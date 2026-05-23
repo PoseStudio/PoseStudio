@@ -70,7 +70,7 @@ Here is just some of what we need to make this happen:
 * **Automated Testing (CI/CD):** Write unit tests and integration tests to ensure that new features don't break existing scenes or corrupt file exports.
 * **Bug Squashing & Triage:** Dive into the issue tracker, replicate user-reported bugs, and submit pull requests with fixes.
 
-## 💬 Community
+## <img src="https://github.com/PoseStudio/PoseStudio/blob/main/icons/community" width="28" alt="Community"> Community
 
 Building a powerful tool requires a powerful community.
 
@@ -78,7 +78,7 @@ Building a powerful tool requires a powerful community.
 * **Official Site:** Visit the Official [PoseStudio Website](https://posestudio.org/).
 
 
-## 📄 License
+## <img src="https://github.com/PoseStudio/PoseStudio/blob/main/icons/license" width="28" alt="License"> License
 
 PoseStudio is open-source software licensed under the [GNU General Public License](https://github.com/PoseStudio/PoseStudio/blob/main/LICENSE).
 
