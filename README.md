@@ -19,7 +19,6 @@ We are at the very beginning of an incredible journey, and **we need your help t
 If you want to be part of the open-source project that disrupts the 3D character industry, there is a place for you here.
 
 ### How You Can Contribute:
-
 1. **Core Development:** Help us build the core rendering engine, UI/UX, and scene management systems.
 2. **AI Integration:** Work on integrating machine learning models for posing, physics, and character generation.
 3. **Content Pipeline:** Assist in developing the vendor tools, rigging standards, and asset packaging systems.
