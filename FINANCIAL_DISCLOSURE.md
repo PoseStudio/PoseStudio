@@ -31,10 +31,10 @@ Our development, infrastructure, and operations are supported by our community. 
 #### ⬆️ Expenses (Outflow)
 | Date | Invoice | Item | Amount | Receipt / Proof | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 05/22/2026 | INV136704184 | GitHub Team Plan | $4.36 | [Link to receipt] | For a GitHub team plan Seat |
-| 05/22/2026 | INV136704234 | GitHub Team Plan | $4.36 | [Link to receipt] | For a GitHub team plan Seat |
-| 05/22/2026 | INV136704659 | GitHub Team Plan | $17.42 | [Link to receipt] | For a GitHub team plan Seat |
-| **Total Expenses** | | **$0.00** | | | |
+| 05/22/2026 | $4.36 | INV136704184 | GitHub Team Plan | [Link to receipt] | For a GitHub team plan Seat |
+| 05/22/2026 | $4.36 | INV136704234 | GitHub Team Plan | [Link to receipt] | For a GitHub team plan Seat |
+| 05/22/2026 | $17.42 | INV136704659 | GitHub Team Plan | [Link to receipt] | For a GitHub team plan Seat |
+| **Total Expenses** | **$0.00** | | | | |
 
 *Historical ledgers for previous months are archived in the `financial-archives/` folder.*
 
