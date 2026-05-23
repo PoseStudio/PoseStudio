@@ -4,7 +4,7 @@ Our mission is to build a truly robust, full featured, community-driven characte
 
 PoseStudio is an open-source project intended to revolutionize how you create, pose, and animate 3D characters. It will blend industry-standard toolsets with cutting-edge AI technologies to build a platform that empowers artists and developers alike, completely free of closed-ecosystem restrictions.
 
-## ✨ Proposed Key Features
+## ✨ Key Features (Proposed)
 
 * **🧬 Next-Gen Character Creation:** Generate highly detailed, customized base meshes and morphs with intuitive character generation tools.
 * **🛍️ Build for Vendors & Creators:** PoseStudio will feature a highly flexible architecture, making it incredibly easy to package, manage, and sell your custom characters, clothing, props, and poses to the broader community.
