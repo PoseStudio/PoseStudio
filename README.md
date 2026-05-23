@@ -83,11 +83,11 @@ Here is just some of what we need to make this happen:
 
 Building a powerful tool requires a powerful community.
 
-* **Discussions:** Share feature requests and technical proposals in our [GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions/)
-* **Official Site:** Visit the Official [PoseStudio Website](https://posestudio.org/)
-* **Support:** You can reach community support at [community@posestudio.org](mailto:community@posestudio.org)
-* **Git Sponsor:** You can help by [Becoming a Sponsor on Git](https://github.com/sponsors/PoseStudio)
-* **Patreon:** You can also [Become a Sponsor on Patreon](https://www.patreon.com/c/PoseStudio)
+* **Discussions:** Share feature requests and technical proposals in our **[GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions/)**
+* **Official Site:** Visit the Official **[PoseStudio Website](https://posestudio.org/)**
+* **Support:** You can reach community support at **[community@posestudio.org](mailto:community@posestudio.org)**
+* **Git Sponsor:** You can help by **[Becoming a Sponsor on Git](https://github.com/sponsors/PoseStudio)**
+* **Patreon:** You can also **[Become a Sponsor on Patreon](https://www.patreon.com/c/PoseStudio)**
 
 
 ## <img src="https://github.com/PoseStudio/PoseStudio/blob/main/icons/license.png" width="28" alt="License"> License
