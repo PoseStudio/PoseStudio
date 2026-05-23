@@ -39,7 +39,7 @@ PoseStudio isn't just matching existing standards; it’s being built to address
 * **No Vendor Lock-In:** No exorbitant licensing fees. PoseStudio is built by the community, for the community, with native support across Windows, macOS, and Linux.
 * **Deep Extensibility:** A robust plugin API allows developers to write custom Python/C++ scripts, integrate third-party rendering engines, and expand the software's capabilities without limits.
 
-## 🤝 How You Can Contribute
+## <img src="https://github.com/PoseStudio/PoseStudio/blob/main/icons/contribute.png" width="28" alt="PoseStudio"> How You Can Contribute
 
 We are at the very beginning of an incredible journey, and **we need your help to build it**. PoseStudio is a massive undertaking, and we are actively looking for passionate C++/Python developers, 3D technical artists, and AI engineers to join our growing community. If you want to be part of the open-source project that disrupts the 3D character industry, there is a place for you here.
 
