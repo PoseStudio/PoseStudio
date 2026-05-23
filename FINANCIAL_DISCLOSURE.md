@@ -11,9 +11,7 @@ Our development, infrastructure, and operations are supported by our community. 
 
 ---
 
-## 🧾 Monthly Ledger
-
-### [Current Month/Year, e.g., May 2026]
+## 🧾 Ledger 2026
 
 #### ⬇️ Income (Inflow)
 | Source | Amount | Notes |
