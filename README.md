@@ -16,7 +16,7 @@ PoseStudio is an open-source project intended to revolutionize how you create, p
 
 We are at the very beginning of an incredible journey, and **we need your help to build it**. PoseStudio is a massive undertaking, and we are actively looking for passionate C++/Python developers, 3D technical artists, and AI engineers to join our growing community. If you want to be part of the open-source project that disrupts the 3D character industry, there is a place for you here.
 
-Here is a breakdown of what we need to make this happen:
+Here is just some of what we need to make this happen:
 
 #### 1. ⚙️ Core Development
 * **Viewport & Graphics Rendering:** Help us build a smooth, real-time rendering viewport. Experience with OpenGL, Vulkan, or modern graphics APIs is highly desired.
