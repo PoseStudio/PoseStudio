@@ -57,5 +57,3 @@ To ensure absolute trust, redacted receipts (with personal banking and home addr
 
 ---
 *This ledger is updated by the project maintainers on the 1st of every month. If you have any questions or concerns regarding our financial allocation, please open a thread in our GitHub Discussions.*
-FINANCES.md
-Displaying FINANCES.md.
