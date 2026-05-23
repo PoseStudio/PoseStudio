@@ -11,9 +11,9 @@ Our development, infrastructure, and operations are supported by our community. 
 
 ---
 
-## 🧾 Ledger 2026
+## Ledger 2026
 
-#### ⬇️ Summary
+#### Summary
 | Source | Amount | Notes |
 | :--- | :--- | :--- |
 | Income | $0.00 | 2026 Total Income |
@@ -41,7 +41,7 @@ Our development, infrastructure, and operations are supported by our community. 
 
 ---
 
-## 📋 Expense Policy & Priorities
+## Expense Policy & Priorities
 
 As the project grows and funding increases, funds will be allocated strictly according to the following priorities to ensure the long-term sustainability of PoseStudio as a free, open-source 3D character platform:
 
@@ -50,7 +50,7 @@ As the project grows and funding increases, funds will be allocated strictly acc
 3. **Developer Compensation:** Compensating the active development team so they can dedicate consistent, focused hours to the project rather than treating it solely as a weekend hobby. 
 4. **Community Bounties:** Funding specific community pull requests, bug fixes, or highly-requested features.
 
-## 🔍 Receipt Verification & Auditing
+## Receipt Verification & Auditing
 To ensure absolute trust, redacted receipts (with personal banking and home address information removed) for all non-payroll expenses are stored locally in the `receipts/` directory of this repository.
 
 ---
