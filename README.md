@@ -75,9 +75,9 @@ Here is just some of what we need to make this happen:
 
 Building a powerful tool requires a powerful community.
 
-* **Contact Email:** You can reach a community moderator at [community@posestudio.org](mailto:community@posestudio.org)
 * **Discussions:** Share feature requests and technical proposals in our [GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions/).
 * **Official Site:** Visit the Official [PoseStudio Website](https://posestudio.org/).
+* **Support:** You can reach a community support at [community@posestudio.org](mailto:community@posestudio.org)
 
 
 ## <img src="https://github.com/PoseStudio/PoseStudio/blob/main/icons/license.png" width="28" alt="License"> License
