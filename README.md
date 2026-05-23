@@ -11,8 +11,7 @@ PoseStudio is an open-source project intended to revolutionize how you create, p
 ## <img src="https://github.com/PoseStudio/PoseStudio/blob/main/icons/sponsor.png" width="28" alt="Become a Sponsor"> Become a Sponsor
 
 Your support ensures that the future of character creation remains open, free, and constantly evolving. Let's build something extraordinary together.
-
-#### **You can also help by [Becoming a Sponsor](https://github.com/sponsors/PoseStudio).**
+* **You can also help by [Becoming a Sponsor](https://github.com/sponsors/PoseStudio).**
 
 ## <img src="https://github.com/PoseStudio/PoseStudio/blob/main/icons/features.png" width="28" alt="Key Features"> Key Features (Proposed)
 
