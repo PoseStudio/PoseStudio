@@ -49,7 +49,7 @@ cd PoseStudio
 Building a powerful tool requires a powerful community.
 
 * **Discussions:** Share feature requests and technical proposals in our [GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions/).
-* * **Official Website:** [Visit the Official PoseStudio Website](https://posestudio.org/).
+* **Official Website:** [Visit the Official PoseStudio Website](https://posestudio.org/).
 
 ## 📄 License
 
