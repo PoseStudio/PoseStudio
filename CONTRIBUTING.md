@@ -36,7 +36,7 @@ Before creating bug reports, please check the existing issues list to see if the
 5. Issue that pull request!
 
 ## Local Development Setup
-*(Provide instructions on how to set up the development environment here. List any required libraries, SDKs, or specific build tools necessary to run the project locally.)*
+*TBD*
 
 ## Styleguides
 ### Git Commit Messages
