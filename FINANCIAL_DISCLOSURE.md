@@ -13,6 +13,13 @@ Our development, infrastructure, and operations are supported by our community. 
 
 ## 🧾 Ledger 2026
 
+#### ⬇️ Summary
+| Source | Amount | Notes |
+| :--- | :--- | :--- |
+| Income | $0.00 | 2026 Total Income |
+| Expenses | $0.00 | 2026 Total Expenses |
+| **Balance** | **$0.00** | **Current Balance** |
+
 #### ⬇️ Income (Inflow)
 | Source | Amount | Notes |
 | :--- | :--- | :--- |
