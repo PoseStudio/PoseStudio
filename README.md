@@ -23,7 +23,7 @@ Here is just some of what we need to make this happen:
 * **Systems Architecture:** Work on the core scene graph, memory allocation, and undo/redo stacks.
 * **Math & Physics:** Develop the algorithms required for inverse kinematics (IK), dynamic cloth simulation, and real-time collision detection.
 
-#### 2. 🎨 UI/UX & Frontend Design (The Bridge)
+#### 2. 🎨 UI/UX & Frontend Design
 * **Interface Design:** Wireframe and design logical layouts, toolbars, and property panels that handle dense amounts of data without overwhelming the artist.
 * **Frontend Implementation:** Connect the UI designs to the backend engine (using frameworks like Qt), ensuring that sliders, menus, and node graphs are highly responsive.
 * **Workflow Optimization:** Collaborate with 3D artists to map out common tasks (like weight-mapping a joint or dialing in a morph) and reduce the friction and clicks required to achieve them.
