@@ -1,3 +1,5 @@
+![PoseStudio](https://avatars.githubusercontent.com/u/287051758?s=200&v=4)
+
 ## 🌟 PoseStudio
 
 Our mission is to build a truly robust, full featured, community-driven character creation system.
