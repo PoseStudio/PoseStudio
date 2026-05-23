@@ -23,10 +23,7 @@ If you want to be part of the open-source project that disrupts the 3D character
 
 Here is a breakdown of where we need the most help right now:
 
-#### 1. ⚙️ Core Development (The Engine Room)
-
-This is the foundation of PoseStudio. We need engineers who care deeply about performance, memory management, and rendering speed.
-
+#### 1. ⚙️ Core Development
 * **Viewport & Graphics Rendering:** Help us build a buttery-smooth, real-time rendering viewport. Experience with OpenGL, Vulkan, or modern graphics APIs is highly desired.
 * **Systems Architecture:** Work on the core scene graph, memory allocation, and undo/redo stacks. (C++/Rust)
 * **Math & Physics:** Develop the algorithms required for inverse kinematics (IK), dynamic cloth simulation, and real-time collision detection.
