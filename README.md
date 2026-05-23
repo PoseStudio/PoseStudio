@@ -1,5 +1,5 @@
 
-<img src="https://github.com/PoseStudio/PoseStudio/blob/main/logos/logo_1.png"width=80 alt="PoseStudio">
+<img src="https://github.com/PoseStudio/PoseStudio/blob/main/logos/logo_1.png" width="80" alt="PoseStudio">
 
 ## <img src="https://avatars.githubusercontent.com/u/287051758?s=38&v=4" alt="PoseStudio"> PoseStudio
 
