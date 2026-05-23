@@ -1,4 +1,4 @@
-# Contributor Covenant Code of Conduct
+# PoseStudio Open-Source Project Code of Conduct
 
 ## Our Pledge
 
