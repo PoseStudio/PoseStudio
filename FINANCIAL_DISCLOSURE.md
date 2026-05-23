@@ -11,14 +11,6 @@ Our development, infrastructure, and operations are supported by our community. 
 
 ---
 
-## 📊 Financial Summary (Year-to-Date)
-* **Starting Balance:** $0.00
-* **Total Income:** $0.00
-* **Total Expenses:** $0.00
-* **Current Reserve:** $0.00
-
----
-
 ## 🧾 Monthly Ledger
 
 ### [Current Month/Year, e.g., May 2026]
