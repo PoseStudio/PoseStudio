@@ -92,4 +92,4 @@ Building a powerful tool requires a powerful community.
 
 ## <img src="https://github.com/PoseStudio/PoseStudio/blob/main/icons/license.png" width="28" alt="License"> License
 
-PoseStudio is open-source software licensed under the [GNU General Public License](https://github.com/PoseStudio/PoseStudio/blob/main/LICENSE).
+PoseStudio is open-source software licensed under the **[GNU General Public License](https://github.com/PoseStudio/PoseStudio/blob/main/LICENSE)**.
