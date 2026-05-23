@@ -23,9 +23,9 @@ Our development, infrastructure, and operations are supported by our community. 
 #### ⬇️ Income (Inflow)
 | Source | Amount | Notes |
 | :--- | :--- | :--- |
-| GitHub Sponsors | $0.00 | Recurring and one time contributions |
-| Patreon Sponsors | $0.00 | Recurring and one time contributions |
-| One-time Donations | $0.00 | Direct contributions |
+| GitHub Sponsors | $0.00 | Recurring and one-time contributions |
+| Patreon Sponsors | $0.00 | Recurring and one-time contributions |
+| Other Donations | $0.00 | Other one-time contributions |
 | **Total Income** | **$0.00** | |
 
 #### ⬆️ Expenses (Outflow)
