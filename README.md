@@ -1,4 +1,4 @@
-![PoseStudio](https://avatars.githubusercontent.com/u/287051758?s=200&v=4)
+<img src="https://avatars.githubusercontent.com/u/287051758?s=200&v=4" width="300" alt="Description">
 
 ## 🌟 PoseStudio
 
