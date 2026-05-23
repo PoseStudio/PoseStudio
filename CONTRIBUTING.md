@@ -3,16 +3,13 @@
 First off, thank you for considering contributing to PoseStudio! It's people like you that make open-source platforms great. 
 
 ## Table of Contents
-- [Code of Conduct](#code-of-conduct)
 - [How Can I Contribute?](#how-can-i-contribute)
   - [Reporting Bugs](#reporting-bugs)
   - [Suggesting Enhancements](#suggesting-enhancements)
   - [Pull Requests](#pull-requests)
 - [Local Development Setup](#local-development-setup)
 - [Styleguides](#styleguides)
-
-## Code of Conduct
-This project and everyone participating in it is governed by the [PoseStudio Open-Source Project Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
+- [Code of Conduct](#code-of-conduct)
 
 ## How Can I Contribute?
 
@@ -43,3 +40,6 @@ Before creating bug reports, please check the existing issues list to see if the
 * Use the present tense ("Add feature" not "Added feature")
 * Use the imperative mood ("Move cursor to..." not "Moves cursor to...")
 * Limit the first line to 72 characters or less
+
+## Code of Conduct
+This project and everyone participating in it is governed by the [PoseStudio Open-Source Project Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
