@@ -16,17 +16,17 @@ Our development, infrastructure, and operations are supported by our community. 
 #### Summary
 | Source | Amount | Notes |
 | :--- | :--- | :--- |
-| Income | $0.00 | 2026 Total Income |
+| Income | $500.00 | 2026 Total Income |
 | Expenses | $365.49 | 2026 Total Expenses |
-| **Balance** | **($365.49)** | **Current Balance** |
+| **Balance** | **$134.51** | **Current Balance** |
 
 #### ⬇️ Income (Inflow)
-| Source | Amount | Notes |
-| :--- | :--- | :--- |
-| GitHub Sponsors | $0.00 | Recurring and one-time contributions |
-| Patreon Sponsors | $0.00 | Recurring and one-time contributions |
-| Other Donations | $0.00 | Other one-time contributions |
-| **Total Income** | **$0.00** | |
+| Date | Amount | Donor | Notes |
+| :--- | :--- | :--- | :--- |
+| - | - | $0.00 | GitHub sponsor contribution |
+| - | - | $0.00 | Patreon sponsor contribution |
+| 05/10/2026 | Ion HAtzithomas | $500.00 | Other one-time contribution |
+| **Total Income** | **$0.00** | | |
 
 #### ⬆️ Expenses (Outflow)
 | Date | Amount | Payee | Invoice | Item | Receipt / Proof |
