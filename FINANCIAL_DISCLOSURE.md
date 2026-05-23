@@ -29,16 +29,16 @@ Our development, infrastructure, and operations are supported by our community. 
 | **Total Income** | **$0.00** | |
 
 #### ⬆️ Expenses (Outflow)
-| Date | Amount | Invoice | Item | Receipt / Proof |
-| :--- | :--- | :--- | :--- | :--- |
-| 05/22/2026 | $4.36 | INV136704184 | GitHub Team Plan | [Link to receipt] |
-| 05/22/2026 | $4.36 | INV136704234 | GitHub Team Plan | [Link to receipt] |
-| 05/22/2026 | $17.42 | INV136704659 | GitHub Team Plan | [Link to receipt] |
-| 05/13/2026 | $9.19 | 4065874376 | To register posestudio.org | [Link to receipt] |
-| 05/13/2026 | $209.98 | 4087661824 | To register posestudio.ai + .io | [Link to receipt] |
-| 05/13/2026 | $20.19 | 4087693210 | To register posestudio.dev | [Link to receipt] |
-| 05/13/2026 | $99.99 | 4087693214 | Broker service posestudio.co | [Link to receipt](/receipts/godaddy_4087693214_redacted.pdf) |
-| **Total Expenses** | **$365.49** | | | |
+| Date | Amount | Payee | Invoice | Item | Receipt / Proof |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 05/22/2026 | $4.36 | GitHub | INV136704184 | GitHub Team Plan | [Link to receipt](/receipts/github_136704184_redacted.pdf) |
+| 05/22/2026 | $4.36 | GitHub |  INV136704234 | GitHub Team Plan | [Link to receipt](/receipts/github_136704234_redacted.pdf) |
+| 05/22/2026 | $17.42 | GitHub |  INV136704659 | GitHub Team Plan | [Link to receipt](/receipts/github_136704659_redacted.pdf) |
+| 05/13/2026 | $9.19 | GoDaddy |  4065874376 | To register posestudio.org | [Link to receipt](/receipts/godaddy_4065874376_redacted.pdf) |
+| 05/13/2026 | $209.98 | GoDaddy |  4087661824 | To register posestudio.ai + .io | [Link to receipt](/receipts/godaddy_4087661824_redacted.pdf) |
+| 05/13/2026 | $20.19 | GoDaddy |  4087693210 | To register posestudio.dev | [Link to receipt](/receipts/godaddy_4087693210_redacted.pdf) |
+| 05/13/2026 | $99.99 | GoDaddy |  4087693214 | Broker service posestudio.co | [Link to receipt](/receipts/godaddy_4087693214_redacted.pdf) |
+| **Total Expenses** | **$365.49** | | | | |
 
 ---
 
