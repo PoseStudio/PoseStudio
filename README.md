@@ -21,7 +21,7 @@ If you want to be part of the open-source project that disrupts the 3D character
 
 ## 🤝 How You Can Contribute
 
-Here is a breakdown of where we need the most help right now:
+Here is a breakdown of what will be needed to make this happen:
 
 #### 1. ⚙️ Core Development
 * **Viewport & Graphics Rendering:** Help us build a smooth, real-time rendering viewport. Experience with OpenGL, Vulkan, or modern graphics APIs is highly desired.
