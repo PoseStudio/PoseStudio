@@ -25,23 +25,6 @@ If you want to be part of the open-source project that disrupts the 3D character
 3. **Content Pipeline:** Assist in developing the vendor tools, rigging standards, and asset packaging systems.
 4. **Documentation & Testing:** Help us write documentation for the API, create tutorials, and squash bugs.
 
-## 🛠️ Getting Started
-
-> **Note:** PoseStudio is currently in the very early-stages of development. 
-
-To get a local development environment up and running, follow these steps:
-
-```bash
-# Clone the repository
-git clone https://github.com/PoseStudio/PoseStudio.git
-
-# Navigate to the project directory
-cd PoseStudio
-
-# (Add your specific build instructions, dependencies, and compilation steps here)
-
-```
-
 ## 💬 Community
 
 Building a powerful tool requires a powerful community.
