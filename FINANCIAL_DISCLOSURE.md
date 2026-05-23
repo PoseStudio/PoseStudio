@@ -5,7 +5,9 @@ Welcome to the official financial disclosure document for the **PoseStudio Open-
 We believe that open source means open operations. Because this project is entirely community-funded, this document serves to provide our sponsors and contributors with 100% visibility into how much money is received and exactly where every dollar is spent.
 
 ## Current Funding Sources
-Our development, infrastructure, and operations are supported by our community. You can support the development of PoseStudio through:
+Our development, infrastructure, and operations are supported by our community.
+
+**You can support the development of PoseStudio through:**
 * **[GitHub Sponsors](https://github.com/sponsors/PoseStudio)**
 * **[Patreon](https://www.patreon.com/PoseStudio)**
 
