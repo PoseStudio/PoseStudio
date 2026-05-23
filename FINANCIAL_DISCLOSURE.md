@@ -1,6 +1,6 @@
 # PoseStudio Financial Disclosure
 
-Welcome to the official financial transparency document for **PoseStudio**. 
+Welcome to the official financial disclosure document for **PoseStudio**. 
 
 We believe that open source means open operations. Because this project is entirely community-funded, this document serves to provide our sponsors and contributors with 100% visibility into how much money is received and exactly where every dollar is spent.
 
