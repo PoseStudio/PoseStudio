@@ -1,4 +1,4 @@
-# PoseStudio Financial Disclosure - 2026 General Ledger
+# PoseStudio Financial Disclosure
 
 Welcome to the official financial transparency document for **PoseStudio**. 
 
