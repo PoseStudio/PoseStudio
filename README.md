@@ -8,7 +8,7 @@ PoseStudio is an open-source project intended to revolutionize how you create, p
 
 ## <img src="https://github.com/PoseStudio/PoseStudio/blob/main/icons/sponsor.png" width="28" alt="get involved"> Get Involved
 
-Your support ensures that the future of character creation remains open, free, and constantly evolving. Let's build something extraordinary together.
+We are calling on anyone who can help with the project. Your support ensures that the future of character creation remains open, free, and constantly evolving. Let's build something extraordinary together.
 * **Become a Contributor:** We are actively looking for **[Contributors](CONTRIBUTING.md)** to help with the project!
 * **Git Sponsorship:** You can help by **[Becoming a Sponsor on Git](https://github.com/sponsors/PoseStudio)**
 * **Patreon Sponsorship:** You can also **[Become a Sponsor on Patreon](https://www.patreon.com/c/PoseStudio)**
