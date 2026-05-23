@@ -37,7 +37,7 @@ Our development, infrastructure, and operations are supported by our community. 
 | 05/13/2026 | $9.19 | 4065874376 | To register posestudio.org | [Link to receipt] |
 | 05/13/2026 | $209.98 | 4087661824 | To register posestudio.ai + .io | [Link to receipt] |
 | 05/13/2026 | $20.19 | 4087693210 | To register posestudio.dev | [Link to receipt] |
-| 05/13/2026 | $99.99 | 4087693214 | To register posestudio.co | [Link to receipt] |
+| 05/13/2026 | $99.99 | 4087693214 | Broker service posestudio.co | [Link to receipt](/receipts/godaddy_4087693214_redacted.pdf) |
 | **Total Expenses** | **$365.49** | | | |
 
 ---
