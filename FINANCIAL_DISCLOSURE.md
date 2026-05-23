@@ -14,7 +14,7 @@ Our development, infrastructure, and operations are supported by our community. 
 ## 2026 General Ledger
 
 #### Summary
-| Source | Amount | Notes |
+| Type | Amount | Notes |
 | :--- | :--- | :--- |
 | Income | $500.00 | 2026 Total Income |
 | Expenses | $365.49 | 2026 Total Expenses |
