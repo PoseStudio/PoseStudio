@@ -1,4 +1,4 @@
-<img src="https://avatars.githubusercontent.com/u/287051758?s=200&v=4" width="300" alt="Description">
+<img src="https://avatars.githubusercontent.com/u/287051758?s=200&v=4" width="80" height="80" alt="PoseStudio">
 
 ## 🌟 PoseStudio
 
