@@ -48,8 +48,8 @@ cd PoseStudio
 
 Building a powerful tool requires a powerful community.
 
-* **Discord:** [Join the PoseStudio Discord Server](https://www.google.com/search?q=%23) to chat with the dev team, share your work, and brainstorm ideas.
 * **Discussions:** Share feature requests and technical proposals in our [GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions/).
+* * **Official Website:** [Visit the Official PoseStudio Website](https://posestudio.org/).
 
 ## 📄 License
 
