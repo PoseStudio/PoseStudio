@@ -35,7 +35,7 @@ To get a local development environment up and running, follow these steps:
 
 ```bash
 # Clone the repository
-git clone https://github.com/YourOrg/PoseStudio.git
+git clone https://github.com/PoseStudio/PoseStudio.git
 
 # Navigate to the project directory
 cd PoseStudio
