@@ -1,0 +1,10 @@
+TLDs we have:
+PoseStudio.org
+PoseStudio.ai
+PoseStudio.io
+PoseStudio.dev
+
+TLDs we don't have:
+PoseStudio.com
+PoseStudio.co
+PoseStudio.net
