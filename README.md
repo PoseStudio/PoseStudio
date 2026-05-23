@@ -8,33 +8,33 @@ PoseStudio is an open-source project intended to revolutionize how you create, p
 
 PoseStudio isn't just matching existing standards; it’s being built to address the long-standing wish list of the character art community.
 
-### Next-Gen Character Creation & Rigging
+#### 1. Next-Gen Character Creation & Rigging
 * **Intuitive Morphing:** Generate highly detailed, customized base meshes and morphs with intuitive character generation tools.
 * **Smart Joint Correction:** Automated Joint Controlled Morphs (JCMs) and tension mapping that preserve anatomical volume and prevent mesh collapse during extreme bends, without requiring hours of manual weight painting.
 * **Superior Auto-Fitting:** A robust conformation algorithm that flawlessly scales clothing to extreme character morphs without mesh explosion or tedious poke-through fixes.
 
-### Advanced Cloth & Hair Systems
+#### 2. Advanced Cloth & Hair Systems
 * **Real-Time Draping:** Integrated cloth simulation that drapes realistically over posed characters and responds dynamically to animation sweeps.
 * **Modern Grooming:** Support for both legacy polygon-based hair and modern strand-based particle grooming systems.
 
-### AI-Powered Posing & Animation
+#### 3. AI-Powered Posing & Animation
 * **Intelligent Posing:** PoseStudio will integrate advanced AI features to predict natural weight distribution, handle complex muscle deformations, and generate fluid motion, speeding up your workflow exponentially.
 * **Rock-Solid Inverse Kinematics (IK):** A modern, predictable IK/FK solver that keeps feet planted and allows you to pin body parts effortlessly while dragging the center of gravity.
 * **Built-in Dynamics:** Native real-time collision calculation for soft body dynamics, gravity, and soft body (jiggle) physics.
 
-### Lightning-Fast Asset Management
+#### 4. Lightning-Fast Asset Management
 * **Modern Smart Library:** A completely redesigned content manager built for speed. Instantly search, tag, and categorize tens of thousands of assets with visual thumbnails, free from database lag or endless folder diving.
 * **Clean Scene Graph:** A highly organized, non-destructive outliner for grouping, parenting, and swapping assets without cluttering the workspace.
 
-### Built for Vendors & Creators
+#### 5. Built for Vendors & Creators
 * **Frictionless Packaging:** PoseStudio will feature a highly flexible architecture, making it incredibly easy to package, manage, and sell your custom characters, clothing, props, and poses to the broader community.
 * **Creator-Friendly Metadata:** Standardized tagging and metadata generation tools so your customers can always find your products in their local libraries.
 
-### Flawless Pipeline & Export Integration
+#### 6. Flawless Pipeline & Export Integration
 * **One-Click Bridges:** Direct, native export bridges to major DCCs (like Blender and Maya) and game engines (Unreal Engine and Unity).
 * **Bulletproof Format Support:** Rock-solid I/O handling for industry-standard formats like **.fbx**, **.obj**, **.gltf**, and **.zpr**, ensuring your materials, rigs, and morphs transfer intact the first time.
 
-### Fully Open Source & Extensible
+#### 7. Fully Open Source & Extensible
 * **No Vendor Lock-In:** No exorbitant licensing fees. PoseStudio is built by the community, for the community, with native support across Windows, macOS, and Linux.
 * **Deep Extensibility:** A robust plugin API allows developers to write custom Python/C++ scripts, integrate third-party rendering engines, and expand the software's capabilities without limits.
 
