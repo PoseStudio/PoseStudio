@@ -20,7 +20,7 @@ Here is a breakdown of what we need to make this happen:
 
 #### 1. ⚙️ Core Development
 * **Viewport & Graphics Rendering:** Help us build a smooth, real-time rendering viewport. Experience with OpenGL, Vulkan, or modern graphics APIs is highly desired.
-* **Systems Architecture:** Work on the core scene graph, memory allocation, and undo/redo stacks. (C++/Rust)
+* **Systems Architecture:** Work on the core scene graph, memory allocation, and undo/redo stacks.
 * **Math & Physics:** Develop the algorithms required for inverse kinematics (IK), dynamic cloth simulation, and real-time collision detection.
 
 #### 2. 🎨 UI/UX & Frontend Design (The Bridge)
