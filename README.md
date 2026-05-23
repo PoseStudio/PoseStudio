@@ -1,7 +1,5 @@
 
-<img src="https://github.com/PoseStudio/PoseStudio/blob/main/logos/logo_1.png" width="240" alt="PoseStudio">
-
-## <img src="https://avatars.githubusercontent.com/u/287051758?s=38&v=4" alt="PoseStudio"> PoseStudio
+<img src="https://github.com/PoseStudio/PoseStudio/blob/main/logos/logo_1.png" width="360" alt="PoseStudio">
 
 Our mission is to build a truly robust, full featured, community-driven character creation system.
 
