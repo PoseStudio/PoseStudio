@@ -75,8 +75,8 @@ Here is just some of what we need to make this happen:
 
 Building a powerful tool requires a powerful community.
 
-* **Discussions:** Share feature requests and technical proposals in our [GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions/).
-* **Official Site:** Visit the Official [PoseStudio Website](https://posestudio.org/).
+* **Discussions:** Share feature requests and technical proposals in our [GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions/)
+* **Official Site:** Visit the Official [PoseStudio Website](https://posestudio.org/)
 * **Support:** You can reach community support at [community@posestudio.org](mailto:community@posestudio.org)
 * **Sponsor:** You can help by [Becoming a Sponsor](https://github.com/sponsors/PoseStudio)
 
