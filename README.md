@@ -4,6 +4,7 @@ Our mission is to build a truly robust, full featured, community-driven characte
 
 PoseStudio is an open-source project intended to revolutionize how you create, pose, and animate 3D characters. It will blend industry-standard toolsets with cutting-edge AI technologies to build a platform that empowers artists and developers alike, completely free of closed-ecosystem restrictions.
 
+
 ## ✨ Proposed Key Features
 
 * **🧬 Next-Gen Character Creation:** Generate highly detailed, customized base meshes and morphs with intuitive character generation tools.
@@ -12,17 +13,13 @@ PoseStudio is an open-source project intended to revolutionize how you create, p
 * **🔌 Deep Extensibility:** A robust plugin API allows developers to write custom scripts, integrate third-party renderers, and expand the software's capabilities without limits.
 * **🧠 AI-Powered Posing & Animation:** Say goodbye to stiff, tedious joint manipulation. PoseStudio will integrate advanced AI features to predict natural weight distribution, handle complex muscle deformations, and generate fluid motion, speeding up your workflow exponentially.
 
+
 ## 🤝 Join the Revolution: Calling All Developers!
 
 We are at the very beginning of an incredible journey, and **we need your help to build it**. PoseStudio is a massive undertaking, and we are actively looking for passionate C++/Python developers, 3D technical artists, and AI engineers to join our growing community.
 
 If you want to be part of the open-source project that disrupts the 3D character industry, there is a place for you here.
 
-
-
-
-
-Here is the expanded section, formatted to drop right into your README.md. It breaks down the exact technical needs into actionable areas, giving developers a clear map of where their specific skills fit best.
 
 ### 🤝 How You Can Contribute
 
@@ -63,18 +60,13 @@ Code without documentation is practically useless, and a tool for artists must b
 * **Bug Squashing & Triage:** Dive into the issue tracker, replicate user-reported bugs, and submit pull requests with fixes.
 
 
-
-
-
-
-
-
 ## 💬 Community
 
 Building a powerful tool requires a powerful community.
 
 * **Discussions:** Share feature requests and technical proposals in our [GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions/).
 * **Official Site:** Visit the Official [PoseStudio Website](https://posestudio.org/).
+
 
 ## 📄 License
 
