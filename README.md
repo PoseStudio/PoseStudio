@@ -1,4 +1,4 @@
-## <img src="https://avatars.githubusercontent.com/u/287051758?s=28&v=4" alt="PoseStudio"> PoseStudio
+## <img src="https://avatars.githubusercontent.com/u/287051758?s=32&v=4" alt="PoseStudio"> PoseStudio
 
 Our mission is to build a truly robust, full featured, community-driven character creation system.
 
