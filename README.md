@@ -21,8 +21,6 @@ If you want to be part of the open-source project that disrupts the 3D character
 
 ## 🤝 How You Can Contribute
 
-There is a place here for developers and artists of all skill levels. Whether you are a systems-level C++ veteran or a technical writer, your contributions are what will make this platform thrive.
-
 Here is a breakdown of where we need the most help right now:
 
 #### 1. ⚙️ Core Development (The Engine Room)
