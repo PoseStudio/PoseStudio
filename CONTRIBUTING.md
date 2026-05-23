@@ -42,4 +42,4 @@ Before creating bug reports, please check the existing issues list to see if the
 * Limit the first line to 72 characters or less
 
 ## Code of Conduct
-This project and everyone participating in it is governed by the [PoseStudio Open-Source Project Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
+This project and everyone participating in it is governed by the [PoseStudio OSP Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
