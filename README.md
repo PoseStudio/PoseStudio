@@ -23,17 +23,22 @@ Here is a breakdown of what we need to make this happen:
 * **Systems Architecture:** Work on the core scene graph, memory allocation, and undo/redo stacks. (C++/Rust)
 * **Math & Physics:** Develop the algorithms required for inverse kinematics (IK), dynamic cloth simulation, and real-time collision detection.
 
-#### 2. 📦 Content Pipeline & Vendor Ecosystem
+#### 2. 🎨 UI/UX & Frontend Design (The Bridge)
+* **Interface Design:** Wireframe and design logical layouts, toolbars, and property panels that handle dense amounts of data without overwhelming the artist.
+* **Frontend Implementation:** Connect the UI designs to the backend engine (using frameworks like Qt), ensuring that sliders, menus, and node graphs are highly responsive.
+* **Workflow Optimization:** Collaborate with 3D artists to map out common tasks (like weight-mapping a joint or dialing in a morph) and reduce the friction and clicks required to achieve them.
+
+#### 3. 📦 Content Pipeline & Vendor Ecosystem
 * **File I/O:** Help us build parsers to handle import/export across the industry's most complex formats, including **.fbx, .obj, .gltf**.
 * **Vendor Tooling:** Develop the packaging and metadata systems that allow artists to bundle characters, clothing, and props into easily installable products.
 * **Rigging Standards:** Collaborate with technical artists to define the universal base skeleton and morphing standards that all community clothing and poses will conform to.
 
-#### 3. 🧠 AI Integration
+#### 4. 🧠 AI Integration
 * **Automated Posing:** Integrate models that predict natural weight distribution, gravity, and muscle tension when a user moves a single limb.
 * **Smart Rigging & Weight Painting:** Help develop AI-assisted tools that analyze a custom character mesh and automatically generate logical skeletal structures and weight maps.
 * **Character Generation:** Work on the morphing engine that allows users to seamlessly blend AI-generated facial features and body types.
 
-#### 4. 🛡️ Documentation & Testing
+#### 5. 🛡️ Documentation & Testing
 * **API & Plugin Documentation:** Help us write clear, comprehensive guides for the Python/C++ plugin API so other developers can build their own extensions.
 * **Automated Testing (CI/CD):** Write unit tests and integration tests to ensure that new features don't break existing scenes or corrupt file exports.
 * **Bug Squashing & Triage:** Dive into the issue tracker, replicate user-reported bugs, and submit pull requests with fixes.
