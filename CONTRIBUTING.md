@@ -1,4 +1,4 @@
-# Contributing to [Project Name]
+# Contributing to The PoseStudio Open-Source Project
 
 First off, thank you for considering contributing to PoseStudio! It's people like you that make open-source platforms great. 
 
