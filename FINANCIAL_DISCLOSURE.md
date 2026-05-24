@@ -28,7 +28,7 @@ Our development, infrastructure, and operations are supported by our community.
 | - | - | $0.00 | GitHub sponsor contribution |
 | - | - | $0.00 | Patreon sponsor contribution |
 | 05/13/2026 | Ion Hatzithomas | $500.00 | Other one-time contribution |
-| **Total Income** | **$0.00** | | |
+| **Total Income** | **$500.00** | | |
 
 #### ⬆️ Expenses (Outflow)
 | Date | Amount | Payee | Invoice | Item | Receipt / Proof |
