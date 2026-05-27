@@ -12,7 +12,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 
 **Here are some of the important roles we need to fill.**
 
-#### 1. Technical Contributors
+#### 1. Technical Roles
 * **Lead Software Architect (Code Lead):** Oversees the overall codebase, reviews critical Pull Requests, establishes coding standards, and defines the technical roadmap.
 * **Graphics / Engine Developer:** Focus entirely on the 3D viewport, rendering pipeline (WebGL, WebGPU, or desktop OpenGL/Vulkan depending on your stack), shaders, and real-time lighting performance.
 * **Animation Systems Engineer:** A highly specialized role focused on the mathematics and logic of 3D animation—specifically skeletal rigging, inverse kinematics (IK), forward kinematics (FK), blendshapes, and timeline interpolation.
@@ -21,7 +21,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 * **DevOps / CI-CD Engineer:** Manage repository automation, build release binaries for different operating systems (Windows, Mac, Linux), and configur automated testing suites in GitHub Actions.
 * **Website Manager:** Manage and implement changes to the official PoseStudio Website **[https://posestudio.org/](https://posestudio.org/)**.
 
-#### 2. Non-Technical Contributors
+#### 2. Non-Technical Roles
 * **Discord Administrator:** Manage our **[Discord Channel](https://discord.gg/MqVT7TbGY)**.
 * **Social Media Manager:** Engage with users on Reddit, Twitter, and other forums gathering community feedback.
 * **Devlog & Content Coordinator:** Manages the public project logs and updates.
