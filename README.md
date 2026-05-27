@@ -13,7 +13,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 <!-- * **Git Sponsorship:** You can help by **[Becoming a Sponsor on Git](https://github.com/sponsors/PoseStudio)** -->
 * **Patreon Sponsorship:** You can also **[Become a Sponsor on Patreon](https://www.patreon.com/c/PoseStudio)**
 
-## <img src="https://github.com/PoseStudio/PoseStudio/blob/main/icons/features.png" width="28" alt="Key Features"> Key Features (Proposed)
+## <img src="/docs/assets/icons/features.png" width="28" alt="Key Features"> Key Features (Proposed)
 
 PoseStudio isn't just matching existing standards; it’s being built to address the long-standing wish list of the character art community.
 
@@ -47,7 +47,7 @@ PoseStudio isn't just matching existing standards; it’s being built to address
 * **No Vendor Lock-In:** No exorbitant licensing fees. PoseStudio is built by the community, for the community, with native support across Windows, macOS, and Linux.
 * **Deep Extensibility:** A robust plugin API allows developers to write custom Python/C++ scripts, integrate third-party rendering engines, and expand the software's capabilities without limits.
 
-## <img src="https://github.com/PoseStudio/PoseStudio/blob/main/icons/contribute.png" width="28" alt="Contribute"> Contributor Skill Sets
+## <img src="/docs/assets/icons/contribute.png" width="28" alt="Contribute"> Contributor Skill Sets
 
 We are at the very beginning of an incredible journey, and **we need your help to build it**. PoseStudio is a massive undertaking, and we are actively looking for passionate C++/Python developers, 3D technical artists, and AI engineers to join our growing community. If you want to be part of the open-source project that disrupts the 3D character industry, there is a place for you here.
 
