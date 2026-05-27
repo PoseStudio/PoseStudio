@@ -39,7 +39,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 
 ## <img src="/docs/assets/icons/features.png" width="28" alt="Key Features"> Key Features (Proposed)
 
-PoseStudio isn't just matching existing standards; it’s being built to address the long-standing wish list of the character art community.
+PoseStudio is being designed as a complete end-to-end character creation and rendering platform. It will combine modern workflows, advanced animation systems, and open-source flexibility into a unified environment.
 
 #### 1. Next-Gen Character Creation & Rigging
 - Create and customize 3D characters with advanced morphing and rigging tools
