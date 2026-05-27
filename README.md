@@ -15,7 +15,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 * **Community Manager:** Engage with users on Reddit, Twitter, and other forums gathering community feedback.
 * **Devlog & Content Coordinator:** Manages the public project logs and updates.
 * **Documentation Lead:** Develop the user manual, tutorials API documentation, and onboarding guides.
-* **Financial Admin / Treasurer:** Manages the incoming funds from community sponsorships, updates the FINANCIAL_DISCLOSURE.md ledger, and handles any platform fees or domain expenses transparently.
+* **Financial Admin / Treasurer:** Manages the incoming funds from community sponsorships, updates the [FINANCIAL_DISCLOSURE.md](FINANCIAL_DISCLOSURE.md) ledger, and handles any platform fees or domain expenses transparently.
 
 #### 2. Project Contributor (Technical)
 
