@@ -1,5 +1,5 @@
 
-<img src="https://github.com/PoseStudio/PoseStudio/blob/main/logos/logo_1.png" width="360" alt="PoseStudio">
+<img src="/docs/assets/images/logo_1.png" width="360" alt="PoseStudio">
 
 **Welcome to the PoseStudio Open-Source Project**.
 Our mission is to build a truly robust, full featured, community-driven character creation system.
