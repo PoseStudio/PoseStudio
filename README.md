@@ -12,7 +12,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 
 **Here are some of the important roles we need to fill.**
 
-#### 1. Technical Roles X
+#### 1. Technical Roles
 * **Lead Software Architect (Code Lead):** Oversees the overall codebase, reviews critical Pull Requests, establishes coding standards, and defines the technical roadmap.
 * **Graphics / Engine Developer:** Focus entirely on the 3D viewport, rendering pipeline (WebGL, WebGPU, or desktop OpenGL/Vulkan depending on your stack), shaders, and real-time lighting performance.
 * **Animation Systems Engineer:** A highly specialized role focused on the mathematics and logic of 3D animation—specifically skeletal rigging, inverse kinematics (IK), forward kinematics (FK), blendshapes, and timeline interpolation.
@@ -42,9 +42,11 @@ We are calling on anyone who can help with the project. Your support ensures tha
 PoseStudio isn't just matching existing standards; it’s being built to address the long-standing wish list of the character art community.
 
 #### 1. Next-Gen Character Creation & Rigging
-* **Intuitive Morphing:** Generate highly detailed, customized base meshes and morphs with intuitive character generation tools.
-* **Smart Joint Correction:** Automated Joint Controlled Morphs (JCMs) and tension mapping that preserve anatomical volume and prevent mesh collapse during extreme bends, without requiring hours of manual weight painting.
-* **Superior Auto-Fitting:** A robust conformation algorithm that flawlessly scales clothing to extreme character morphs without mesh explosion or tedious poke-through fixes.
+- Create and customize 3D characters with advanced morphing and rigging tools
+- Intuitive morph blending for highly detailed characters and facial customization
+- Smart Joint Controlled Morphs (JCMs) and tension mapping to preserve anatomical volume during extreme poses
+- Superior auto-fitting systems that adapt clothing and accessories across a wide range of character shapes
+- AI-assisted rigging and weight painting workflows for faster setup and iteration
 
 #### 2. Advanced Cloth & Hair Systems
 * **Real-Time Draping:** Integrated cloth simulation that drapes realistically over posed characters and responds dynamically to animation sweeps.
