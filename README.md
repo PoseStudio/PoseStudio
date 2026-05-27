@@ -40,7 +40,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 * **Public Relations:** Manage and grow the PR footprint for the project.
 
 #### 3. Becoming a Sponsor:
-* **Git Sponsor:** You can help by $\color{grey}{\text{this text is grey}}$ Becoming a Sponsor on Git
+* **Git Sponsor:** We are waiting for GitHub approval on this.
 * **Patreon:** You can also **[Become a Sponsor on Patreon](https://www.patreon.com/c/PoseStudio)**
 <!-- * **Git Sponsor:** You can help by **[Becoming a Sponsor on Git](https://github.com/sponsors/PoseStudio)** -->
 
@@ -126,8 +126,9 @@ Building a powerful tool requires a powerful community.
 * **Git Discussions:** Share feature requests and technical proposals in our **[GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions/)**
 * **Official Site:** Visit the Official **[PoseStudio Website](https://posestudio.org/)**
 * **Support:** You can reach community support at **[community@posestudio.org](mailto:community@posestudio.org)**
-* **Git Sponsor:** You can help by **[Becoming a Sponsor on Git](https://github.com/sponsors/PoseStudio)**
+* **Git Sponsor:** We are waiting for GitHub approval on this.
 * **Patreon:** You can also **[Become a Sponsor on Patreon](https://www.patreon.com/c/PoseStudio)**
+<!-- * **Git Sponsor:** You can help by **[Becoming a Sponsor on Git](https://github.com/sponsors/PoseStudio)** -->
 
 
 ## <img src="/docs/assets/icons/license.png" width="28" alt="License"> License
