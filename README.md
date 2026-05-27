@@ -18,6 +18,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 * **Animation Systems Engineer:** A highly specialized role focused on the mathematics and logic of 3D animation—specifically skeletal rigging, inverse kinematics (IK), forward kinematics (FK), blendshapes, and timeline interpolation.
 * **I/O & Pipeline Specialist:** Dedicated to maintaining robust import and export pipelines for critical 3D file formats ensuring flawless handling of object and animation data.
 * **UI/UX Developer:** This role focuses on making user friendly timeline, rigging, and posing controls that are intuitive, accessible, and responsive.
+* **Integrations / Plugin Developer:** Develop, build and maintain bridge plugins for major software (like Blender, Unreal Engine, Unity, or Maya).
 * **DevOps / CI-CD Engineer:** Manage repository automation, build release binaries for different operating systems (Windows, Mac, Linux), and configur automated testing suites in GitHub Actions.
 * **Web, SEO & Infrastructure Lead:** Handle technical SEO, overall site architecture, and web security for the official PoseStudio Website **[https://posestudio.org/](https://posestudio.org/)**.
 
