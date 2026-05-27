@@ -78,7 +78,7 @@ Here is just some of skills we need to make this happen:
 * **Automated Testing (CI/CD):** Write unit tests and integration tests to ensure that new features don't break existing scenes or corrupt file exports.
 * **Bug Squashing & Triage:** Dive into the issue tracker, replicate user-reported bugs, and submit pull requests with fixes.
 
-## <img src="https://github.com/PoseStudio/PoseStudio/blob/main/icons/community.png" width="28" alt="Community"> Community
+## <img src="/docs/assets/icons/community.png" width="28" alt="Community"> Community
 
 Building a powerful tool requires a powerful community.
 
@@ -90,6 +90,6 @@ Building a powerful tool requires a powerful community.
 * **Patreon:** You can also **[Become a Sponsor on Patreon](https://www.patreon.com/c/PoseStudio)**
 
 
-## <img src="https://github.com/PoseStudio/PoseStudio/blob/main/icons/license.png" width="28" alt="License"> License
+## <img src="/docs/assets/icons/license.png" width="28" alt="License"> License
 
 PoseStudio is open-source software licensed under the **[GNU General Public License](https://github.com/PoseStudio/PoseStudio/blob/main/LICENSE)**.
