@@ -1,4 +1,7 @@
 
+<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
+[![All Contributors](https://img.shields.io/badge/all_contributors-1-orange.svg?style=flat-square)](#contributors-)
+<!-- ALL-CONTRIBUTORS-BADGE:END -->
 <img src="/docs/assets/images/logo_1.png" width="360" alt="PoseStudio">
 
 **Welcome to the PoseStudio Open-Source Project**.
@@ -129,3 +132,25 @@ Building a powerful tool requires a powerful community.
 ## <img src="/docs/assets/icons/license.png" width="28" alt="License"> License
 
 PoseStudio is open-source software licensed under the **[GNU General Public License](https://github.com/PoseStudio/PoseStudio/blob/main/LICENSE)**.
+
+## Contributors ✨
+
+Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://www.renderhub.com"><img src="https://avatars.githubusercontent.com/u/128636914?v=4?s=100" width="100px;" alt="Ion Hatzithomas"/><br /><sub><b>Ion Hatzithomas</b></sub></a><br /><a href="https://github.com/PoseStudio/PoseStudio/commits?author=Ihatzithomas" title="Code">💻</a> <a href="#design-Ihatzithomas" title="Design">🎨</a> <a href="https://github.com/PoseStudio/PoseStudio/commits?author=Ihatzithomas" title="Documentation">📖</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
