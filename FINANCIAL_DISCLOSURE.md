@@ -7,10 +7,6 @@ We believe that open source means open operations. Because this project is entir
 ## Current Funding Sources
 Our development, infrastructure, and operations are supported by our community.
 
-**You can support the development of PoseStudio through:**
-* **[GitHub Sponsors](https://github.com/sponsors/PoseStudio)**
-* **[Patreon](https://www.patreon.com/PoseStudio)**
-
 ---
 
 ## 2026 General Ledger
