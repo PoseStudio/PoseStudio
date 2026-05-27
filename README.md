@@ -5,7 +5,7 @@
 
 <!-- DISCORD BANNER To change style style=banner1 (1,2,3,4) -->
 
-<img src="https://discord.com/api/guilds/1509182819954458624/widget.png?style=banner2">
+<a href="https://discord.gg/MqVT7TbGY"><img src="https://discord.com/api/guilds/1509182819954458624/widget.png?style=banner2"></a>
 
 [![Discord Server](https://discord.com/api/guilds/1509182819954458624/widget.png?style=shield)](https://discord.gg/MqVT7TbGY)
 
