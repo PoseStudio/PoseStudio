@@ -15,10 +15,11 @@ We are calling on anyone who can help with the project. Your support ensures tha
 * **Community Manager:** Engage with users on Reddit, Twitter, and other forums gathering community feedback.
 * **Devlog & Content Coordinator:** Manages the public project logs and updates.
 * **Documentation Lead:** Develop the user manual, tutorials API documentation, and onboarding guides.
+* **Financial Admin / Treasurer:** Manages the incoming funds from community sponsorships, updates the FINANCIAL_DISCLOSURE.md ledger, and handles any platform fees or domain expenses transparently.
 
 #### 2. Project Contributor (Technical)
 
-#### 3. Become A Sponsor:
+#### 3. Project Sponsor:
 * **Git Sponsor:** You can help by **[Becoming a Sponsor on Git](https://github.com/sponsors/PoseStudio)**
 * **Patreon:** You can also **[Become a Sponsor on Patreon](https://www.patreon.com/c/PoseStudio)**
 
