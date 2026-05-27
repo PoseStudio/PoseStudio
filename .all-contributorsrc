@@ -17,6 +17,17 @@
         "design",
         "doc"
       ]
+    },
+    {
+      "login": "jbond-007",
+      "name": "JBond-007",
+      "avatar_url": "https://avatars.githubusercontent.com/u/65986244?v=4",
+      "profile": "https://github.com/jbond-007",
+      "contributions": [
+        "ideas",
+        "design",
+        "doc"
+      ]
     }
   ],
   "contributorsPerLine": 7,

@@ -1,6 +1,6 @@
 
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-1-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-2-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 <img src="/docs/assets/images/logo_1.png" width="360" alt="PoseStudio">
 
@@ -144,6 +144,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://www.renderhub.com"><img src="https://avatars.githubusercontent.com/u/128636914?v=4?s=100" width="100px;" alt="Ion Hatzithomas"/><br /><sub><b>Ion Hatzithomas</b></sub></a><br /><a href="https://github.com/PoseStudio/PoseStudio/commits?author=Ihatzithomas" title="Code">💻</a> <a href="#design-Ihatzithomas" title="Design">🎨</a> <a href="https://github.com/PoseStudio/PoseStudio/commits?author=Ihatzithomas" title="Documentation">📖</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/jbond-007"><img src="https://avatars.githubusercontent.com/u/65986244?v=4?s=100" width="100px;" alt="JBond-007"/><br /><sub><b>JBond-007</b></sub></a><br /><a href="#ideas-jbond-007" title="Ideas, Planning, & Feedback">🤔</a> <a href="#design-jbond-007" title="Design">🎨</a> <a href="https://github.com/PoseStudio/PoseStudio/commits?author=jbond-007" title="Documentation">📖</a></td>
     </tr>
   </tbody>
 </table>
