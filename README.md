@@ -11,7 +11,7 @@ PoseStudio is an open-source project intended to revolutionize how you create, p
 We are calling on anyone who can help with the project. Your support ensures that the future of character creation remains open, free, and constantly evolving. Let's build something extraordinary together.
 
 #### 1. Contribute To The Project
-* **Become a Contributor:** We are actively looking for **[Contributors](CONTRIBUTING.md)** to help with the project!
+* **Discord Manager:** We need someone to manage our **[Discord Channel](https://discord.gg/MqVT7TbGY)**.
 
 #### 2. Become A Sponsor:
 * **Git Sponsor:** You can help by **[Becoming a Sponsor on Git](https://github.com/sponsors/PoseStudio)**
