@@ -28,6 +28,17 @@
         "design",
         "doc"
       ]
+    },
+    {
+      "login": "iamsaif-khan",
+      "name": "Saifullah Khan",
+      "avatar_url": "https://avatars.githubusercontent.com/u/263315944?v=4",
+      "profile": "https://texelbyte.com/",
+      "contributions": [
+        "ideas",
+        "code",
+        "design"
+      ]
     }
   ],
   "contributorsPerLine": 7,
