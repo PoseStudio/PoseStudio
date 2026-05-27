@@ -40,7 +40,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 * **Public Relations:** Manage and grow the PR footprint for the project.
 
 #### 3. Becoming a Sponsor:
-* **Git Sponsor:** You can help by **<span style="color:red">Becoming a Sponsor on Git</span>**
+* **Git Sponsor:** You can help by **<font color="red">Becoming a Sponsor on Git</font>**
 * **Patreon:** You can also **[Become a Sponsor on Patreon](https://www.patreon.com/c/PoseStudio)**
 <!-- * **Git Sponsor:** You can help by **[Becoming a Sponsor on Git](https://github.com/sponsors/PoseStudio)** -->
 
