@@ -29,7 +29,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 * **Devlog & Content Coordinator:** Manages the public project logs and updates.
 * **Documentation Lead:** Develop the user manual, tutorials API documentation, and onboarding guides.
 * **Digital Artist/Designer:** Develop the aesthetic and visual communication of the project.
-* **Financial Admin / Treasurer:** Manages the incoming funds from community sponsorships, updates the [FINANCIAL_DISCLOSURE.md](FINANCIAL_DISCLOSURE.md) ledger, and handles any platform fees or domain expenses transparently.
+* **Financial Admin / Treasurer:** Manages the incoming funds from community sponsorships, updates the **[FINANCIAL_DISCLOSURE.md](FINANCIAL_DISCLOSURE.md)** ledger, and handles any platform fees or domain expenses transparently.
 * **Legal Advisor / Open-Source Counsel:** Legal counsel specializing in open-source licensing, intellectual property, and copyright law.
 * **Public Relations:** Manage and grow the PR footprint for the project.
 
