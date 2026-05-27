@@ -12,7 +12,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 
 **Here are some of the important roles we need to fill.**
 
-#### 1. Technical Roles
+#### 1. Technical Roles X
 * **Lead Software Architect (Code Lead):** Oversees the overall codebase, reviews critical Pull Requests, establishes coding standards, and defines the technical roadmap.
 * **Graphics / Engine Developer:** Focus entirely on the 3D viewport, rendering pipeline (WebGL, WebGPU, or desktop OpenGL/Vulkan depending on your stack), shaders, and real-time lighting performance.
 * **Animation Systems Engineer:** A highly specialized role focused on the mathematics and logic of 3D animation—specifically skeletal rigging, inverse kinematics (IK), forward kinematics (FK), blendshapes, and timeline interpolation.
