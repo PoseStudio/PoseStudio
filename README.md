@@ -1,11 +1,11 @@
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
 [![All Contributors](https://img.shields.io/badge/all_contributors-4-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
-<img src="/docs/assets/images/logo_1.png" width="360" alt="PoseStudio">
-
 <!-- DISCORD BANNER To change style style=banner1 (1,2,3,4) -->
 <a href="https://discord.gg/MqVT7TbGY"><img align="right" src="https://discord.com/api/guilds/1509182819954458624/widget.png?style=shield"></a>
 <!-- DISCORD BANNER:END -->
+<img src="/docs/assets/images/logo_1.png" width="360" alt="PoseStudio">
+
 
 **Welcome to the PoseStudio Open-Source Project**.
 
