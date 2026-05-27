@@ -17,7 +17,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 * **I/O & Pipeline Specialist:** Dedicated to maintaining robust import and export pipelines for critical 3D file formats ensuring flawless handling of object and animation data.
 * **UI/UX Developer:** This role focuses on making user friendly timeline, rigging, and posing controls that are intuitive, accessible, and responsive.
 * **DevOps / CI-CD Engineer:** Manage repository automation, build release binaries for different operating systems (Windows, Mac, Linux), and configur automated testing suites in GitHub Actions.
-* **Website Manager:** MAnage and implement changes to the official PoseStudio Website **[https://posestudio.org/](https://posestudio.org/)**.
+* **Website Manager:** Manage and implement changes to the official PoseStudio Website **[https://posestudio.org/](https://posestudio.org/)**.
 
 #### 2. Non-Technical Contributors
 * **Discord Administrator:** Manage our **[Discord Channel](https://discord.gg/MqVT7TbGY)**.
