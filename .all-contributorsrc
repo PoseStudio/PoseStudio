@@ -49,6 +49,16 @@
         "ideas",
         "doc"
       ]
+    },
+    {
+      "login": "Fira94",
+      "name": "Fira94",
+      "avatar_url": "https://avatars.githubusercontent.com/u/57450621?v=4",
+      "profile": "https://github.com/FIRA94",
+      "contributions": [
+        "ideas",
+        "design"
+      ]
     }
   ],
   "contributorsPerLine": 7,
