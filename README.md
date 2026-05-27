@@ -118,9 +118,7 @@ Here is just some of skills we need to make this happen:
 * **Automated Testing (CI/CD):** Write unit tests and integration tests to ensure that new features don't break existing scenes or corrupt file exports.
 * **Bug Squashing & Triage:** Dive into the issue tracker, replicate user-reported bugs, and submit pull requests with fixes.
 
-## Contributing to the Website & Local Development
-
-For info on how to contribute changes to this repo, see our **[CONTRIBUTING.md](.github/CONTRIBUTING.md)**
+For more information on how to contribute changes to this repo, see our **[CONTRIBUTING.md](.github/CONTRIBUTING.md)**
 
 ## <img src="/docs/assets/icons/community.png" width="28" alt="Community"> Community
 
