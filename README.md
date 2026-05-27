@@ -4,6 +4,8 @@
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 <img src="/docs/assets/images/logo_1.png" width="360" alt="PoseStudio">
 
+<iframe src="https://discord.com/widget?id=1509182819954458624&theme=dark" width="350" height="500" allowtransparency="true" frameborder="0" sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"></iframe>
+
 **Welcome to the PoseStudio Open-Source Project**.
 
 Our mission is to build a robust, community-driven platform for 3D character creation and scene production.
