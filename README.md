@@ -12,7 +12,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 
 #### 1. Project Contributor (Non-Technical)
 * **Discord Administrator:** Manage our **[Discord Channel](https://discord.gg/MqVT7TbGY)**.
-* **Social Manager:** Engage with users on Reddit, Twitter, and other forums gathering community feedback.
+* **Social Media Manager:** Engage with users on Reddit, Twitter, and other forums gathering community feedback.
 * **Devlog & Content Coordinator:** Manages the public project logs and updates.
 * **Documentation Lead:** Develop the user manual, tutorials API documentation, and onboarding guides.
 * **Digital Artist/Designer:** Develop the aesthetic and visual communication of the project.
