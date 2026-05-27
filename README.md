@@ -10,7 +10,16 @@ PoseStudio is an open-source project intended to revolutionize how you create, p
 
 We are calling on anyone who can help with the project. Your support ensures that the future of character creation remains open, free, and constantly evolving. Let's build something extraordinary together.
 
-#### 1. Project Contributor (Non-Technical)
+#### 1. Technical Contributor
+* **Lead Software Architect (Code Lead):** Oversees the overall codebase, reviews critical Pull Requests, establishes coding standards, and defines the technical roadmap.
+* **Graphics / Engine Developer:** Focus entirely on the 3D viewport, rendering pipeline (WebGL, WebGPU, or desktop OpenGL/Vulkan depending on your stack), shaders, and real-time lighting performance.
+* **Animation Systems Engineer:** A highly specialized role focused on the mathematics and logic of 3D animation—specifically skeletal rigging, inverse kinematics (IK), forward kinematics (FK), blendshapes, and timeline interpolation.
+* **I/O & Pipeline Specialist:** Dedicated to maintaining robust import and export pipelines for critical 3D file formats ensuring flawless handling of object and animation data.
+* **UI/UX Developer:** This role focuses on making user friendly timeline, rigging, and posing controls that are intuitive, accessible, and responsive.
+* **DevOps / CI-CD Engineer:** Manage repository automation, build release binaries for different operating systems (Windows, Mac, Linux), and configur automated testing suites in GitHub Actions.
+* **Website Manager:** MAnage and implement changes to the official PoseStudio Website **[https://posestudio.org/](https://posestudio.org/)**.
+
+#### 2. Non-Technical Contributor
 * **Discord Administrator:** Manage our **[Discord Channel](https://discord.gg/MqVT7TbGY)**.
 * **Social Media Manager:** Engage with users on Reddit, Twitter, and other forums gathering community feedback.
 * **Devlog & Content Coordinator:** Manages the public project logs and updates.
@@ -19,8 +28,6 @@ We are calling on anyone who can help with the project. Your support ensures tha
 * **Financial Admin / Treasurer:** Manages the incoming funds from community sponsorships, updates the [FINANCIAL_DISCLOSURE.md](FINANCIAL_DISCLOSURE.md) ledger, and handles any platform fees or domain expenses transparently.
 * **Legal Advisor / Open-Source Counsel:** Legal counsel specializing in open-source licensing, intellectual property, and copyright law.
 * **Public Relations:** Manage and grow the PR footprint for the project.
-
-#### 2. Project Contributor (Technical)
 
 #### 3. Project Sponsor:
 * **Git Sponsor:** You can help by **[Becoming a Sponsor on Git](https://github.com/sponsors/PoseStudio)**
