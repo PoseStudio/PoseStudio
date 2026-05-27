@@ -10,7 +10,7 @@ PoseStudio is an open-source project intended to revolutionize how you create, p
 
 We are calling on anyone who can help with the project. Your support ensures that the future of character creation remains open, free, and constantly evolving. Let's build something extraordinary together!
 
-Here are some of the important roles we need to fill.
+**Here are some of the important roles we need to fill.**
 
 #### 1. Technical Contributors
 * **Lead Software Architect (Code Lead):** Oversees the overall codebase, reviews critical Pull Requests, establishes coding standards, and defines the technical roadmap.
