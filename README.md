@@ -27,6 +27,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 * **Integrations / Plugin Developer:** Develop, build and maintain bridge plugins for major software (like Blender, Unreal Engine, Unity, or Maya).
 * **DevOps / CI-CD Engineer:** Manage repository automation, build release binaries for different operating systems (Windows, Mac, Linux), and configur automated testing suites in GitHub Actions.
 * **Web, SEO & Infrastructure Lead:** Handle technical SEO, overall site architecture, and web security for the official PoseStudio Website **[https://posestudio.org/](https://posestudio.org/)**.
+* **GitHub Administrator:** Manage the organization and repository settings, enforce security policies, and maintain smooth development workflows.
 
 #### 2. Non-Technical Roles
 * **GitHub Community Manager:** Manage our **[GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions)**, issue triaging, monotor overall community health.
