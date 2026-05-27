@@ -1,6 +1,6 @@
 <a href="https://discord.gg/MqVT7TbGY"><img src="https://discord.com/api/guilds/1509182819954458624/widget.png?style=shield" align="right"></a>
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-4-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-5-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 <img src="/docs/assets/images/logo_1.png" width="360" alt="PoseStudio">
 
@@ -152,6 +152,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/jbond-007"><img src="https://avatars.githubusercontent.com/u/65986244?v=4?s=100" width="100px;" alt="JBond-007"/><br /><sub><b>JBond-007</b></sub></a><br /><a href="#ideas-jbond-007" title="Ideas, Planning, & Feedback">🤔</a> <a href="#design-jbond-007" title="Design">🎨</a> <a href="https://github.com/PoseStudio/PoseStudio/commits?author=jbond-007" title="Documentation">📖</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://texelbyte.com/"><img src="https://avatars.githubusercontent.com/u/263315944?v=4?s=100" width="100px;" alt="Saifullah Khan"/><br /><sub><b>Saifullah Khan</b></sub></a><br /><a href="#ideas-iamsaif-khan" title="Ideas, Planning, & Feedback">🤔</a> <a href="https://github.com/PoseStudio/PoseStudio/commits?author=iamsaif-khan" title="Code">💻</a> <a href="#design-iamsaif-khan" title="Design">🎨</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/eladarling"><img src="https://avatars.githubusercontent.com/u/26311802?v=4?s=100" width="100px;" alt="Ela Darling"/><br /><sub><b>Ela Darling</b></sub></a><br /><a href="#ideas-eladarling" title="Ideas, Planning, & Feedback">🤔</a> <a href="https://github.com/PoseStudio/PoseStudio/commits?author=eladarling" title="Documentation">📖</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/FIRA94"><img src="https://avatars.githubusercontent.com/u/57450621?v=4?s=100" width="100px;" alt="Fira94"/><br /><sub><b>Fira94</b></sub></a><br /><a href="#ideas-Fira94" title="Ideas, Planning, & Feedback">🤔</a> <a href="#design-Fira94" title="Design">🎨</a></td>
     </tr>
   </tbody>
 </table>
