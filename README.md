@@ -5,10 +5,6 @@
 <img src="/docs/assets/images/logo_1.png" width="360" alt="PoseStudio">
 
 [![Discord Server](https://discord.com/api/guilds/1509182819954458624/widget.png?style=shield)](https://discord.gg/MqVT7TbGY)
-[![Discord Server](https://discord.com/api/guilds/1509182819954458624/widget.png?style=banner1)](https://discord.gg/MqVT7TbGY)
-[![Discord Server](https://discord.com/api/guilds/1509182819954458624/widget.png?style=banner2)](https://discord.gg/MqVT7TbGY)
-[![Discord Server](https://discord.com/api/guilds/1509182819954458624/widget.png?style=banner3)](https://discord.gg/MqVT7TbGY)
-[![Discord Server](https://discord.com/api/guilds/1509182819954458624/widget.png?style=banner4)](https://discord.gg/MqVT7TbGY)
 
 **Welcome to the PoseStudio Open-Source Project**.
 
