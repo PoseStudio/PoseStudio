@@ -4,7 +4,7 @@
 <img src="/docs/assets/images/logo_1.png" width="360" alt="PoseStudio">
 
 <!-- DISCORD BANNER To change style style=banner1 (1,2,3,4) -->
-<a href="https://discord.gg/MqVT7TbGY"><img style="float: right;" src="https://discord.com/api/guilds/1509182819954458624/widget.png?style=shield"></a>
+<a href="https://discord.gg/MqVT7TbGY"><img align="right" src="https://discord.com/api/guilds/1509182819954458624/widget.png?style=shield"></a>
 <!-- DISCORD BANNER:END -->
 
 **Welcome to the PoseStudio Open-Source Project**.
