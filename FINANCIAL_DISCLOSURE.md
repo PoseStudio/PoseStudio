@@ -19,12 +19,13 @@ Our development, infrastructure, and operations are supported by our community.
 | **Balance** | **$138.55** | **Current Balance** |
 
 #### ⬇️ Income (Inflow)
-*Transaction Fees are charged by the payment platform.
 | Date | Donor | Item | Amount | Transaction Fee | Total |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 05/28/2006 | TaterTot | Patreon tier 1 contribution | $5.00 | $0.96 | $4.04 |
 | 05/13/2026 | Ion Hatzithomas | Other one-time contribution | $500.00 | - | $500.00 |
 | | | | | **Total Income** | **$504.04** |
+
+*Transaction Fees are charged by the payment platform.
 
 #### ⬆️ Expenses (Outflow)
 | Date | Invoice | Payee | Item | Amount | Receipt / Proof |
