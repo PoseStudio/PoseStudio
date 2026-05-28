@@ -14,8 +14,8 @@ Our development, infrastructure, and operations are supported by our community.
 #### Summary
 | Date | Item | Amount |
 | :--- | :--- | :--- |
-| 2026 YTD | Income | $504.04 |
-| 2026 YTD | Expenses | $365.49 |
+| 2026 YTD | Income (Inflow) | $504.04 |
+| 2026 YTD | Expenses (Outflow) | $365.49 |
 | | **Balance** | **$138.55** |
 
 #### ⬇️ Income (Inflow)
