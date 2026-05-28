@@ -12,11 +12,11 @@ Our development, infrastructure, and operations are supported by our community.
 ## 2026 General Ledger
 
 #### Summary
-| Type | Amount | Notes |
+| Type | Notes | Amount |
 | :--- | :--- | :--- |
-| Income | $504.04 | 2026 Total Income |
-| Expenses | $365.49 | 2026 Total Expenses |
-| **Balance** | **$138.55** | **Current Balance** |
+| Income | 2026 Total Income | $504.04 |
+| Expenses | 2026 Total Expenses | $365.49 |
+| | **Balance** | **$138.55** |
 
 #### ⬇️ Income (Inflow)
 | Date | Donor | Item | Amount | Transaction Fee | Total |
