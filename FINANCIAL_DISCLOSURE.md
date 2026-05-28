@@ -14,8 +14,8 @@ Our development, infrastructure, and operations are supported by our community.
 #### Summary
 | Type | Notes | Amount |
 | :--- | :--- | :--- |
-| Income | 2026 Total Income | $504.04 |
-| Expenses | 2026 Total Expenses | $365.49 |
+| Income | 2026 Income | $504.04 |
+| Expenses | 2026 Expenses | $365.49 |
 | | **Balance** | **$138.55** |
 
 #### ⬇️ Income (Inflow)
