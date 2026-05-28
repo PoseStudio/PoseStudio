@@ -23,7 +23,7 @@ Our development, infrastructure, and operations are supported by our community.
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 05/28/2006 | TaterTot | Patreon tier 1 monthly contribution | $5.00 | $0.96 | $4.04 |
 | 05/13/2026 | Ion Hatzithomas | Other one-time contribution | $500.00 | - | $500.00 |
-| | | | | | **Total Income** | **$504.04** |
+| | | | | **Total Income** | **$504.04** |
 
 #### ⬆️ Expenses (Outflow)
 | Date | Invoice | Payee | Item | Amount | Receipt / Proof |
