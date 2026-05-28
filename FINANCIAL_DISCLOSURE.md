@@ -23,7 +23,7 @@ Our development, infrastructure, and operations are supported by our community.
 | :--- | :--- | :--- | :--- | :--- |
 | - | - | - | $0.00 | GitHub sponsor contribution |
 | 05/28/2006 | $5.00 | $0.96 | TaterTot | Patreon tier 1 monthly contribution |
-| 05/13/2026 | Ion Hatzithomas | $500.00 | $0.00 | Ion Hatzithomas | Other one-time contribution |
+| 05/13/2026 | $500.00 | $0.00 | Ion Hatzithomas | Other one-time contribution |
 | **Total Income** | **$504.04** | | | |
 
 #### ⬆️ Expenses (Outflow)
