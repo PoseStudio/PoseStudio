@@ -14,9 +14,9 @@ Our development, infrastructure, and operations are supported by our community.
 #### Summary
 | Type | Amount | Notes |
 | :--- | :--- | :--- |
-| Income | $500.00 | 2026 Total Income |
+| Income | $505.00 | 2026 Total Income |
 | Expenses | $365.49 | 2026 Total Expenses |
-| **Balance** | **$134.51** | **Current Balance** |
+| **Balance** | **$139.51** | **Current Balance** |
 
 #### ⬇️ Income (Inflow)
 | Date | Amount | Donor | Notes |
@@ -24,7 +24,7 @@ Our development, infrastructure, and operations are supported by our community.
 | - | - | $0.00 | GitHub sponsor contribution |
 | 05/28/2006 | TaterTot | $5.00 | Patreon tier 1 monthly contribution |
 | 05/13/2026 | Ion Hatzithomas | $500.00 | Other one-time contribution |
-| **Total Income** | **$500.00** | | |
+| **Total Income** | **$505.00** | | |
 
 #### ⬆️ Expenses (Outflow)
 | Date | Amount | Payee | Invoice | Item | Receipt / Proof |
