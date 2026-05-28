@@ -27,16 +27,16 @@ Our development, infrastructure, and operations are supported by our community.
 | **Total Income** | | | **$504.04** | | | |
 
 #### ⬆️ Expenses (Outflow)
-| Date | Amount | Payee | Invoice | Item | Receipt / Proof |
+| Date | Invoice | Payee | Item | Amount | Receipt / Proof |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 05/22/2026 | $4.36 | GitHub | INV136704184 | GitHub Team Plan | [Link to receipt](/docs/receipts/github_136704184_redacted.pdf) |
-| 05/22/2026 | $4.36 | GitHub |  INV136704234 | GitHub Team Plan | [Link to receipt](/docs/receipts/github_136704234_redacted.pdf) |
-| 05/22/2026 | $17.42 | GitHub |  INV136704659 | GitHub Team Plan | [Link to receipt](/docs/receipts/github_136704659_redacted.pdf) |
-| 05/13/2026 | $9.19 | GoDaddy |  4065874376 | To register posestudio.org | [Link to receipt](/docs/receipts/godaddy_4065874376_redacted.pdf) |
-| 05/13/2026 | $209.98 | GoDaddy |  4087661824 | To register posestudio.ai + .io | [Link to receipt](/docs/receipts/godaddy_4087661824_redacted.pdf) |
-| 05/13/2026 | $20.19 | GoDaddy |  4087693210 | To register posestudio.dev | [Link to receipt](/docs/receipts/godaddy_4087693210_redacted.pdf) |
-| 05/13/2026 | $99.99 | GoDaddy |  4087693214 | Broker service posestudio.co | [Link to receipt](/docs/receipts/godaddy_4087693214_redacted.pdf) |
-| **Total Expenses** | **$365.49** | | | | |
+| 05/22/2026 | INV136704184 | GitHub | GitHub Team Plan | $4.36 | [Link to receipt](/docs/receipts/github_136704184_redacted.pdf) |
+| 05/22/2026 | INV136704234 | GitHub | GitHub Team Plan | $4.36 | [Link to receipt](/docs/receipts/github_136704234_redacted.pdf) |
+| 05/22/2026 | INV136704659 | GitHub | GitHub Team Plan | $17.42 | [Link to receipt](/docs/receipts/github_136704659_redacted.pdf) |
+| 05/13/2026 | 4065874376 | GoDaddy | To register posestudio.org | $9.19 | [Link to receipt](/docs/receipts/godaddy_4065874376_redacted.pdf) |
+| 05/13/2026 | 4087661824 | GoDaddy | To register posestudio.ai + .io | $209.98 | [Link to receipt](/docs/receipts/godaddy_4087661824_redacted.pdf) |
+| 05/13/2026 | 4087693210 | GoDaddy | To register posestudio.dev | $20.19 | [Link to receipt](/docs/receipts/godaddy_4087693210_redacted.pdf) |
+| 05/13/2026 | 4087693214 | GoDaddy | Broker service posestudio.co | $99.99 | [Link to receipt](/docs/receipts/godaddy_4087693214_redacted.pdf) |
+| **Total Expenses** | | | | **$365.49** | |
 
 ---
 
