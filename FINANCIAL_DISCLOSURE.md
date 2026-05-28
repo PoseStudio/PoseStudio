@@ -25,7 +25,7 @@ Our development, infrastructure, and operations are supported by our community.
 | 05/13/2026 | Ion Hatzithomas | Other one-time contribution | $500.00 | - | $500.00 |
 | | | | | **Total Income** | **$504.04** |
 
-*Transaction Fees are charged by the payment platform.
+*Transaction Fees are charged by the payment platforms.
 
 #### ⬆️ Expenses (Outflow)
 | Date | Invoice | Payee | Item | Amount | Receipt / Proof |
