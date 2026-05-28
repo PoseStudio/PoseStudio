@@ -14,7 +14,7 @@ The goal is to reduce reliance on fragmented toolchains and provide a flexible, 
 
 ## <img src="/docs/assets/icons/sponsor.png" width="28" alt="get involved"> Get Involved
 
-We are calling on anyone who can help with the project. Your support ensures that the future of character creation remains open, free, and constantly evolving. Let's build something extraordinary together!
+We are calling on anyone who can help with the project. Your support ensures that the future of character creation remains open, free, and constantly evolving. Let's build something extraordinary together! <a href="https://discord.gg/MqVT7TbGY">Join our Discord</a>!
 
 **Here are some of the important roles we need to fill.**
 
