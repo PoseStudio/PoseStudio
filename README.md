@@ -1,4 +1,4 @@
-<a href="https://discord.gg/MqVT7TbGY"><img src="https://discord.com/api/guilds/1509182819954458624/widget.png?style=banner2" align="right"></a>
+<a href="https://discord.gg/MqVT7TbGY"><img src="https://discord.com/api/guilds/1509182819954458624/widget.png?style=shield" align="right"></a>
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
 [![All Contributors](https://img.shields.io/badge/all_contributors-5-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
@@ -14,7 +14,7 @@ The goal is to reduce reliance on fragmented toolchains and provide a flexible, 
 
 ## <img src="/docs/assets/icons/sponsor.png" width="28" alt="get involved"> Get Involved
 
-We are calling on anyone who can help with the project. Your support ensures that the future of character creation remains open, free, and constantly evolving. Let's build something extraordinary together! <a href="https://discord.gg/MqVT7TbGY">Join our Discord</a>!
+We are calling on anyone who can help with the project. Your support ensures that the future of character creation remains open, free, and constantly evolving. Let's build something extraordinary together! **<a href="https://discord.gg/MqVT7TbGY">Join our Discord</a>**!
 
 **Here are some of the important roles we need to fill.**
 
