@@ -19,3 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core open-source community files including `LICENSE`, `.gitignore`, and `CODE_OF_CONDUCT.md`.
 - Associated domain linkages for PoseStudio.org.
 - Updated Code of Conduct
+
+## [0.0.2] - 2026-05-29
+### Added
+- Created initial "Hello World" C++ Qt package
+- Integrated SQLite into the app
+- Create database initialization .sql file and function
