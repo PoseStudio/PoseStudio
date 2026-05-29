@@ -1,0 +1,70 @@
+{
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "commitType": "docs",
+  "commitConvention": "angular",
+  "contributors": [
+    {
+      "login": "Ihatzithomas",
+      "name": "Ion Hatzithomas",
+      "avatar_url": "https://avatars.githubusercontent.com/u/128636914?v=4",
+      "profile": "https://www.renderhub.com",
+      "contributions": [
+        "code",
+        "design",
+        "doc"
+      ]
+    },
+    {
+      "login": "jbond-007",
+      "name": "JBond-007",
+      "avatar_url": "https://avatars.githubusercontent.com/u/65986244?v=4",
+      "profile": "https://github.com/jbond-007",
+      "contributions": [
+        "ideas",
+        "design",
+        "doc"
+      ]
+    },
+    {
+      "login": "iamsaif-khan",
+      "name": "Saifullah Khan",
+      "avatar_url": "https://avatars.githubusercontent.com/u/263315944?v=4",
+      "profile": "https://texelbyte.com/",
+      "contributions": [
+        "ideas",
+        "code",
+        "design"
+      ]
+    },
+    {
+      "login": "eladarling",
+      "name": "Ela Darling",
+      "avatar_url": "https://avatars.githubusercontent.com/u/26311802?v=4",
+      "profile": "https://github.com/eladarling",
+      "contributions": [
+        "ideas",
+        "doc"
+      ]
+    },
+    {
+      "login": "Fira94",
+      "name": "Fira94",
+      "avatar_url": "https://avatars.githubusercontent.com/u/57450621?v=4",
+      "profile": "https://github.com/FIRA94",
+      "contributions": [
+        "ideas",
+        "design"
+      ]
+    }
+  ],
+  "contributorsPerLine": 7,
+  "skipCi": true,
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "projectName": "PoseStudio",
+  "projectOwner": "PoseStudio"
+}

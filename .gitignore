@@ -1,1 +1,131 @@
+# ==========================================
+# PoseStudio .gitignore
+# ==========================================
+
+# ------------------------------------------
+# C++ / Compiled Object Files & Libraries
+# ------------------------------------------
+*.slo
+*.lo
+*.o
+*.obj
+*.gch
+*.pch
+*.so
+*.dylib
+*.dll
+*.lai
+*.la
+*.a
+*.lib
+*.exe
+*.out
+*.app
+
+# ------------------------------------------
+# Python (Plugins & Scripting)
+# ------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+.venv/
+.env
+
+# ------------------------------------------
+# Qt Framework (UI/Frontend)
+# ------------------------------------------
+# Qt moc, uic, rcc generated files
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+Makefile*
+*build-*/
+*.qstash
+*.qmlc
+*.jsc
+
+# ------------------------------------------
+# CMake (Build System)
+# ------------------------------------------
 build/
+CMakeCache.txt
+CMakeFiles
+CMakeScripts
+Testing
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+
+# ------------------------------------------
+# IDEs and Editors
+# ------------------------------------------
+# Visual Studio / VS Code
+.vscode/
+.vs/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln.docstates
+
+# CLion / IntelliJ / JetBrains
+.idea/
+cmake-build-*/
+
+# Vim / Emacs
+*.swp
+*.swo
+*~
+\#*\#
+
+# ------------------------------------------
+# OS Generated Files
+# ------------------------------------------
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+
+# ------------------------------------------
+# 3D Cache & Local Assets (PoseStudio Specific)
+# ------------------------------------------
+# Prevent large test assets and temp cache from bloating the repo
+/local_assets/
+/test_cache/
+*.zpr.backup
+*.fbx.bak
+*.obj.bak
+# Ignore large log files generated from rendering or crashing
+*.log
+crash_dumps/
