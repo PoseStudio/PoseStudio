@@ -25,3 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Created initial "Hello World" C++ Qt package
 - Integrated SQLite into the app
 - Create database initialization .sql file and function
+
+## [0.0.3] - 2026-05-30
+### Added
+- Created main application window
+- Created intial main file menus
+
+## [0.0.4] - 2026-05-30
+### Added
+- Created main splash screen
+
+
