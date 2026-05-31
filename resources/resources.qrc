@@ -1,0 +1,28 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource prefix="/resources">
+    <file>splash_screen.png</file>
+    <file>icon.png</file>
+    <file>new.png</file>
+    <file>new-d.png</file>
+    <file>open.png</file>
+    <file>open-d.png</file>
+    <file>save.png</file>
+    <file>save-d.png</file>
+    <file>import.png</file>
+    <file>import-d.png</file>
+    <file>export.png</file>
+    <file>export-d.png</file>
+    <file>undo.png</file>
+    <file>undo-d.png</file>
+    <file>redo.png</file>
+    <file>redo-d.png</file>
+    <file>preferences.png</file>
+    <file>preferences-d.png</file>
+    <file>copy.png</file>
+    <file>copy-d.png</file>
+    <file>tutorials.png</file>
+    <file>tutorials-d.png</file>
+    <file>about.png</file>
+    <file>about-d.png</file>
+</qresource>
+</RCC>

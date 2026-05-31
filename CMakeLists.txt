@@ -18,7 +18,19 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 # Define the executable and its source files
-add_executable(PoseStudio main.cpp database.cpp resources.qrc PoseStudio.rc)
+add_executable(
+    PoseStudio 
+    src/main.cpp 
+    src/database.cpp 
+    src/menumanager.cpp       
+    src/menumanager.h         
+    src/splashoverlay.h       
+    resources/resources.qrc 
+    resources/PoseStudio.rc
+)
+
+# Tells the compiler to look in the /src folder for any included header files
+target_include_directories(PoseStudio PRIVATE src)
 
 # Link the Qt libraries to your application
 target_link_libraries(PoseStudio PRIVATE Qt6::Widgets Qt6::Sql)
