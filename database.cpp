@@ -45,8 +45,8 @@ bool initializeDatabase() {
     // Remove the connection from Qt's manager
     QSqlDatabase::removeDatabase(connectionName);
 
-    QString databaseSql = "D:/PoseStudio/initialize.sql";
-    QString databaseFile = "D:/PoseStudio/build/Debug/posestudio.db";
+    QString databaseSql = "D:/PoseStudio/PoseStudio/initialize.sql";
+    QString databaseFile = "D:/PoseStudio/PoseStudio/build/Debug/posestudio.db";
 
     // Delete the physical db file if it exists
     QFile dbFile(databaseFile);
