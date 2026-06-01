@@ -1,9 +1,19 @@
+/**
+ * @file main.cpp
+ * @brief Application entry point and primary bootstrap sequence for PoseStudio.
+ * * This file initializes the core QApplication event loop. It establishes the 
+ * global SQLite database connection, loads user preferences into memory, applies 
+ * the unified CSS dark theme, and constructs the primary window layout 
+ * (Viewport + Docked Side Panels).
+ */
+
 #include "database.h"
 #include "menumanager.h"
 #include "splashoverlay.h"
 #include "constants.h"
 #include "preferencesmanager.h"
 #include "assetmanagerwidget.h"
+
 #include <QApplication>
 #include <QDebug>
 #include <QFile>
@@ -17,99 +27,116 @@
 #include <QSplitter>
 #include <QTabWidget>
 
+/**
+ * @brief Main execution function.
+ * @param argc Command line argument count.
+ * @param argv Command line argument vector.
+ * @return Application exit code (0 for success, non-zero for fatal errors).
+ */
 int main(int argc, char *argv[]) {
+    // 1. Initialize the Qt Application framework
     QApplication app(argc, argv);
 
-    // Change this to 0 when you want to stop resetting the database!
+    // =========================================================================
+    // [ CORE SERVICES & DATA LAYER ]
+    // =========================================================================
+
+    // DANGER: Setting initDb to 1 executes a destructive factory reset of the local DB!
+    // This must strictly default to 0 for production and community builds.
     int initDb = 0; 
 
-    // One function call handles nuking, creating, reading the file, and connecting
+    // Establish connection pool and execute schema validation
     QSqlDatabase db = initializeDatabase(initDb);
-
     if (!db.isOpen()) {
-        // If it failed to open, abort launching the app
-        return false; 
+        qCritical() << "Fatal Error: PoseStudio cannot launch without a valid database connection.";
+        return -1; // Return a non-zero exit code to alert the OS of a failure
     }
 
+    // Load global application settings into the Singleton manager
     PreferencesManager::instance().loadFromDatabase();
 
-    // Get the Asset Folder value from the preferences table.
-    QString assetFolder = PreferencesManager::instance().getValue("AssetDir", "").toString();
+    // =========================================================================
+    // [ BRANDING & THEMING ]
+    // =========================================================================
 
-    app.setWindowIcon(QIcon(":/resources/icons/icon.png"));
+    app.setWindowIcon(QIcon(":/resources/icon.png"));
+    
+    // Enforce the 'Fusion' style to override native OS variations (Windows/macOS)
+    // This guarantees our custom CSS renders consistently across all platforms.
     app.setStyle("Fusion");
 
-    // --- LOAD EXTERNAL STYLESHEET ---
+    // Inject global stylesheet
     QFile styleFile(":/resources/styles/style.qss");
     if (styleFile.open(QFile::ReadOnly)) {
-        // Read the file and apply it to the whole app
         QString styleSheet = QLatin1String(styleFile.readAll());
         app.setStyleSheet(styleSheet);
         styleFile.close();
     } else {
-        qWarning() << "Could not load the stylesheet from resources!";
+        qWarning() << "UI Warning: Could not locate compiled style.qss in resources.";
     }
-    // --------------------------------
+
+    // =========================================================================
+    // [ MAIN WINDOW GEOMETRY ]
+    // =========================================================================
 
     QMainWindow mainWindow;
     QString windowTitle = QString("%1 %2").arg(Constants::APP_NAME, Constants::APP_VERSION);
     mainWindow.setWindowTitle(windowTitle);
 
+    // Dynamically scale the initial window size based on the user's primary monitor
     QScreen *screen = app.primaryScreen();
     QRect screenGeometry = screen->availableGeometry();
 
     int windowHeight = screenGeometry.height() * 0.80;
-    int windowWidth = screenGeometry.height() * 1.4;
+    int windowWidth  = screenGeometry.height() * 1.4;
     mainWindow.resize(windowWidth, windowHeight); 
 
-    // --- NEW MODULAR MENU SETUP ---
+    // Attach modular top menu bar
     MenuManager *menuManager = new MenuManager(&mainWindow);
     menuManager->setupMenus();
-    // ------------------------------
 
+    // =========================================================================
+    // [ WORKSPACE LAYOUT ARCHITECTURE ]
+    // =========================================================================
 
-    // --- MAIN UI LAYOUT ---
-    
-    // 1. Create the Splitter
+    // The primary horizontal splitter dividing the 3D space from the UI panels
     QSplitter *mainSplitter = new QSplitter(Qt::Horizontal, &mainWindow);
 
-    // 2. Create the Viewport FIRST (so it sits on the left side)
+    // --- 1. Central 3D Viewport (Left) ---
+    // TODO: Replace this placeholder with the OpenGL/Vulkan rendering context
     QWidget *viewportPlaceholder = new QWidget(mainSplitter);
     viewportPlaceholder->setStyleSheet("background-color: #1e1f22;"); 
 
-    // 3. Create the Side Panel SECOND (so it sits on the right side)
+    // --- 2. Tool & Asset Panels (Right) ---
     QTabWidget *sidePanel = new QTabWidget(mainSplitter);
+    sidePanel->setTabPosition(QTabWidget::West); // Anchor tabs to the inner spine
     
-    // Change this to West so the tabs face the central viewport!
-    sidePanel->setTabPosition(QTabWidget::West); 
-    
-
-
     AssetManagerWidget *assetsTab = new AssetManagerWidget();
-
-
-    QWidget *propertiesTab = new QWidget();
+    QWidget *propertiesTab = new QWidget(); // Placeholder for Node/Material properties
+    
     sidePanel->addTab(assetsTab, "Asset Manager");
     sidePanel->addTab(propertiesTab, "Properties");
 
-    // 4. Add them to the splitter in the new left-to-right order
+    // Assemble the splitter in strict Left-to-Right order
     mainSplitter->addWidget(viewportPlaceholder);
     mainSplitter->addWidget(sidePanel);
 
-    // 5. Flip the initial width ratios (e.g., 1500px for viewport, 350px for panel)
-    mainSplitter->setSizes({1500, 350});
+    // Establish default workspace ratios (heavily favoring the 3D viewport)
+    mainSplitter->setSizes({1500, 480});
 
-    // 6. Lock it into the window
+    // Lock the fully assembled workspace into the main window
     mainWindow.setCentralWidget(mainSplitter);
 
-    // ----------------------
-
-
+    // =========================================================================
+    // [ EXECUTION ]
+    // =========================================================================
 
     mainWindow.show();
 
+    // Overlay the splash screen while background threads (like scanning) boot up
     SplashOverlay *splash = new SplashOverlay(&mainWindow);
     splash->show();
 
+    // Hand control over to the Qt Event Loop
     return app.exec();
 }

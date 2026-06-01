@@ -1,41 +1,81 @@
+# ==============================================================================
+# PoseStudio Open Source Project
+# File: CMakeLists.txt
+# Description: The primary CMake build script.
+#              Configures the C++ compiler, locates the Qt6 framework, handles 
+#              Qt's meta-object compilation, and links all source files.
+# ==============================================================================
+
 cmake_minimum_required(VERSION 3.16)
 project(PoseStudio VERSION 1.0 LANGUAGES CXX)
 
-# Qt 6 requires C++17 or higher
+# ==============================================================================
+# [ COMPILER CONFIGURATION ]
+# ==============================================================================
+
+# Qt 6 mandates C++17 or higher. Enforce this standard across all platforms.
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# IMPORTANT: If CMake cannot find Qt automatically, uncomment the line below 
-# and update it to your exact Qt 6 installation path.
-set(CMAKE_PREFIX_PATH "C:/Qt/6.11.1/msvc2022_64" CACHE PATH "Qt Path")
+# ==============================================================================
+# [ QT6 FRAMEWORK INTEGRATION ]
+# ==============================================================================
 
-# Locate the required Qt modules
+# CONTRIBUTOR NOTICE: 
+# Do not hardcode your local Qt path here before submitting a Pull Request!
+# If CMake cannot find Qt, pass your path via the command line when building:
+# e.g., cmake -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/msvc2022_64" ..
+if(NOT DEFINED CMAKE_PREFIX_PATH)
+    set(CMAKE_PREFIX_PATH "C:/Qt/6.11.1/msvc2022_64" CACHE PATH "Fallback Qt Path")
+endif()
+
+# Locate required Qt modules. The build will fatally abort if these are missing.
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Sql)
 
-# Enable Qt's automatic compilation features
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTOUIC ON)
-set(CMAKE_AUTORCC ON)
+# Automatically invoke Qt's pre-processors during the build:
+set(CMAKE_AUTOMOC ON) # Meta-Object Compiler (Handles Signals & Slots)
+set(CMAKE_AUTOUIC ON) # User Interface Compiler (Handles .ui XML files)
+set(CMAKE_AUTORCC ON) # Resource Compiler (Handles .qrc binary embedding)
 
-# Define the executable and its source files
+# ==============================================================================
+# [ TARGET DEFINITION & SOURCE FILES ]
+# ==============================================================================
+
+# Define the final executable output and map all required files.
+# Grouped logically to make finding files easier for contributors.
 add_executable(
     PoseStudio 
+    
+    # --- Core Application Bootstrap ---
     src/main.cpp 
-    src/database.cpp 
-    src/menumanager.cpp       
-    src/menumanager.h         
-    src/splashoverlay.h     
     src/constants.h  
+    
+    # --- UI & Layout ---
+    src/menumanager.cpp        
+    src/menumanager.h          
+    src/splashoverlay.h      
+    
+    # --- Tools & Widgets ---
     src/assetmanagerwidget.cpp
     src/assetmanagerwidget.h
+    
+    # --- Data Layer & Storage ---
+    src/database.cpp 
+    src/database.h
     src/preferencesmanager.cpp
     src/preferencesmanager.h
-    resources/resources.qrc 
-    resources/PoseStudio.rc
+    
+    # --- Embedded Resources ---
+    resources/resources.qrc   # Injects images, UI styles, and SQL templates
+    resources/PoseStudio.rc   # Injects the executable icon for Windows OS (.exe)
 )
 
-# Tells the compiler to look in the /src folder for any included header files
+# ==============================================================================
+# [ INCLUDES & LINKING ]
+# ==============================================================================
+
+# Tell the compiler where to look for #include <header.h> files
 target_include_directories(PoseStudio PRIVATE src)
 
-# Link the Qt libraries to your application
+# Link the compiled executable to the required Qt binaries
 target_link_libraries(PoseStudio PRIVATE Qt6::Widgets Qt6::Sql)

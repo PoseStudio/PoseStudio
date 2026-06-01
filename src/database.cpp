@@ -1,4 +1,12 @@
-#include "database.h" // Links this source file to header
+/**
+ * @file database.cpp
+ * @brief Implementation of global SQLite database connection and initialization routines.
+ * * This file handles the establishment of secure SQLite database connections. 
+ * It manages connection pooling via named connections to prevent memory leaks,
+ * and handles raw schema execution during factory resets or initial launches.
+ */
+
+#include "database.h"
 #include <QCoreApplication>
 #include <QSqlDatabase>
 #include <QSqlError>
@@ -8,37 +16,49 @@
 #include <QFile>
 #include <QStringList>
 
-
+/**
+ * @brief Retrieves an active connection to the SQLite database.
+ * * Implements a Singleton-style check to verify if a connection pool named 
+ * "db_conn" already exists. If it does, the existing connection is returned 
+ * to prevent duplicate locks on the physical database file.
+ * * @return QSqlDatabase The active database connection object.
+ */
 QSqlDatabase connectDatabase() {
-    // Define a unique connection name
     QString connectionName = "db_conn";
 
-    // Check if the connection already exists to prevent duplicates
     if (QSqlDatabase::contains(connectionName)) {
         return QSqlDatabase::database(connectionName);
     }
 
-    // Create a new database connection
     QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
     db.setDatabaseName("posestudio.db");
     
-    // Open the connection and check for errors
     if (!db.open()) {
-        qCritical() << "Database open error:" << db.lastError().text();
+        qCritical() << "Database Error [connectDatabase]: Failed to open connection." 
+                    << db.lastError().text();
     }
 
-    // Return the database object by value
     return db;
 }
 
+/**
+ * @brief Bootstraps the application database, optionally forcing a factory reset.
+ * * This function locates the `.db` file relative to the application executable.
+ * If mode 1 is passed, it executes a destructive reset: it forces connection 
+ * closures, deletes the physical SQLite file, creates a new one, and runs the 
+ * embedded `initialize.sql` script from the Qt Resource System to reconstruct 
+ * the schema.
+ * * @param mode Operation mode flag. 0 = Normal Connection, 1 = Destructive Factory Reset.
+ * @return QSqlDatabase The active, initialized database connection.
+ */
 QSqlDatabase initializeDatabase(int mode) {
-    // Dynamically locate the database file
+    // Resolve absolute path dynamically relative to the application binary
     QString exeFolder = QCoreApplication::applicationDirPath();
     QString dbPath = QDir(exeFolder).filePath("posestudio.db");
 
-    // If mode is 1, we NUKE the database
+    // --- DESTRUCTIVE RESET ---
     if (mode == 1) {
-        // Ensure no active connections are holding the file hostage
+        // Sever any active handles to prevent OS-level file locking
         if (QSqlDatabase::contains("db_conn")) {
             QSqlDatabase::removeDatabase("db_conn");
         }
@@ -48,12 +68,12 @@ QSqlDatabase initializeDatabase(int mode) {
             if (dbFile.remove()) {
                 qDebug() << "Success: Database nuked from orbit at:" << dbPath;
             } else {
-                qCritical() << "Error: Could not delete database. It might be locked by the OS.";
+                qCritical() << "Fatal Error: OS denied permission to delete database file.";
             }
         }
     }
 
-    // Create the connection
+    // --- ESTABLISH CONNECTION ---
     QSqlDatabase db;
     if (QSqlDatabase::contains("db_conn")) {
         db = QSqlDatabase::database("db_conn");
@@ -64,22 +84,24 @@ QSqlDatabase initializeDatabase(int mode) {
     db.setDatabaseName(dbPath);
 
     if (!db.open()) {
-        qCritical() << "Database Error: Could not connect to SQLite database.";
+        qCritical() << "Database Error [initializeDatabase]: Connection failed.";
         qCritical() << "Reason:" << db.lastError().text();
-        return db; // Return the broken connection so the app knows it failed
+        return db; 
     }
 
-    // If mode is 1, rebuild the tables from the embedded SQL script
+    // --- SCHEMA RECONSTRUCTION ---
+    // If a destructive reset was requested, parse and execute the SQL blueprint
     if (mode == 1) {
         QFile sqlFile(":/resources/database/initialize.sql");
         if (!sqlFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            qCritical() << "Failed to open SQL initialization script from resources!";
+            qCritical() << "Fatal Error: Missing initialize.sql blueprint in resources.";
             return db; 
         }
 
-        // Read the entire file and split it into individual SQL commands by semicolon
         QString sqlData = sqlFile.readAll();
         sqlFile.close();
+        
+        // Isolate individual SQL commands
         QStringList sqlStatements = sqlData.split(';', Qt::SkipEmptyParts);
 
         QSqlQuery query(db);
@@ -92,9 +114,8 @@ QSqlDatabase initializeDatabase(int mode) {
                 }
             }
         }
-        qDebug() << "Success: Database successfully rebuilt from initialize.sql";
+        qDebug() << "Success: Database architecture successfully reconstructed.";
     }
 
-    // Hand the open, ready-to-use connection back to the application
     return db;
 }

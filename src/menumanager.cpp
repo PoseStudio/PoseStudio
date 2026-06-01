@@ -1,3 +1,12 @@
+/**
+ * @file menumanager.cpp
+ * @brief Implementation of the MenuManager class.
+ *
+ * This file handles the procedural generation of the application's top menu bar.
+ * It maps user actions to UI icons, defines multi-state graphics (normal vs. disabled), 
+ * and establishes the foundational hooks for global application events.
+ */
+
 #include "menumanager.h"
 #include "splashoverlay.h"
 #include <QMenu>
@@ -6,21 +15,34 @@
 #include <QApplication>
 #include <QIcon>
 
-// Constructor (Notice there is no 'void' here)
+/**
+ * @brief Constructs the MenuManager.
+ * @param parent The main application window where the menu bar will be injected.
+ */
 MenuManager::MenuManager(QMainWindow *parent) : QObject(parent), mainWindow(parent) {}
 
-// Setup Function
+/**
+ * @brief Initializes and populates the global menu bar.
+ * * Builds the File, Edit, and Help menus. Most actions are currently initialized 
+ * in a disabled state (`setEnabled(false)`) acting as placeholders for future 
+ * feature implementations.
+ */
 void MenuManager::setupMenus() {
     if (!mainWindow) return;
 
-    // FILE MENU
+    // =========================================================================
+    // [ FILE MENU ]
+    // Handles document lifecycle, importing, exporting, and application exit.
+    // =========================================================================
     QMenu *fileMenu = mainWindow->menuBar()->addMenu("File");
 
+    // --- New ---
     QIcon newIcon;
     newIcon.addPixmap(QPixmap(":/resources/icons/new.png"), QIcon::Normal);
     newIcon.addPixmap(QPixmap(":/resources/icons/new-d.png"), QIcon::Disabled);
     fileMenu->addAction(QIcon(newIcon), "New...")->setEnabled(false);
 
+    // --- Open ---
     QIcon openIcon;
     openIcon.addPixmap(QPixmap(":/resources/icons/open.png"), QIcon::Normal);
     openIcon.addPixmap(QPixmap(":/resources/icons/open-d.png"), QIcon::Disabled);
@@ -29,6 +51,7 @@ void MenuManager::setupMenus() {
     fileMenu->addAction("Open Recent...")->setEnabled(false);
     fileMenu->addSeparator();
 
+    // --- Save ---
     QIcon saveIcon;
     saveIcon.addPixmap(QPixmap(":/resources/icons/save.png"), QIcon::Normal);
     saveIcon.addPixmap(QPixmap(":/resources/icons/save-d.png"), QIcon::Disabled);
@@ -38,6 +61,7 @@ void MenuManager::setupMenus() {
     fileMenu->addAction("Save Copy...")->setEnabled(false);
     fileMenu->addSeparator();
 
+    // --- Import / Export ---
     QIcon importIcon;
     importIcon.addPixmap(QPixmap(":/resources/icons/import.png"), QIcon::Normal);
     importIcon.addPixmap(QPixmap(":/resources/icons/import-d.png"), QIcon::Disabled);
@@ -50,13 +74,19 @@ void MenuManager::setupMenus() {
 
     fileMenu->addSeparator();
     
+    // --- Quit ---
     QAction *quitAction = fileMenu->addAction("Quit");
     quitAction->setShortcuts({QKeySequence("Ctrl+Q"), QKeySequence::Quit});
     QObject::connect(quitAction, &QAction::triggered, QApplication::instance(), &QApplication::quit);
 
-    // EDIT MENU
+
+    // =========================================================================
+    // [ EDIT MENU ]
+    // Handles history (Undo/Redo), clipboard actions, and global preferences.
+    // =========================================================================
     QMenu *editMenu = mainWindow->menuBar()->addMenu("Edit");
 
+    // --- History ---
     QIcon undoIcon;
     undoIcon.addPixmap(QPixmap(":/resources/icons/undo.png"), QIcon::Normal);
     undoIcon.addPixmap(QPixmap(":/resources/icons/undo-d.png"), QIcon::Disabled);
@@ -70,6 +100,7 @@ void MenuManager::setupMenus() {
     editMenu->addAction("Undo History...")->setEnabled(false);
     editMenu->addSeparator();
 
+    // --- Clipboard ---
     QIcon copyIcon;
     copyIcon.addPixmap(QPixmap(":/resources/icons/copy.png"), QIcon::Normal);
     copyIcon.addPixmap(QPixmap(":/resources/icons/copy-d.png"), QIcon::Disabled);
@@ -78,12 +109,17 @@ void MenuManager::setupMenus() {
     editMenu->addAction("Paste")->setEnabled(false);
     editMenu->addSeparator();
 
+    // --- Preferences ---
     QIcon preferencesIcon;
     preferencesIcon.addPixmap(QPixmap(":/resources/icons/preferences.png"), QIcon::Normal);
     preferencesIcon.addPixmap(QPixmap(":/resources/icons/preferences-d.png"), QIcon::Disabled);
     editMenu->addAction(QIcon(preferencesIcon), "Preferences")->setEnabled(false);
 
-    // HELP MENU
+
+    // =========================================================================
+    // [ HELP MENU ]
+    // Handles documentation, external links, and application metadata.
+    // =========================================================================
     QMenu *helpMenu = mainWindow->menuBar()->addMenu("Help");
 
     helpMenu->addAction("Release Notes")->setEnabled(false);
@@ -96,6 +132,8 @@ void MenuManager::setupMenus() {
     helpMenu->addAction("Support")->setEnabled(false);
     helpMenu->addSeparator();
 
+    // --- About Dialog ---
+    // Triggers the reusable SplashOverlay to display branding and version info
     QIcon aboutIcon;
     aboutIcon.addPixmap(QPixmap(":/resources/icons/about.png"), QIcon::Normal);
     aboutIcon.addPixmap(QPixmap(":/resources/icons/about-d.png"), QIcon::Disabled);
