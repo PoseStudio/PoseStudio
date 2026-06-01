@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Community funding configurations for GitHub Sponsors and Patreon.
 - Core open-source community files including `LICENSE`, `.gitignore`, and `CODE_OF_CONDUCT.md`.
 - Associated domain linkages for PoseStudio.org.
+- Updated Code of Conduct
 
 ## [Unreleased]
 ### Added
