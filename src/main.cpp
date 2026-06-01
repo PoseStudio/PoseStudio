@@ -1,8 +1,12 @@
 #include "database.h"
 #include "menumanager.h"
 #include "splashoverlay.h"
+#include "constants.h"
+#include "preferencesmanager.h"
+#include "assetmanagerwidget.h"
 #include <QApplication>
 #include <QDebug>
+#include <QFile>
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QRect>
@@ -10,46 +14,46 @@
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QSplitter>
+#include <QTabWidget>
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
 
-    int initDb = 0;
-    if (initDb == 1) {
-        initializeDatabase();
-        QSqlDatabase db = connectDatabase();
-        if (!db.open()) {
-            qCritical() << "Database Error: Could not connect to SQLite database.";
-            qCritical() << "Reason:" << db.lastError().text();
-            return false;
-        }
+    // Change this to 0 when you want to stop resetting the database!
+    int initDb = 0; 
 
-        QSqlQuery query(db);
-        if (!query.exec("SELECT appErrorText FROM appErrors")) {
-            QMessageBox::critical(nullptr, "Database Error 3", 
-                                    "Failed to query database:\n" + query.lastError().text());
-        }
-        if (query.next()) {
-            QString poseName = query.value("appErrorText").toString();
-            QMessageBox::information(nullptr, "Pose Found", 
-                                    "The name of the pose is: " + poseName);
-        }
+    // One function call handles nuking, creating, reading the file, and connecting
+    QSqlDatabase db = initializeDatabase(initDb);
+
+    if (!db.isOpen()) {
+        // If it failed to open, abort launching the app
+        return false; 
     }
 
-    app.setWindowIcon(QIcon("resources/icon.png"));
+    PreferencesManager::instance().loadFromDatabase();
+
+    // Get the Asset Folder value from the preferences table.
+    QString assetFolder = PreferencesManager::instance().getValue("AssetDir", "").toString();
+
+    app.setWindowIcon(QIcon(":/resources/icons/icon.png"));
     app.setStyle("Fusion");
-    app.setStyleSheet("QMainWindow { background-color: #191a1b; }"
-                      "QLabel { color: #ffffff; font-size: 18px; padding: 4px;}"
-                      "QMenu { background-color: #323232; color: white; border: 1px solid #555; border-radius: 4px; padding: 4px; }"
-                      "QMenu::item { padding: 6px 4px 6px 6px; }"
-                      "QMenu::item:selected { background-color: #555555; border-radius: 4px; }"
-                      "QMenu::item:disabled { color: #929292;}"
-                      "QMenuBar { background-color: #191a1b; color: white; padding: 4px; border-bottom: 1px solid #313131;}" 
-                      "QMenuBar::item { padding: 6px 12px;}"
-                      "QMenuBar::item:selected { background-color: #323232; border-radius: 4px; }");
+
+    // --- LOAD EXTERNAL STYLESHEET ---
+    QFile styleFile(":/resources/styles/style.qss");
+    if (styleFile.open(QFile::ReadOnly)) {
+        // Read the file and apply it to the whole app
+        QString styleSheet = QLatin1String(styleFile.readAll());
+        app.setStyleSheet(styleSheet);
+        styleFile.close();
+    } else {
+        qWarning() << "Could not load the stylesheet from resources!";
+    }
+    // --------------------------------
 
     QMainWindow mainWindow;
-    mainWindow.setWindowTitle("PoseStudio 0.0.015");
+    QString windowTitle = QString("%1 %2").arg(Constants::APP_NAME, Constants::APP_VERSION);
+    mainWindow.setWindowTitle(windowTitle);
 
     QScreen *screen = app.primaryScreen();
     QRect screenGeometry = screen->availableGeometry();
@@ -62,6 +66,45 @@ int main(int argc, char *argv[]) {
     MenuManager *menuManager = new MenuManager(&mainWindow);
     menuManager->setupMenus();
     // ------------------------------
+
+
+    // --- MAIN UI LAYOUT ---
+    
+    // 1. Create the Splitter
+    QSplitter *mainSplitter = new QSplitter(Qt::Horizontal, &mainWindow);
+
+    // 2. Create the Viewport FIRST (so it sits on the left side)
+    QWidget *viewportPlaceholder = new QWidget(mainSplitter);
+    viewportPlaceholder->setStyleSheet("background-color: #1e1f22;"); 
+
+    // 3. Create the Side Panel SECOND (so it sits on the right side)
+    QTabWidget *sidePanel = new QTabWidget(mainSplitter);
+    
+    // Change this to West so the tabs face the central viewport!
+    sidePanel->setTabPosition(QTabWidget::West); 
+    
+
+
+    AssetManagerWidget *assetsTab = new AssetManagerWidget();
+
+
+    QWidget *propertiesTab = new QWidget();
+    sidePanel->addTab(assetsTab, "Asset Manager");
+    sidePanel->addTab(propertiesTab, "Properties");
+
+    // 4. Add them to the splitter in the new left-to-right order
+    mainSplitter->addWidget(viewportPlaceholder);
+    mainSplitter->addWidget(sidePanel);
+
+    // 5. Flip the initial width ratios (e.g., 1500px for viewport, 350px for panel)
+    mainSplitter->setSizes({1500, 350});
+
+    // 6. Lock it into the window
+    mainWindow.setCentralWidget(mainSplitter);
+
+    // ----------------------
+
+
 
     mainWindow.show();
 

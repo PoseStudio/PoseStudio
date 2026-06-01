@@ -24,7 +24,12 @@ add_executable(
     src/database.cpp 
     src/menumanager.cpp       
     src/menumanager.h         
-    src/splashoverlay.h       
+    src/splashoverlay.h     
+    src/constants.h  
+    src/assetmanagerwidget.cpp
+    src/assetmanagerwidget.h
+    src/preferencesmanager.cpp
+    src/preferencesmanager.h
     resources/resources.qrc 
     resources/PoseStudio.rc
 )

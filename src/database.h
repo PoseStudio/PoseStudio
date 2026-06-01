@@ -5,7 +5,6 @@
 #include <QSqlDatabase>
 
 // Function declarations
-bool initializeDatabase();
-QSqlDatabase connectDatabase();
+QSqlDatabase initializeDatabase(int mode);
 
 #endif // DATABASE_H

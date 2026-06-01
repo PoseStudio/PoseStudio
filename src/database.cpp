@@ -1,8 +1,13 @@
 #include "database.h" // Links this source file to header
+#include <QCoreApplication>
 #include <QSqlDatabase>
 #include <QSqlError>
+#include <QDebug>
 #include <QSqlQuery>
+#include <QDir>
 #include <QFile>
+#include <QStringList>
+
 
 QSqlDatabase connectDatabase() {
     // Define a unique connection name
@@ -26,91 +31,70 @@ QSqlDatabase connectDatabase() {
     return db;
 }
 
-bool initializeDatabase() {
+QSqlDatabase initializeDatabase(int mode) {
+    // Dynamically locate the database file
+    QString exeFolder = QCoreApplication::applicationDirPath();
+    QString dbPath = QDir(exeFolder).filePath("posestudio.db");
 
-    // Define a unique connection name
-    QString connectionName = "db_conn";
+    // If mode is 1, we NUKE the database
+    if (mode == 1) {
+        // Ensure no active connections are holding the file hostage
+        if (QSqlDatabase::contains("db_conn")) {
+            QSqlDatabase::removeDatabase("db_conn");
+        }
 
-    // Close the db connection
-    {
-        if (QSqlDatabase::contains(connectionName)) {
-            QSqlDatabase db = QSqlDatabase::database(connectionName);
-            if (db.isOpen()) {
-                db.close();
-                qDebug() << "Database connection closed.";
+        QFile dbFile(dbPath);
+        if (dbFile.exists()) {
+            if (dbFile.remove()) {
+                qDebug() << "Success: Database nuked from orbit at:" << dbPath;
+            } else {
+                qCritical() << "Error: Could not delete database. It might be locked by the OS.";
             }
         }
     }
 
-    // Remove the connection from Qt's manager
-    QSqlDatabase::removeDatabase(connectionName);
-
-    QString databaseSql = "D:/PoseStudio/PoseStudio/initialize.sql";
-    QString databaseFile = "D:/PoseStudio/PoseStudio/build/Debug/posestudio.db";
-
-    // Delete the physical db file if it exists
-    QFile dbFile(databaseFile);
-    if (dbFile.exists()) {
-        if (dbFile.remove()) {
-            qDebug() << "Success: Database file deleted completely.";
-        } else {
-            qCritical() << "Error: Could not delete the database file. It may be locked by another program.";
-            return false;
-        }
+    // Create the connection
+    QSqlDatabase db;
+    if (QSqlDatabase::contains("db_conn")) {
+        db = QSqlDatabase::database("db_conn");
+    } else {
+        db = QSqlDatabase::addDatabase("QSQLITE", "db_conn");
     }
-
-    QSqlDatabase db = connectDatabase();
+    
+    db.setDatabaseName(dbPath);
 
     if (!db.open()) {
         qCritical() << "Database Error: Could not connect to SQLite database.";
         qCritical() << "Reason:" << db.lastError().text();
-        return false;
+        return db; // Return the broken connection so the app knows it failed
     }
 
-    // Open .sql db initialization file
-    QFile file(databaseSql);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qCritical() << "Database Error: Could not initialize SQLite database.";
-        qCritical() << "Failed to open SQL file:" << file.errorString();
-        return false;
-    }
-
-    // Read the initialization file
-    QTextStream in(&file);
-    QString sqlContent = in.readAll();
-    file.close();
-
-    // Split initialization string into individual queries by semicolon
-    QStringList queries = sqlContent.split(';', Qt::SkipEmptyParts);
-
-    // Start a transaction
-    db.transaction();
-
-    // Pass the active connection into the query
-    QSqlQuery query(db);
-
-    // Loop through and execute each command
-    for (QString singleQuery : queries) {
-        singleQuery = singleQuery.trimmed(); // Remove leading/trailing whitespace
-        
-        // Skip entirely empty lines
-        if (singleQuery.isEmpty()) {
-            continue; 
+    // If mode is 1, rebuild the tables from the embedded SQL script
+    if (mode == 1) {
+        QFile sqlFile(":/resources/database/initialize.sql");
+        if (!sqlFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            qCritical() << "Failed to open SQL initialization script from resources!";
+            return db; 
         }
 
-        if (!query.exec(singleQuery)) {
-            qCritical() << "Database Error: Failed to execute statement in script.";
-            qCritical() << "Reason:" << query.lastError().text();
-            qCritical() << "Failing Query:" << singleQuery;
-            
-            // If one fails, cancel the whole batch so you don't get corrupt data
-            db.rollback(); 
-            return false;
+        // Read the entire file and split it into individual SQL commands by semicolon
+        QString sqlData = sqlFile.readAll();
+        sqlFile.close();
+        QStringList sqlStatements = sqlData.split(';', Qt::SkipEmptyParts);
+
+        QSqlQuery query(db);
+        for (QString statement : sqlStatements) {
+            statement = statement.trimmed();
+            if (!statement.isEmpty()) {
+                if (!query.exec(statement)) {
+                    qWarning() << "SQL Execution failed for statement:" << statement;
+                    qWarning() << "Error:" << query.lastError().text();
+                }
+            }
         }
+        qDebug() << "Success: Database successfully rebuilt from initialize.sql";
     }
 
-    // If everything succeeded, commit the changes to the database!
-    db.commit();
-    return true;
-
+    // Hand the open, ready-to-use connection back to the application
+    return db;
 }
