@@ -43,5 +43,5 @@ INSERT INTO UserTypes(UserTypeName) VALUES('Business');
 CREATE TABLE Preferences(PreferenceID INTEGER PRIMARY KEY AUTOINCREMENT, PreferenceName TEXT UNIQUE NOT NULL, PreferenceValue TEXT NOT NULL DEFAULT '',PreferenceStamp DATETIME DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX idx_PreferenceName ON Preferences(PreferenceName);
 
-INSERT INTO Preferences(PreferenceName, PreferenceValue) VALUES('AssetDir', 'C:/Users/Public/Documents/My DAZ 3D Library/People/Genesis 8 Female/Characters');
+INSERT INTO Preferences(PreferenceName, PreferenceValue) VALUES('AssetDir', 'C:/Users/Public/Documents/My DAZ 3D Library');
 

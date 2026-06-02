@@ -66,16 +66,39 @@ QMenu::item:disabled {
    [ WORKSPACE LAYOUT & SIDE PANEL ]
 ============================================================================== */
 
-/* The draggable divider between the 3D viewport and the side panel */
+/* ==============================================================================
+   [ SPLITTER HANDLES ]
+============================================================================== */
 QSplitter::handle { 
     background-color: #121212; 
-    width: 2px; 
+}
+
+/* The vertical bar separating the 3D Viewport (Left) from the Panels (Right) */
+QSplitter::handle:horizontal { 
+    width: 6px; /* 6px is the UI sweet spot: easy to grab, but doesn't waste space */
+}
+
+/* The horizontal bar separating the Top Panel from the Bottom Panel */
+QSplitter::handle:vertical { 
+    height: 4px; 
+}
+
+/* UX Highlight: Subtly brighten the handle when the user hovers over it.
+   By removing ':horizontal', this now works on BOTH of your splitters! */
+QSplitter::handle:hover { 
+    background-color: #3a3b3c; 
+}
+
+/* Optional: If you want it to feel really premium, you can make it turn 
+   your selection blue when they actually click and drag! */
+QSplitter::handle:pressed {
+    background-color: #5b87cc; 
 }
 
 /* The background of the content area inside the tabs */
 QTabWidget::pane { 
     border: none; 
-    background-color: #252627; 
+    background-color: #303030; 
 }
 
 /* Vertical Tabs (Docked West)
@@ -95,7 +118,7 @@ QTabBar::tab {
 }
 
 QTabBar::tab:selected { 
-    background-color: #252627; 
+    background-color: #303030; 
     color: white; 
 }
 
@@ -218,4 +241,46 @@ QTabBar::tab:hover:!selected {
 #AssetManagerGrid QScrollBar::add-line:vertical,
 #AssetManagerGrid QScrollBar::sub-line:vertical {
     height: 0px; 
+}
+
+#AssetManagerTopPanel {
+    background-color: #303030;
+    border-radius: 4px;
+}
+
+#AssetManagerTree {
+    background-color: #252627;
+    color: #cccccc;
+    border: none;
+    border-radius: 4px;
+    padding: 4px;
+    outline: none; /* Removes the dotted focus ring */
+}
+
+/* The individual folder rows */
+#AssetManagerTree::item {
+    padding: 4px;
+}
+
+#AssetManagerTree {
+    background-color: #252627;
+    color: #cccccc;
+    border: none;
+    border-radius: 4px;
+    padding: 4px;
+    outline: none; /* Removes the dotted focus ring */
+}
+
+/* The individual folder rows */
+#AssetManagerTree::item {
+    padding: 4px;
+}
+
+#AssetManagerTree::item:hover {
+    background-color: #2a2c2e;
+}
+
+#AssetManagerTree::item:selected {
+    background-color: #314d7a;
+    color: #ffffff;
 }

@@ -1,9 +1,10 @@
 /**
  * @file assetmanagerwidget.h
  * @brief Defines the AssetManagerWidget class and supporting data structures.
- * * This file contains the declarations for the side-panel asset library UI, 
- * including the data structure used to pair 3D files with their respective 
- * image thumbnails during directory scans.
+ *
+ * This file contains the declarations for the side-panel asset library UI,
+ * a high-speed file parser, and a proxy model used to dynamically colorize
+ * and format the directory tree based on asset discovery.
  */
 
 #ifndef ASSETMANAGERWIDGET_H
@@ -11,74 +12,84 @@
 
 #include <QWidget>
 #include <QVBoxLayout>
-#include <QPushButton>
 #include <QLabel>
 #include <QString>
 #include <QStringList>
 #include <QList>
 #include <QListWidget>
-#include <QCheckBox>
+#include <QTreeView>
+#include <QFileSystemModel>
+#include <QIdentityProxyModel> 
+#include <QModelIndex>
+#include <QHash>
+#include <QSet>
 
 /**
  * @struct AssetHit
  * @brief Represents a successfully discovered 3D asset and its paired imagery.
  */
 struct AssetHit {
-    QString folderPath;          ///< Absolute path to the directory containing the asset.
-    QString assetFileName;       ///< The raw file name of the 3D asset (e.g., 'character.obj').
-    QStringList matchingImages;  ///< List of image files in the same directory sharing the base name.
+    QString folderPath;          
+    QString assetFileName;       
+    QStringList matchingImages;  
+};
+
+/**
+ * @class AssetFolderProxyModel
+ * @brief Intercepts FileSystem data to dynamically style folders based on contents.
+ * * This proxy sits between the QFileSystemModel and the QTreeView. It checks if a 
+ * directory contains an "Asset Hit" (paired 3D model and image). If it does not, 
+ * it overrides the text color to gray. It also intercepts the hasChildren() call 
+ * to hide expander arrows on empty directories.
+ */
+class AssetFolderProxyModel : public QIdentityProxyModel {
+    Q_OBJECT
+public:
+    explicit AssetFolderProxyModel(QFileSystemModel* source, QObject* parent = nullptr);
+    QVariant data(const QModelIndex &proxyIndex, int role = Qt::DisplayRole) const override;
+
+    // --- NEW: Intercepts the UI asking if it should draw an arrow ---
+    bool hasChildren(const QModelIndex &parent = QModelIndex()) const override;
+
+private:
+    QFileSystemModel* fsModel;
+    mutable QHash<QString, bool> hitCache; // Mutable so it can be updated inside const data()
+
+    /**
+     * @brief Blazing-fast early-exit algorithm to detect if a folder contains a matched pair.
+     */
+    bool hasAssetHit(const QString& folderPath) const;
 };
 
 /**
  * @class AssetManagerWidget
- * @brief A dedicated side-panel widget for browsing and managing 3D assets.
- * * This class handles the rendering of the asset grid, user interaction, and 
- * the background logic required to recursively scan user directories for 
- * valid 3D models and their associated thumbnail graphics.
+ * @brief The main side-panel widget managing the directory tree and asset grid.
  */
 class AssetManagerWidget : public QWidget {
     Q_OBJECT 
 
 public:
-    /**
-     * @brief Constructs the AssetManagerWidget.
-     * @param parent The parent widget (typically the main window splitter).
-     */
     explicit AssetManagerWidget(QWidget *parent = nullptr);
-    
-    /**
-     * @brief Default destructor.
-     */
     ~AssetManagerWidget() = default;
 
 private slots:
-    /**
-     * @brief Slot triggered when the user initiates a directory scan.
-     * Reads preferences for the target directory and populates the UI grid.
-     */
-    void onRefreshButtonClicked();
+    // --- Triggered whenever the user clicks a folder in the top panel ---
+    void onFolderSelected(const QModelIndex &index);
 
 private:
-    // --- UI Components ---
-    QVBoxLayout *mainLayout;           ///< The primary vertical layout container.
-    QLabel *titleLabel;                ///< Panel header text.
-    QCheckBox *subfolderCheckbox;      ///< Toggles recursive directory traversal.
-    QPushButton *refreshButton;        ///< Triggers the scanning engine.
-    QListWidget *assetListWidget;      ///< The main grid displaying asset thumbnails.
+    QVBoxLayout *mainLayout;           
+    QLabel *titleLabel;                
+    QListWidget *assetListWidget;      
+    
+    QFileSystemModel *dirModel;
+    AssetFolderProxyModel *proxyModel; // <-- NEW: The middleman layer
+    QTreeView *dirTreeView; // <-- ADD THIS LINE BACK IN!
 
-    // --- Internal Methods ---
-    /**
-     * @brief Initializes the layout, instantiates child widgets, and applies constraints.
-     */
     void setupUI();
     
-    /**
-     * @brief Core engine function to scan directories and pair files.
-     * @param rootDirectory The absolute path to begin the search.
-     * @param scanSubfolders If true, performs a deep recursive search of all child directories.
-     * @return QList<AssetHit> A populated list of paired assets and thumbnails.
-     */
-    QList<AssetHit> scanForPairedAssets(const QString& rootDirectory, bool scanSubfolders);
+    // --- UPDATED: Replaces the old recursive scanner with a lightweight parser ---
+    QList<AssetHit> parseFolderAssets(const QString& folderPath);
+
 };
 
 #endif // ASSETMANAGERWIDGET_H

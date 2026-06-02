@@ -1,9 +1,10 @@
 /**
  * @file assetmanagerwidget.cpp
  * @brief Implementation of the AssetManagerWidget class.
- * * This file contains the logic for the side-panel asset library. It handles
- * recursive directory scanning, file pairing (matching 3D assets with their 
- * respective image thumbnails), and the procedural generation of the UI grid.
+ *
+ * This file contains the logic for the side-panel asset library. It utilizes a 
+ * custom proxy model to intercept file system data, allowing for ultra-fast 
+ * folder coloring and expander-arrow toggling without freezing the UI thread.
  */
 
 #include "assetmanagerwidget.h"
@@ -15,97 +16,250 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QIcon>
-#include <QProgressDialog>
 #include <QPainter>
+#include <QSplitter>
+#include <QColor>
+#include <QSet>
+
+// =============================================================================
+// [ PROXY MODEL IMPLEMENTATION ]
+// =============================================================================
+
+AssetFolderProxyModel::AssetFolderProxyModel(QFileSystemModel* source, QObject* parent)
+    : QIdentityProxyModel(parent), fsModel(source) {
+    setSourceModel(fsModel);
+}
+
+/**
+ * @brief Intercepts UI requests to dynamically swap folder icons.
+ */
+QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) const {
+    
+    // Only intercept the Icon Request (DecorationRole) on the primary column (0)
+    if (role == Qt::DecorationRole && proxyIndex.column() == 0) {
+        QModelIndex sourceIndex = mapToSource(proxyIndex);
+        
+        // Only apply logic to folders, not files
+        if (fsModel->isDir(sourceIndex)) {
+            QString folderPath = fsModel->filePath(sourceIndex);
+
+            // 1. Check cache. Evaluate and store if new.
+            if (!hitCache.contains(folderPath)) {
+                bool hit = hasAssetHit(folderPath);
+                hitCache.insert(folderPath, hit);
+                
+                // --- DEBUG LOGGING ---
+                // This will print to your terminal so you can verify the backend 
+                // is actually finding your files successfully!
+                if (hit) {
+                    qDebug() << "[ASSET HIT] Found pair in:" << folderPath;
+                }
+            }
+
+            // 2. Safely extract the native OS folder icon directly from the File System provider
+            QIcon defaultIcon = fsModel->fileIcon(sourceIndex);
+
+            // 3. If the folder is empty (No Hit), force it to be grayscale!
+            if (!hitCache.value(folderPath)) {
+                
+                // Convert the icon to an image so we can manipulate the raw pixels
+                QImage img = defaultIcon.pixmap(16, 16).toImage();
+                
+                // Iterate through the 16x16 grid (super fast)
+                for (int y = 0; y < img.height(); ++y) {
+                    for (int x = 0; x < img.width(); ++x) {
+                        QColor c = img.pixelColor(x, y);
+                        
+                        // If the pixel isn't invisible (preserves the transparent background)
+                        if (c.alpha() > 0) {
+                            // Calculate the mathematical grayscale equivalent of the color
+                            int gray = qGray(c.rgb()); 
+                            
+                            // Re-apply the gray color, and cut the opacity in half for a faded look
+                            img.setPixelColor(x, y, QColor(gray, gray, gray, c.alpha() / 2));
+                        }
+                    }
+                }
+                
+                // Repackage the manipulated image back into an icon for the UI
+                return QIcon(QPixmap::fromImage(img));
+                
+            } else {
+                // Return the bright, full-color default icon for hits!
+                return defaultIcon;
+            }
+        }
+    }
+    
+    // For all other roles (text name, font size, etc.), pass it through normally
+    return QIdentityProxyModel::data(proxyIndex, role);
+}
+
+/**
+ * @brief Determines if a folder actually contains subdirectories.
+ * Overrides the default lazy-loading to hide expander arrows on empty directories.
+ */
+bool AssetFolderProxyModel::hasChildren(const QModelIndex &parent) const {
+    QModelIndex sourceParent = mapToSource(parent);
+
+    // If the base model explicitly knows there are no children, trust it.
+    if (!fsModel->hasChildren(sourceParent)) {
+        return false;
+    }
+
+    QString dirPath = fsModel->filePath(sourceParent);
+    
+    if (dirPath.isEmpty()) {
+        return true; 
+    }
+
+    // Fast Peek: Grab the very first directory it finds and exit.
+    QDirIterator it(dirPath, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::NoIteratorFlags);
+    return it.hasNext();
+}
+
+/**
+ * @brief An ultra-fast, single-pass algorithm to detect file pairs.
+ */
+bool AssetFolderProxyModel::hasAssetHit(const QString& folderPath) const {
+    QDir dir(folderPath);
+    // Ignore symlinks and prevent sorting to maximize read speed
+    QFileInfoList files = dir.entryInfoList(QDir::Files | QDir::NoSymLinks, QDir::NoSort);
+
+    QSet<QString> images;
+    QSet<QString> assets;
+    QStringList imageExts = {"png", "jpg", "jpeg", "bmp", "webp", "gif", "tif", "tiff"};
+
+    // Iterate through files once. The moment a pair is found, exit immediately!
+    for (const QFileInfo& file : files) {
+        QString baseName = file.baseName(); 
+        
+        if (imageExts.contains(file.suffix().toLower())) {
+            images.insert(baseName);
+            if (assets.contains(baseName)) return true; // Match found!
+        } else {
+            assets.insert(baseName);
+            if (images.contains(baseName)) return true; // Match found!
+        }
+    }
+    return false; // Loop finished, no pairs exist
+}
+
+// =============================================================================
+// [ WIDGET IMPLEMENTATION ]
+// =============================================================================
 
 AssetManagerWidget::AssetManagerWidget(QWidget *parent) : QWidget(parent) {
     setupUI();
 }
 
-/**
- * @brief Initializes the UI layout, widgets, and rigid styling constraints.
- */
 void AssetManagerWidget::setupUI() {
     mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0); 
 
-    titleLabel = new QLabel("Asset Library", this);
-    titleLabel->setObjectName("AssetManagerTitle"); 
-    
-    // Subfolder toggle (Defaults to false for faster initial scans)
-    subfolderCheckbox = new QCheckBox("Include Subfolders", this);
-    subfolderCheckbox->setObjectName("AssetManagerSubfolderCheck");
-    subfolderCheckbox->setChecked(false); 
-    
-    refreshButton = new QPushButton("Scan for Assets", this);
-    refreshButton->setObjectName("AssetManagerRefreshBtn");
-    connect(refreshButton, &QPushButton::clicked, this, &AssetManagerWidget::onRefreshButtonClicked);
+    QSplitter *splitter = new QSplitter(Qt::Vertical, this);
+    splitter->setHandleWidth(6); 
 
-    // Grid View Configuration
-    assetListWidget = new QListWidget(this);
+    // --- 1. TOP PANEL: THE DIRECTORY TREE ---
+    dirModel = new QFileSystemModel(this);
+    dirModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs); 
+    
+    QString startFolder = PreferencesManager::instance().getValue("AssetDir", "C:/").toString();
+    dirModel->setRootPath(startFolder);
+
+    // Instantiate and inject the Proxy Model
+    proxyModel = new AssetFolderProxyModel(dirModel, this);
+
+    dirTreeView = new QTreeView(splitter);
+    dirTreeView->setObjectName("AssetManagerTree");
+    
+    // Hook the TreeView to the Proxy, NOT the raw file system
+    dirTreeView->setModel(proxyModel);
+    
+    // Map the raw file system root index through the proxy
+    QModelIndex sourceRoot = dirModel->index(startFolder);
+    dirTreeView->setRootIndex(proxyModel->mapFromSource(sourceRoot));
+
+    for (int i = 1; i < proxyModel->columnCount(); ++i) {
+        dirTreeView->hideColumn(i);
+    }
+    dirTreeView->setHeaderHidden(true); 
+    dirTreeView->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+
+    // --- 2. BOTTOM PANEL (Asset Library) ---
+    QWidget *bottomPanel = new QWidget(splitter);
+    QVBoxLayout *bottomLayout = new QVBoxLayout(bottomPanel);
+    bottomLayout->setContentsMargins(0, 0, 0, 0); 
+
+    // The Title will dynamically update based on the folder clicked
+    titleLabel = new QLabel("Select a folder to view assets...", bottomPanel);
+    titleLabel->setObjectName("AssetManagerTitle"); 
+
+    assetListWidget = new QListWidget(bottomPanel);
     assetListWidget->setObjectName("AssetManagerGrid");
     assetListWidget->setViewMode(QListView::IconMode);
     
-    // Icon and Grid sizes are strictly locked. 
-    // The grid cage is intentionally larger than the icon to accommodate 
-    // procedural canvas padding and CSS margins without breaking the layout.
     assetListWidget->setIconSize(QSize(105, 105));
     assetListWidget->setGridSize(QSize(135, 150)); 
-    
-    // Text wrapping and truncation
     assetListWidget->setWordWrap(true);
     assetListWidget->setTextElideMode(Qt::ElideRight);
-    
-    // Disable drag-and-drop movement and enable dynamic wrapping
     assetListWidget->setResizeMode(QListView::Adjust); 
     assetListWidget->setMovement(QListView::Static);
 
-    // Assemble Layout
-    mainLayout->addWidget(titleLabel);
-    mainLayout->addWidget(subfolderCheckbox);
-    mainLayout->addWidget(refreshButton);
-    mainLayout->addWidget(assetListWidget); 
+    bottomLayout->addWidget(titleLabel);
+    bottomLayout->addWidget(assetListWidget); 
+
+    // =========================================================================
+    // [ ASSEMBLE & CONNECT ]
+    // =========================================================================
+    
+    splitter->addWidget(dirTreeView);
+    splitter->addWidget(bottomPanel);
+    splitter->setSizes({300, 700});
+
+    mainLayout->addWidget(splitter);
+
+    // Whenever a folder is clicked in the tree, fire the onFolderSelected function
+    connect(dirTreeView, &QTreeView::clicked, this, &AssetManagerWidget::onFolderSelected);
 }
 
 /**
- * @brief Triggered when the Refresh button is clicked. Initiates the scan
- * and populates the QListWidget with generated thumbnails.
+ * @brief Slot triggered dynamically when a user clicks a folder in the QTreeView.
  */
-void AssetManagerWidget::onRefreshButtonClicked() {
-    QString targetFolder = PreferencesManager::instance().getValue("AssetDir", "C:/").toString();
-    bool includeSubfolders = subfolderCheckbox->isChecked();
+void AssetManagerWidget::onFolderSelected(const QModelIndex &proxyIndex) {
+    // 1. Map the clicked Proxy index back to the underlying FileSystem index
+    QModelIndex sourceIndex = proxyModel->mapToSource(proxyIndex);
     
-    qDebug() << "\n=== ASSET SCAN INITIATED ===";
-    qDebug() << "Target Directory:" << targetFolder;
-    qDebug() << "Recursive Scan:" << includeSubfolders;
-    
-    QList<AssetHit> discoveredAssets = scanForPairedAssets(targetFolder, includeSubfolders);
+    // 2. Extract the absolute hard drive path
+    QString folderPath = dirModel->filePath(sourceIndex);
 
+    // 3. Update the UI Title to show the user exactly where they are
+    QString folderName = dirModel->fileName(sourceIndex);
+    titleLabel->setText(QString("Viewing: %1").arg(folderName));
+    
+    // 4. Parse the folder
+    QList<AssetHit> discoveredAssets = parseFolderAssets(folderPath);
+
+    // 5. Populate the Grid
     assetListWidget->clear(); 
 
     for (const AssetHit& hit : discoveredAssets) {
         QListWidgetItem *item = new QListWidgetItem(assetListWidget);
         
-        // Strip file extensions for a cleaner UI presentation
         QString cleanName = QFileInfo(hit.assetFileName).baseName();
         item->setText(cleanName);
 
-        // Process and apply thumbnail if a matching image was found
         if (!hit.matchingImages.isEmpty()) {
             QString imagePath = QDir(hit.folderPath).filePath(hit.matchingImages.first());
             QPixmap rawPixmap(imagePath);
             
-            // Apply high-quality downsampling
             QPixmap scaledImage = rawPixmap.scaled(
                 QSize(120, 120), 
                 Qt::KeepAspectRatio, 
                 Qt::SmoothTransformation
             );
             
-            // PROCEDURAL CANVAS GENERATION
-            // A taller 128px canvas is created to force the text layout down.
-            // A linear gradient is baked into the top 120px to act as a background,
-            // leaving the bottom 8px fully transparent to prevent CSS layout conflicts.
             QPixmap paddedCanvas(120, 128);
             paddedCanvas.fill(Qt::transparent); 
             
@@ -116,7 +270,6 @@ void AssetManagerWidget::onRefreshButtonClicked() {
 
             painter.fillRect(0, 0, 120, 120, gradient);
 
-            // Center the image horizontally on the procedural canvas
             int xOffset = (120 - scaledImage.width()) / 2; 
             painter.drawPixmap(xOffset, 0, scaledImage);
             painter.end(); 
@@ -124,112 +277,52 @@ void AssetManagerWidget::onRefreshButtonClicked() {
             item->setIcon(QIcon(paddedCanvas));
         }
 
-        // Retain original file path in tooltip for user reference
         item->setToolTip(QDir(hit.folderPath).filePath(hit.assetFileName));
     }
     
-    // Alphabetize the grid based on the extracted clean names
     assetListWidget->sortItems(Qt::AscendingOrder);
-    
-    qDebug() << "Scan complete. Populated" << discoveredAssets.size() << "assets.";
-    qDebug() << "==========================\n";
 }
 
 /**
- * @brief Scans directories to locate 3D assets and match them with companion images.
- * * @param rootDirectory The starting directory path.
- * @param scanSubfolders If true, recursively searches all child directories.
- * @return QList<AssetHit> A structured list of discovered assets and their thumbnails.
+ * @brief A highly optimized, single-directory parser to match 3D files with thumbnails.
  */
-QList<AssetHit> AssetManagerWidget::scanForPairedAssets(const QString& rootDirectory, bool scanSubfolders) {
+QList<AssetHit> AssetManagerWidget::parseFolderAssets(const QString& folderPath) {
     QList<AssetHit> finalHits;
     QStringList imageExtensions = {"png", "jpg", "jpeg", "bmp", "webp", "gif", "tif", "tiff"};
     
-    // Phase 1: Build the directory tree
-    QStringList foldersToScan;
-    foldersToScan << rootDirectory; 
-    
-    if (scanSubfolders) {
-        qDebug() << "Engine: Subfolder scan triggered. Building directory tree...";
-        QDirIterator dirIt(rootDirectory, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-        while (dirIt.hasNext()) {
-            foldersToScan << dirIt.next();
+    QDir dir(folderPath);
+    // Only grab files (ignore subdirectories) to keep it lightning fast
+    QFileInfoList allFilesInFolder = dir.entryInfoList(QDir::Files | QDir::NoSymLinks);
+
+    struct FileGroup {
+        QStringList nonImages;
+        QStringList images;
+    };
+    QHash<QString, FileGroup> groupedFiles;
+
+    for (const QFileInfo& fileInfo : allFilesInFolder) {
+        QString baseName = fileInfo.baseName(); 
+        QString finalExtension = fileInfo.suffix().toLower(); 
+
+        if (imageExtensions.contains(finalExtension)) {
+            groupedFiles[baseName].images.append(fileInfo.fileName());
+        } else {
+            groupedFiles[baseName].nonImages.append(fileInfo.fileName());
         }
-    } else {
-        qDebug() << "Engine: Subfolder scan bypassed. Only evaluating root directory.";
     }
 
-    int totalFolders = foldersToScan.size();
-    qDebug() << "Engine: Total directories to process:" << totalFolders;
-
-    // Initialize non-blocking UI progress dialog
-    QProgressDialog progressDialog("Initializing scanner...", "Cancel Scan", 0, totalFolders, this);
-    progressDialog.setWindowTitle("Scanning Assets");
-    progressDialog.setWindowModality(Qt::WindowModal); 
-    progressDialog.setMinimumDuration(100); 
-    progressDialog.setFixedWidth(450); 
-    progressDialog.setFixedHeight(150); 
-    progressDialog.setValue(0);
-
-    int currentStep = 0;
-
-    // Phase 2: Traverse and parse directories
-    for (const QString& currentFolder : foldersToScan) {
-        
-        // Handle user abort
-        if (progressDialog.wasCanceled()) {
-            qWarning() << "Scan aborted by user!";
-            break; 
-        }
-        
-        // Elide text to prevent horizontal dialog stretching during deep path scans
-        QFontMetrics metrics(progressDialog.font());
-        QString safeText = metrics.elidedText(currentFolder, Qt::ElideRight, 400);
-
-        progressDialog.setLabelText(QString("Scanning:\n%1").arg(safeText));
-        progressDialog.setValue(currentStep);
-        
-        // Pump the Qt event loop to keep the UI responsive
-        QCoreApplication::processEvents(); 
-
-        QDir dir(currentFolder);
-        QFileInfoList allFilesInFolder = dir.entryInfoList(QDir::Files | QDir::NoSymLinks);
-
-        // Group files by base name to identify pairs (e.g., 'model.obj' + 'model.png')
-        struct FileGroup {
-            QStringList nonImages;
-            QStringList images;
-        };
-        QHash<QString, FileGroup> groupedFiles;
-
-        for (const QFileInfo& fileInfo : allFilesInFolder) {
-            QString baseName = fileInfo.baseName(); 
-            QString finalExtension = fileInfo.suffix().toLower(); 
-
-            if (imageExtensions.contains(finalExtension)) {
-                groupedFiles[baseName].images.append(fileInfo.fileName());
-            } else {
-                groupedFiles[baseName].nonImages.append(fileInfo.fileName());
+    for (auto it = groupedFiles.begin(); it != groupedFiles.end(); ++it) {
+        const FileGroup& group = it.value();
+        if (!group.images.isEmpty() && !group.nonImages.isEmpty()) {
+            for (const QString& nonImageFile : group.nonImages) {
+                AssetHit hit;
+                hit.folderPath = folderPath;
+                hit.assetFileName = nonImageFile;
+                hit.matchingImages = group.images;
+                finalHits.append(hit);
             }
         }
-
-        // Assemble final hits for valid pairs
-        for (auto it = groupedFiles.begin(); it != groupedFiles.end(); ++it) {
-            const FileGroup& group = it.value();
-            if (!group.images.isEmpty() && !group.nonImages.isEmpty()) {
-                for (const QString& nonImageFile : group.nonImages) {
-                    AssetHit hit;
-                    hit.folderPath = currentFolder;
-                    hit.assetFileName = nonImageFile;
-                    hit.matchingImages = group.images;
-                    finalHits.append(hit);
-                }
-            }
-        }
-        
-        currentStep++; 
     }
     
-    progressDialog.setValue(totalFolders); 
     return finalHits;
 }
