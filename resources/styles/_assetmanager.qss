@@ -1,0 +1,139 @@
+/* =========================================================================
+   [ TOP PANEL & HEADER ]
+   ========================================================================= */
+
+#AssetManagerTopPanel {
+    background-color: #252627;
+    border-radius: 4px;
+}
+
+#AssetManagerTitle {
+    padding: 10px;
+    color: #cccccc; 
+    font-size: 14px; 
+    font-weight: bold; 
+}
+
+/* =========================================================================
+   [ DIRECTORY TREE ]
+   ========================================================================= */
+
+#AssetManagerTree {
+    padding: 4px;
+    background-color: #252627;
+    border: none;
+    border-radius: 4px;
+    outline: none; /* Removes the dotted focus ring */
+    color: #cccccc;
+}
+
+#AssetManagerTree::item {
+    padding: 4px;
+}
+
+#AssetManagerTree::item:hover {
+    background-color: #2a2c2e;
+}
+
+#AssetManagerTree::item:selected {
+    background-color: #314d7a;
+    color: #ffffff;
+}
+
+/* =========================================================================
+   [ ASSET GRID ]
+   ========================================================================= */
+
+#AssetManagerGrid {
+    padding: 5px;
+    background-color: #1a1b1c; 
+    border: 1px solid #2a2b2c;
+    border-radius: 4px;
+    outline: none;
+}
+
+#AssetManagerGrid::item {
+    padding: 4px;
+    background-color: transparent; 
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: #aaaaaa;
+}
+
+#AssetManagerGrid::item:hover {
+    background-color: #2a2c2e;
+    border: 1px solid #4a4b4c; 
+    color: #ffffff; 
+}
+
+#AssetManagerGrid::item:selected {
+    background-color: #314d7a; 
+    border: 1px solid #5b87cc;
+    color: #ffffff;
+}
+
+#AssetManagerGrid::item:text {
+    padding-bottom: 6px;
+    text-align: center;
+}
+
+/* =========================================================================
+   [ GRID SCROLLBAR ]
+   ========================================================================= */
+
+#AssetManagerGrid QScrollBar:vertical {
+    width: 14px;
+    margin: 0px;
+    background-color: #1a1b1c;
+    border: none;
+}
+
+#AssetManagerGrid QScrollBar::handle:vertical {
+    min-height: 20px;
+    margin: 2px; 
+    background-color: #3a3b3c;
+    border-radius: 7px;
+}
+
+#AssetManagerGrid QScrollBar::handle:vertical:hover {
+    background-color: #4a4b4c; 
+}
+
+#AssetManagerGrid QScrollBar::add-line:vertical,
+#AssetManagerGrid QScrollBar::sub-line:vertical {
+    height: 0px; 
+}
+
+/* =========================================================================
+   [ CONTROLS ]
+   ========================================================================= */
+
+#AssetManagerSubfolderCheck {
+    padding-bottom: 10px;
+    padding-left: 10px;
+    color: #cccccc;
+}
+
+#AssetManagerSubfolderCheck::indicator {
+    width: 13px;
+    height: 13px;
+    background-color: #2a2b2c;
+    border: 1px solid #555555;
+    border-radius: 2px;
+}
+
+#AssetManagerSubfolderCheck::indicator:checked {
+    background-color: #5b87cc; 
+    border: 1px solid #5b87cc;
+}
+
+#AssetManagerRefreshBtn {
+    padding: 6px; 
+    background-color: #3a3b3c; 
+    border-radius: 3px;
+    color: white; 
+}
+
+#AssetManagerRefreshBtn:hover {
+    background-color: #4a4b4c; 
+}

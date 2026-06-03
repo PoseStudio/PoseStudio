@@ -1,0 +1,44 @@
+/* =========================================================================
+   [ MENU BAR ]
+   ========================================================================= */
+
+QMenuBar { 
+    padding: 4px; 
+    border-bottom: 1px solid #313131;
+    background-color: #191a1b; 
+    color: white; 
+}
+
+QMenuBar::item { 
+    padding: 6px 12px;
+}
+
+QMenuBar::item:selected { 
+    border-radius: 4px; 
+    background-color: #323232; 
+}
+
+/* =========================================================================
+   [ DROPDOWN MENUS ]
+   ========================================================================= */
+
+QMenu { 
+    padding: 4px; 
+    border: 1px solid #555555; 
+    border-radius: 4px; 
+    background-color: #323232; 
+    color: white; 
+}
+
+QMenu::item { 
+    padding: 6px 4px 6px 6px; 
+}
+
+QMenu::item:selected { 
+    border-radius: 4px; 
+    background-color: #555555; 
+}
+
+QMenu::item:disabled { 
+    color: #929292;
+}

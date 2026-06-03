@@ -1,10 +1,8 @@
 /**
  * @file assetmanagerwidget.h
- * @brief Defines the AssetManagerWidget class and supporting data structures.
- *
- * This file contains the declarations for the side-panel asset library UI,
- * a high-speed file parser, and a proxy model used to dynamically colorize
- * and format the directory tree based on asset discovery.
+ * @brief Declarations for the AssetManagerWidget and its associated models and delegates.
+ * * This file defines the core UI components and data models required to parse, 
+ * display, and interact with the PoseStudio 3D asset library and its directory structure.
  */
 
 #ifndef ASSETMANAGERWIDGET_H
@@ -23,73 +21,133 @@
 #include <QModelIndex>
 #include <QHash>
 #include <QSet>
+#include <QIcon>
+#include <QStyledItemDelegate>
+#include <QPainter>
 
 /**
  * @struct AssetHit
- * @brief Represents a successfully discovered 3D asset and its paired imagery.
+ * @brief Represents a successfully discovered 3D asset and its paired thumbnail imagery.
  */
 struct AssetHit {
-    QString folderPath;          
-    QString assetFileName;       
-    QStringList matchingImages;  
+    QString folderPath;          ///< Absolute path to the directory containing the asset
+    QString assetFileName;       ///< Filename of the 3D asset (e.g., model.obj, .dsf)
+    QStringList matchingImages;  ///< List of filenames for matching thumbnails (e.g., render.png)
 };
 
 /**
  * @class AssetFolderProxyModel
  * @brief Intercepts FileSystem data to dynamically style folders based on contents.
- * * This proxy sits between the QFileSystemModel and the QTreeView. It checks if a 
- * directory contains an "Asset Hit" (paired 3D model and image). If it does not, 
- * it overrides the text color to gray. It also intercepts the hasChildren() call 
- * to hide expander arrows on empty directories.
+ * * Wraps a standard QFileSystemModel to calculate if directories contain valid 3D assets.
+ * It modifies the DisplayRole (to show asset counts) and DecorationRole (to show custom icons).
  */
 class AssetFolderProxyModel : public QIdentityProxyModel {
     Q_OBJECT
 public:
     explicit AssetFolderProxyModel(QFileSystemModel* source, QObject* parent = nullptr);
     QVariant data(const QModelIndex &proxyIndex, int role = Qt::DisplayRole) const override;
-
-    // --- NEW: Intercepts the UI asking if it should draw an arrow ---
     bool hasChildren(const QModelIndex &parent = QModelIndex()) const override;
 
 private:
     QFileSystemModel* fsModel;
-    mutable QHash<QString, bool> hitCache; // Mutable so it can be updated inside const data()
+    mutable QHash<QString, int> hitCache; ///< Caches asset counts to prevent redundant disk reads
+
+    int getAssetCount(const QString& folderPath) const;
+    QList<AssetHit> parseAssetsInternal(const QString& folderPath) const;
+    bool hasAssetHit(const QString& folderPath) const;
+    
+    QIcon folderIcon = QIcon(QStringLiteral(":/resources/icons/folder.png"));
+};
+
+/**
+ * @class AssetTreeDelegate
+ * @brief Custom item delegate to style the directory tree, highlighting asset counts in blue.
+ */
+class AssetTreeDelegate : public QStyledItemDelegate {
+public:
+    explicit AssetTreeDelegate(QObject *parent = nullptr) : QStyledItemDelegate(parent) {}
 
     /**
-     * @brief Blazing-fast early-exit algorithm to detect if a folder contains a matched pair.
+     * @brief Custom paint routine to handle drawing the folder name and the blue asset count.
+     * Highly optimized to ensure smooth 60fps scrolling in the QTreeView.
      */
-    bool hasAssetHit(const QString& folderPath) const;
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
+        painter->save();
+
+        // 1. Draw the background highlight across the entire row rect
+        if (option.state & QStyle::State_Selected) {
+            painter->fillRect(option.rect, option.palette.highlight());
+            painter->setPen(option.palette.highlightedText().color());
+        } else {
+            painter->setPen(option.palette.text().color());
+        }
+
+        // 2. Prepare the text
+        const QString text = index.data(Qt::DisplayRole).toString();
+        
+        // Single-pass check to locate the count parentheses (faster than text.contains)
+        const int openParen = text.lastIndexOf(QLatin1Char('('));
+
+        if (openParen == -1) {
+            // No count found, render standard text
+            painter->drawText(option.rect, Qt::AlignLeft | Qt::AlignVCenter, text);
+        } else {
+            // Split text into Name and Count segments
+            const QString name = text.left(openParen);
+            const QString count = text.mid(openParen);
+
+            // Draw Folder Name
+            painter->drawText(option.rect, Qt::AlignLeft | Qt::AlignVCenter, name);
+            
+            // Offset the count text using pre-existing fontMetrics to save CPU cycles
+            const int nameWidth = option.fontMetrics.horizontalAdvance(name);
+            QRect countRect = option.rect;
+            countRect.setX(option.rect.x() + nameWidth + 5);
+
+            // Keep the count blue if not selected, white/contrast if selected
+            if (!(option.state & QStyle::State_Selected)) {
+                // Use raw RGB integers instead of hex strings to bypass parsing overhead
+                painter->setPen(QColor(77, 166, 255)); // Equivalent to #4da6ff
+            }
+            
+            // Apply smaller, bold font to the count
+            QFont countFont = painter->font();
+            countFont.setPixelSize(10);
+            countFont.setWeight(QFont::Bold);
+            painter->setFont(countFont);
+            
+            painter->drawText(countRect, Qt::AlignLeft | Qt::AlignVCenter, count);
+        }
+
+        painter->restore();
+    }
 };
 
 /**
  * @class AssetManagerWidget
- * @brief The main side-panel widget managing the directory tree and asset grid.
+ * @brief The main side-panel widget managing the directory tree and the asset thumbnail grid.
  */
 class AssetManagerWidget : public QWidget {
     Q_OBJECT 
 
 public:
     explicit AssetManagerWidget(QWidget *parent = nullptr);
-    ~AssetManagerWidget() = default;
+    ~AssetManagerWidget() override = default;
 
 private slots:
-    // --- Triggered whenever the user clicks a folder in the top panel ---
     void onFolderSelected(const QModelIndex &index);
 
 private:
-    QVBoxLayout *mainLayout;           
-    QLabel *titleLabel;                
-    QListWidget *assetListWidget;      
+    QVBoxLayout *mainLayout;            
+    QLabel *titleLabel;                 
+    QListWidget *assetListWidget;       
     
     QFileSystemModel *dirModel;
-    AssetFolderProxyModel *proxyModel; // <-- NEW: The middleman layer
-    QTreeView *dirTreeView; // <-- ADD THIS LINE BACK IN!
+    AssetFolderProxyModel *proxyModel;
+    QTreeView *dirTreeView;
 
     void setupUI();
-    
-    // --- UPDATED: Replaces the old recursive scanner with a lightweight parser ---
     QList<AssetHit> parseFolderAssets(const QString& folderPath);
-
 };
 
 #endif // ASSETMANAGERWIDGET_H

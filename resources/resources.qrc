@@ -2,7 +2,9 @@
 <RCC>
     <qresource prefix="/resources">
         
-        <file>styles/style.qss</file>
+        <file>styles/global.qss</file>
+        <file>styles/_assetmanager.qss</file>
+        <file>styles/_menumanager.qss</file>
         
         <file>database/initialize.sql</file>
 
@@ -15,6 +17,7 @@
         <file>icons/open-d.png</file>
         <file>icons/save.png</file>
         <file>icons/save-d.png</file>
+
         <file>icons/import.png</file>
         <file>icons/import-d.png</file>
         <file>icons/export.png</file>
@@ -29,11 +32,12 @@
 
         <file>icons/preferences.png</file>
         <file>icons/preferences-d.png</file>
-
         <file>icons/about.png</file>
         <file>icons/about-d.png</file>
         <file>icons/tutorials.png</file>
         <file>icons/tutorials-d.png</file>
+
+        <file>icons/folder.png</file>
 
     </qresource>
 </RCC>
