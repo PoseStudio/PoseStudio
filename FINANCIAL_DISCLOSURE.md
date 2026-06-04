@@ -14,16 +14,18 @@ Our development, infrastructure, and operations are supported by our community.
 #### Summary
 | Date | Item | Amount |
 | :--- | :--- | :--- |
-| 2026 YTD | Income (Inflow) | $504.04 |
+| 2026 YTD | Income (Inflow) | $514.04 |
 | 2026 YTD | Expenses (Outflow) | $365.49 |
-| | **Balance** | **$138.55** |
+| | **Balance** | **$148.55** |
 
 #### ⬇️ Income (Inflow)
 | Date | Donor | Item | Amount | Transaction Fee | Total |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| 06/04/2026 | Everwild | Patreon tier 1 contribution | $5.00 | $0.46 | $4.54 |
+| 06/04/2026 | bu_es | Patreon tier 1 contribution | $5.00 | $0.47 | $4.53 |
 | 05/28/2026 | TaterTot | Patreon tier 1 contribution | $5.00 | $0.96 | $4.04 |
 | 05/13/2026 | Ion Hatzithomas | Other one-time contribution | $500.00 | - | $500.00 |
-| | | | | **Total Income** | **$504.04** |
+| | | | | **Total Income** | **$514.04** |
 
 *Transaction Fees are charged by the payment platforms.
 
