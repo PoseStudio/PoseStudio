@@ -40,12 +40,17 @@
     color: #ffffff;
 }
 
+QTreeView#AssetManagerTree {
+    /* Inject our custom color into the C++ delegate! */
+    qproperty-separatorColor: #343536; 
+}
+
 /* =========================================================================
    [ ASSET GRID ]
    ========================================================================= */
 
 #AssetManagerGrid {
-    padding: 5px;
+    padding: 8px;
     background-color: #1a1b1c; 
     border: 1px solid #2a2b2c;
     border-radius: 4px;
@@ -73,35 +78,39 @@
 }
 
 #AssetManagerGrid::item:text {
-    padding-bottom: 6px;
+    padding-bottom: 4px;
     text-align: center;
 }
 
 /* =========================================================================
    [ GRID SCROLLBAR ]
    ========================================================================= */
-
-#AssetManagerGrid QScrollBar:vertical {
+QScrollBar:vertical {
     width: 14px;
     margin: 0px;
     background-color: #1a1b1c;
     border: none;
 }
 
-#AssetManagerGrid QScrollBar::handle:vertical {
+QScrollBar::handle:vertical {
     min-height: 20px;
     margin: 2px; 
     background-color: #3a3b3c;
-    border-radius: 7px;
+    border-radius: 5px; 
 }
 
-#AssetManagerGrid QScrollBar::handle:vertical:hover {
+QScrollBar::handle:vertical:hover {
     background-color: #4a4b4c; 
 }
 
-#AssetManagerGrid QScrollBar::add-line:vertical,
-#AssetManagerGrid QScrollBar::sub-line:vertical {
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
     height: 0px; 
+}
+
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical {
+    background: none;
 }
 
 /* =========================================================================
@@ -136,4 +145,33 @@
 
 #AssetManagerRefreshBtn:hover {
     background-color: #4a4b4c; 
+}
+
+/* ========================================================================= */
+/* ASSET MANAGER CONTEXT MENU                                                */
+/* ========================================================================= */
+
+QMenu#AssetManagerContextMenu { 
+    border: 1px solid #4a4b4c; 
+    background-color: #1a1b1c; /* Matches your dark theme */
+    icon-size: 12px;
+}
+
+QMenu#AssetManagerContextMenu::item { 
+    padding: 5px 25px 5px 10px; 
+    color: #e0e0e0; 
+}
+
+QMenu#AssetManagerContextMenu::item:selected { 
+    background-color: #2a2d30; /* Highlight color on hover */
+}
+
+QMenu#AssetManagerContextMenu::icon { 
+    padding-left: 12px; 
+}
+
+QMenu#AssetManagerContextMenu::separator {
+    height: 1px;
+    background: #4a4b4c;
+    margin: 5px 10px 5px 10px;
 }

@@ -48,3 +48,21 @@ CREATE TABLE AssetLibraries(AssetLibraryID INTEGER PRIMARY KEY AUTOINCREMENT, As
 INSERT INTO AssetLibraries(AssetLibraryPath) VALUES('C:/Users/Public/Documents/My DAZ 3D Library');
 INSERT INTO AssetLibraries(AssetLibraryPath) VALUES('D:/Dropbox (Personal)/My 3D Library');
 
+CREATE TABLE AssetFavorites(AssetFavoriteID INTEGER PRIMARY KEY AUTOINCREMENT, AssetFavoritePath TEXT NOT NULL UNIQUE, AssetFavoriteName TEXT NOT NULL);
+CREATE INDEX idx_AssetFavoritePath ON AssetFavorites(AssetFavoritePath);
+
+CREATE TABLE AssetCollections(AssetCollectionID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionName TEXT NOT NULL);
+INSERT INTO AssetCollections(AssetCollectionName) VALUES('Cool Characters');
+INSERT INTO AssetCollections(AssetCollectionName) VALUES('Sexy Women');
+INSERT INTO AssetCollections(AssetCollectionName) VALUES('Super Heroes');
+
+CREATE TABLE AssetCollectionItems(AssetCollectionItemID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionItemPath TEXT NOT NULL, AssetCollectionItemCol INTEGER NOT NULL DEFAULT 0, UNIQUE(AssetCollectionItemPath, AssetCollectionItemCol) ON CONFLICT IGNORE);
+CREATE INDEX idx_AssetCollectionItemPath ON AssetCollectionItems(AssetCollectionItemPath);
+CREATE INDEX idx_AssetCollectionItemCol ON AssetCollectionItems(AssetCollectionItemCol);
+INSERT INTO AssetCollectionItems(AssetCollectionItemPath, AssetCollectionItemCol) VALUES('C:/Users/Public/Documents/My DAZ 3D Library/People/Genesis 8 Female/Characters/Aisling.duf', 1);
+INSERT INTO AssetCollectionItems(AssetCollectionItemPath, AssetCollectionItemCol) VALUES('C:/Users/Public/Documents/My DAZ 3D Library/People/Genesis 8 Female/Characters/BJ Sahel.duf', 1);
+INSERT INTO AssetCollectionItems(AssetCollectionItemPath, AssetCollectionItemCol) VALUES('D:/Dropbox (Personal)/My 3D Library/People/Genesis 8 Female/Characters/Mechaela.duf', 1);
+INSERT INTO AssetCollectionItems(AssetCollectionItemPath, AssetCollectionItemCol) VALUES('D:/Dropbox (Personal)/My 3D Library/People/Genesis 8 Female/Characters/Ariana.duf', 2);
+INSERT INTO AssetCollectionItems(AssetCollectionItemPath, AssetCollectionItemCol) VALUES('D:/Dropbox (Personal)/My 3D Library/People/Genesis 8 Female/Characters/Sinn Sage.dsa', 2);
+
+

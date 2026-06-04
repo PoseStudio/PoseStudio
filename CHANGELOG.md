@@ -5,31 +5,48 @@ All notable changes to the PoseStudio project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.8] - 2026-06-04
+### Added
+- **Virtual Collections System:** Implemented a database-backed "Collections" architecture, allowing users to group and organize 3D assets entirely independently of their physical hard-drive locations.
+- **Dynamic QSS Properties:** Subclassed standard Qt UI components (e.g., `AssetTreeView`) to expose custom C++ `Q_PROPERTY` variables, successfully bridging pure CSS stylesheets with highly customized C++ `QPainter` drawing logic.
+- **Context-Aware Right-Click Menus:** Built highly specific context menus that dynamically adapt based on the clicked node type (e.g., Root Nodes, Virtual Collections, Physical Folders). 
+- **Hierarchy Protection:** Implemented intelligent tree-traversal logic to detect if a folder is a nested child of an existing Favorite, preventing redundant database entries.
+- **Global UI Terminology Framework:** Abstracted core UI nomenclature (like "Favorites" and "Collections") into global constants (`constants.h`), establishing a robust foundation for future internationalization (i18n) and user-customization.
+- **Contextual Iconography:** Integrated a full suite of custom icons (Expand, Collapse, Rename, Browse, Refresh) into the new context menus to improve navigation speed and visual hierarchy.
+
+### Changed
+- **Proxy Model Abstraction:** Upgraded the `AssetFolderProxyModel` to seamlessly route, cache, and serve both physical disk directory scans and SQLite database queries without the frontend grid renderer knowing the difference.
+- **Inline Editor Geometry:** Overrode `updateEditorGeometry` in the item delegate to perfectly align Qt's native `QLineEdit` text box with custom-painted C++ text margins during renaming.
+- **Root Node Protections:** Stripped native OS edit privileges (F2/slow double-click) from structural tree headers ("Favorites", "Collections") to prevent accidental renaming.
+- **Open-Source Code Sweep:** Performed a massive cleanup of `assetmanagerwidget.cpp` and `main.cpp`, grouping internal logic and applying professional Doxygen-style blocks to assist new open-source contributors.
+
+### Fixed
+- **Fatal Startup Crash:** Resolved a silent Windows access violation (segfault) where the database was attempting to populate the UI grid before the widget pointers had been fully instantiated in memory.
+- **Menu Separator Layout:** Fixed native Qt Fusion style quirks by explicitly targeting and padding `QMenu::icon` and `QMenu::separator` in the global `.qss` file.
+
 ## [0.0.7] - 2026-06-01
 ### Added
-* **Asset Manager Grid UI:** Implemented a responsive `QListWidget` (Icon Mode) to visually display 3D assets and paired thumbnails.
-* **Smart Recursive Scanning:** Added a UI toggle allowing users to choose between scanning only the root directory or recursively scanning all subfolders.
-* **Non-Blocking Progress Dialog:** Integrated `QProgressDialog` into the scanning engine to prevent UI lockups during massive directory traversals. Includes a safe "Cancel" feature and dynamic text truncation for deep folder paths.
-* **Procedural Thumbnail Rendering:** Engineered a custom `QPainter` canvas to mathematically bake a dark-theme gradient and layout padding directly into the image buffer, bypassing native CSS layout limitations.
-* **High-Quality Image Scaling:** Thumbnails are now dynamically loaded into RAM and scaled using bilinear filtering (`Qt::SmoothTransformation`) to preserve aspect ratios without pixelation.
-* **Alphabetical Sorting:** The Asset Library now automatically sorts discovered assets from A to Z prior to rendering.
+- **Asset Manager Grid UI:** Implemented a responsive `QListWidget` (Icon Mode) to visually display 3D assets and paired thumbnails.
+- **Smart Recursive Scanning:** Added a UI toggle allowing users to choose between scanning only the root directory or recursively scanning all subfolders.
+- **Non-Blocking Progress Dialog:** Integrated `QProgressDialog` into the scanning engine to prevent UI lockups during massive directory traversals. Includes a safe "Cancel" feature and dynamic text truncation for deep folder paths.
+- **Procedural Thumbnail Rendering:** Engineered a custom `QPainter` canvas to mathematically bake a dark-theme gradient and layout padding directly into the image buffer, bypassing native CSS layout limitations.
+- **High-Quality Image Scaling:** Thumbnails are now dynamically loaded into RAM and scaled using bilinear filtering (`Qt::SmoothTransformation`) to preserve aspect ratios without pixelation.
+- **Alphabetical Sorting:** The Asset Library now automatically sorts discovered assets from A to Z prior to rendering.
 
-#### Changed
+### Changed
 - **Main Boot Sequence:** Overhauled `main.cpp` to establish a clear, modular bootstrap sequence (Database -> Preferences -> Theming -> Layout). 
 - **Safe Database Defaults:** Changed the `initDb` factory reset flag default to `0` to prevent accidental database wiping on standard launches.
 - **CMake OS Agnosticism:** Removed hardcoded local Qt paths from `CMakeLists.txt` and added command-line instructions, ensuring the project builds cleanly across different contributor operating systems.
 - **Grid Styling:** Replaced default Windows/macOS scrollbars with a custom dark-theme CSS implementation and added premium hover/selection states to the asset grid.
 
-#### Fixed
+### Fixed
 - **Text Padding Jitter:** Solved a known Qt layout bug where CSS `padding-top` shifted the entire thumbnail bounding box rather than the internal text.
 - **Sorting Performance:** Relocated the `sortItems()` call outside the main scanning loop to prevent redundant UI recalculations and massively improve load times.
 - **Application Exit Codes:** Corrected a bug in `main.cpp` where a failed database connection returned `false` (0/Success) instead of `-1` (Failure) to the operating system.
 
-#### Documentation
+### Documentation
 - **Open-Source Code Sweep:** Applied professional, Doxygen-style header comments to all core C++ files to explain architectural intent to future contributors.
 - **File Architecture:** Documented the exact purpose and grouping of the Qt Resource (`.qrc`), Stylesheet (`.qss`), and SQL initialization files.
-
-
 
 ## [0.0.6] - 2026-05-31
 ### Added
