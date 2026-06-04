@@ -15,9 +15,9 @@ Our development, infrastructure, and operations are supported by our community.
 
 | Date | Item | Amount |
 | --- | --- | --- |
-| 2026 YTD | Income (Inflow) | $512.12 |
+| 2026 YTD | Income (Inflow) | $512.11 |
 | 2026 YTD | Expenses (Outflow) | $365.49 |
-|  | **Balance** | **$146.63** |
+|  | **Balance** | **$146.62** |
 
 #### ⬇️ Income (Inflow)
 
@@ -27,7 +27,7 @@ Our development, infrastructure, and operations are supported by our community.
 | 06/04/2026 | bu_es | Patreon tier 1 contribution | $5.00 | $0.97 | $4.03 |
 | 05/28/2026 | TaterTot | Patreon tier 1 contribution | $5.00 | $0.96 | $4.04 |
 | 05/13/2026 | Ion Hatzithomas | Other one-time contribution | $500.00 | - | $500.00 |
-|  |  |  |  | **Total Income** | **$512.12** |
+|  |  |  |  | **Total Income** | **$512.11** |
 
 *Transaction Fees are charged by the payment platforms.
 
