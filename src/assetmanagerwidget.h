@@ -29,8 +29,10 @@
 class QVBoxLayout;
 class QLabel;
 class QListWidget;
+class QListWidgetItem;
 class QStandardItemModel;
 class QStandardItem;
+class CustomToolTip;
 
 /**
  * @struct AssetHit
@@ -40,6 +42,7 @@ struct AssetHit {
     QString folderPath;          ///< Absolute path to the directory containing the asset
     QString assetFileName;       ///< Filename of the 3D asset (e.g., model.obj, .dsf)
     QStringList matchingImages;  ///< List of filenames for matching thumbnails (e.g., render.png)
+    QString displayName;         ///< Custom UI text for handling virtual folder collisions
 };
 
 /**
@@ -238,15 +241,21 @@ public:
 
 private slots:
     void onFolderSelected(const QModelIndex &index);
-    void onTreeExpanded(const QModelIndex &index); ///< Handles lazy-loading of physical directories
+    void onTreeExpanded(const QModelIndex &index); 
 
     void onContextMenuRequested(const QPoint &pos);
-    void onItemChanged(QStandardItem *item); ///< Hooks into SQLite for inline renaming
+    void onGridContextMenuRequested(const QPoint &pos); 
+    void onGridItemDoubleClicked(QListWidgetItem *item); ///< ADDED: Handles double-clicking an asset
+
+    void onItemChanged(QStandardItem *item);
 
 private:
     QVBoxLayout *mainLayout;            
     QLabel *titleLabel;                 
     QListWidget *assetListWidget;       
+
+    CustomToolTip *customToolTip;       ///< Our floating interactive tooltip
+    QListWidgetItem *activeToolTipItem;   ///< Tracks the active item
     
     QStandardItemModel *dirModel;       
     AssetFolderProxyModel *proxyModel;
@@ -255,10 +264,17 @@ private:
     
     QStandardItem *favoritesRootItem;
     QStandardItem *collectionsRootItem; 
+    QStandardItem *combinedRootItem;    
 
     void setupUI();
     QList<AssetHit> parseFolderAssets(const QString& folderPath);
     QList<AssetHit> parseCollectionAssets(int collectionId);
+    QList<AssetHit> parseCombinedAssets(const QString& relativePath);
+    
+    void addAssetToCollection(const QString& filePath, int collectionId);
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override; ///< Intercepts mouse events
 };
 
 #endif // ASSETMANAGERWIDGET_H

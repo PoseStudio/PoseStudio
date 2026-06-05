@@ -49,6 +49,7 @@
         <file>icons/rename.png</file>
         <file>icons/unfavorite.png</file>
         <file>icons/collections.png</file>
+        <file>icons/open-item.png</file>
 
     </qresource>
 </RCC>

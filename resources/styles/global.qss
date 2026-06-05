@@ -87,3 +87,15 @@ QTabBar::tab:hover:!selected {
     /* Subtle highlight for inactive tabs when moused over */
     background-color: #2a2a2a; 
 }
+
+/* ========================================================================= */
+/* [ TOOLTIPS ]                                                              */
+/* ========================================================================= */
+QToolTip {
+    background-color: #1e1f22; /* Matches your viewport background */
+    color: #e0e0e0;
+    border: 1px solid #3a3b3c;
+    border-radius: 4px;
+    padding: 2px 4px;
+    font-size: 13px;
+}

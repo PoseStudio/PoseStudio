@@ -15,17 +15,22 @@
 #include <QAction>
 #include <QApplication>
 #include <QColor>
+#include <QDateTime>
 #include <QDebug>
 #include <QDesktopServices>
 #include <QDir>
 #include <QDirIterator>
+#include <QEnterEvent>
 #include <QFileInfo>
 #include <QHash>
+#include <QHelpEvent>
 #include <QIcon>
 #include <QLabel>
 #include <QListWidget>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QPainter>
+#include <QProxyStyle>
 #include <QSet>
 #include <QSplitter>
 #include <QSqlDatabase>
@@ -34,9 +39,103 @@
 #include <QStandardItem>
 #include <QStandardItemModel>
 #include <QStyle>
+#include <QTimer>
 #include <QTreeView>
 #include <QUrl>
 #include <QVBoxLayout>
+
+// =============================================================================
+// [ CUSTOM STYLE OVERRIDES ]
+// =============================================================================
+
+/**
+ * @class TooltipProxyStyle
+ * @brief Intercepts OS-level styling requests to force custom tooltip hover delays.
+ */
+class TooltipProxyStyle : public QProxyStyle {
+public:
+    using QProxyStyle::QProxyStyle;
+
+    int styleHint(StyleHint hint, const QStyleOption *option = nullptr, 
+                  const QWidget *widget = nullptr, QStyleHintReturn *returnData = nullptr) const override {
+                  
+        // Intercept the wake-up delay request
+        if (hint == QStyle::SH_ToolTip_WakeUpDelay) {
+            return Constants::TOOLTIP_WAKE_DELAY_MS;
+        }
+        
+        // Force the system to instantly fall asleep so the delay resets
+        if (hint == QStyle::SH_ToolTip_FallAsleepDelay) {
+            return Constants::TOOLTIP_SLEEP_DELAY_MS;
+        }
+        
+        // Pass everything else normally to the OS
+        return QProxyStyle::styleHint(hint, option, widget, returnData);
+    }
+};
+
+/**
+ * @class CustomToolTip
+ * @brief An interactive, floating label that replaces standard Qt tooltips.
+ */
+class CustomToolTip : public QWidget { // THE FIX: Inherit from QWidget instead of QLabel
+    Q_OBJECT
+public:
+    explicit CustomToolTip(QWidget* parent = nullptr) : QWidget(parent, Qt::ToolTip) {
+        setWindowFlags(Qt::ToolTip | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+        setAttribute(Qt::WA_ShowWithoutActivating);
+        
+        // The outer widget becomes the invisible "glass" container
+        setAttribute(Qt::WA_TranslucentBackground); 
+        setMouseTracking(true); 
+
+        // Create a layout with zero margins so the label fills the entire glass window
+        QVBoxLayout* layout = new QVBoxLayout(this);
+        layout->setContentsMargins(0, 0, 0, 0);
+
+        // The inner label safely renders the CSS without top-level window bugs!
+        textLabel = new QLabel(this);
+        textLabel->setStyleSheet(
+            "QLabel {"
+            "  background-color: #1e1f22;"
+            "  color: #e0e0e0;"
+            "  border: 1px solid #3a3b3c;"
+            "  border-radius: 4px;"
+            "  padding: 6px 10px;"
+            "  font-size: 13px;"
+            "}"
+        );
+        
+        layout->addWidget(textLabel);
+
+        hideTimer = new QTimer(this);
+        hideTimer->setSingleShot(true);
+        connect(hideTimer, &QTimer::timeout, this, &CustomToolTip::hide);
+    }
+
+    // Bridge function so the rest of your code can still set the text easily
+    void setText(const QString& text) {
+        textLabel->setText(text);
+    }
+
+    void startHideTimer(int ms) { hideTimer->start(ms); }
+    void stopHideTimer() { hideTimer->stop(); }
+
+protected:
+    void enterEvent(QEnterEvent* event) override {
+        stopHideTimer();
+        QWidget::enterEvent(event);
+    }
+    
+    void leaveEvent(QEvent* event) override {
+        startHideTimer(Constants::TOOLTIP_HIDE_DELAY_MS);
+        QWidget::leaveEvent(event);
+    }
+
+private:
+    QTimer* hideTimer;
+    QLabel* textLabel;
+};
 
 // =============================================================================
 // [ PROXY MODEL IMPLEMENTATION ]
@@ -62,22 +161,41 @@ QList<AssetHit> AssetFolderProxyModel::parseAssetsInternal(const QString& folder
     QDir dir(folderPath);
     
     QFileInfoList allFilesInFolder = dir.entryInfoList(QDir::Files | QDir::NoSymLinks);
-    QHash<QString, QPair<QStringList, QStringList>> groupedFiles;
+    
+    struct FileGroup {
+        QStringList nonImages;
+        QString bestImage;
+        qint64 maxBytes = -1;
+        QStringList otherImages;
+    };
+    QHash<QString, FileGroup> groupedFiles;
 
     for (const QFileInfo& fileInfo : allFilesInFolder) {
-        if (imageExtensions.contains(fileInfo.suffix().toLower()))
-            groupedFiles[fileInfo.baseName()].second.append(fileInfo.fileName());
-        else
-            groupedFiles[fileInfo.baseName()].first.append(fileInfo.fileName());
+        QString baseName = fileInfo.baseName(); 
+        if (imageExtensions.contains(fileInfo.suffix().toLower())) {
+            qint64 fileSize = fileInfo.size();
+            if (fileSize > groupedFiles[baseName].maxBytes) {
+                if (!groupedFiles[baseName].bestImage.isEmpty()) {
+                    groupedFiles[baseName].otherImages.append(groupedFiles[baseName].bestImage);
+                }
+                groupedFiles[baseName].bestImage = fileInfo.fileName();
+                groupedFiles[baseName].maxBytes = fileSize;
+            } else {
+                groupedFiles[baseName].otherImages.append(fileInfo.fileName());
+            }
+        } else {
+            groupedFiles[baseName].nonImages.append(fileInfo.fileName());
+        }
     }
 
     for (auto it = groupedFiles.begin(); it != groupedFiles.end(); ++it) {
-        if (!it.value().second.isEmpty() && !it.value().first.isEmpty()) {
-            for (const QString& nonImage : it.value().first) {
+        if (!it.value().bestImage.isEmpty() && !it.value().nonImages.isEmpty()) {
+            for (const QString& nonImage : it.value().nonImages) {
                 AssetHit hit;
                 hit.folderPath = folderPath;
                 hit.assetFileName = nonImage;
-                hit.matchingImages = it.value().second;
+                hit.matchingImages.append(it.value().bestImage);
+                hit.matchingImages.append(it.value().otherImages);
                 finalHits.append(hit);
             }
         }
@@ -105,6 +223,10 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
         if (role == Qt::DecorationRole) return QIcon(":/resources/icons/collections.png"); 
         return QIdentityProxyModel::data(proxyIndex, role);
     }
+    if (path == "COMBINED_ROOT") {
+        if (role == Qt::DecorationRole) return QIcon(":/resources/icons/collections.png"); 
+        return QIdentityProxyModel::data(proxyIndex, role);
+    }
 
     // ---------------------------------------------------------
     // 2. Ignore structural/dummy nodes
@@ -118,7 +240,6 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
     // ---------------------------------------------------------
     if (!hitCache.contains(path)) {
         if (path.startsWith("COLLECTION_")) {
-            // Extract the numeric ID from the string (e.g., "COLLECTION_3" -> 3)
             int count = 0;
             int collId = path.mid(11).toInt(); 
             
@@ -128,15 +249,28 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
             
             if (query.exec()) {
                 while (query.next()) {
-                    // Verify the physical file hasn't been deleted outside the application
                     if (QFileInfo::exists(query.value(0).toString())) {
                         count++;
                     }
                 }
             }
             hitCache.insert(path, count);
-        } else {
-            // Standard hard-drive folders
+        } 
+        else if (path.startsWith("COMBINED_DIR_")) {
+            QString relPath = path.mid(13); 
+            int count = 0;
+            QSqlQuery libQuery(QSqlDatabase::database("db_conn"));
+            libQuery.exec("SELECT AssetLibraryPath FROM AssetLibraries WHERE AssetLibraryEnabled = 1");
+            
+            while (libQuery.next()) {
+                QDir dir(libQuery.value(0).toString());
+                if (dir.cd(relPath)) {
+                    count += getAssetCount(dir.absolutePath());
+                }
+            }
+            hitCache.insert(path, count);
+        } 
+        else {
             hitCache.insert(path, getAssetCount(path)); 
         }
     }
@@ -148,22 +282,18 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
     // ---------------------------------------------------------
     if (role == Qt::DisplayRole) {
         QString name = sourceModel()->data(sourceIndex, Qt::DisplayRole).toString();
-        // Append the blue hit count next to the folder name if assets exist
         return (count > 0) ? QString("%1 (%2)").arg(name).arg(count) : name;
     }
 
-    // Qt::UserRole + 1 stores the raw integer count for delegate access
     if (role == Qt::UserRole + 1) return count; 
 
     if (role == Qt::DecorationRole) {
         QModelIndex parentIndex = sourceIndex.parent();
         
-        // Items directly under the Favorites root get a distinct star icon
         if (parentIndex.isValid() && sourceModel()->data(parentIndex, Qt::UserRole).toString() == "FAVORITES_ROOT") {
             return QIcon(":/resources/icons/favorite-item.png");
         }
         
-        // Standard folders dynamically swap between empty/hit icons
         QString iconPath = (count > 0) ? QStringLiteral(":/resources/icons/folder-hit.png") 
                                        : QStringLiteral(":/resources/icons/folder-empty.png");
         return QIcon(iconPath);
@@ -198,6 +328,16 @@ bool AssetFolderProxyModel::hasAssetHit(const QString& folderPath) const {
 // =============================================================================
 
 AssetManagerWidget::AssetManagerWidget(QWidget *parent) : QWidget(parent) {
+
+    // Disable the OS-level slide and fade animations for all tooltips
+    QApplication::setEffectEnabled(Qt::UI_AnimateTooltip, false);
+    QApplication::setEffectEnabled(Qt::UI_FadeTooltip, false);
+
+    // Apply the custom tooltip delay proxy style to this widget and its children
+    TooltipProxyStyle *fastTooltips = new TooltipProxyStyle(this->style());
+    fastTooltips->setParent(this); // Ensure Qt deletes this safely when the widget is destroyed
+    this->setStyle(fastTooltips);
+
     setupUI();
 }
 
@@ -221,7 +361,6 @@ void AssetManagerWidget::setupUI() {
     dirTreeView->setItemDelegate(new AssetTreeDelegate(this));
     dirTreeView->setHeaderHidden(true); 
     
-    // Enable F2 and slow double-click renaming
     dirTreeView->setEditTriggers(QAbstractItemView::SelectedClicked | QAbstractItemView::EditKeyPressed);
     dirTreeView->setContextMenuPolicy(Qt::CustomContextMenu);
     
@@ -240,12 +379,28 @@ void AssetManagerWidget::setupUI() {
     assetListWidget = new QListWidget(bottomPanel);
     assetListWidget->setObjectName("AssetManagerGrid");
     assetListWidget->setViewMode(QListView::IconMode);
-    assetListWidget->setIconSize(QSize(105, 105));
-    assetListWidget->setGridSize(QSize(135, 150)); 
+    assetListWidget->setIconSize(QSize(Constants::GRID_ICON_DISPLAY_SIZE, Constants::GRID_ICON_DISPLAY_SIZE));
+    assetListWidget->setGridSize(QSize(Constants::GRID_CELL_WIDTH, Constants::GRID_CELL_HEIGHT));
     assetListWidget->setWordWrap(true);
     assetListWidget->setTextElideMode(Qt::ElideRight);
     assetListWidget->setResizeMode(QListView::Adjust); 
     assetListWidget->setMovement(QListView::Static);
+
+    // =====================================================================
+    // INITIALIZE INTERACTIVE TOOLTIPS
+    // =====================================================================
+    customToolTip = new CustomToolTip(this);
+    activeToolTipItem = nullptr;
+    
+    // Force the grid to track mouse movements even when not clicking
+    assetListWidget->setMouseTracking(true); 
+    // Install the filter so we can intercept the ToolTip spawn requests
+    assetListWidget->viewport()->installEventFilter(this);
+    // =====================================================================
+
+    assetListWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(assetListWidget, &QListWidget::customContextMenuRequested, this, &AssetManagerWidget::onGridContextMenuRequested);
+    connect(assetListWidget, &QListWidget::itemDoubleClicked, this, &AssetManagerWidget::onGridItemDoubleClicked);
 
     bottomLayout->addWidget(titleLabel);
     bottomLayout->addWidget(assetListWidget); 
@@ -259,7 +414,6 @@ void AssetManagerWidget::setupUI() {
     connect(dirTreeView, &QTreeView::clicked, this, &AssetManagerWidget::onFolderSelected);
     connect(dirTreeView, &QTreeView::expanded, this, &AssetManagerWidget::onTreeExpanded);
 
-    // Populate the tree data from the database
     refreshAssetManager();
 }
 
@@ -275,11 +429,10 @@ void AssetManagerWidget::refreshAssetManager() {
     // ---------------------------------------------------------
     // 1. Rebuild Favorites Root
     // ---------------------------------------------------------
-    favoritesRootItem = new QStandardItem(Constants::TERM_FAV_PLURAL); // THE FIX: Uses UI Constant
+    favoritesRootItem = new QStandardItem(Constants::TERM_FAV_PLURAL);
     favoritesRootItem->setData("FAVORITES_ROOT", Qt::UserRole); 
     favoritesRootItem->setIcon(QIcon(":/resources/icons/favorites.png")); 
     
-    // Prevent the root node from being renamed via UI triggers
     favoritesRootItem->setFlags(favoritesRootItem->flags() & ~Qt::ItemIsEditable);
     dirModel->appendRow(favoritesRootItem);
 
@@ -294,7 +447,7 @@ void AssetManagerWidget::refreshAssetManager() {
     // ---------------------------------------------------------
     // 2. Rebuild Collections Root
     // ---------------------------------------------------------
-    collectionsRootItem = new QStandardItem(Constants::TERM_COL_PLURAL); // THE FIX: Uses UI Constant
+    collectionsRootItem = new QStandardItem(Constants::TERM_COL_PLURAL); 
     collectionsRootItem->setData("COLLECTIONS_ROOT", Qt::UserRole); 
     collectionsRootItem->setFlags(collectionsRootItem->flags() & ~Qt::ItemIsEditable);
     dirModel->appendRow(collectionsRootItem);
@@ -309,13 +462,36 @@ void AssetManagerWidget::refreshAssetManager() {
         QStandardItem *colItem = new QStandardItem(colName);
         colItem->setData("COLLECTION_" + colId, Qt::UserRole); 
         
-        // Explicitly allow custom collections to be renamed
         colItem->setFlags(colItem->flags() | Qt::ItemIsEditable);
         collectionsRootItem->appendRow(colItem);
     }
 
     // ---------------------------------------------------------
-    // 3. Build Visual Separator
+    // 3. Count Active Libraries
+    // ---------------------------------------------------------
+    int activeLibraryCount = 0;
+    QSqlQuery countQuery(QSqlDatabase::database("db_conn"));
+    countQuery.exec("SELECT COUNT(*) FROM AssetLibraries WHERE AssetLibraryEnabled = 1");
+    if (countQuery.next()) {
+        activeLibraryCount = countQuery.value(0).toInt();
+    }
+
+    // ---------------------------------------------------------
+    // 4. Build Combined View Root (Only if 2+ libraries exist)
+    // ---------------------------------------------------------
+    combinedRootItem = nullptr; 
+    
+    if (activeLibraryCount > 1) {
+        combinedRootItem = new QStandardItem("Combined View");
+        combinedRootItem->setData("COMBINED_ROOT", Qt::UserRole); 
+        combinedRootItem->setFlags(combinedRootItem->flags() & ~Qt::ItemIsEditable);
+        
+        combinedRootItem->appendRow(new QStandardItem("..."));
+        dirModel->appendRow(combinedRootItem);
+    }
+
+    // ---------------------------------------------------------
+    // 5. Build Visual Separator
     // ---------------------------------------------------------
     QStandardItem *separatorItem = new QStandardItem();
     separatorItem->setData("SEPARATOR", Qt::UserRole);
@@ -323,7 +499,7 @@ void AssetManagerWidget::refreshAssetManager() {
     dirModel->appendRow(separatorItem);
 
     // ---------------------------------------------------------
-    // 4. Load Physical Asset Libraries
+    // 6. Load Physical Asset Libraries
     // ---------------------------------------------------------
     QSqlQuery libQuery(QSqlDatabase::database("db_conn"));
     libQuery.exec("SELECT AssetLibraryPath FROM AssetLibraries WHERE AssetLibraryEnabled = 1");
@@ -337,7 +513,6 @@ void AssetManagerWidget::refreshAssetManager() {
             rootItem->setData(path, Qt::UserRole); 
             rootItem->setFlags(rootItem->flags() & ~Qt::ItemIsEditable);
             
-            // Append a dummy node if children exist to enable lazy-loading
             QDirIterator it(path, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::NoIteratorFlags);
             if (it.hasNext()) {
                 rootItem->appendRow(new QStandardItem("..."));
@@ -357,8 +532,80 @@ void AssetManagerWidget::onTreeExpanded(const QModelIndex &proxyIndex) {
     QStandardItem *item = dirModel->itemFromIndex(sourceIndex);
 
     if (!item || !item->hasChildren()) return;
-    if (item == favoritesRootItem) return;
+    if (item == favoritesRootItem || item == collectionsRootItem) return;
 
+    QString parentData = item->data(Qt::UserRole).toString();
+
+    // =========================================================================
+    // THE NEW MERGE LOGIC: Aggregate subdirectories across all libraries
+    // =========================================================================
+    if (parentData == "COMBINED_ROOT" || parentData.startsWith("COMBINED_DIR_")) {
+        QStandardItem *firstChild = item->child(0);
+        if (firstChild && firstChild->text() == "...") {
+            item->removeRow(0); // Erase dummy node
+
+            QString relPath = (parentData == "COMBINED_ROOT") ? "" : parentData.mid(13);
+            QSet<QString> uniqueDirs;
+            
+            // OPTIMIZATION: Query the database ONCE and cache the paths in memory
+            QStringList activeLibraries;
+            QSqlQuery libQuery(QSqlDatabase::database("db_conn"));
+            libQuery.exec("SELECT AssetLibraryPath FROM AssetLibraries WHERE AssetLibraryEnabled = 1");
+            while (libQuery.next()) {
+                activeLibraries.append(libQuery.value(0).toString());
+            }
+            
+            // 1. Find all unique folder names across all active libraries
+            for (const QString& libPath : activeLibraries) {
+                QDir dir(libPath);
+                // If we are deep in the tree, ensure this specific library actually has this subfolder
+                if (!relPath.isEmpty() && !dir.cd(relPath)) continue; 
+                
+                QFileInfoList list = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::IgnoreCase);
+                for (const QFileInfo &info : list) {
+                    uniqueDirs.insert(info.fileName());
+                }
+            }
+            
+            // 2. Sort the unified list alphabetically
+            QStringList sortedDirs = uniqueDirs.values();
+            sortedDirs.sort(Qt::CaseInsensitive);
+            
+            // 3. Build the virtual tree nodes
+            for (const QString &dirName : sortedDirs) {
+                QStandardItem *child = new QStandardItem(dirName);
+                QString nextRelPath = relPath.isEmpty() ? dirName : relPath + "/" + dirName;
+                
+                child->setData("COMBINED_DIR_" + nextRelPath, Qt::UserRole);
+                child->setFlags(child->flags() & ~Qt::ItemIsEditable);
+                
+                // Check if this virtual folder actually has subdirectories in ANY library
+                bool hasSubDirs = false;
+                for (const QString& libPath : activeLibraries) {
+                    QDir subDir(libPath);
+                    if (subDir.cd(nextRelPath)) {
+                        QDirIterator it(subDir.absolutePath(), QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::NoIteratorFlags);
+                        if (it.hasNext()) {
+                            hasSubDirs = true;
+                            break; 
+                        }
+                    }
+                }
+                
+                // Only append the dummy node if there is actually content to lazy-load
+                if (hasSubDirs) {
+                    child->appendRow(new QStandardItem("..."));
+                }
+                
+                item->appendRow(child);
+            }
+        }
+        return; 
+    }
+
+    // =========================================================================
+    // STANDARD PHYSICAL FOLDER LOGIC
+    // =========================================================================
     QStandardItem *firstChild = item->child(0);
     if (firstChild && firstChild->data(Qt::UserRole).toString().isEmpty() && firstChild->text() == "...") {
         // Erase dummy node
@@ -372,7 +619,6 @@ void AssetManagerWidget::onTreeExpanded(const QModelIndex &proxyIndex) {
             QStandardItem *child = new QStandardItem(info.fileName());
             child->setData(info.absoluteFilePath(), Qt::UserRole);
 
-            // Standard hard-drive folders should not be renamed via the UI
             child->setFlags(child->flags() & ~Qt::ItemIsEditable);
 
             QDirIterator it(info.absoluteFilePath(), QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::NoIteratorFlags);
@@ -385,48 +631,63 @@ void AssetManagerWidget::onTreeExpanded(const QModelIndex &proxyIndex) {
 }
 
 /**
- * @brief Adds a folder to the Favorites database and visually updates the tree.
+ * @brief Adds a folder (or virtual combined directory) to the Shortcuts database and visually updates the tree.
  */
 void AssetManagerWidget::addFavoriteFolder(const QString& folderPath, const QString& displayName, bool saveToDb) {
-    // Prevent duplicate entries during current session
+    // 1. Prevent duplicate entries during current session
     for (int i = 0; i < favoritesRootItem->rowCount(); ++i) {
         if (favoritesRootItem->child(i)->data(Qt::UserRole).toString() == folderPath) {
             return; 
         }
     }
 
+    // 2. Check if this is a virtual directory or a physical hard drive path
+    bool isVirtualNode = folderPath.startsWith("COMBINED_DIR_");
+
+    // 3. Determine the default name if none was provided
+    QString defaultName;
+    if (isVirtualNode) {
+        // Extract just the final folder name from "COMBINED_DIR_path/to/folder"
+        QString relPath = folderPath.mid(13);
+        defaultName = relPath.section('/', -1); 
+    } else {
+        defaultName = QDir(folderPath).dirName();
+    }
+    QString nameToSave = displayName.isEmpty() ? defaultName : displayName;
+
+    // 4. Save to SQLite
     if (saveToDb) {
-        QString nameToSave = displayName.isEmpty() ? QDir(folderPath).dirName() : displayName;
         QSqlQuery query(QSqlDatabase::database("db_conn"));
-        
         query.prepare("INSERT OR IGNORE INTO AssetFavorites (AssetFavoritePath, AssetFavoriteName) VALUES (:path, :name)");
         query.bindValue(":path", folderPath);
         query.bindValue(":name", nameToSave);
         if (!query.exec()) {
-            qWarning() << "Failed to save favorite to DB:" << query.lastError().text();
+            qWarning() << "[!] Failed to save shortcut to DB:" << query.lastError().text();
         }
     }
 
-    QDir dir(folderPath);
-    QString name = displayName.isEmpty() ? dir.dirName() : displayName;
-    QStandardItem *favItem = new QStandardItem(name);
+    // 5. Build the visual UI Item
+    QStandardItem *favItem = new QStandardItem(nameToSave);
+    favItem->setFlags(favItem->flags() | Qt::ItemIsEditable); 
 
-    // Favorites require editing privileges for the rename functionality
-    favItem->setFlags(favItem->flags() | Qt::ItemIsEditable);
-
-    // Handle missing drives/moved folders gracefully
-    if (!dir.exists()) {
-        favItem->setData("BROKEN_PATH", Qt::UserRole);
-        favItem->setText(name + " (Not Found)");
-        favoritesRootItem->appendRow(favItem);
-        return;
-    }
-
-    favItem->setData(folderPath, Qt::UserRole);
-
-    QDirIterator it(folderPath, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::NoIteratorFlags);
-    if (it.hasNext()) {
+    // 6. Validation & Child Assignment
+    if (isVirtualNode) {
+        favItem->setData(folderPath, Qt::UserRole);
         favItem->appendRow(new QStandardItem("..."));
+    } else {
+        QDir dir(folderPath);
+        if (!dir.exists()) {
+            favItem->setData("BROKEN_PATH", Qt::UserRole);
+            favItem->setText(nameToSave + " (Not Found)");
+            favoritesRootItem->appendRow(favItem);
+            return;
+        }
+
+        favItem->setData(folderPath, Qt::UserRole);
+        QDirIterator it(folderPath, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::NoIteratorFlags);
+        if (it.hasNext()) {
+            favItem->appendRow(new QStandardItem("..."));
+        }
     }
 
     favoritesRootItem->appendRow(favItem);
@@ -464,7 +725,7 @@ void AssetManagerWidget::onFolderSelected(const QModelIndex &proxyIndex) {
     // ---------------------------------------------------------
     // 1. Handle Structural Node Clicks
     // ---------------------------------------------------------
-    if (folderPath == "FAVORITES_ROOT" || folderPath == "COLLECTIONS_ROOT") {
+    if (folderPath == "FAVORITES_ROOT" || folderPath == "COLLECTIONS_ROOT" || folderPath == "COMBINED_ROOT") {
         bool isExpanded = dirTreeView->isExpanded(proxyIndex);
         dirTreeView->setExpanded(proxyIndex, !isExpanded);
         return; 
@@ -482,17 +743,22 @@ void AssetManagerWidget::onFolderSelected(const QModelIndex &proxyIndex) {
         int collId = folderPath.mid(11).toInt(); 
         discoveredAssets = parseCollectionAssets(collId);
         hits = discoveredAssets.size();
+    } else if (folderPath.startsWith("COMBINED_DIR_")) {
+        QString relPath = folderPath.mid(13); 
+        discoveredAssets = parseCombinedAssets(relPath);
+        hits = discoveredAssets.size();
     } else {
-        hits = proxyModel->data(proxyIndex, Qt::UserRole + 1).toInt();
         discoveredAssets = parseFolderAssets(folderPath);
+        hits = discoveredAssets.size();
     }
 
     // ---------------------------------------------------------
     // 3. Update Title Labels
     // ---------------------------------------------------------
     if (hits > 0) {
-        titleLabel->setText(QString("<span style='font-size: 16px; font-weight: bold;'>&nbsp;%1</span><span style='color: #1d84c7; font-size: 14px; font-weight: bold;'>&nbsp;&nbsp;(%2)</span>")
+        titleLabel->setText(QString("<span style='font-size: 16px; font-weight: bold;'>&nbsp;%1</span><span style='color: %2; font-size: 14px; font-weight: bold;'>&nbsp;&nbsp;(%3)</span>")
                             .arg(folderName.toHtmlEscaped())
+                            .arg(Constants::COLOR_ACCENT_BLUE)
                             .arg(hits));
     } else {
         titleLabel->setText(QString("<span style='font-size: 16px; font-weight: bold;'>&nbsp;%1</span>").arg(folderName.toHtmlEscaped()));
@@ -505,32 +771,75 @@ void AssetManagerWidget::onFolderSelected(const QModelIndex &proxyIndex) {
 
     for (const AssetHit& hit : discoveredAssets) {
         QListWidgetItem *item = new QListWidgetItem(assetListWidget);
-        
-        QString cleanName = QFileInfo(hit.assetFileName).baseName();
+
+        QString cleanName = hit.displayName.isEmpty() ? QFileInfo(hit.assetFileName).baseName() : hit.displayName;
         item->setText(cleanName);
 
-        // Apply visual styling to thumbnail containers
         if (!hit.matchingImages.isEmpty()) {
             QString imagePath = QDir(hit.folderPath).filePath(hit.matchingImages.first());
             QPixmap rawPixmap(imagePath);
             
-            QPixmap scaledImage = rawPixmap.scaled(QSize(120, 120), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-            QPixmap paddedCanvas(120, 128);
+            QPixmap scaledImage = rawPixmap.scaled(QSize(Constants::THUMB_RENDER_SIZE, Constants::THUMB_RENDER_SIZE), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            QPixmap paddedCanvas(Constants::THUMB_RENDER_SIZE, Constants::THUMB_CANVAS_HEIGHT);
             paddedCanvas.fill(Qt::transparent); 
             
             QPainter painter(&paddedCanvas);
-            QLinearGradient gradient(0, 0, 0, 120);
-            gradient.setColorAt(0.0, QColor(42, 45, 48)); 
-            gradient.setColorAt(1.0, QColor(13, 13, 14)); 
+            QLinearGradient gradient(0, 0, 0, Constants::THUMB_RENDER_SIZE);
+            
+            gradient.setColorAt(0.0, QColor(Constants::COLOR_THUMB_BG_START)); 
+            gradient.setColorAt(1.0, QColor(Constants::COLOR_THUMB_BG_END)); 
 
-            painter.fillRect(0, 0, 120, 120, gradient);
-            int xOffset = (120 - scaledImage.width()) / 2; 
+            painter.fillRect(0, 0, Constants::THUMB_RENDER_SIZE, Constants::THUMB_RENDER_SIZE, gradient);
+            int xOffset = (Constants::THUMB_RENDER_SIZE - scaledImage.width()) / 2;
             painter.drawPixmap(xOffset, 0, scaledImage);
             painter.end(); 
 
             item->setIcon(QIcon(paddedCanvas));
         }
-        item->setToolTip(QDir(hit.folderPath).filePath(hit.assetFileName));
+
+        // =====================================================================
+        // RICH TEXT TOOLTIP GENERATION WITH CONSTANT COLORS
+        // =====================================================================
+        QString fullPath = QDir(hit.folderPath).filePath(hit.assetFileName);
+        QFileInfo info(fullPath);
+
+        // 1. Format the Extension (e.g., ".DUF File")
+        QString ext = info.suffix().toUpper();
+        QString typeStr = ext.isEmpty() ? "File" : QString(".%1 File").arg(ext);
+
+        // 2. Format the Size dynamically (KB vs MB)
+        double sizeInBytes = info.size();
+        QString sizeStr;
+        if (sizeInBytes > (1024 * 1024)) {
+            sizeStr = QString::number(sizeInBytes / (1024.0 * 1024.0), 'f', 2) + " MB";
+        } else {
+            sizeStr = QString::number(sizeInBytes / 1024.0, 'f', 2) + " KB";
+        }
+
+        // 3. Format Date to match "12/22/2025 6:30pm"
+        QString modStr = info.lastModified().toString("MM/dd/yyyy h:mm ap");
+
+        // 4. Convert Unix paths to native Windows paths for a cleaner display
+        QString nativeFolder = QDir::toNativeSeparators(hit.folderPath);
+
+        // 5. Construct the HTML Tooltip using Global Constants
+        QString tooltipHtml = QString(
+            "<div style='white-space: pre-wrap;'>"
+            "<span style='font-weight: bold; color: %1;'>%2</span><br/>"
+            "Size: %3<br/>"
+            "Modified: %4<br/>"
+            "<br/>"
+            "<span style='color: %5; font-size: 11px;'>%6</span>"
+            "</div>"
+        ).arg(Constants::COLOR_TOOLTIP_ACCENT, 
+              typeStr, 
+              sizeStr, 
+              modStr, 
+              Constants::COLOR_TOOLTIP_MUTED, 
+              nativeFolder.toHtmlEscaped());
+
+        item->setData(Qt::UserRole + 1, tooltipHtml);
+        item->setData(Qt::UserRole, fullPath);
     }
     
     assetListWidget->sortItems(Qt::AscendingOrder);
@@ -547,7 +856,9 @@ QList<AssetHit> AssetManagerWidget::parseFolderAssets(const QString& folderPath)
 
     struct FileGroup {
         QStringList nonImages;
-        QStringList images;
+        QString bestImage;
+        qint64 maxBytes = -1;
+        QStringList otherImages;
     };
     QHash<QString, FileGroup> groupedFiles;
 
@@ -555,7 +866,16 @@ QList<AssetHit> AssetManagerWidget::parseFolderAssets(const QString& folderPath)
         QString baseName = fileInfo.baseName(); 
         QString finalExtension = fileInfo.suffix().toLower(); 
         if (imageExtensions.contains(finalExtension)) {
-            groupedFiles[baseName].images.append(fileInfo.fileName());
+            qint64 fileSize = fileInfo.size();
+            if (fileSize > groupedFiles[baseName].maxBytes) {
+                if (!groupedFiles[baseName].bestImage.isEmpty()) {
+                    groupedFiles[baseName].otherImages.append(groupedFiles[baseName].bestImage);
+                }
+                groupedFiles[baseName].bestImage = fileInfo.fileName();
+                groupedFiles[baseName].maxBytes = fileSize;
+            } else {
+                groupedFiles[baseName].otherImages.append(fileInfo.fileName());
+            }
         } else {
             groupedFiles[baseName].nonImages.append(fileInfo.fileName());
         }
@@ -563,12 +883,13 @@ QList<AssetHit> AssetManagerWidget::parseFolderAssets(const QString& folderPath)
 
     for (auto it = groupedFiles.begin(); it != groupedFiles.end(); ++it) {
         const FileGroup& group = it.value();
-        if (!group.images.isEmpty() && !group.nonImages.isEmpty()) {
+        if (!group.bestImage.isEmpty() && !group.nonImages.isEmpty()) {
             for (const QString& nonImageFile : group.nonImages) {
                 AssetHit hit;
                 hit.folderPath = folderPath;
                 hit.assetFileName = nonImageFile;
-                hit.matchingImages = group.images;
+                hit.matchingImages.append(group.bestImage);
+                hit.matchingImages.append(group.otherImages);
                 finalHits.append(hit);
             }
         }
@@ -596,7 +917,6 @@ QList<AssetHit> AssetManagerWidget::parseCollectionAssets(int collectionId) {
         QString fullPath = query.value(0).toString();
         QFileInfo fileInfo(fullPath);
 
-        // Skip assets that have been moved or deleted from the physical hard drive
         if (!fileInfo.exists()) continue; 
 
         QString baseName = fileInfo.baseName();
@@ -606,14 +926,29 @@ QList<AssetHit> AssetManagerWidget::parseCollectionAssets(int collectionId) {
         hit.folderPath = folderPath;
         hit.assetFileName = fileInfo.fileName();
 
-        // Check the local hard drive for matching thumbnails using a wildcard filter
         QDir dir(folderPath);
         QFileInfoList relatedFiles = dir.entryInfoList(QStringList() << baseName + ".*", QDir::Files);
         
+        QString bestImage;
+        qint64 maxBytes = -1;
+        QStringList otherImages;
+
         for (const QFileInfo& related : relatedFiles) {
             if (imageExtensions.contains(related.suffix().toLower())) {
-                hit.matchingImages.append(related.fileName());
+                qint64 fileSize = related.size();
+                if (fileSize > maxBytes) {
+                    if (!bestImage.isEmpty()) otherImages.append(bestImage);
+                    bestImage = related.fileName();
+                    maxBytes = fileSize;
+                } else {
+                    otherImages.append(related.fileName());
+                }
             }
+        }
+
+        if (!bestImage.isEmpty()) {
+            hit.matchingImages.append(bestImage);
+            hit.matchingImages.append(otherImages);
         }
 
         finalHits.append(hit);
@@ -627,7 +962,22 @@ QList<AssetHit> AssetManagerWidget::parseCollectionAssets(int collectionId) {
  */
 void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
     QModelIndex proxyIndex = dirTreeView->indexAt(pos);
-    if (!proxyIndex.isValid()) return;
+    
+    // =========================================================================
+    // DEDICATED MENU: EMPTY SPACE (BACKGROUND CLICK IN TREE)
+    // =========================================================================
+    if (!proxyIndex.isValid()) {
+        QMenu emptyMenu(this);
+        emptyMenu.setObjectName("AssetManagerContextMenu");
+        
+        QAction *refreshAction = emptyMenu.addAction(QIcon(":/resources/icons/refresh.png"), "Refresh");
+        QAction *selectedAction = emptyMenu.exec(dirTreeView->viewport()->mapToGlobal(pos));
+        
+        if (selectedAction == refreshAction) {
+            refreshAssetManager();
+        }
+        return; 
+    }
 
     QModelIndex sourceIndex = proxyModel->mapToSource(proxyIndex);
     QString folderPath = dirModel->data(sourceIndex, Qt::UserRole).toString();
@@ -702,13 +1052,70 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
     }
 
     // =========================================================================
+    // DEDICATED MENU: COMBINED VIEW VIRTUAL NODES
+    // =========================================================================
+    if (folderPath == "COMBINED_ROOT" || folderPath.startsWith("COMBINED_DIR_")) {
+        QMenu combinedMenu(this);
+        combinedMenu.setObjectName("AssetManagerContextMenu");
+
+        // 1. Shortcut Management (Only for sub-folders, not the Root itself)
+        QAction *shortcutAction = nullptr;
+        QAction *removeShortcutAction = nullptr;
+
+        if (folderPath.startsWith("COMBINED_DIR_")) {
+            bool isAlreadyShortcut = false;
+            for (int i = 0; i < favoritesRootItem->rowCount(); ++i) {
+                if (favoritesRootItem->child(i)->data(Qt::UserRole).toString() == folderPath) {
+                    isAlreadyShortcut = true;
+                    break;
+                }
+            }
+
+            if (!isAlreadyShortcut) {
+                shortcutAction = combinedMenu.addAction(QIcon(":/resources/icons/favorites.png"), 
+                                                       QStringLiteral("Add to %1").arg(Constants::TERM_FAV_PLURAL));
+            } else {
+                removeShortcutAction = combinedMenu.addAction(QIcon(":/resources/icons/unfavorite.png"), 
+                                                             QStringLiteral("Remove %1").arg(Constants::TERM_FAV_SINGULAR));
+            }
+            combinedMenu.addSeparator();
+        }
+
+        // 2. Tree Navigation
+        bool isExpanded = dirTreeView->isExpanded(proxyIndex);
+        bool hasChildren = proxyModel->hasChildren(proxyIndex); 
+        QAction *expandAction = nullptr;
+        QAction *collapseAction = nullptr;
+
+        if (isExpanded) {
+            collapseAction = combinedMenu.addAction(QIcon(":/resources/icons/collapse.png"), "Collapse");
+        } else {
+            expandAction = combinedMenu.addAction(QIcon(":/resources/icons/expand.png"), "Expand");
+            expandAction->setEnabled(hasChildren); 
+        }
+        
+        combinedMenu.addSeparator();
+        QAction *refreshAction = combinedMenu.addAction(QIcon(":/resources/icons/refresh.png"), "Refresh");
+
+        // 3. Execution
+        QAction *selectedAction = combinedMenu.exec(dirTreeView->viewport()->mapToGlobal(pos));
+
+        if (shortcutAction && selectedAction == shortcutAction) addFavoriteFolder(folderPath, folderName);
+        else if (removeShortcutAction && selectedAction == removeShortcutAction) removeFavoriteFolder(folderPath);
+        else if (expandAction && selectedAction == expandAction) dirTreeView->expand(proxyIndex);
+        else if (collapseAction && selectedAction == collapseAction) collapseNodeRecursively(proxyIndex); 
+        else if (selectedAction == refreshAction) refreshAssetManager();
+        
+        return; 
+    }
+
+    // =========================================================================
     // DEDICATED MENU: INDIVIDUAL DB COLLECTION ITEMS
     // =========================================================================
     if (folderPath.startsWith("COLLECTION_")) {
         QMenu collMenu(this);
         collMenu.setObjectName("AssetManagerContextMenu");
 
-        // THE FIX: Dynamic UI Constant
         QAction *renameAction = collMenu.addAction(QIcon(":/resources/icons/rename.png"), 
                                                    QStringLiteral("Rename %1").arg(Constants::TERM_COL_SINGULAR));
         collMenu.addSeparator();
@@ -742,7 +1149,6 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
     // STANDARD MENU: PHYSICAL HARD DRIVE DIRECTORIES
     // =========================================================================
     
-    // Prevent duplicate favoriting by checking if the path is already nested in a Favorite
     bool isAlreadyFavorite = false;
     bool isChildOfFavorite = false;
     
@@ -769,26 +1175,22 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
     QMenu contextMenu(this);
     contextMenu.setObjectName("AssetManagerContextMenu");
 
-    // --- Action Group 1: Manage & Browse ---
     QAction *favoriteAction = nullptr;
     QAction *renameAction = nullptr;
 
     if (!isAlreadyFavorite && !isChildOfFavorite) {
-        // THE FIX: Dynamic UI Constant
         favoriteAction = contextMenu.addAction(QIcon(":/resources/icons/favorites.png"), 
                                                QStringLiteral("Add to %1").arg(Constants::TERM_FAV_PLURAL));
     }
     
     if (isAlreadyFavorite && isTopLevelFavorite) {
-        // THE FIX: Dynamic UI Constant
         renameAction = contextMenu.addAction(QIcon(":/resources/icons/rename.png"), 
                                              QStringLiteral("Rename %1").arg(Constants::TERM_FAV_SINGULAR));
     }
 
-    QAction *browseAction = contextMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse in Explorer");
+    QAction *browseAction = contextMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
     contextMenu.addSeparator();
 
-    // --- Action Group 2: Tree Navigation ---
     bool isExpanded = dirTreeView->isExpanded(proxyIndex);
     bool hasChildren = proxyModel->hasChildren(proxyIndex); 
 
@@ -809,18 +1211,15 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
     }
     contextMenu.addSeparator();
 
-    // --- Action Group 3: Danger & Refresh ---
     QAction *removeFavoriteAction = nullptr;
     
     if (isAlreadyFavorite) {
-        // THE FIX: Dynamic UI Constant
         removeFavoriteAction = contextMenu.addAction(QIcon(":/resources/icons/unfavorite.png"), 
-                                                     QStringLiteral("Remove from %1").arg(Constants::TERM_FAV_PLURAL));
+                                                     QStringLiteral("Remove %1").arg(Constants::TERM_FAV_SINGULAR));
     }
 
     QAction *refreshAction = contextMenu.addAction(QIcon(":/resources/icons/refresh.png"), "Refresh");
 
-    // --- Event Execution ---
     QAction *selectedAction = contextMenu.exec(dirTreeView->viewport()->mapToGlobal(pos));
 
     if (expandAction && selectedAction == expandAction) dirTreeView->expand(proxyIndex);
@@ -831,6 +1230,103 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
     else if (removeFavoriteAction && selectedAction == removeFavoriteAction) removeFavoriteFolder(folderPath);
     else if (renameAction && selectedAction == renameAction) dirTreeView->edit(proxyIndex);
     else if (selectedAction == refreshAction) refreshAssetManager();
+}
+
+/**
+ * @brief Constructs and routes right-click context menus for the asset grid.
+ */
+void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
+    QListWidgetItem *item = assetListWidget->itemAt(pos);
+
+    // =========================================================================
+    // DEDICATED MENU: EMPTY SPACE (BACKGROUND CLICK IN GRID)
+    // =========================================================================
+    if (!item) {
+        QMenu emptyMenu(this);
+        emptyMenu.setObjectName("AssetManagerContextMenu");
+
+        QAction *refreshAction = emptyMenu.addAction(QIcon(":/resources/icons/refresh.png"), "Refresh");
+        QAction *selectedAction = emptyMenu.exec(assetListWidget->viewport()->mapToGlobal(pos));
+
+        if (selectedAction == refreshAction) {
+            QModelIndex currentIndex = dirTreeView->currentIndex();
+            if (currentIndex.isValid()) {
+                onFolderSelected(currentIndex); 
+            } else {
+                refreshAssetManager(); 
+            }
+        }
+        return; 
+    }
+
+    // =========================================================================
+    // DEDICATED MENU: SPECIFIC ASSET ITEM
+    // =========================================================================
+    // Extract the raw path we hid inside the Qt::UserRole
+    QString fullPath = item->data(Qt::UserRole).toString();
+    QString folderPath = QFileInfo(fullPath).absolutePath();
+
+    QMenu itemMenu(this);
+    itemMenu.setObjectName("AssetManagerContextMenu");
+
+    // Action 1: Open
+    QAction *openAction = itemMenu.addAction(QIcon(":/resources/icons/open-item.png"), "Open");
+    
+    itemMenu.addSeparator();
+
+    // Action 2: Add to Collection (Sub-menu)
+    QMenu *collectionMenu = new QMenu("Add To Collection", &itemMenu);
+    collectionMenu->setIcon(QIcon(":/resources/icons/collections.png"));
+
+    // Dynamically query collections from SQLite
+    QSqlQuery collQuery(QSqlDatabase::database("db_conn"));
+    collQuery.exec("SELECT AssetCollectionID, AssetCollectionName FROM AssetCollections");
+    
+    bool hasCollections = false;
+    while (collQuery.next()) {
+        hasCollections = true;
+        int colId = collQuery.value(0).toInt();
+        QString colName = collQuery.value(1).toString();
+
+        QAction *colAction = collectionMenu->addAction(colName);
+        // Use a Lambda to capture the specific Collection ID when clicked
+        connect(colAction, &QAction::triggered, [this, colId, fullPath]() {
+            addAssetToCollection(fullPath, colId);
+        });
+    }
+
+    if (!hasCollections) {
+        collectionMenu->setEnabled(false);
+    }
+    
+    // Assign the menu to the action
+    itemMenu.addMenu(collectionMenu);
+    
+    // Action 3: Browse Folder
+    QAction *browseAction = itemMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
+
+    itemMenu.addSeparator();
+
+    // Action 4: Refresh
+    QAction *refreshAction = itemMenu.addAction(QIcon(":/resources/icons/refresh.png"), "Refresh");
+
+    // --- Execute Menu & Handle Clicks ---
+    QAction *selectedAction = itemMenu.exec(assetListWidget->viewport()->mapToGlobal(pos));
+
+    if (selectedAction == openAction) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(fullPath));
+    } 
+    else if (selectedAction == browseAction) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
+    } 
+    else if (selectedAction == refreshAction) {
+        QModelIndex currentIndex = dirTreeView->currentIndex();
+        if (currentIndex.isValid()) {
+            onFolderSelected(currentIndex); 
+        } else {
+            refreshAssetManager(); 
+        }
+    }
 }
 
 /**
@@ -898,7 +1394,6 @@ void AssetManagerWidget::onItemChanged(QStandardItem *item) {
         QString dataStr = item->data(Qt::UserRole).toString();
 
         if (dataStr.startsWith("COLLECTION_")) {
-            // Strip the text prefix to isolate the primary key database ID
             int collId = dataStr.mid(11).toInt(); 
 
             QSqlQuery query(QSqlDatabase::database("db_conn"));
@@ -912,3 +1407,131 @@ void AssetManagerWidget::onItemChanged(QStandardItem *item) {
         }
     }
 }
+
+/**
+ * @brief Parses identical relative paths across all physical libraries and handles filename collisions.
+ */
+QList<AssetHit> AssetManagerWidget::parseCombinedAssets(const QString& relativePath) {
+    QList<AssetHit> rawHits;
+    
+    QSqlQuery libQuery(QSqlDatabase::database("db_conn"));
+    libQuery.exec("SELECT AssetLibraryPath FROM AssetLibraries WHERE AssetLibraryEnabled = 1");
+    
+    // 1. Gather all assets from all libraries sharing this folder path
+    while (libQuery.next()) {
+        QDir dir(libQuery.value(0).toString());
+        if (dir.cd(relativePath)) {
+            rawHits.append(parseFolderAssets(dir.absolutePath()));
+        }
+    }
+    
+    // 2. Map indices by base name to detect collisions safely
+    QHash<QString, QList<int>> hitMap;
+    for (int i = 0; i < rawHits.size(); ++i) {
+        QString base = QFileInfo(rawHits[i].assetFileName).baseName();
+        hitMap[base].append(i);
+    }
+    
+    // 3. Resolve collisions with numbers (e.g., Aisling (1), Aisling (2))
+    for (auto it = hitMap.begin(); it != hitMap.end(); ++it) {
+        const QList<int>& indices = it.value();
+        if (indices.size() > 1) {
+            for (int j = 0; j < indices.size(); ++j) {
+                rawHits[indices[j]].displayName = QString("%1 (%2)").arg(it.key()).arg(j + 1);
+            }
+        } else {
+            rawHits[indices.first()].displayName = it.key();
+        }
+    }
+    
+    return rawHits;
+}
+
+/**
+ * @brief Handles double-clicking an item in the asset grid to open it.
+ */
+void AssetManagerWidget::onGridItemDoubleClicked(QListWidgetItem *item) {
+    if (!item) return;
+
+    // Extract the raw path we hid inside the Qt::UserRole
+    QString fullPath = item->data(Qt::UserRole).toString();
+
+    if (!fullPath.isEmpty()) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(fullPath));
+    }
+}
+
+/**
+ * @brief Intercepts events on the asset grid viewport to manage interactive custom tooltips.
+ */
+bool AssetManagerWidget::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == assetListWidget->viewport()) {
+        
+        // 1. Intercept the exact moment Qt tries to spawn a native tooltip
+        if (event->type() == QEvent::ToolTip) {
+            QHelpEvent *helpEvent = static_cast<QHelpEvent *>(event);
+            QListWidgetItem *item = assetListWidget->itemAt(helpEvent->pos());
+
+            if (item) {
+                QString html = item->data(Qt::UserRole + 1).toString();
+                if (!html.isEmpty()) {
+                    customToolTip->stopHideTimer();
+                    customToolTip->setText(html);
+                    
+                    // Offset the box slightly right/down so the cursor doesn't instantly block it
+                    customToolTip->move(helpEvent->globalPos() + QPoint(15, 15));
+                    customToolTip->show();
+                    
+                    // THE FIX: Only update the "owner" when a new tooltip successfully spawns
+                    activeToolTipItem = item; 
+                    return true; // Return TRUE to completely block the native OS tooltip!
+                }
+            } else {
+                customToolTip->startHideTimer(Constants::TOOLTIP_HIDE_DELAY_MS);
+            }
+        } 
+        // 2. Track mouse movements to manage the closing grace period
+        else if (event->type() == QEvent::MouseMove) {
+            QMouseEvent *mouseEvent = static_cast<QMouseEvent *>(event);
+            QListWidgetItem *item = assetListWidget->itemAt(mouseEvent->pos());
+
+            if (customToolTip->isVisible()) {
+                if (item == activeToolTipItem) {
+                    // The mouse is still moving safely inside the item that OWNS the tooltip. Keep it alive.
+                    customToolTip->stopHideTimer();
+                } else {
+                    // The mouse left the owning item (to empty space OR a neighboring item). Start the countdown!
+                    customToolTip->startHideTimer(Constants::TOOLTIP_HIDE_DELAY_MS);
+                }
+            }
+        } 
+        // 3. The mouse left the grid entirely
+        else if (event->type() == QEvent::Leave) {
+            if (customToolTip->isVisible()) {
+                customToolTip->startHideTimer(Constants::TOOLTIP_HIDE_DELAY_MS);
+            }
+        }
+    }
+    
+    // Pass all other normal events back to the application
+    return QWidget::eventFilter(watched, event);
+}
+
+/**
+ * @brief Links an asset file path to a specific Collection ID in the database.
+ */
+void AssetManagerWidget::addAssetToCollection(const QString& filePath, int collectionId) {
+    QSqlQuery query(QSqlDatabase::database("db_conn"));
+    query.prepare("INSERT INTO AssetCollectionItems (AssetCollectionItemPath, AssetCollectionItemCol) VALUES (:path, :id)");
+    query.bindValue(":path", filePath);
+    query.bindValue(":id", collectionId);
+    
+    if (!query.exec()) {
+        qWarning() << "Failed to add asset to collection:" << query.lastError().text();
+    } else {
+        qDebug() << "Successfully added" << filePath << "to collection" << collectionId;
+        // Optionally force a refresh or visual feedback here
+    }
+}
+
+#include "assetmanagerwidget.moc"

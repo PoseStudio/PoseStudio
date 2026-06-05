@@ -52,9 +52,8 @@ CREATE TABLE AssetFavorites(AssetFavoriteID INTEGER PRIMARY KEY AUTOINCREMENT, A
 CREATE INDEX idx_AssetFavoritePath ON AssetFavorites(AssetFavoritePath);
 
 CREATE TABLE AssetCollections(AssetCollectionID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionName TEXT NOT NULL);
-INSERT INTO AssetCollections(AssetCollectionName) VALUES('Cool Characters');
-INSERT INTO AssetCollections(AssetCollectionName) VALUES('Sexy Women');
-INSERT INTO AssetCollections(AssetCollectionName) VALUES('Super Heroes');
+INSERT INTO AssetCollections(AssetCollectionName) VALUES('Characters');
+INSERT INTO AssetCollections(AssetCollectionName) VALUES('Props');
 
 CREATE TABLE AssetCollectionItems(AssetCollectionItemID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionItemPath TEXT NOT NULL, AssetCollectionItemCol INTEGER NOT NULL DEFAULT 0, UNIQUE(AssetCollectionItemPath, AssetCollectionItemCol) ON CONFLICT IGNORE);
 CREATE INDEX idx_AssetCollectionItemPath ON AssetCollectionItems(AssetCollectionItemPath);
