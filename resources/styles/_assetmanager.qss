@@ -60,20 +60,20 @@ QTreeView#AssetManagerTree {
 #AssetManagerGrid::item {
     padding: 4px;
     background-color: transparent; 
-    border: 1px solid transparent;
+    border: 1px solid transparent; /* This prevents the 1px jitter! */
     border-radius: 6px;
     color: #aaaaaa;
 }
 
 #AssetManagerGrid::item:hover {
-    background-color: #2a2c2e;
-    border: 1px solid #4a4b4c; 
+    background-color: #2a2d30;
+    border: 1px solid #3c3c3c; 
     color: #ffffff; 
 }
 
 #AssetManagerGrid::item:selected {
-    background-color: #314d7a; 
-    border: 1px solid #5b87cc;
+    background-color: #25344b; /* The dark gray background */
+    border: 1px solid #314d7a; /* Your custom blue accent border */
     color: #ffffff;
 }
 

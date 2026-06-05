@@ -50,7 +50,7 @@
 
 /**
  * @class TooltipProxyStyle
- * @brief Intercepts OS-level styling requests to force custom tooltip hover delays.
+ * @brief Intercepts OS-level styling requests to force custom UI behaviors.
  */
 class TooltipProxyStyle : public QProxyStyle {
 public:
@@ -69,7 +69,6 @@ public:
             return Constants::TOOLTIP_SLEEP_DELAY_MS;
         }
         
-        // Pass everything else normally to the OS
         return QProxyStyle::styleHint(hint, option, widget, returnData);
     }
 };
@@ -78,7 +77,7 @@ public:
  * @class CustomToolTip
  * @brief An interactive, floating label that replaces standard Qt tooltips.
  */
-class CustomToolTip : public QWidget { // THE FIX: Inherit from QWidget instead of QLabel
+class CustomToolTip : public QWidget {
     Q_OBJECT
 public:
     explicit CustomToolTip(QWidget* parent = nullptr) : QWidget(parent, Qt::ToolTip) {
@@ -385,6 +384,8 @@ void AssetManagerWidget::setupUI() {
     assetListWidget->setTextElideMode(Qt::ElideRight);
     assetListWidget->setResizeMode(QListView::Adjust); 
     assetListWidget->setMovement(QListView::Static);
+
+
 
     // =====================================================================
     // INITIALIZE INTERACTIVE TOOLTIPS
@@ -794,7 +795,14 @@ void AssetManagerWidget::onFolderSelected(const QModelIndex &proxyIndex) {
             painter.drawPixmap(xOffset, 0, scaledImage);
             painter.end(); 
 
-            item->setIcon(QIcon(paddedCanvas));
+            // =================================================================
+            // THE FIX: Prevent Qt from auto-tinting the image on selection
+            // =================================================================
+            QIcon thumbIcon;
+            thumbIcon.addPixmap(paddedCanvas, QIcon::Normal);
+            thumbIcon.addPixmap(paddedCanvas, QIcon::Selected); // Force it to stay unmodified!
+            
+            item->setIcon(thumbIcon);
         }
 
         // =====================================================================
@@ -1051,18 +1059,23 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         return; 
     }
 
-    // =========================================================================
+// =========================================================================
     // DEDICATED MENU: COMBINED VIEW VIRTUAL NODES
     // =========================================================================
     if (folderPath == "COMBINED_ROOT" || folderPath.startsWith("COMBINED_DIR_")) {
         QMenu combinedMenu(this);
         combinedMenu.setObjectName("AssetManagerContextMenu");
+        combinedMenu.setStyle(this->style()); // Keeps our negative pixel gap active!
 
-        // 1. Shortcut Management (Only for sub-folders, not the Root itself)
+        // 1. Setup Actions
         QAction *shortcutAction = nullptr;
         QAction *removeShortcutAction = nullptr;
+        QAction *browseAction = nullptr;
+        QString singlePhysicalPath;
 
         if (folderPath.startsWith("COMBINED_DIR_")) {
+            
+            // A. Shortcut Management (POSITION 1)
             bool isAlreadyShortcut = false;
             for (int i = 0; i < favoritesRootItem->rowCount(); ++i) {
                 if (favoritesRootItem->child(i)->data(Qt::UserRole).toString() == folderPath) {
@@ -1078,6 +1091,40 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
                 removeShortcutAction = combinedMenu.addAction(QIcon(":/resources/icons/unfavorite.png"), 
                                                              QStringLiteral("Remove %1").arg(Constants::TERM_FAV_SINGULAR));
             }
+            
+            // B. Browse Folder (POSITION 2)
+            // THE FIX: Check if this virtual folder exists in exactly ONE library structurally,
+            // OR if it exists in multiple, check if only ONE actually contains direct files.
+            QString relPath = folderPath.mid(13);
+            QStringList existingPaths;
+            QStringList pathsWithFiles;
+            
+            QSqlQuery libQuery(QSqlDatabase::database("db_conn"));
+            libQuery.exec("SELECT AssetLibraryPath FROM AssetLibraries WHERE AssetLibraryEnabled = 1");
+            while (libQuery.next()) {
+                QDir dir(libQuery.value(0).toString());
+                if (dir.exists(relPath)) {
+                    QString absPath = dir.absoluteFilePath(relPath);
+                    existingPaths.append(absPath);
+                    
+                    // Ultra-fast peek to see if this physical folder actually contains any files
+                    QDirIterator it(absPath, QDir::Files | QDir::NoSymLinks, QDirIterator::NoIteratorFlags);
+                    if (it.hasNext()) {
+                        pathsWithFiles.append(absPath);
+                    }
+                }
+            }
+            
+            // Show the browse option if it maps to a single physical directory structurally,
+            // OR if multiple structural folders exist but only ONE actually holds assets.
+            if (existingPaths.size() == 1) {
+                singlePhysicalPath = existingPaths.first();
+                browseAction = combinedMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
+            } else if (pathsWithFiles.size() == 1) {
+                singlePhysicalPath = pathsWithFiles.first();
+                browseAction = combinedMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
+            }
+
             combinedMenu.addSeparator();
         }
 
@@ -1102,6 +1149,7 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
 
         if (shortcutAction && selectedAction == shortcutAction) addFavoriteFolder(folderPath, folderName);
         else if (removeShortcutAction && selectedAction == removeShortcutAction) removeFavoriteFolder(folderPath);
+        else if (browseAction && selectedAction == browseAction) QDesktopServices::openUrl(QUrl::fromLocalFile(singlePhysicalPath));
         else if (expandAction && selectedAction == expandAction) dirTreeView->expand(proxyIndex);
         else if (collapseAction && selectedAction == collapseAction) collapseNodeRecursively(proxyIndex); 
         else if (selectedAction == refreshAction) refreshAssetManager();
@@ -1277,6 +1325,13 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
     // Action 2: Add to Collection (Sub-menu)
     QMenu *collectionMenu = new QMenu("Add To Collection", &itemMenu);
     collectionMenu->setIcon(QIcon(":/resources/icons/collections.png"));
+    
+    // Explicitly name the menu so your global.qss catches it
+    collectionMenu->setObjectName("AssetManagerContextMenu");
+    collectionMenu->setAttribute(Qt::WA_TranslucentBackground);
+    
+    // THE FIX: Use CSS margins to enforce the visual gap safely
+    collectionMenu->setStyleSheet("QMenu { margin: 0px 2px; }");
 
     // Dynamically query collections from SQLite
     QSqlQuery collQuery(QSqlDatabase::database("db_conn"));

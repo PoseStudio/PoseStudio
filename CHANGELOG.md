@@ -10,22 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Interactive Tooltips:** Implemented `CustomToolTip` class (inherited from `QWidget` with a `QLabel` child) to replace standard native tooltips. This allows for hoverable, interactive rich-text panels that remain open when the user moves their mouse over them.
 - **Tooltip Grace Period:** Added custom `eventFilter` and `QTimer` logic to the thumbnail grid, providing a 400ms "grace period" for the user to move the mouse into the tooltip before it closes.
 - **Context Menu Expansion:** Integrated dynamic "Add to Collection" sub-menu into the grid right-click context menu, featuring live database polling.
+- **Smart "Browse Folder" Routing:** Added a highly efficient `QDirIterator` peek algorithm to virtual "Combined View" nodes, conditionally displaying a "Browse Folder" context action only if exactly one mapped physical folder actually contains files.
 - **Double-Click Action:** Wired `QListWidget::itemDoubleClicked` signal to the open-asset logic, synchronizing double-click behavior with the context menu's "Open" action.
 
 ### Changed
 - **UI Architecture:** Migrated all color definitions from hardcoded RGB values to centralized `Constants` in `constants.h` (e.g., `COLOR_ACCENT_BLUE`, `COLOR_THUMB_BG_START`, etc.), ensuring theme consistency across C++ and QSS.
 - **Tooltip UX:** - Disabled OS-level tooltip animations (fade/slide) via `QApplication::setEffectEnabled` for a snappier, professional feel.
     - Implemented a custom `QProxyStyle` to override native `SH_ToolTip_WakeUpDelay` and `SH_ToolTip_FallAsleepDelay`, allowing for immediate resetting of delays when moving between items.
+- **Context Menu UX:** Overrode native `PM_SubMenuOverlap` via custom `QProxyStyle` to introduce a 4-pixel visual gap between parent and child menus, overriding default native OS overlap rules.
+- **QSS Modularity:** Transitioned widget-specific C++ stylesheet injections to a dedicated `_assetmanager.qss` file to prevent CSS specificity wars and isolate component styles.
 - **Refactoring:** - Decoupled `AssetManagerWidget` logic from native tooltips to support custom, interactive floating widgets.
     - Updated `QListWidgetItem` data handling to securely store metadata (`Qt::UserRole` for paths and `Qt::UserRole + 1` for HTML content).
 
 ### Fixed
-- **Rendering Artifacts:** Applied `Qt::WA_TranslucentBackground` to the custom tooltip window to eliminate rigid rectangular background artifacts around rounded CSS borders.
+- **Rendering Artifacts:** Applied `Qt::WA_TranslucentBackground` to the custom tooltip and dynamically spawned sub-menus to eliminate rigid rectangular background artifacts around rounded CSS borders.
+- **Selection Highlight Conflicts:** Prevented Qt from auto-tinting `QIcon` images upon selection, and resolved CSS specificity overrides to ensure a crisp, dark gray background with a blue accent border on selected items.
 - **Memory/Build Issues:** - Resolved `QListWidgetItem` syntax errors by adding proper forward declarations in `assetmanagerwidget.h`.
     - Fixed CMake `AutoMoc` errors by correctly including `"assetmanagerwidget.moc"` in the C++ file for nested classes.
-    - Fixed logic leak in mouse-move event tracking by introducing `activeToolTipItem` state tracking.
-
-
+    - Fixed logic leak in mouse-move event tracking by introducing `activeToolTipItem` state tracking to prevent stuck tooltips.
 
 ## [0.0.8] - 2026-06-04
 ### Added
@@ -113,8 +115,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Foundational `README.md` establishing the project vision as an open-source 3D character platform.
 - Community funding configurations for GitHub Sponsors and Patreon.
 - Core open-source community files including `LICENSE`, `.gitignore`, and `CODE_OF_CONDUCT.md`.
-- Associated domain linkages for PoseStudio.org.
-- Updated Code of Conduct
+- Associated domain linkages for posestudio.org.
+- Updated Code of Conduct.
 
 ## [Unreleased]
 ### Added
