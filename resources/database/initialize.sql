@@ -57,10 +57,5 @@ INSERT INTO AssetCollections(AssetCollectionName) VALUES('Props');
 CREATE TABLE AssetCollectionItems(AssetCollectionItemID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionItemPath TEXT NOT NULL, AssetCollectionItemCol INTEGER NOT NULL DEFAULT 0, UNIQUE(AssetCollectionItemPath, AssetCollectionItemCol) ON CONFLICT IGNORE);
 CREATE INDEX idx_AssetCollectionItemPath ON AssetCollectionItems(AssetCollectionItemPath);
 CREATE INDEX idx_AssetCollectionItemCol ON AssetCollectionItems(AssetCollectionItemCol);
-INSERT INTO AssetCollectionItems(AssetCollectionItemPath, AssetCollectionItemCol) VALUES('C:/Users/Public/Documents/My DAZ 3D Library/People/Genesis 8 Female/Characters/Aisling.duf', 1);
-INSERT INTO AssetCollectionItems(AssetCollectionItemPath, AssetCollectionItemCol) VALUES('C:/Users/Public/Documents/My DAZ 3D Library/People/Genesis 8 Female/Characters/BJ Sahel.duf', 1);
-INSERT INTO AssetCollectionItems(AssetCollectionItemPath, AssetCollectionItemCol) VALUES('D:/Dropbox (Personal)/My 3D Library/People/Genesis 8 Female/Characters/Mechaela.duf', 1);
-INSERT INTO AssetCollectionItems(AssetCollectionItemPath, AssetCollectionItemCol) VALUES('D:/Dropbox (Personal)/My 3D Library/People/Genesis 8 Female/Characters/Ariana.duf', 2);
-INSERT INTO AssetCollectionItems(AssetCollectionItemPath, AssetCollectionItemCol) VALUES('D:/Dropbox (Personal)/My 3D Library/People/Genesis 8 Female/Characters/Sinn Sage.dsa', 2);
 
 

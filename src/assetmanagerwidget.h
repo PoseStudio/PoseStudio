@@ -17,6 +17,7 @@
 #include <QStringList>
 #include <QList>
 #include <QModelIndex>
+#include <QPersistentModelIndex>
 #include <QHash>
 #include <QSet>
 #include <QIcon>
@@ -45,12 +46,11 @@ struct AssetHit {
     QString displayName;         ///< Custom UI text for handling virtual folder collisions
 };
 
+enum FolderHitState { NoHit = 0, IndirectHit = 1, DirectHit = 2 };
+
 /**
  * @class AssetFolderProxyModel
- * @brief Intercepts data requests to dynamically style folders based on physical or database contents.
- * @details Calculates if directories contain valid 3D assets and modifies the DisplayRole 
- * (to show asset counts) and DecorationRole (to show custom icons). Serves as the bridge 
- * between the visual UI and the SQLite/Disk parsers.
+ * @brief Intercepts data requests to dynamically style folders with custom icons and labels.
  */
 class AssetFolderProxyModel : public QIdentityProxyModel {
     Q_OBJECT
@@ -58,19 +58,25 @@ public:
     explicit AssetFolderProxyModel(QAbstractItemModel* source, QObject* parent = nullptr);
     QVariant data(const QModelIndex &proxyIndex, int role = Qt::DisplayRole) const override;
 
-private:
-    mutable QHash<QString, int> hitCache; ///< Caches asset counts to prevent redundant disk/DB reads
+    void invalidateAndRefresh(const QString& path);
 
-    int getAssetCount(const QString& folderPath) const;
-    QList<AssetHit> parseAssetsInternal(const QString& folderPath) const;
-    bool hasAssetHit(const QString& folderPath) const;
+private slots:
+    void processPendingHitCheck();
+
+private:
+    mutable QHash<QString, FolderHitState> hasHitCache;
+    mutable QList<QPersistentModelIndex> m_pendingHitIndexes;
+    mutable QSet<QString> m_pendingHitPathsSet;
+    mutable bool m_hitCheckTimerActive = false;
+
+    bool directFolderHasHit(const QString& folderPath) const;
+    FolderHitState folderHitState(const QString& folderPath) const;
 };
 
 /**
  * @class AssetTreeDelegate
  * @brief Custom item delegate that completely overrides native Qt painting for the directory tree.
- * @details Responsible for rendering dual-colored text (folder names + hit counts), custom 
- * icons, and enforcing the geometry of the inline rename editor.
+ * @details Responsible for rendering folder names, custom icons, and enforcing the geometry of the inline rename editor.
  */
 class AssetTreeDelegate : public QStyledItemDelegate {
 public:
@@ -160,36 +166,13 @@ public:
         textRect.adjust(textOffset, 0, 0, 0);
 
         if (opt.state & QStyle::State_Selected) {
-            painter->setPen(Qt::white); 
+            painter->setPen(Qt::white);
         } else {
-            painter->setPen(opt.palette.text().color());
+            QVariant fg = index.data(Qt::ForegroundRole);
+            painter->setPen(fg.isValid() ? fg.value<QColor>() : opt.palette.text().color());
         }
 
-        // Parse and draw the dual-color formatted text (e.g., "Folder Name (12)")
-        const int openParen = folderText.lastIndexOf(QLatin1Char('('));
-
-        if (openParen == -1) {
-            painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, folderText);
-        } else {
-            const QString name = folderText.left(openParen);
-            const QString count = folderText.mid(openParen);
-
-            painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, name);
-            
-            const int nameWidth = opt.fontMetrics.horizontalAdvance(name);
-            QRect countRect = textRect;
-            countRect.setX(textRect.x() + nameWidth + 5);
-
-            if (!(opt.state & QStyle::State_Selected)) {
-                painter->setPen(QColor(105, 105, 105)); // Subdued blue for hit counts
-            }
-            
-            QFont countFont = painter->font();
-            countFont.setWeight(QFont::Bold);
-            painter->setFont(countFont);
-            
-            painter->drawText(countRect, Qt::AlignLeft | Qt::AlignVCenter, count);
-        }
+        painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, folderText);
 
         painter->restore();
     }
@@ -208,9 +191,22 @@ public:
     explicit AssetTreeView(QWidget *parent = nullptr) : QTreeView(parent), m_separatorColor(60, 60, 60) {}
 
     QColor separatorColor() const { return m_separatorColor; }
-    void setSeparatorColor(const QColor &color) { 
-        m_separatorColor = color; 
-        viewport()->update(); // Force a redraw if the QSS property dynamically changes
+    void setSeparatorColor(const QColor &color) {
+        m_separatorColor = color;
+        viewport()->update();
+    }
+
+protected:
+    void drawBranches(QPainter *painter, const QRect &rect, const QModelIndex &index) const override {
+        QVariant fg = index.data(Qt::ForegroundRole);
+        if (fg.isValid()) {
+            painter->save();
+            painter->setOpacity(0.35);
+            QTreeView::drawBranches(painter, rect, index);
+            painter->restore();
+        } else {
+            QTreeView::drawBranches(painter, rect, index);
+        }
     }
 
 private:
@@ -266,12 +262,21 @@ private:
     QStandardItem *collectionsRootItem; 
     QStandardItem *combinedRootItem;    
 
+    QList<QPair<int, QString>> m_pendingThumbs;
+
     void setupUI();
+    void processNextThumbnailBatch();
+
     QList<AssetHit> parseFolderAssets(const QString& folderPath);
     QList<AssetHit> parseCollectionAssets(int collectionId);
     QList<AssetHit> parseCombinedAssets(const QString& relativePath);
-    
+
+    void navigateToFolderInTree(const QString& folderPath);
     void addAssetToCollection(const QString& filePath, int collectionId);
+    void removeAssetFromCollection(const QString& filePath, int collectionId);
+    void saveExpandedState(const QModelIndex &parentProxyIndex, QSet<QString> &expandedPaths);
+    void restoreExpandedState(const QModelIndex &parentProxyIndex, const QSet<QString> &expandedPaths);
+    QModelIndex findProxyIndexByPath(const QModelIndex &parentProxyIndex, const QString &targetPath);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override; ///< Intercepts mouse events

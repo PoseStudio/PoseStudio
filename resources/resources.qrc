@@ -41,6 +41,7 @@
         <file>icons/favorite-item.png</file>
         <file>icons/folder-empty.png</file>
         <file>icons/folder-hit.png</file>
+        <file>icons/folder-full.png</file>
         <file>icons/browse-folder.png</file>
         <file>icons/collapse.png</file>
         <file>icons/expand-branch.png</file>
