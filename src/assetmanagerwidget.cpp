@@ -49,27 +49,48 @@
 // =============================================================================
 
 /**
- * @class TooltipProxyStyle
+ * @class AppProxyStyle
  * @brief Intercepts OS-level styling requests to force custom UI behaviors.
  */
-class TooltipProxyStyle : public QProxyStyle {
+class AppProxyStyle : public QProxyStyle {
 public:
     using QProxyStyle::QProxyStyle;
 
     int styleHint(StyleHint hint, const QStyleOption *option = nullptr, 
                   const QWidget *widget = nullptr, QStyleHintReturn *returnData = nullptr) const override {
-                  
-        // Intercept the wake-up delay request
-        if (hint == QStyle::SH_ToolTip_WakeUpDelay) {
-            return Constants::TOOLTIP_WAKE_DELAY_MS;
-        }
         
-        // Force the system to instantly fall asleep so the delay resets
-        if (hint == QStyle::SH_ToolTip_FallAsleepDelay) {
-            return Constants::TOOLTIP_SLEEP_DELAY_MS;
-        }
+        if (hint == QStyle::SH_ToolTip_WakeUpDelay) return Constants::TOOLTIP_WAKE_DELAY_MS;
+        if (hint == QStyle::SH_ToolTip_FallAsleepDelay) return Constants::TOOLTIP_SLEEP_DELAY_MS;
         
         return QProxyStyle::styleHint(hint, option, widget, returnData);
+    }
+
+    int pixelMetric(PixelMetric metric, const QStyleOption *option = nullptr, const QWidget *widget = nullptr) const override {
+        if (metric == QStyle::PM_SubMenuOverlap) return -4; 
+        return QProxyStyle::pixelMetric(metric, option, widget);
+    }
+
+    // =========================================================================
+    // Globally force all disabled icons to 30% opacity
+    // =========================================================================
+    QPixmap generatedIconPixmap(QIcon::Mode iconMode, const QPixmap &pixmap, const QStyleOption *opt) const override {
+        if (iconMode == QIcon::Disabled) {
+            
+            // Create a blank, transparent canvas the exact same size as the icon
+            QPixmap transparentPixmap(pixmap.size());
+            transparentPixmap.fill(Qt::transparent);
+            
+            // Paint the original icon onto the canvas at exactly 30% opacity
+            QPainter painter(&transparentPixmap);
+            painter.setOpacity(0.3); 
+            painter.drawPixmap(0, 0, pixmap);
+            painter.end();
+            
+            return transparentPixmap;
+        }
+        
+        // Pass all other normal/active icons back to standard Qt behavior
+        return QProxyStyle::generatedIconPixmap(iconMode, pixmap, opt);
     }
 };
 
@@ -332,10 +353,15 @@ AssetManagerWidget::AssetManagerWidget(QWidget *parent) : QWidget(parent) {
     QApplication::setEffectEnabled(Qt::UI_AnimateTooltip, false);
     QApplication::setEffectEnabled(Qt::UI_FadeTooltip, false);
 
-    // Apply the custom tooltip delay proxy style to this widget and its children
-    TooltipProxyStyle *fastTooltips = new TooltipProxyStyle(this->style());
-    fastTooltips->setParent(this); // Ensure Qt deletes this safely when the widget is destroyed
-    this->setStyle(fastTooltips);
+    // =========================================================================
+    // Apply the custom proxy style GLOBALLY so QIcon can access it!
+    // =========================================================================
+    static bool globalStyleSet = false;
+    if (!globalStyleSet) {
+        // By passing nothing to the constructor, it automatically wraps the existing global style
+        QApplication::setStyle(new AppProxyStyle()); 
+        globalStyleSet = true;
+    }
 
     setupUI();
 }
@@ -384,8 +410,6 @@ void AssetManagerWidget::setupUI() {
     assetListWidget->setTextElideMode(Qt::ElideRight);
     assetListWidget->setResizeMode(QListView::Adjust); 
     assetListWidget->setMovement(QListView::Static);
-
-
 
     // =====================================================================
     // INITIALIZE INTERACTIVE TOOLTIPS
@@ -796,7 +820,7 @@ void AssetManagerWidget::onFolderSelected(const QModelIndex &proxyIndex) {
             painter.end(); 
 
             // =================================================================
-            // THE FIX: Prevent Qt from auto-tinting the image on selection
+            // Prevent Qt from auto-tinting the image on selection
             // =================================================================
             QIcon thumbIcon;
             thumbIcon.addPixmap(paddedCanvas, QIcon::Normal);
@@ -1059,14 +1083,13 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         return; 
     }
 
-// =========================================================================
+    // =========================================================================
     // DEDICATED MENU: COMBINED VIEW VIRTUAL NODES
     // =========================================================================
     if (folderPath == "COMBINED_ROOT" || folderPath.startsWith("COMBINED_DIR_")) {
         QMenu combinedMenu(this);
         combinedMenu.setObjectName("AssetManagerContextMenu");
-        combinedMenu.setStyle(this->style()); // Keeps our negative pixel gap active!
-
+        
         // 1. Setup Actions
         QAction *shortcutAction = nullptr;
         QAction *removeShortcutAction = nullptr;
@@ -1093,8 +1116,6 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
             }
             
             // B. Browse Folder (POSITION 2)
-            // THE FIX: Check if this virtual folder exists in exactly ONE library structurally,
-            // OR if it exists in multiple, check if only ONE actually contains direct files.
             QString relPath = folderPath.mid(13);
             QStringList existingPaths;
             QStringList pathsWithFiles;
@@ -1115,14 +1136,17 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
                 }
             }
             
-            // Show the browse option if it maps to a single physical directory structurally,
-            // OR if multiple structural folders exist but only ONE actually holds assets.
+            // Unconditionally add the action to maintain menu consistency
+            browseAction = combinedMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
+            
+            // Determine if we can safely route to a single physical directory
             if (existingPaths.size() == 1) {
                 singlePhysicalPath = existingPaths.first();
-                browseAction = combinedMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
             } else if (pathsWithFiles.size() == 1) {
                 singlePhysicalPath = pathsWithFiles.first();
-                browseAction = combinedMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
+            } else {
+                // The folder spans multiple drives (or is entirely empty), disable the action!
+                browseAction->setEnabled(false);
             }
 
             combinedMenu.addSeparator();
@@ -1131,14 +1155,21 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         // 2. Tree Navigation
         bool isExpanded = dirTreeView->isExpanded(proxyIndex);
         bool hasChildren = proxyModel->hasChildren(proxyIndex); 
+        
         QAction *expandAction = nullptr;
+        QAction *expandBranchAction = nullptr;
         QAction *collapseAction = nullptr;
+
+        if (!isExpanded) {
+            expandAction = combinedMenu.addAction(QIcon(":/resources/icons/expand.png"), "Expand");
+            expandAction->setEnabled(hasChildren); 
+        }
+        
+        expandBranchAction = combinedMenu.addAction(QIcon(":/resources/icons/expand-branch.png"), "Expand Branch");
+        expandBranchAction->setEnabled(hasChildren); 
 
         if (isExpanded) {
             collapseAction = combinedMenu.addAction(QIcon(":/resources/icons/collapse.png"), "Collapse");
-        } else {
-            expandAction = combinedMenu.addAction(QIcon(":/resources/icons/expand.png"), "Expand");
-            expandAction->setEnabled(hasChildren); 
         }
         
         combinedMenu.addSeparator();
@@ -1151,6 +1182,7 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         else if (removeShortcutAction && selectedAction == removeShortcutAction) removeFavoriteFolder(folderPath);
         else if (browseAction && selectedAction == browseAction) QDesktopServices::openUrl(QUrl::fromLocalFile(singlePhysicalPath));
         else if (expandAction && selectedAction == expandAction) dirTreeView->expand(proxyIndex);
+        else if (expandBranchAction && selectedAction == expandBranchAction) expandNodeRecursively(proxyIndex);
         else if (collapseAction && selectedAction == collapseAction) collapseNodeRecursively(proxyIndex); 
         else if (selectedAction == refreshAction) refreshAssetManager();
         
@@ -1263,7 +1295,7 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
     
     if (isAlreadyFavorite) {
         removeFavoriteAction = contextMenu.addAction(QIcon(":/resources/icons/unfavorite.png"), 
-                                                     QStringLiteral("Remove %1").arg(Constants::TERM_FAV_SINGULAR));
+                                                     QStringLiteral("Remove From %1").arg(Constants::TERM_FAV_PLURAL));
     }
 
     QAction *refreshAction = contextMenu.addAction(QIcon(":/resources/icons/refresh.png"), "Refresh");
@@ -1329,9 +1361,7 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
     // Explicitly name the menu so your global.qss catches it
     collectionMenu->setObjectName("AssetManagerContextMenu");
     collectionMenu->setAttribute(Qt::WA_TranslucentBackground);
-    
-    // THE FIX: Use CSS margins to enforce the visual gap safely
-    collectionMenu->setStyleSheet("QMenu { margin: 0px 2px; }");
+    collectionMenu->setStyleSheet("QMenu { margin: 0px 4px; }"); // Aligned exactly with -4 offset from AppProxyStyle
 
     // Dynamically query collections from SQLite
     QSqlQuery collQuery(QSqlDatabase::database("db_conn"));
@@ -1537,7 +1567,7 @@ bool AssetManagerWidget::eventFilter(QObject *watched, QEvent *event) {
                     customToolTip->move(helpEvent->globalPos() + QPoint(15, 15));
                     customToolTip->show();
                     
-                    // THE FIX: Only update the "owner" when a new tooltip successfully spawns
+                    // Only update the "owner" when a new tooltip successfully spawns
                     activeToolTipItem = item; 
                     return true; // Return TRUE to completely block the native OS tooltip!
                 }

@@ -175,3 +175,8 @@ QMenu#AssetManagerContextMenu::separator {
     background: #4a4b4c;
     margin: 5px 10px 5px 10px;
 }
+
+QMenu#AssetManagerContextMenu::item:disabled {
+    color: #666666; /* Muted, greyed-out text */
+    background-color: transparent; /* Ensures it doesn't highlight on hover */
+}
