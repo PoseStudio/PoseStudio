@@ -5,6 +5,33 @@ All notable changes to the PoseStudio project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0] - 2026-06-16
+
+### Added
+- **Asset Search:** Added a persistent search bar (QLineEdit + clear button + search button) above the Collections node in the tree panel. Searching scans all enabled asset library directories recursively and populates a dedicated "Search Results" root node.
+- **Search Results Tree:** Results are displayed as a proper navigable hierarchy — shared ancestor folders are merged so the full path context is preserved (e.g., `People → Genesis 8 Female → Anatomy → X3D`), not compacted into a single flat string.
+- **Full Subtree Browsing from Search:** Matched folders in the search results are fully expandable via the existing lazy-load mechanism, allowing the user to browse the entire subtree beneath a hit without leaving the search results panel.
+- **NoHit Filtering in Search:** Folders that contain no assets anywhere in their subtree (greyed "empty" folders) are automatically excluded from search results.
+- **Search Visual Feedback:** While a search is running, a "Searching…" placeholder appears in the tree, the search controls are disabled, and the cursor changes to the system wait cursor. Results replace the placeholder atomically when complete.
+- **Search Root Iconography:** The Search Results root node displays `search.png` when results are populated and `search-g.png` when empty, matching the grey/bright state of its text color.
+- **Clear Search Button:** A dedicated clear button (`clear.png`) sits between the input and search button. Clicking it clears the input and collapses the Search Results node instantly.
+- **Folder Shortcuts in Collections:** Users can now add any folder (physical library folder or Combined View virtual folder) directly to a Collection via the right-click context menu. The folder appears as a navigable child node under the collection, functioning identically to a folder shortcut.
+- **"New Collection" Quick-Add:** All "Add to Collection" flyout menus (grid items and folder nodes) now have a "New Collection" entry pinned at the top with a separator below it. Clicking it creates a collection named "New Collection" (or reuses it if it already exists) and immediately adds the item.
+- **Delete Collection:** Added a "Delete Collection" context menu item directly below "Rename Collection". The action is only enabled when the collection is completely empty (no asset items and no folder shortcuts), preventing accidental data loss.
+- **Tri-State Folder Icons:** Folder nodes in the tree now use three distinct icons to communicate asset presence at a glance: `folder-full.png` (assets exist directly in this folder), `folder-hit.png` (assets exist in a subfolder), and `folder-empty.png` (no assets anywhere in the subtree).
+- **Asynchronous Hit Detection:** Folder hit-state scanning is now fully deferred. On first paint, nodes display a bright default icon immediately. A `QPersistentModelIndex` queue processes one folder per event-loop tick via `QTimer::singleShot(0)`, emitting targeted `dataChanged` signals so icons and colors fill in progressively without blocking the UI.
+
+### Changed
+- **Collections Replace Shortcuts/Favorites:** The Shortcuts and Favorites systems have been removed entirely. Their functionality (grouping folders independently of physical location) is now unified under Collections, which supports both individual asset items and folder shortcuts in the same collection.
+- **Alphabetical Collection Ordering:** Collection nodes are automatically sorted alphabetically on initial load, after a rename, and after a new collection is created.
+- **Faster Tree Expansion:** Child nodes are now inserted via a single `item->appendRows(QList<QStandardItem*>)` call wrapped in `setUpdatesEnabled(false/true)`, replacing per-item `appendRow` calls to eliminate redundant `rowsInserted` signal emissions during expansion.
+- **Database Cleanup:** Removed the unused `AssetFavorites` table and its associated index from `initialize.sql`.
+
+### Fixed
+- **Collection Staying Grey After Folder Add:** Adding a folder shortcut to a collection now correctly calls `invalidateAndRefresh` on the collection's cache entry, so its icon and color update immediately without requiring a manual refresh.
+- **Combined View Folders in Collections (Not Found):** Virtual `COMBINED_DIR_` paths no longer trigger a filesystem existence check (which would always fail). The system now detects the `COMBINED_DIR_` prefix and uses library database queries to validate and display the folder correctly.
+- **Search Results Root Greyed:** The Search Results node is now correctly bright when results are present. The proxy model evaluates `rowCount()` on the source item at paint time rather than attempting a `folderHitState` call on a non-filesystem path.
+
 ## [0.0.9] - 2026-06-06
 ### Added
 - **Interactive Tooltips:** Implemented `CustomToolTip` class (inherited from `QWidget` with a `QLabel` child) to replace standard native tooltips. This allows for hoverable, interactive rich-text panels that remain open when the user moves their mouse over them.
