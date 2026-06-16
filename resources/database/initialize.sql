@@ -47,15 +47,18 @@ CREATE TABLE AssetLibraries(AssetLibraryID INTEGER PRIMARY KEY AUTOINCREMENT, As
 INSERT INTO AssetLibraries(AssetLibraryPath) VALUES('C:/Users/Public/Documents/My DAZ 3D Library');
 INSERT INTO AssetLibraries(AssetLibraryPath) VALUES('D:/Dropbox (Personal)/My 3D Library');
 
-CREATE TABLE AssetFavorites(AssetFavoriteID INTEGER PRIMARY KEY AUTOINCREMENT, AssetFavoritePath TEXT NOT NULL UNIQUE, AssetFavoriteName TEXT NOT NULL);
-CREATE INDEX idx_AssetFavoritePath ON AssetFavorites(AssetFavoritePath);
-
 CREATE TABLE AssetCollections(AssetCollectionID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionName TEXT NOT NULL);
 INSERT INTO AssetCollections(AssetCollectionName) VALUES('Characters');
+INSERT INTO AssetCollections(AssetCollectionName) VALUES('Clothing');
+INSERT INTO AssetCollections(AssetCollectionName) VALUES('Hair');
 INSERT INTO AssetCollections(AssetCollectionName) VALUES('Props');
 
 CREATE TABLE AssetCollectionItems(AssetCollectionItemID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionItemPath TEXT NOT NULL, AssetCollectionItemCol INTEGER NOT NULL DEFAULT 0, UNIQUE(AssetCollectionItemPath, AssetCollectionItemCol) ON CONFLICT IGNORE);
 CREATE INDEX idx_AssetCollectionItemPath ON AssetCollectionItems(AssetCollectionItemPath);
 CREATE INDEX idx_AssetCollectionItemCol ON AssetCollectionItems(AssetCollectionItemCol);
+
+CREATE TABLE AssetCollectionFolders(AssetCollectionFolderID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionFolderPath TEXT NOT NULL, AssetCollectionFolderName TEXT NOT NULL DEFAULT '', AssetCollectionFolderCol INTEGER NOT NULL DEFAULT 0, UNIQUE(AssetCollectionFolderPath, AssetCollectionFolderCol) ON CONFLICT IGNORE);
+CREATE INDEX idx_AssetCollectionFolderPath ON AssetCollectionFolders(AssetCollectionFolderPath);
+CREATE INDEX idx_AssetCollectionFolderCol ON AssetCollectionFolders(AssetCollectionFolderCol);
 
 

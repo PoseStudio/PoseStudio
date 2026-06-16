@@ -22,15 +22,19 @@
 #include <QDirIterator>
 #include <QEnterEvent>
 #include <QFileInfo>
+#include <QFrame>
 #include <QHash>
+#include <QHBoxLayout>
 #include <QHelpEvent>
 #include <QIcon>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QProxyStyle>
+#include <QPushButton>
 #include <QSet>
 #include <QSplitter>
 #include <QSqlDatabase>
@@ -44,6 +48,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <algorithm>
+#include <functional>
 
 // =============================================================================
 // [ CUSTOM STYLE OVERRIDES ]
@@ -279,10 +284,9 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
     QString path = sourceModel()->data(sourceIndex, Qt::UserRole).toString();
 
     // ---------------------------------------------------------
-    // 1. Root Node Overrides (Favorites & Collections)
+    // 1. Root Node Overrides (Collections)
     // ---------------------------------------------------------
     if (path == "FAVORITES_ROOT") {
-        if (role == Qt::DecorationRole) return QIcon(":/resources/icons/favorites.png"); 
         return QIdentityProxyModel::data(proxyIndex, role);
     }
     if (path == "COLLECTIONS_ROOT") {
@@ -302,25 +306,26 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
     }
 
     if (role == Qt::DecorationRole || role == Qt::ForegroundRole) {
-        QModelIndex parentIndex = sourceIndex.parent();
-
-        if (role == Qt::DecorationRole && parentIndex.isValid() &&
-            sourceModel()->data(parentIndex, Qt::UserRole).toString() == "FAVORITES_ROOT") {
-            return QIcon(":/resources/icons/favorite-item.png");
-        }
-
         FolderHitState state = NoHit;
         if (path.startsWith("COLLECTION_")) {
             if (!hasHitCache.contains(path)) {
                 int collId = path.mid(11).toInt();
+                bool found = false;
+                // Check asset items first
                 QSqlQuery q(QSqlDatabase::database("db_conn"));
                 q.prepare("SELECT AssetCollectionItemPath FROM AssetCollectionItems WHERE AssetCollectionItemCol = :id");
                 q.bindValue(":id", collId);
-                bool found = false;
                 if (q.exec()) {
                     while (q.next()) {
                         if (QFileInfo::exists(q.value(0).toString())) { found = true; break; }
                     }
+                }
+                // Fall back to folder shortcuts if no asset items found
+                if (!found) {
+                    QSqlQuery qf(QSqlDatabase::database("db_conn"));
+                    qf.prepare("SELECT COUNT(*) FROM AssetCollectionFolders WHERE AssetCollectionFolderCol = :id");
+                    qf.bindValue(":id", collId);
+                    if (qf.exec() && qf.next() && qf.value(0).toInt() > 0) found = true;
                 }
                 hasHitCache.insert(path, found ? DirectHit : NoHit);
             }
@@ -386,21 +391,62 @@ void AssetManagerWidget::setupUI() {
     QSplitter *splitter = new QSplitter(Qt::Vertical, this);
     splitter->setHandleWidth(6); 
 
-    // --- 1. Top Panel: Directory & Collections Tree ---
+    // --- 1. Top Panel: Search bar + Directory & Collections Tree ---
     dirModel = new QStandardItemModel(this);
     proxyModel = new AssetFolderProxyModel(dirModel, this);
 
-    dirTreeView = new AssetTreeView(splitter);
+    QWidget *topPanel = new QWidget(splitter);
+    topPanel->setObjectName("AssetManagerTopPanel");
+    QVBoxLayout *topLayout = new QVBoxLayout(topPanel);
+    topLayout->setContentsMargins(0, 0, 0, 0);
+    topLayout->setSpacing(0);
+
+    QWidget *searchRow = new QWidget(topPanel);
+    searchRow->setObjectName("AssetManagerSearchRow");
+    QHBoxLayout *searchLayout = new QHBoxLayout(searchRow);
+    searchLayout->setContentsMargins(6, 5, 6, 5);
+    searchLayout->setSpacing(4);
+
+    searchInput = new QLineEdit(searchRow);
+    searchInput->setObjectName("AssetManagerSearchInput");
+    searchInput->setPlaceholderText("Search assets...");
+
+    clearSearchButton = new QPushButton(searchRow);
+    clearSearchButton->setObjectName("AssetManagerClearButton");
+    clearSearchButton->setIcon(QIcon(":/resources/icons/clear.png"));
+    clearSearchButton->setIconSize(QSize(14, 14));
+    clearSearchButton->setFixedSize(26, 26);
+
+    searchButton = new QPushButton(searchRow);
+    searchButton->setObjectName("AssetManagerSearchButton");
+    searchButton->setIcon(QIcon(":/resources/icons/search.png"));
+    searchButton->setIconSize(QSize(14, 14));
+    searchButton->setFixedSize(26, 26);
+
+    searchLayout->addWidget(searchInput);
+    searchLayout->addWidget(clearSearchButton);
+    searchLayout->addWidget(searchButton);
+
+    QFrame *searchSeparator = new QFrame(topPanel);
+    searchSeparator->setObjectName("AssetManagerSearchSeparator");
+    searchSeparator->setFrameShape(QFrame::HLine);
+    searchSeparator->setFrameShadow(QFrame::Plain);
+
+    dirTreeView = new AssetTreeView(topPanel);
     dirTreeView->setObjectName("AssetManagerTree");
     dirTreeView->setModel(proxyModel);
     dirTreeView->setItemDelegate(new AssetTreeDelegate(this));
-    dirTreeView->setHeaderHidden(true); 
-    
+    dirTreeView->setHeaderHidden(true);
+
     dirTreeView->setEditTriggers(QAbstractItemView::SelectedClicked | QAbstractItemView::EditKeyPressed);
     dirTreeView->setContextMenuPolicy(Qt::CustomContextMenu);
-    
+
     connect(dirTreeView, &QTreeView::customContextMenuRequested, this, &AssetManagerWidget::onContextMenuRequested);
     connect(dirModel, &QStandardItemModel::itemChanged, this, &AssetManagerWidget::onItemChanged);
+
+    topLayout->addWidget(searchRow);
+    topLayout->addWidget(searchSeparator);
+    topLayout->addWidget(dirTreeView);
 
     // --- 2. Bottom Panel: Asset Thumbnail Grid ---
     QWidget *bottomPanel = new QWidget(splitter);
@@ -440,7 +486,7 @@ void AssetManagerWidget::setupUI() {
     bottomLayout->addWidget(titleLabel);
     bottomLayout->addWidget(assetListWidget); 
 
-    splitter->addWidget(dirTreeView);
+    splitter->addWidget(topPanel);
     splitter->addWidget(bottomPanel);
     splitter->setSizes({300, 700});
 
@@ -448,6 +494,17 @@ void AssetManagerWidget::setupUI() {
 
     connect(dirTreeView, &QTreeView::clicked, this, &AssetManagerWidget::onFolderSelected);
     connect(dirTreeView, &QTreeView::expanded, this, &AssetManagerWidget::onTreeExpanded);
+
+    connect(searchButton, &QPushButton::clicked, this, [this]() {
+        runSearch(searchInput->text().trimmed());
+    });
+    connect(searchInput, &QLineEdit::returnPressed, this, [this]() {
+        runSearch(searchInput->text().trimmed());
+    });
+    connect(clearSearchButton, &QPushButton::clicked, this, [this]() {
+        searchInput->clear();
+        runSearch(QString());
+    });
 
     refreshAssetManager();
 }
@@ -538,22 +595,12 @@ void AssetManagerWidget::refreshAssetManager() {
     if (titleLabel) titleLabel->setText("Select a folder to view assets...");
 
     // ---------------------------------------------------------
-    // 2. Rebuild Favorites Root
+    // 2. Build Search Results Root (always first in tree)
     // ---------------------------------------------------------
-    favoritesRootItem = new QStandardItem(Constants::TERM_FAV_PLURAL);
-    favoritesRootItem->setData("FAVORITES_ROOT", Qt::UserRole); 
-    favoritesRootItem->setIcon(QIcon(":/resources/icons/favorites.png")); 
-    
-    favoritesRootItem->setFlags(favoritesRootItem->flags() & ~Qt::ItemIsEditable);
-    dirModel->appendRow(favoritesRootItem);
-
-    QSqlQuery favQuery(QSqlDatabase::database("db_conn"));
-    favQuery.exec("SELECT AssetFavoritePath, AssetFavoriteName FROM AssetFavorites");
-    while (favQuery.next()) {
-        QString savedPath = favQuery.value(0).toString();
-        QString savedName = favQuery.value(1).toString();
-        addFavoriteFolder(savedPath, savedName, false); 
-    }
+    searchResultsRootItem = new QStandardItem("Search Results");
+    searchResultsRootItem->setData("SEARCH_ROOT", Qt::UserRole);
+    searchResultsRootItem->setFlags(searchResultsRootItem->flags() & ~Qt::ItemIsEditable);
+    dirModel->appendRow(searchResultsRootItem);
 
     // ---------------------------------------------------------
     // 3. Rebuild Collections Root
@@ -575,7 +622,21 @@ void AssetManagerWidget::refreshAssetManager() {
         
         colItem->setFlags(colItem->flags() | Qt::ItemIsEditable);
         collectionsRootItem->appendRow(colItem);
+
+        // Load folder shortcuts for this collection
+        QSqlQuery folderQuery(QSqlDatabase::database("db_conn"));
+        folderQuery.prepare("SELECT AssetCollectionFolderPath, AssetCollectionFolderName FROM AssetCollectionFolders WHERE AssetCollectionFolderCol = :id");
+        folderQuery.bindValue(":id", colId.toInt());
+        if (folderQuery.exec()) {
+            while (folderQuery.next()) {
+                QString fPath = folderQuery.value(0).toString();
+                QString fName = folderQuery.value(1).toString();
+                if (fName.isEmpty()) fName = QDir(fPath).dirName();
+                addFolderToCollection(fPath, fName, colId.toInt(), false);
+            }
+        }
     }
+    collectionsRootItem->sortChildren(0, Qt::AscendingOrder);
 
     // ---------------------------------------------------------
     // 4. Count Active Libraries
@@ -654,6 +715,126 @@ void AssetManagerWidget::refreshAssetManager() {
 }
 
 /**
+ * @brief Searches all enabled asset libraries for folders whose name contains the query string.
+ *        Results are displayed under the Search Results root node, grouped by library.
+ */
+void AssetManagerWidget::runSearch(const QString& query) {
+    searchResultsRootItem->removeRows(0, searchResultsRootItem->rowCount());
+
+    const QModelIndex searchProxyIdx = proxyModel->mapFromSource(
+        dirModel->indexFromItem(searchResultsRootItem));
+
+    if (query.isEmpty()) {
+        if (searchProxyIdx.isValid()) dirTreeView->collapse(searchProxyIdx);
+        return;
+    }
+
+    // Show "Searching..." immediately and let Qt repaint before the blocking scan
+    QStandardItem *loadingItem = new QStandardItem("Searching...");
+    loadingItem->setFlags(Qt::NoItemFlags);
+    searchResultsRootItem->appendRow(loadingItem);
+    if (searchProxyIdx.isValid()) {
+        dirTreeView->expand(searchProxyIdx);
+        dirTreeView->scrollTo(searchProxyIdx, QAbstractItemView::PositionAtTop);
+    }
+    searchButton->setEnabled(false);
+    clearSearchButton->setEnabled(false);
+    searchInput->setEnabled(false);
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    // Collect results into local structures before touching the model
+    QList<QStandardItem*> libraryNodes;
+    int totalFound = 0;
+
+    QSqlQuery libQuery(QSqlDatabase::database("db_conn"));
+    libQuery.exec("SELECT AssetLibraryPath FROM AssetLibraries WHERE AssetLibraryEnabled = 1");
+
+    while (libQuery.next()) {
+        const QString libPath = libQuery.value(0).toString();
+        const QDir libDir(libPath);
+        if (!libDir.exists()) continue;
+
+        QStandardItem *libHeader = new QStandardItem(libDir.dirName());
+        libHeader->setData(libPath, Qt::UserRole);
+        libHeader->setFlags(libHeader->flags() & ~Qt::ItemIsEditable);
+
+        // path → item map for deduplicating shared ancestor nodes
+        QHash<QString, QStandardItem*> pathItemMap;
+        QSet<QString> matchedPaths;
+
+        // Ensures a tree node exists for absPath, recursively creating ancestors up to libHeader.
+        std::function<QStandardItem*(const QString&)> ensureNode;
+        ensureNode = [&](const QString& absPath) -> QStandardItem* {
+            if (absPath == libPath) return libHeader;
+            auto cached = pathItemMap.find(absPath);
+            if (cached != pathItemMap.end()) return cached.value();
+
+            const QFileInfo fi(absPath);
+            QStandardItem *parent = ensureNode(fi.absolutePath());
+            QStandardItem *node = new QStandardItem(fi.fileName());
+            node->setData(absPath, Qt::UserRole);
+            node->setFlags(node->flags() & ~Qt::ItemIsEditable);
+            parent->appendRow(node);
+            pathItemMap.insert(absPath, node);
+            return node;
+        };
+
+        QDirIterator it(libPath,
+                        QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks,
+                        QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            it.next();
+            const QFileInfo fi = it.fileInfo();
+            if (!fi.fileName().contains(query, Qt::CaseInsensitive)) continue;
+
+            const QString absPath = fi.absoluteFilePath();
+            if (!proxyModel->hasHit(absPath)) continue;
+
+            matchedPaths.insert(absPath);
+            ensureNode(absPath);
+        }
+
+        if (!matchedPaths.isEmpty()) {
+            // Add "..." only to leaf matched nodes — those with no pre-built children.
+            // Intermediate nodes already have real children so onTreeExpanded skips them.
+            for (const QString& matchPath : matchedPaths) {
+                QStandardItem *node = pathItemMap.value(matchPath);
+                if (!node || node->rowCount() > 0) continue;
+                QDirIterator subIt(matchPath, QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
+                if (subIt.hasNext()) node->appendRow(new QStandardItem("..."));
+            }
+            libraryNodes.append(libHeader);
+            totalFound += matchedPaths.size();
+        } else {
+            delete libHeader;
+        }
+    }
+
+    // Replace "Searching..." with real results
+    searchResultsRootItem->removeRows(0, searchResultsRootItem->rowCount());
+
+    if (totalFound == 0) {
+        QStandardItem *noResult = new QStandardItem("(No results)");
+        noResult->setFlags(Qt::NoItemFlags);
+        searchResultsRootItem->appendRow(noResult);
+    } else {
+        for (QStandardItem *node : libraryNodes)
+            searchResultsRootItem->appendRow(node);
+    }
+
+    QApplication::restoreOverrideCursor();
+    searchButton->setEnabled(true);
+    clearSearchButton->setEnabled(true);
+    searchInput->setEnabled(true);
+
+    if (searchProxyIdx.isValid()) {
+        dirTreeView->expand(searchProxyIdx);
+        dirTreeView->scrollTo(searchProxyIdx, QAbstractItemView::PositionAtTop);
+    }
+}
+
+/**
  * @brief Handles lazy-loading of physical directories to keep memory footprint low.
  */
 void AssetManagerWidget::onTreeExpanded(const QModelIndex &proxyIndex) {
@@ -661,7 +842,8 @@ void AssetManagerWidget::onTreeExpanded(const QModelIndex &proxyIndex) {
     QStandardItem *item = dirModel->itemFromIndex(sourceIndex);
 
     if (!item || !item->hasChildren()) return;
-    if (item == favoritesRootItem || item == collectionsRootItem) return;
+    if (item == collectionsRootItem || item == searchResultsRootItem) return;
+    if (item->parent() == searchResultsRootItem) return; // library grouper headers in search results
 
     const QString parentData = item->data(Qt::UserRole).toString();
 
@@ -747,113 +929,6 @@ void AssetManagerWidget::onTreeExpanded(const QModelIndex &proxyIndex) {
 }
 
 /**
- * @brief Adds a folder (or virtual combined directory) to the Shortcuts database and visually updates the tree.
- */
-void AssetManagerWidget::addFavoriteFolder(const QString& folderPath, const QString& displayName, bool saveToDb) {
-    // 1. Prevent duplicate entries during current session
-    for (int i = 0; i < favoritesRootItem->rowCount(); ++i) {
-        if (favoritesRootItem->child(i)->data(Qt::UserRole).toString() == folderPath) {
-            return; 
-        }
-    }
-
-    // 2. Check if this is a virtual directory or a physical hard drive path
-    bool isVirtualNode = folderPath.startsWith("COMBINED_DIR_");
-
-    // 3. Determine the default name if none was provided
-    QString defaultName;
-    if (isVirtualNode) {
-        // Extract just the final folder name from "COMBINED_DIR_path/to/folder"
-        QString relPath = folderPath.mid(13);
-        defaultName = relPath.section('/', -1); 
-    } else {
-        defaultName = QDir(folderPath).dirName();
-    }
-    QString nameToSave = displayName.isEmpty() ? defaultName : displayName;
-
-    // 4. Save to SQLite
-    if (saveToDb) {
-        QSqlQuery query(QSqlDatabase::database("db_conn"));
-        query.prepare("INSERT OR IGNORE INTO AssetFavorites (AssetFavoritePath, AssetFavoriteName) VALUES (:path, :name)");
-        query.bindValue(":path", folderPath);
-        query.bindValue(":name", nameToSave);
-        if (!query.exec()) {
-            qWarning() << "[!] Failed to save shortcut to DB:" << query.lastError().text();
-        }
-    }
-
-    // 5. Build the visual UI Item
-    QStandardItem *favItem = new QStandardItem(nameToSave);
-    favItem->setFlags(favItem->flags() | Qt::ItemIsEditable); 
-
-    // 6. Validation & Child Assignment
-    if (isVirtualNode) {
-        favItem->setData(folderPath, Qt::UserRole);
-        
-        // THE FIX: Check if this virtual folder actually has subdirectories before adding the dummy node
-        QString relPath = folderPath.mid(13);
-        bool hasSubDirs = false;
-        
-        QSqlQuery libQuery(QSqlDatabase::database("db_conn"));
-        libQuery.exec("SELECT AssetLibraryPath FROM AssetLibraries WHERE AssetLibraryEnabled = 1");
-        
-        while (libQuery.next()) {
-            QDir dir(libQuery.value(0).toString());
-            if (dir.cd(relPath)) {
-                QDirIterator it(dir.absolutePath(), QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::NoIteratorFlags);
-                if (it.hasNext()) {
-                    hasSubDirs = true;
-                    break; // As soon as we find one subfolder across any drive, we know it needs an arrow!
-                }
-            }
-        }
-        
-        // Only add the dummy node (which draws the arrow) if there are actual subfolders
-        if (hasSubDirs) {
-            favItem->appendRow(new QStandardItem("..."));
-        }
-        
-    } else {
-        QDir dir(folderPath);
-        if (!dir.exists()) {
-            favItem->setData("BROKEN_PATH", Qt::UserRole);
-            favItem->setText(nameToSave + " (Not Found)");
-            favoritesRootItem->appendRow(favItem);
-            return;
-        }
-
-        favItem->setData(folderPath, Qt::UserRole);
-        QDirIterator it(folderPath, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::NoIteratorFlags);
-        if (it.hasNext()) {
-            favItem->appendRow(new QStandardItem("..."));
-        }
-    }
-
-    favoritesRootItem->appendRow(favItem);
-}
-
-/**
- * @brief Removes a folder from the Favorites database and visually removes it from the tree.
- */
-void AssetManagerWidget::removeFavoriteFolder(const QString& folderPath) {
-    QSqlQuery query(QSqlDatabase::database("db_conn"));
-    query.prepare("DELETE FROM AssetFavorites WHERE AssetFavoritePath = :path");
-    query.bindValue(":path", folderPath);
-    
-    if (!query.exec()) {
-        qWarning() << "Failed to remove favorite from DB:" << query.lastError().text();
-    }
-
-    // Visually remove from the UI Tree
-    for (int i = 0; i < favoritesRootItem->rowCount(); ++i) {
-        if (favoritesRootItem->child(i)->data(Qt::UserRole).toString() == folderPath) {
-            favoritesRootItem->removeRow(i);
-            break; 
-        }
-    }
-}
-
-/**
  * @brief Triggered when a user clicks a node in the directory tree. Processes the click and populates the grid.
  */
 void AssetManagerWidget::onFolderSelected(const QModelIndex &proxyIndex) {
@@ -864,11 +939,13 @@ void AssetManagerWidget::onFolderSelected(const QModelIndex &proxyIndex) {
     // ---------------------------------------------------------
     // 1. Handle Structural Node Clicks
     // ---------------------------------------------------------
-    if (folderPath == "FAVORITES_ROOT" || folderPath == "COLLECTIONS_ROOT" || folderPath == "COMBINED_ROOT") {
+    if (folderPath == "COLLECTIONS_ROOT" || folderPath == "COMBINED_ROOT" || folderPath == "SEARCH_ROOT") {
         bool isExpanded = dirTreeView->isExpanded(proxyIndex);
         dirTreeView->setExpanded(proxyIndex, !isExpanded);
-        return; 
+        return;
     }
+
+    if (folderPath == "FAVORITES_ROOT") return;
 
     if (folderPath.isEmpty() || folderPath == "BROKEN_PATH" || folderPath == "SEPARATOR") return;
 
@@ -1159,37 +1236,6 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
     }
 
     // =========================================================================
-    // DEDICATED MENU: "FAVORITES" ROOT NODE
-    // =========================================================================
-    if (folderPath == "FAVORITES_ROOT") {
-        QMenu rootMenu(this);
-        rootMenu.setObjectName("AssetManagerContextMenu");
-        bool isExpanded = dirTreeView->isExpanded(proxyIndex);
-        bool hasChildren = proxyModel->hasChildren(proxyIndex); 
-        
-        QAction *expandAction = nullptr;
-        QAction *collapseAction = nullptr;
-        
-        if (isExpanded) {
-            collapseAction = rootMenu.addAction(QIcon(":/resources/icons/collapse.png"), "Collapse");
-        } else {
-            expandAction = rootMenu.addAction(QIcon(":/resources/icons/expand.png"), "Expand");
-            expandAction->setEnabled(hasChildren); 
-        }
-        
-        rootMenu.addSeparator();
-        QAction *refreshAction = rootMenu.addAction(QIcon(":/resources/icons/refresh.png"), "Refresh");
-        
-        QAction *selectedAction = rootMenu.exec(dirTreeView->viewport()->mapToGlobal(pos));
-        
-        if (expandAction && selectedAction == expandAction) dirTreeView->expand(proxyIndex);
-        else if (collapseAction && selectedAction == collapseAction) collapseNodeRecursively(proxyIndex); 
-        else if (selectedAction == refreshAction) refreshAssetManager();
-        
-        return; 
-    }
-
-    // =========================================================================
     // DEDICATED MENU: "COLLECTIONS" ROOT NODE
     // =========================================================================
     if (folderPath == "COLLECTIONS_ROOT") {
@@ -1229,30 +1275,33 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         combinedMenu.setObjectName("AssetManagerContextMenu");
         
         // 1. Setup Actions
-        QAction *shortcutAction = nullptr;
-        QAction *removeShortcutAction = nullptr;
         QAction *browseAction = nullptr;
         QString singlePhysicalPath;
 
         if (folderPath.startsWith("COMBINED_DIR_")) {
-            
-            // A. Shortcut Management (POSITION 1)
-            bool isAlreadyShortcut = false;
-            for (int i = 0; i < favoritesRootItem->rowCount(); ++i) {
-                if (favoritesRootItem->child(i)->data(Qt::UserRole).toString() == folderPath) {
-                    isAlreadyShortcut = true;
-                    break;
-                }
-            }
 
-            if (!isAlreadyShortcut) {
-                shortcutAction = combinedMenu.addAction(QIcon(":/resources/icons/favorites.png"), 
-                                                       QStringLiteral("Add to %1").arg(Constants::TERM_FAV_PLURAL));
-            } else {
-                removeShortcutAction = combinedMenu.addAction(QIcon(":/resources/icons/unfavorite.png"), 
-                                                             QStringLiteral("Remove %1").arg(Constants::TERM_FAV_SINGULAR));
+            // A. Add to Collection submenu (POSITION 1)
+            QMenu *addToCollMenu = new QMenu("Add to Collection", &combinedMenu);
+            addToCollMenu->setIcon(QIcon(":/resources/icons/collections.png"));
+            addToCollMenu->setObjectName("AssetManagerContextMenu");
+            addToCollMenu->addAction("New Collection", [this, folderPath, folderName]() {
+                int cid = getOrCreateCollection("New Collection");
+                if (cid > 0) addFolderToCollection(folderPath, folderName, cid);
+            });
+            QSqlQuery collQ(QSqlDatabase::database("db_conn"));
+            collQ.exec("SELECT AssetCollectionID, AssetCollectionName FROM AssetCollections");
+            bool hasExisting = false;
+            while (collQ.next()) {
+                if (collQ.value(1).toString() == "New Collection") continue;
+                if (!hasExisting) { addToCollMenu->addSeparator(); hasExisting = true; }
+                int cid = collQ.value(0).toInt();
+                QString cname = collQ.value(1).toString();
+                addToCollMenu->addAction(cname, [this, folderPath, folderName, cid]() {
+                    addFolderToCollection(folderPath, folderName, cid);
+                });
             }
-            
+            combinedMenu.addAction(addToCollMenu->menuAction());
+
             // B. Browse Folder (POSITION 2)
             QString relPath = folderPath.mid(13);
             QStringList existingPaths;
@@ -1316,12 +1365,10 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         // 3. Execution
         QAction *selectedAction = combinedMenu.exec(dirTreeView->viewport()->mapToGlobal(pos));
 
-        if (shortcutAction && selectedAction == shortcutAction) addFavoriteFolder(folderPath, folderName);
-        else if (removeShortcutAction && selectedAction == removeShortcutAction) removeFavoriteFolder(folderPath);
-        else if (browseAction && selectedAction == browseAction) QDesktopServices::openUrl(QUrl::fromLocalFile(singlePhysicalPath));
+        if (browseAction && selectedAction == browseAction) QDesktopServices::openUrl(QUrl::fromLocalFile(singlePhysicalPath));
         else if (expandAction && selectedAction == expandAction) dirTreeView->expand(proxyIndex);
         else if (expandBranchAction && selectedAction == expandBranchAction) expandNodeRecursively(proxyIndex);
-        else if (collapseAction && selectedAction == collapseAction) collapseNodeRecursively(proxyIndex); 
+        else if (collapseAction && selectedAction == collapseAction) collapseNodeRecursively(proxyIndex);
         else if (selectedAction == refreshAction) refreshAssetManager();
         
         return; 
@@ -1331,15 +1378,34 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
     // DEDICATED MENU: INDIVIDUAL DB COLLECTION ITEMS
     // =========================================================================
     if (folderPath.startsWith("COLLECTION_")) {
+        const int collId = folderPath.mid(11).toInt();
+
+        // Deletable only when both asset items and folder shortcuts are absent
+        bool collIsEmpty = true;
+        {
+            QSqlQuery chk(QSqlDatabase::database("db_conn"));
+            chk.prepare("SELECT COUNT(*) FROM AssetCollectionItems WHERE AssetCollectionItemCol = :id");
+            chk.bindValue(":id", collId);
+            if (chk.exec() && chk.next() && chk.value(0).toInt() > 0) collIsEmpty = false;
+        }
+        if (collIsEmpty) {
+            QSqlQuery chk(QSqlDatabase::database("db_conn"));
+            chk.prepare("SELECT COUNT(*) FROM AssetCollectionFolders WHERE AssetCollectionFolderCol = :id");
+            chk.bindValue(":id", collId);
+            if (chk.exec() && chk.next() && chk.value(0).toInt() > 0) collIsEmpty = false;
+        }
+
         QMenu collMenu(this);
         collMenu.setObjectName("AssetManagerContextMenu");
 
-        QAction *renameAction = collMenu.addAction(QIcon(":/resources/icons/rename.png"), 
+        QAction *renameAction = collMenu.addAction(QIcon(":/resources/icons/rename.png"),
                                                    QStringLiteral("Rename %1").arg(Constants::TERM_COL_SINGULAR));
+        QAction *deleteAction = collMenu.addAction(QStringLiteral("Delete %1").arg(Constants::TERM_COL_SINGULAR));
+        deleteAction->setEnabled(collIsEmpty);
         collMenu.addSeparator();
 
         bool isExpanded = dirTreeView->isExpanded(proxyIndex);
-        bool hasChildren = proxyModel->hasChildren(proxyIndex); 
+        bool hasChildren = proxyModel->hasChildren(proxyIndex);
         QAction *expandAction = nullptr;
         QAction *collapseAction = nullptr;
 
@@ -1347,70 +1413,83 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
             collapseAction = collMenu.addAction(QIcon(":/resources/icons/collapse.png"), "Collapse");
         } else {
             expandAction = collMenu.addAction(QIcon(":/resources/icons/expand.png"), "Expand");
-            expandAction->setEnabled(hasChildren); 
+            expandAction->setEnabled(hasChildren);
         }
-        
+
         collMenu.addSeparator();
         QAction *refreshAction = collMenu.addAction(QIcon(":/resources/icons/refresh.png"), "Refresh");
 
         QAction *selectedAction = collMenu.exec(dirTreeView->viewport()->mapToGlobal(pos));
 
-        if (renameAction && selectedAction == renameAction) dirTreeView->edit(proxyIndex);
-        else if (expandAction && selectedAction == expandAction) dirTreeView->expand(proxyIndex);
-        else if (collapseAction && selectedAction == collapseAction) collapseNodeRecursively(proxyIndex); 
-        else if (selectedAction == refreshAction) refreshAssetManager();
-        
+        if (renameAction && selectedAction == renameAction) {
+            dirTreeView->edit(proxyIndex);
+        } else if (deleteAction && selectedAction == deleteAction) {
+            QSqlDatabase db = QSqlDatabase::database("db_conn");
+            QSqlQuery q(db);  q.prepare("DELETE FROM AssetCollections WHERE AssetCollectionID = :id");         q.bindValue(":id", collId); q.exec();
+            QSqlQuery q2(db); q2.prepare("DELETE FROM AssetCollectionItems WHERE AssetCollectionItemCol = :id"); q2.bindValue(":id", collId); q2.exec();
+            QSqlQuery q3(db); q3.prepare("DELETE FROM AssetCollectionFolders WHERE AssetCollectionFolderCol = :id"); q3.bindValue(":id", collId); q3.exec();
+            QModelIndex srcIdx = proxyModel->mapToSource(proxyIndex);
+            QStandardItem *collItem = dirModel->itemFromIndex(srcIdx);
+            if (collItem && collItem->parent()) collItem->parent()->removeRow(collItem->row());
+            titleLabel->setText("Select a folder to view assets...");
+            assetListWidget->clear();
+        } else if (expandAction && selectedAction == expandAction) {
+            dirTreeView->expand(proxyIndex);
+        } else if (collapseAction && selectedAction == collapseAction) {
+            collapseNodeRecursively(proxyIndex);
+        } else if (selectedAction == refreshAction) {
+            refreshAssetManager();
+        }
+
         return;
     }
 
     // =========================================================================
     // STANDARD MENU: PHYSICAL HARD DRIVE DIRECTORIES
     // =========================================================================
-    
-    bool isAlreadyFavorite = false;
-    bool isChildOfFavorite = false;
-    
-    QString targetPath = QDir::fromNativeSeparators(folderPath);
-    if (!targetPath.endsWith('/')) targetPath += '/';
-
-    for (int i = 0; i < favoritesRootItem->rowCount(); ++i) {
-        QString favPath = favoritesRootItem->child(i)->data(Qt::UserRole).toString();
-        QString normalizedFav = QDir::fromNativeSeparators(favPath);
-        if (!normalizedFav.endsWith('/')) normalizedFav += '/';
-
-        if (targetPath == normalizedFav) {
-            isAlreadyFavorite = true;
-            break;
-        } 
-        else if (targetPath.startsWith(normalizedFav)) {
-            isChildOfFavorite = true;
-        }
-    }
-
     QStandardItem *clickedItem = dirModel->itemFromIndex(sourceIndex);
-    bool isTopLevelFavorite = (clickedItem && clickedItem->parent() == favoritesRootItem);
+    int parentCollectionId = clickedItem && clickedItem->parent()
+        ? clickedItem->data(Qt::UserRole + 1).toInt()
+        : 0;
+    bool isCollectionFolder = (parentCollectionId > 0);
 
     QMenu contextMenu(this);
     contextMenu.setObjectName("AssetManagerContextMenu");
 
-    QAction *favoriteAction = nullptr;
-    QAction *renameAction = nullptr;
-
-    if (!isAlreadyFavorite && !isChildOfFavorite) {
-        favoriteAction = contextMenu.addAction(QIcon(":/resources/icons/favorites.png"), 
-                                               QStringLiteral("Add to %1").arg(Constants::TERM_FAV_PLURAL));
-    }
-    
-    if (isAlreadyFavorite && isTopLevelFavorite) {
-        renameAction = contextMenu.addAction(QIcon(":/resources/icons/rename.png"), 
-                                             QStringLiteral("Rename %1").arg(Constants::TERM_FAV_SINGULAR));
+    QAction *removeFromCollFolderAction = nullptr;
+    if (isCollectionFolder) {
+        removeFromCollFolderAction = contextMenu.addAction(
+            QIcon(":/resources/icons/unfavorite.png"), "Remove from Collection");
+        contextMenu.addSeparator();
+    } else {
+        QMenu *addToCollMenu = new QMenu("Add to Collection", &contextMenu);
+        addToCollMenu->setIcon(QIcon(":/resources/icons/collections.png"));
+        addToCollMenu->setObjectName("AssetManagerContextMenu");
+        addToCollMenu->addAction("New Collection", [this, folderPath, folderName]() {
+            int cid = getOrCreateCollection("New Collection");
+            if (cid > 0) addFolderToCollection(folderPath, folderName, cid);
+        });
+        QSqlQuery collQ(QSqlDatabase::database("db_conn"));
+        collQ.exec("SELECT AssetCollectionID, AssetCollectionName FROM AssetCollections");
+        bool hasExisting = false;
+        while (collQ.next()) {
+            if (collQ.value(1).toString() == "New Collection") continue;
+            if (!hasExisting) { addToCollMenu->addSeparator(); hasExisting = true; }
+            int cid = collQ.value(0).toInt();
+            QString cname = collQ.value(1).toString();
+            addToCollMenu->addAction(cname, [this, folderPath, folderName, cid]() {
+                addFolderToCollection(folderPath, folderName, cid);
+            });
+        }
+        contextMenu.addAction(addToCollMenu->menuAction());
+        contextMenu.addSeparator();
     }
 
     QAction *browseAction = contextMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
     contextMenu.addSeparator();
 
     bool isExpanded = dirTreeView->isExpanded(proxyIndex);
-    bool hasChildren = proxyModel->hasChildren(proxyIndex); 
+    bool hasChildren = proxyModel->hasChildren(proxyIndex);
 
     QAction *expandAction = nullptr;
     QAction *expandBranchAction = nullptr;
@@ -1418,35 +1497,24 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
 
     if (!isExpanded) {
         expandAction = contextMenu.addAction(QIcon(":/resources/icons/expand.png"), "Expand");
-        expandAction->setEnabled(hasChildren); 
+        expandAction->setEnabled(hasChildren);
     }
-    
     expandBranchAction = contextMenu.addAction(QIcon(":/resources/icons/expand-branch.png"), "Expand Branch");
-    expandBranchAction->setEnabled(hasChildren); 
-
+    expandBranchAction->setEnabled(hasChildren);
     if (isExpanded) {
         collapseAction = contextMenu.addAction(QIcon(":/resources/icons/collapse.png"), "Collapse");
     }
     contextMenu.addSeparator();
-
-    QAction *removeFavoriteAction = nullptr;
-    
-    if (isAlreadyFavorite) {
-        removeFavoriteAction = contextMenu.addAction(QIcon(":/resources/icons/unfavorite.png"), 
-                                                     QStringLiteral("Remove From %1").arg(Constants::TERM_FAV_PLURAL));
-    }
-
     QAction *refreshAction = contextMenu.addAction(QIcon(":/resources/icons/refresh.png"), "Refresh");
 
     QAction *selectedAction = contextMenu.exec(dirTreeView->viewport()->mapToGlobal(pos));
 
-    if (expandAction && selectedAction == expandAction) dirTreeView->expand(proxyIndex);
+    if (removeFromCollFolderAction && selectedAction == removeFromCollFolderAction)
+        removeFolderFromCollection(folderPath, parentCollectionId);
+    else if (expandAction && selectedAction == expandAction) dirTreeView->expand(proxyIndex);
     else if (collapseAction && selectedAction == collapseAction) collapseNodeRecursively(proxyIndex);
     else if (selectedAction == expandBranchAction) expandNodeRecursively(proxyIndex);
     else if (selectedAction == browseAction) QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
-    else if (favoriteAction && selectedAction == favoriteAction) addFavoriteFolder(folderPath, folderName);
-    else if (removeFavoriteAction && selectedAction == removeFavoriteAction) removeFavoriteFolder(folderPath);
-    else if (renameAction && selectedAction == renameAction) dirTreeView->edit(proxyIndex);
     else if (selectedAction == refreshAction) refreshAssetManager();
 }
 
@@ -1547,16 +1615,26 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
     // Dynamically query collections from SQLite
     QSqlQuery collQuery(QSqlDatabase::database("db_conn"));
     collQuery.exec("SELECT AssetCollectionID, AssetCollectionName FROM AssetCollections");
-    
-    bool hasCollections = false;
+
     bool hasOtherCollections = false; // Tracks if there are valid destinations to move/copy to
-    
+
+    // "New Collection" always at the top of the Add menu
+    if (currentCollectionId == -1) {
+        QAction *newCollAction = addMenu->addAction("New Collection");
+        connect(newCollAction, &QAction::triggered, [this, fullPath]() {
+            int cid = getOrCreateCollection("New Collection");
+            if (cid > 0) addAssetToCollection(fullPath, cid);
+        });
+    }
+
+    bool hasExistingForAdd = false;
     while (collQuery.next()) {
-        hasCollections = true;
         int colId = collQuery.value(0).toInt();
         QString colName = collQuery.value(1).toString();
 
         if (currentCollectionId == -1) {
+            if (colName == "New Collection") continue; // already pinned at top
+            if (!hasExistingForAdd) { addMenu->addSeparator(); hasExistingForAdd = true; }
             // STANDARD ADD
             QAction *addAction = addMenu->addAction(colName);
             connect(addAction, &QAction::triggered, [this, colId, fullPath]() {
@@ -1586,7 +1664,6 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
 
     // Attach the appropriate menus to the context list and grey them out if empty
     if (currentCollectionId == -1) {
-        if (!hasCollections) addMenu->setEnabled(false);
         itemMenu.addMenu(addMenu);
     } else {
         if (!hasOtherCollections) {
@@ -1668,27 +1745,9 @@ void AssetManagerWidget::onItemChanged(QStandardItem *item) {
     if (!item) return;
 
     // ---------------------------------------------------------
-    // Handle Favorites Renaming
-    // ---------------------------------------------------------
-    if (item->parent() == favoritesRootItem) {
-        QString newName = item->text();
-        QString path = item->data(Qt::UserRole).toString();
-
-        if (path.isEmpty() || path == "BROKEN_PATH") return;
-
-        QSqlQuery query(QSqlDatabase::database("db_conn"));
-        query.prepare("UPDATE AssetFavorites SET AssetFavoriteName = :name WHERE AssetFavoritePath = :path");
-        query.bindValue(":name", newName);
-        query.bindValue(":path", path);
-
-        if (!query.exec()) {
-            qWarning() << "[!] Failed to update favorite name in DB:" << query.lastError().text();
-        }
-    } 
-    // ---------------------------------------------------------
     // Handle Collection Renaming
     // ---------------------------------------------------------
-    else if (item->parent() == collectionsRootItem) {
+    if (item->parent() == collectionsRootItem) {
         QString newName = item->text();
         QString dataStr = item->data(Qt::UserRole).toString();
 
@@ -1702,6 +1761,8 @@ void AssetManagerWidget::onItemChanged(QStandardItem *item) {
 
             if (!query.exec()) {
                 qWarning() << "[!] Failed to update collection name in DB:" << query.lastError().text();
+            } else {
+                collectionsRootItem->sortChildren(0, Qt::AscendingOrder);
             }
         }
     }
@@ -1855,33 +1916,6 @@ void AssetManagerWidget::navigateToFolderInTree(const QString& folderPath) {
         onFolderSelected(idx);
     };
 
-    // --- Pass 1: search Favorites ---
-    for (int i = 0; i < favoritesRootItem->rowCount(); ++i) {
-        QStandardItem* favItem = favoritesRootItem->child(i);
-        const QString itemPath = favItem->data(Qt::UserRole).toString();
-        if (itemPath == "BROKEN_PATH" || itemPath.startsWith("COMBINED_DIR_")) continue;
-
-        const QString normFav = QDir::cleanPath(QDir::fromNativeSeparators(itemPath));
-        if (normTarget.compare(normFav, Qt::CaseInsensitive) != 0 &&
-            !normTarget.startsWith(normFav + '/', Qt::CaseInsensitive)) continue;
-
-        // Ensure the Favorites section is expanded so the child is accessible
-        QModelIndex favRootProxy = proxyModel->mapFromSource(dirModel->indexFromItem(favoritesRootItem));
-        if (!dirTreeView->isExpanded(favRootProxy))
-            dirTreeView->expand(favRootProxy);
-
-        QModelIndex favProxy = proxyModel->mapFromSource(dirModel->indexFromItem(favItem));
-
-        if (normTarget.compare(normFav, Qt::CaseInsensitive) == 0) {
-            selectNode(favProxy);
-            return;
-        }
-
-        const QStringList segments = normTarget.mid(normFav.length() + 1).split('/', Qt::SkipEmptyParts);
-        const QModelIndex result = walkSegments(favProxy, segments);
-        if (result.isValid()) { selectNode(result); return; }
-    }
-
     // --- Pass 2: search Combined library view ---
     QSqlQuery libQuery(QSqlDatabase::database("db_conn"));
     libQuery.exec("SELECT AssetLibraryPath FROM AssetLibraries WHERE AssetLibraryEnabled = 1");
@@ -1902,8 +1936,114 @@ void AssetManagerWidget::navigateToFolderInTree(const QString& folderPath) {
 }
 
 /**
- * @brief Links an asset file path to a specific Collection ID in the database.
+ * @brief Adds a folder shortcut to a Collection and saves it to the database.
  */
+void AssetManagerWidget::addFolderToCollection(const QString& folderPath, const QString& displayName, int collectionId, bool saveToDb) {
+    // Find the collection item in the tree
+    QStandardItem *collItem = nullptr;
+    for (int i = 0; i < collectionsRootItem->rowCount(); ++i) {
+        QStandardItem *child = collectionsRootItem->child(i);
+        if (child->data(Qt::UserRole).toString() == QString("COLLECTION_%1").arg(collectionId)) {
+            collItem = child;
+            break;
+        }
+    }
+    if (!collItem) return;
+
+    // Prevent duplicates
+    for (int i = 0; i < collItem->rowCount(); ++i) {
+        if (collItem->child(i)->data(Qt::UserRole).toString() == folderPath) return;
+    }
+
+    QString name = displayName.isEmpty() ? QDir(folderPath).dirName() : displayName;
+
+    if (saveToDb) {
+        QSqlQuery q(QSqlDatabase::database("db_conn"));
+        q.prepare("INSERT OR IGNORE INTO AssetCollectionFolders (AssetCollectionFolderPath, AssetCollectionFolderName, AssetCollectionFolderCol) VALUES (:path, :name, :col)");
+        q.bindValue(":path", folderPath);
+        q.bindValue(":name", name);
+        q.bindValue(":col", collectionId);
+        if (!q.exec()) qWarning() << "[!] Failed to save collection folder:" << q.lastError().text();
+    }
+
+    QStandardItem *folderItem = new QStandardItem(name);
+    folderItem->setData(folderPath, Qt::UserRole);
+    folderItem->setData(collectionId, Qt::UserRole + 1);
+    folderItem->setFlags((folderItem->flags() & ~Qt::ItemIsEditable) | Qt::ItemIsSelectable);
+
+    const bool isVirtual = folderPath.startsWith("COMBINED_DIR_");
+
+    if (!isVirtual && !QDir(folderPath).exists()) {
+        folderItem->setData("BROKEN_PATH", Qt::UserRole);
+        folderItem->setText(name + " (Not Found)");
+        collItem->appendRow(folderItem);
+        if (saveToDb) proxyModel->invalidateAndRefresh(QString("COLLECTION_%1").arg(collectionId));
+        return;
+    }
+
+    if (isVirtual) {
+        const QString relPath = folderPath.mid(13);
+        QSqlQuery libQ(QSqlDatabase::database("db_conn"));
+        libQ.exec("SELECT AssetLibraryPath FROM AssetLibraries WHERE AssetLibraryEnabled = 1");
+        while (libQ.next()) {
+            QDir dir(libQ.value(0).toString());
+            if (!dir.cd(relPath)) continue;
+            QDirIterator it(dir.absolutePath(), QDir::Dirs | QDir::NoDotAndDotDot);
+            if (it.hasNext()) { folderItem->appendRow(new QStandardItem("...")); break; }
+        }
+    } else {
+        QDirIterator it(folderPath, QDir::Dirs | QDir::NoDotAndDotDot);
+        if (it.hasNext()) folderItem->appendRow(new QStandardItem("..."));
+    }
+
+    collItem->appendRow(folderItem);
+    if (saveToDb) proxyModel->invalidateAndRefresh(QString("COLLECTION_%1").arg(collectionId));
+}
+
+/**
+ * @brief Removes a folder shortcut from a Collection and deletes it from the database.
+ */
+void AssetManagerWidget::removeFolderFromCollection(const QString& folderPath, int collectionId) {
+    QSqlQuery q(QSqlDatabase::database("db_conn"));
+    q.prepare("DELETE FROM AssetCollectionFolders WHERE AssetCollectionFolderPath = :path AND AssetCollectionFolderCol = :col");
+    q.bindValue(":path", folderPath);
+    q.bindValue(":col", collectionId);
+    if (!q.exec()) qWarning() << "[!] Failed to remove collection folder:" << q.lastError().text();
+
+    for (int i = 0; i < collectionsRootItem->rowCount(); ++i) {
+        QStandardItem *collItem = collectionsRootItem->child(i);
+        if (collItem->data(Qt::UserRole).toString() != QString("COLLECTION_%1").arg(collectionId)) continue;
+        for (int j = 0; j < collItem->rowCount(); ++j) {
+            if (collItem->child(j)->data(Qt::UserRole).toString() == folderPath) {
+                collItem->removeRow(j);
+                proxyModel->invalidateAndRefresh(QString("COLLECTION_%1").arg(collectionId));
+                return;
+            }
+        }
+    }
+}
+
+int AssetManagerWidget::getOrCreateCollection(const QString& name) {
+    QSqlQuery q(QSqlDatabase::database("db_conn"));
+    q.prepare("SELECT AssetCollectionID FROM AssetCollections WHERE AssetCollectionName = :name");
+    q.bindValue(":name", name);
+    if (q.exec() && q.next()) return q.value(0).toInt();
+
+    QSqlQuery ins(QSqlDatabase::database("db_conn"));
+    ins.prepare("INSERT INTO AssetCollections (AssetCollectionName) VALUES (:name)");
+    ins.bindValue(":name", name);
+    if (!ins.exec()) return -1;
+    int newId = ins.lastInsertId().toInt();
+
+    QStandardItem *colItem = new QStandardItem(name);
+    colItem->setData("COLLECTION_" + QString::number(newId), Qt::UserRole);
+    colItem->setFlags(colItem->flags() | Qt::ItemIsEditable);
+    collectionsRootItem->appendRow(colItem);
+    collectionsRootItem->sortChildren(0, Qt::AscendingOrder);
+
+    return newId;
+}
+
 void AssetManagerWidget::addAssetToCollection(const QString& filePath, int collectionId) {
     QSqlQuery query(QSqlDatabase::database("db_conn"));
     query.prepare("INSERT INTO AssetCollectionItems (AssetCollectionItemPath, AssetCollectionItemCol) VALUES (:path, :id)");

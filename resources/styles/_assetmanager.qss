@@ -15,6 +15,55 @@
 }
 
 /* =========================================================================
+   [ SEARCH BAR ]
+   ========================================================================= */
+
+#AssetManagerSearchRow {
+    background-color: #252627;
+}
+
+#AssetManagerSearchInput {
+    background-color: #1e1f20;
+    border: 1px solid #3a3b3c;
+    border-radius: 4px;
+    color: #cccccc;
+    padding: 3px 6px;
+    font-size: 12px;
+    selection-background-color: #314d7a;
+}
+
+#AssetManagerSearchInput:focus {
+    border: 1px solid #4a6a9a;
+    outline: none;
+}
+
+#AssetManagerClearButton,
+#AssetManagerSearchButton {
+    background-color: #3a3b3c;
+    border: 1px solid #4a4b4c;
+    border-radius: 4px;
+    padding: 0px;
+}
+
+#AssetManagerClearButton:hover,
+#AssetManagerSearchButton:hover {
+    background-color: #4a4b4c;
+}
+
+#AssetManagerClearButton:pressed,
+#AssetManagerSearchButton:pressed {
+    background-color: #314d7a;
+    border-color: #4a6a9a;
+}
+
+#AssetManagerSearchSeparator {
+    color: #343536;
+    background-color: #343536;
+    max-height: 1px;
+    border: none;
+}
+
+/* =========================================================================
    [ DIRECTORY TREE ]
    ========================================================================= */
 

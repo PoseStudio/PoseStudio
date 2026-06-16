@@ -68,7 +68,7 @@ int main(int argc, char *argv[]) {
     // =========================================================================
 
     // Initialize the SQLite data schema if this is a first-time run (0 = normal mode)
-    initializeDatabase(0); 
+    initializeDatabase(1); 
     
     // Retrieve the active database connection to ensure readiness before UI construction.
     // Kept as a local const to prevent Qt shutdown lifecycle warnings.

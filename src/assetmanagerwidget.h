@@ -28,7 +28,11 @@
 
 // Forward declarations drastically improve project compilation times
 class QVBoxLayout;
+class QHBoxLayout;
+class QFrame;
 class QLabel;
+class QLineEdit;
+class QPushButton;
 class QListWidget;
 class QListWidgetItem;
 class QStandardItemModel;
@@ -59,6 +63,7 @@ public:
     QVariant data(const QModelIndex &proxyIndex, int role = Qt::DisplayRole) const override;
 
     void invalidateAndRefresh(const QString& path);
+    bool hasHit(const QString& folderPath) const { return folderHitState(folderPath) != NoHit; }
 
 private slots:
     void processPendingHitCheck();
@@ -228,9 +233,6 @@ public:
     explicit AssetManagerWidget(QWidget *parent = nullptr);
     ~AssetManagerWidget() override = default;
 
-    void addFavoriteFolder(const QString& folderPath, const QString& displayName = QString(), bool saveToDb = true);
-    void removeFavoriteFolder(const QString& folderPath);
-
     void expandNodeRecursively(const QModelIndex &proxyIndex);
     void collapseNodeRecursively(const QModelIndex &proxyIndex);
     void refreshAssetManager();
@@ -246,9 +248,13 @@ private slots:
     void onItemChanged(QStandardItem *item);
 
 private:
-    QVBoxLayout *mainLayout;            
-    QLabel *titleLabel;                 
-    QListWidget *assetListWidget;       
+    QVBoxLayout *mainLayout;
+    QLabel *titleLabel;
+    QListWidget *assetListWidget;
+
+    QLineEdit *searchInput;
+    QPushButton *clearSearchButton;
+    QPushButton *searchButton;       
 
     CustomToolTip *customToolTip;       ///< Our floating interactive tooltip
     QListWidgetItem *activeToolTipItem;   ///< Tracks the active item
@@ -258,22 +264,26 @@ private:
     
     AssetTreeView *dirTreeView; 
     
-    QStandardItem *favoritesRootItem;
-    QStandardItem *collectionsRootItem; 
-    QStandardItem *combinedRootItem;    
+    QStandardItem *searchResultsRootItem;
+    QStandardItem *collectionsRootItem;
+    QStandardItem *combinedRootItem;
 
     QList<QPair<int, QString>> m_pendingThumbs;
 
     void setupUI();
     void processNextThumbnailBatch();
+    void runSearch(const QString& query);
 
     QList<AssetHit> parseFolderAssets(const QString& folderPath);
     QList<AssetHit> parseCollectionAssets(int collectionId);
     QList<AssetHit> parseCombinedAssets(const QString& relativePath);
 
     void navigateToFolderInTree(const QString& folderPath);
+    int  getOrCreateCollection(const QString& name);
     void addAssetToCollection(const QString& filePath, int collectionId);
     void removeAssetFromCollection(const QString& filePath, int collectionId);
+    void addFolderToCollection(const QString& folderPath, const QString& displayName, int collectionId, bool saveToDb = true);
+    void removeFolderFromCollection(const QString& folderPath, int collectionId);
     void saveExpandedState(const QModelIndex &parentProxyIndex, QSet<QString> &expandedPaths);
     void restoreExpandedState(const QModelIndex &parentProxyIndex, const QSet<QString> &expandedPaths);
     QModelIndex findProxyIndexByPath(const QModelIndex &parentProxyIndex, const QString &targetPath);
