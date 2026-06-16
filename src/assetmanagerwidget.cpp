@@ -289,12 +289,22 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
     if (path == "FAVORITES_ROOT") {
         return QIdentityProxyModel::data(proxyIndex, role);
     }
+    if (path == "SEARCH_ROOT") {
+        if (role == Qt::DecorationRole || role == Qt::ForegroundRole) {
+            const bool hasResults = sourceModel()->rowCount(mapToSource(proxyIndex)) > 0;
+            if (role == Qt::DecorationRole)
+                return hasResults ? QIcon(":/resources/icons/search.png")
+                                  : QIcon(":/resources/icons/search-d.png");
+            return hasResults ? QVariant() : QColor(110, 110, 110);
+        }
+        return QIdentityProxyModel::data(proxyIndex, role);
+    }
     if (path == "COLLECTIONS_ROOT") {
-        if (role == Qt::DecorationRole) return QIcon(":/resources/icons/collections.png"); 
+        if (role == Qt::DecorationRole) return QIcon(":/resources/icons/collections.png");
         return QIdentityProxyModel::data(proxyIndex, role);
     }
     if (path == "COMBINED_ROOT") {
-        if (role == Qt::DecorationRole) return QIcon(":/resources/icons/collections.png"); 
+        if (role == Qt::DecorationRole) return QIcon(":/resources/icons/collections.png");
         return QIdentityProxyModel::data(proxyIndex, role);
     }
 
@@ -827,6 +837,8 @@ void AssetManagerWidget::runSearch(const QString& query) {
     searchButton->setEnabled(true);
     clearSearchButton->setEnabled(true);
     searchInput->setEnabled(true);
+
+    proxyModel->invalidateAndRefresh("SEARCH_ROOT");
 
     if (searchProxyIdx.isValid()) {
         dirTreeView->expand(searchProxyIdx);
