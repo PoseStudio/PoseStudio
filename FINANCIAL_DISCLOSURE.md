@@ -36,8 +36,8 @@ Our development, infrastructure, and operations are supported by our community.
 
 | Date | Invoice | Payee | Item | Receipt / Proof | Amount |
 | --- | --- | --- | --- | --- | --- |
-| 06/19/2026 | 7MTG47NE-0002 | Claud | Prepaid extra usage | [Link to receipt](/docs/receipts/claud_2577-9593-8726_Redacted.pdf) | $48.99 |
-| 06/08/2026 | 7MTG47NE-0001 | Claud | Claude Pro Plan | [Link to receipt](/docs/receipts/claud_2164-7953-2103_Redacted.pdf) | $217.75 |
+| 06/19/2026 | 7MTG47NE-0002 | Claud | Prepaid extra usage | [Link to receipt](/docs/receipts/claud_2577-9593-8726_redacted.pdf) | $48.99 |
+| 06/08/2026 | 7MTG47NE-0001 | Claud | Claude Pro Plan | [Link to receipt](/docs/receipts/claud_2164-7953-2103_redacted.pdf) | $217.75 |
 | 05/22/2026 | INV136704184 | GitHub | GitHub Team Plan | [Link to receipt](/docs/receipts/github_136704184_redacted.pdf) | $4.36 |
 | 05/22/2026 | INV136704234 | GitHub | GitHub Team Plan | [Link to receipt](/docs/receipts/github_136704234_redacted.pdf) | $4.36 |
 | 05/22/2026 | INV136704659 | GitHub | GitHub Team Plan | [Link to receipt](/docs/receipts/github_136704659_redacted.pdf) | $17.42 |
