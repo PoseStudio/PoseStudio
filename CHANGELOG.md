@@ -5,11 +5,35 @@ All notable changes to the PoseStudio project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-06-19
+
+### Added
+- **Clickable Breadcrumb Navigation:** The asset panel's folder header is a real breadcrumb again — ancestor segments are clickable links (with hover underline) that jump straight to that folder. Segments are fit dynamically to the available header width, fitting as many trailing folders as possible and collapsing whatever doesn't fit (including the library name) into a single leading "...".
+- **Folder Context Menu on Breadcrumb:** Right-clicking a breadcrumb segment (or the current folder) now offers "Open" and "Browse Folder", targeting whichever link is under the cursor.
+- **Search Result De-duplication:** A search result that is itself a subfolder of another result already in the list is dropped, since it's already reachable by expanding that ancestor in the tree.
+- **Search Result Path Truncation:** Long search result paths are capped to their last 4 segments, prefixed with "..." instead of showing the full path.
+- **Folder Context Menu in Asset Grid:** Right-clicking a subfolder shown in the asset grid now offers Open, Add To Collection, Browse Folder, and Refresh — matching the functionality already available for individual assets.
+
+### Changed
+- **Breadcrumb Header Never Resizes the Window:** The folder header label no longer grows to fit long paths; it elides instead, so dragging the splitter or resizing the window is no longer fought by the label's content.
+- **Tree Selection Reflects Current Folder:** Navigating away from a folder via a breadcrumb link, or by opening a subfolder from the asset grid, now clears the tree's selection/highlight instead of leaving the previous folder looking selected.
+- **Two-Line Asset Labels:** Asset and folder names in the grid now word-wrap to two lines (eliding the second line with "..." if still too long) instead of being cut off after one line, with a deliberate, consistently-sized gap between the thumbnail and its label.
+- **Asset Grid Row Spacing:** Added breathing room between grid rows via `QListWidget::setSpacing`.
+
+### Removed
+- **Combined View:** Removed the virtual "Combined View" tree node that aggregated subdirectories across all enabled asset libraries (`COMBINED_ROOT` / `COMBINED_DIR_*`). Folder navigation, search, and "Go to Folder" now operate solely against each library's own physical directory tree. Collections folder shortcuts pointing at virtual Combined View paths are no longer supported.
+
+### Fixed
+- **Grid Cell Sizing Drift:** `AssetGridDelegate`'s cell-size calculation and its actual paint logic had drifted out of sync (1.5 vs. 2 lines of text height), intermittently compressing the gap between a thumbnail and its label. The two are now derived from the same formula.
+
+### Internal
+- Project-wide cleanup pass: removed dead code left over from the now-deleted Favorites feature and other unused constants/functions, deduplicated repeated context-menu-building and icon-loading logic into shared helpers, moved a fully-inlined tree delegate implementation out of the header to restore the project's intended fast-compile structure, and rewrote stale or inaccurate comments throughout.
+
 ## [0.1.0] - 2026-06-16
 
 ### Added
 - **Asset Search:** Added a persistent search bar (QLineEdit + clear button + search button) above the Collections node in the tree panel. Searching scans all enabled asset library directories recursively and populates a dedicated "Search Results" root node.
-- **Search Results Tree:** Results are displayed as a proper navigable hierarchy — shared ancestor folders are merged so the full path context is preserved (e.g., `People → Genesis 8 Female → Anatomy → X3D`), not compacted into a single flat string.
+- **Search Results Tree:** Results are displayed as a proper navigable hierarchy — shared ancestor folders are merged so the full path context is preserved, not compacted into a single flat string.
 - **Full Subtree Browsing from Search:** Matched folders in the search results are fully expandable via the existing lazy-load mechanism, allowing the user to browse the entire subtree beneath a hit without leaving the search results panel.
 - **NoHit Filtering in Search:** Folders that contain no assets anywhere in their subtree (greyed "empty" folders) are automatically excluded from search results.
 - **Search Visual Feedback:** While a search is running, a "Searching…" placeholder appears in the tree, the search controls are disabled, and the cursor changes to the system wait cursor. Results replace the placeholder atomically when complete.

@@ -28,8 +28,6 @@
 
 // Forward declarations drastically improve project compilation times
 class QVBoxLayout;
-class QHBoxLayout;
-class QFrame;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -37,6 +35,7 @@ class QListWidget;
 class QListWidgetItem;
 class QStandardItemModel;
 class QStandardItem;
+class QMenu;
 class CustomToolTip;
 
 /**
@@ -47,7 +46,6 @@ struct AssetHit {
     QString folderPath;          ///< Absolute path to the directory containing the asset
     QString assetFileName;       ///< Filename of the 3D asset (e.g., model.obj, .dsf)
     QStringList matchingImages;  ///< List of filenames for matching thumbnails (e.g., render.png)
-    QString displayName;         ///< Custom UI text for handling virtual folder collisions
 };
 
 enum FolderHitState { NoHit = 0, IndirectHit = 1, DirectHit = 2 };
@@ -63,7 +61,8 @@ public:
     QVariant data(const QModelIndex &proxyIndex, int role = Qt::DisplayRole) const override;
 
     void invalidateAndRefresh(const QString& path);
-    bool hasHit(const QString& folderPath) const { return folderHitState(folderPath) != NoHit; }
+    bool hasHit(const QString& folderPath)      const { return folderHitState(folderPath) != NoHit; }
+    bool isDirectHit(const QString& folderPath) const { return folderHitState(folderPath) == DirectHit; }
 
 private slots:
     void processPendingHitCheck();
@@ -87,100 +86,20 @@ class AssetTreeDelegate : public QStyledItemDelegate {
 public:
     explicit AssetTreeDelegate(QObject *parent = nullptr) : QStyledItemDelegate(parent) {}
 
-    // =========================================================================
-    // [ CUSTOM RENDER HOOKS ]
-    // =========================================================================
-    
-    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
-        // Enforce a strict 12px height for visual separators rather than a full folder height
-        if (index.data(Qt::UserRole).toString() == "SEPARATOR") {
-            return QSize(option.rect.width(), 12); 
-        }
-        return QStyledItemDelegate::sizeHint(option, index);
-    }
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override;
+    void updateEditorGeometry(QWidget *editor, const QStyleOptionViewItem &option, const QModelIndex &index) const override;
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override;
+};
 
-    void updateEditorGeometry(QWidget *editor, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
-        // Shift the inline QLineEdit to perfectly overlay our custom-painted text geometry
-        int iconSize = option.decorationSize.width() > 0 ? option.decorationSize.width() : 16;
-        int textOffset = iconSize + 6;
-
-        QRect editRect = option.rect;
-        editRect.setLeft(option.rect.left() + textOffset - 2); // -2px compensates for native line-edit margins
-        editor->setGeometry(editRect);
-    }
-
-    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
-        QString path = index.data(Qt::UserRole).toString();
-
-        // --- Custom Separator Paint ---
-        if (path == "SEPARATOR") {
-            painter->save();
-            int y = option.rect.center().y();
-            
-            QColor sepColor(60, 60, 60); // Default fallback
-
-            // Extract the dynamic qproperty-separatorColor set in the .qss file
-            if (const QWidget *widget = option.widget) {
-                QVariant qssColor = widget->property("separatorColor");
-                if (qssColor.isValid() && qssColor.canConvert<QColor>()) {
-                    sepColor = qssColor.value<QColor>(); 
-                }
-            }
-
-            painter->setPen(sepColor);
-            painter->drawLine(option.rect.left() + 5, y, option.rect.right() - 5, y);
-            painter->restore();
-            return; 
-        }
-
-        // --- Custom Node Paint ---
-        QStyleOptionViewItem opt = option;
-        initStyleOption(&opt, index);
-
-        // Strip text and icons so the QStyle engine only draws the selection background
-        QIcon folderIcon = opt.icon;
-        QString folderText = opt.text;
-
-        opt.text = QString();
-        opt.icon = QIcon();
-        opt.features &= ~QStyleOptionViewItem::HasDisplay;
-        opt.features &= ~QStyleOptionViewItem::HasDecoration;
-
-        if (const QWidget *widget = option.widget) {
-            QStyle *style = widget->style();
-            style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, widget);
-        }
-
-        painter->save();
-
-        int textOffset = 0;
-        
-        // Draw the custom folder icon
-        if (!folderIcon.isNull()) {
-            const int iconSize = opt.decorationSize.width() > 0 ? opt.decorationSize.width() : 16;
-            QRect iconRect = opt.rect;
-            iconRect.setWidth(iconSize);
-            
-            QIcon::Mode mode = (opt.state & QStyle::State_Selected) ? QIcon::Selected : QIcon::Normal;
-            folderIcon.paint(painter, iconRect, Qt::AlignLeft | Qt::AlignVCenter, mode, QIcon::Off);
-            
-            textOffset = iconSize + 6;
-        }
-
-        QRect textRect = opt.rect;
-        textRect.adjust(textOffset, 0, 0, 0);
-
-        if (opt.state & QStyle::State_Selected) {
-            painter->setPen(Qt::white);
-        } else {
-            QVariant fg = index.data(Qt::ForegroundRole);
-            painter->setPen(fg.isValid() ? fg.value<QColor>() : opt.palette.text().color());
-        }
-
-        painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, folderText);
-
-        painter->restore();
-    }
+/**
+ * @class AssetGridDelegate
+ * @brief Custom delegate for the asset grid that word-wraps labels to 2 lines and elides on line 2.
+ */
+class AssetGridDelegate : public QStyledItemDelegate {
+public:
+    explicit AssetGridDelegate(QObject *parent = nullptr) : QStyledItemDelegate(parent) {}
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override;
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override;
 };
 
 /**
@@ -243,7 +162,7 @@ private slots:
 
     void onContextMenuRequested(const QPoint &pos);
     void onGridContextMenuRequested(const QPoint &pos); 
-    void onGridItemDoubleClicked(QListWidgetItem *item); ///< ADDED: Handles double-clicking an asset
+    void onGridItemDoubleClicked(QListWidgetItem *item); ///< Opens an asset, or navigates into a folder item
 
     void onItemChanged(QStandardItem *item);
 
@@ -266,30 +185,48 @@ private:
     
     QStandardItem *searchResultsRootItem;
     QStandardItem *collectionsRootItem;
-    QStandardItem *combinedRootItem;
 
     QList<QPair<int, QString>> m_pendingThumbs;
+    QString m_currentFolderPath;
+    QString m_currentTitleText;   ///< Plain display name for virtual/collection titles (no breadcrumb)
+    QString m_hoveredBreadcrumbLink;
+    int m_currentAssetCount = 0;
+
+    // Cached breadcrumb structure for the current physical folder, rebuilt on each displayFolder()
+    // call and re-laid-out (without recomputation) whenever the label is resized.
+    QString m_breadcrumbLibRoot;
+    QString m_breadcrumbLibName;
+    QStringList m_breadcrumbSegments;
+    QStringList m_breadcrumbPaths;
 
     void setupUI();
     void processNextThumbnailBatch();
     void runSearch(const QString& query);
+    void displayFolder(const QString& folderPath, const QString& title = QString());
+    void deselectTree();
+    void resolveBreadcrumb(const QString& folderPath);
+    void refreshTitleLabel();
+    QString buildBreadcrumbHtml(int availableWidth) const;
 
     QList<AssetHit> parseFolderAssets(const QString& folderPath);
     QList<AssetHit> parseCollectionAssets(int collectionId);
-    QList<AssetHit> parseCombinedAssets(const QString& relativePath);
 
     void navigateToFolderInTree(const QString& folderPath);
+    void navigateToCollectionNode(int collectionId, bool enterEditMode = false);
+    void collectDirectHits(const QString& folderPath, const QString& libRootPath, QSet<QString>& added, QList<QStandardItem*>& results);
     int  getOrCreateCollection(const QString& name);
     void addAssetToCollection(const QString& filePath, int collectionId);
     void removeAssetFromCollection(const QString& filePath, int collectionId);
     void addFolderToCollection(const QString& folderPath, const QString& displayName, int collectionId, bool saveToDb = true);
+    QMenu* buildAddToCollectionMenu(QWidget* parentMenu, const QString& folderPath, const QString& folderName);
     void removeFolderFromCollection(const QString& folderPath, int collectionId);
     void saveExpandedState(const QModelIndex &parentProxyIndex, QSet<QString> &expandedPaths);
     void restoreExpandedState(const QModelIndex &parentProxyIndex, const QSet<QString> &expandedPaths);
     QModelIndex findProxyIndexByPath(const QModelIndex &parentProxyIndex, const QString &targetPath);
 
 protected:
-    bool eventFilter(QObject *watched, QEvent *event) override; ///< Intercepts mouse events
+    /// Handles the title label's resize/context-menu events and the asset grid's custom tooltips.
+    bool eventFilter(QObject *watched, QEvent *event) override;
 };
 
 #endif // ASSETMANAGERWIDGET_H

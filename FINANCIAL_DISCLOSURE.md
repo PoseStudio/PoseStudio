@@ -15,19 +15,20 @@ Our development, infrastructure, and operations are supported by our community.
 
 | Date | Item | Amount |
 | --- | --- | --- |
-| 2026 YTD | Income (Inflow) | $512.11 |
-| 2026 YTD | Expenses (Outflow) | $365.49 |
-|  | **Balance** | **$146.62** |
+| 2026 YTD | Income (Inflow) | $762.11 |
+| 2026 YTD | Expenses (Outflow) | $632.23 |
+|  | **Balance** | **$129.88** |
 
 #### ⬇️ Income (Inflow)
 
 | Date | Donor | Item | Amount | Transaction Fee | Total |
 | --- | --- | --- | --- | --- | --- |
+| 06/19/2026 | Ion Hatzithomas | Other one-time contribution | $250.00 | - | $250.00 |
 | 06/04/2026 | Everwild | Patreon tier 1 monthly | $5.00 | $0.96 | $4.04 |
 | 06/04/2026 | bu_es | Patreon tier 1 monthly | $5.00 | $0.97 | $4.03 |
 | 05/28/2026 | TaterTot | Patreon tier 1 monthly | $5.00 | $0.96 | $4.04 |
 | 05/13/2026 | Ion Hatzithomas | Other one-time contribution | $500.00 | - | $500.00 |
-|  |  |  |  | **Total Income** | **$512.11** |
+|  |  |  |  | **Total Income** | **$762.11** |
 
 *Transaction Fees are charged by the payment platforms.
 
@@ -35,6 +36,8 @@ Our development, infrastructure, and operations are supported by our community.
 
 | Date | Invoice | Payee | Item | Receipt / Proof | Amount |
 | --- | --- | --- | --- | --- | --- |
+| 06/19/2026 | 7MTG47NE-0002 | Claud | Prepaid extra usage | [Link to receipt](https://www.google.com/search?q=/docs/receipts/claud_2577-9593-8726_Redacted.pdf) | $48.99 |
+| 06/08/2026 | 7MTG47NE-0001 | Claud | Claude Pro Plan | [Link to receipt](https://www.google.com/search?q=/docs/receipts/claud_2164-7953-2103_Redacted.pdf) | $217.75 |
 | 05/22/2026 | INV136704184 | GitHub | GitHub Team Plan | [Link to receipt](https://www.google.com/search?q=/docs/receipts/github_136704184_redacted.pdf) | $4.36 |
 | 05/22/2026 | INV136704234 | GitHub | GitHub Team Plan | [Link to receipt](https://www.google.com/search?q=/docs/receipts/github_136704234_redacted.pdf) | $4.36 |
 | 05/22/2026 | INV136704659 | GitHub | GitHub Team Plan | [Link to receipt](https://www.google.com/search?q=/docs/receipts/github_136704659_redacted.pdf) | $17.42 |
@@ -42,7 +45,7 @@ Our development, infrastructure, and operations are supported by our community.
 | 05/13/2026 | 4087661824 | GoDaddy | To register posestudio.ai + .io | [Link to receipt](https://www.google.com/search?q=/docs/receipts/godaddy_4087661824_redacted.pdf) | $209.98 |
 | 05/13/2026 | 4087693210 | GoDaddy | To register posestudio.dev | [Link to receipt](https://www.google.com/search?q=/docs/receipts/godaddy_4087693210_redacted.pdf) | $20.19 |
 | 05/13/2026 | 4087693214 | GoDaddy | Broker service posestudio.co | [Link to receipt](https://www.google.com/search?q=/docs/receipts/godaddy_4087693214_redacted.pdf) | $99.99 |
-|  |  |  |  | **Total Expenses** | **$365.49** |
+|  |  |  |  | **Total Expenses** | **$632.23** |
 
 ---
 

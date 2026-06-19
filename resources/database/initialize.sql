@@ -45,7 +45,7 @@ CREATE INDEX idx_PreferenceName ON Preferences(PreferenceName);
 
 CREATE TABLE AssetLibraries(AssetLibraryID INTEGER PRIMARY KEY AUTOINCREMENT, AssetLibraryPath TEXT NOT NULL UNIQUE, AssetLibraryEnabled INTEGER DEFAULT 1);
 INSERT INTO AssetLibraries(AssetLibraryPath) VALUES('C:/Users/Public/Documents/My DAZ 3D Library');
-INSERT INTO AssetLibraries(AssetLibraryPath) VALUES('D:/Dropbox (Personal)/My 3D Library');
+INSERT INTO AssetLibraries(AssetLibraryPath) VALUES('D:/My PoseStudio Library');
 
 CREATE TABLE AssetCollections(AssetCollectionID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionName TEXT NOT NULL);
 INSERT INTO AssetCollections(AssetCollectionName) VALUES('Characters');

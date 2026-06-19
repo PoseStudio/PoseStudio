@@ -1,9 +1,10 @@
 /**
  * @file database.cpp
- * @brief Implementation of global SQLite database connection and initialization routines.
- * * This file manages the lifecycle of the SQLite database for PoseStudio.
- * It provides connection pooling to prevent memory leaks and file locks, 
- * and handles the raw execution of SQL schemas during application bootstrap or factory resets.
+ * @brief Opens and (when requested) rebuilds PoseStudio's SQLite database.
+ *
+ * The database lives next to the executable as posestudio.db. We keep a single named
+ * connection ("db_conn") alive for the app's lifetime and hand that same connection back
+ * to every caller, rather than opening a new one per call.
  */
 
 #include "database.h"
@@ -17,53 +18,19 @@
 #include <QStringList>
 
 /**
- * @brief Retrieves the active connection to the SQLite database.
- * * Implements a check to verify if the "db_conn" connection pool already exists. 
- * If it does, the existing connection is reused to prevent duplicate OS-level locks 
- * on the physical SQLite file.
- * * @return QSqlDatabase The active database connection object.
+ * @brief Opens (or rebuilds) the SQLite database and returns the active connection.
+ * @param mode Normal just opens the existing file (creating it if missing). FactoryReset
+ *             deletes the existing file first and rebuilds the schema from initialize.sql.
  */
-QSqlDatabase connectDatabase() {
-    // QStringLiteral resolves the string at compile-time, saving runtime memory allocation
+QSqlDatabase initializeDatabase(DbInitMode mode) {
     const QString connectionName = QStringLiteral("db_conn");
 
-    // Return the existing connection if it is already established
-    if (QSqlDatabase::contains(connectionName)) {
-        return QSqlDatabase::database(connectionName);
-    }
+    // The database lives next to the .exe, not the current working directory
+    const QString dbPath = QDir(QCoreApplication::applicationDirPath())
+                                .filePath(QStringLiteral("posestudio.db"));
 
-    // Otherwise, instantiate a new SQLite connection pool
-    QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
-    db.setDatabaseName(QStringLiteral("posestudio.db"));
-    
-    if (!db.open()) {
-        qCritical() << "Database Error [connectDatabase]: Failed to open connection." 
-                    << db.lastError().text();
-    }
-
-    return db;
-}
-
-/**
- * @brief Bootstraps the application database, optionally forcing a complete factory reset.
- * * This function resolves the database path relative to the application executable.
- * If mode 1 is passed, it executes a destructive reset: severing connections, deleting 
- * the physical SQLite file, and rebuilding the schema using the embedded initialize.sql blueprint.
- * * @param mode Operation mode flag (0 = Normal Connection, 1 = Destructive Factory Reset).
- * @return QSqlDatabase The active, initialized database connection.
- */
-QSqlDatabase initializeDatabase(int mode) {
-    const QString connectionName = QStringLiteral("db_conn");
-    
-    // Resolve absolute path dynamically relative to the application binary
-    const QString exeFolder = QCoreApplication::applicationDirPath();
-    const QString dbPath = QDir(exeFolder).filePath(QStringLiteral("posestudio.db"));
-
-    // =========================================================================
-    // [ DESTRUCTIVE RESET ]
-    // =========================================================================
-    if (mode == 1) {
-        // Sever any active handles to prevent OS-level file locking
+    if (mode == DbInitMode::FactoryReset) {
+        // Close any open handle first — SQLite can't delete a file Qt still has locked
         if (QSqlDatabase::contains(connectionName)) {
             QSqlDatabase::removeDatabase(connectionName);
         }
@@ -78,52 +45,42 @@ QSqlDatabase initializeDatabase(int mode) {
         }
     }
 
-    // =========================================================================
-    // [ ESTABLISH CONNECTION ]
-    // =========================================================================
-    
-    // Fetch the existing connection, or create a new one if it was purged
-    QSqlDatabase db = QSqlDatabase::contains(connectionName) 
-                      ? QSqlDatabase::database(connectionName) 
+    // Reuse the connection if it's already open; otherwise create it
+    QSqlDatabase db = QSqlDatabase::contains(connectionName)
+                      ? QSqlDatabase::database(connectionName)
                       : QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
-    
+
     db.setDatabaseName(dbPath);
 
     if (!db.open()) {
         qCritical() << "Database Error [initializeDatabase]: Connection failed.";
         qCritical() << "Reason:" << db.lastError().text();
-        return db; 
+        return db;
     }
 
-    // =========================================================================
-    // [ SCHEMA RECONSTRUCTION ]
-    // =========================================================================
-    
-    // If a destructive reset was requested, parse and execute the SQL blueprint
-    if (mode == 1) {
+    // Schema only needs rebuilding after we just deleted the file above
+    if (mode == DbInitMode::FactoryReset) {
         QFile sqlFile(QStringLiteral(":/resources/database/initialize.sql"));
         if (!sqlFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
             qCritical() << "Fatal Error: Missing initialize.sql blueprint in resources.";
-            return db; 
+            return db;
         }
 
         const QString sqlData = sqlFile.readAll();
         sqlFile.close();
-        
-        // Isolate individual SQL commands using a fast Latin1 char split
+
+        // The schema file has no semicolons inside string literals or trigger bodies,
+        // so a naive split is sufficient — no need for a real SQL statement parser here.
         const QStringList sqlStatements = sqlData.split(QLatin1Char(';'), Qt::SkipEmptyParts);
 
         QSqlQuery query(db);
-        
-        // Pass by const reference to avoid deep copying strings during iteration
         for (const QString& statement : sqlStatements) {
             const QString trimmedStatement = statement.trimmed();
-            
-            if (!trimmedStatement.isEmpty()) {
-                if (!query.exec(trimmedStatement)) {
-                    qWarning() << "SQL Execution failed for statement:" << trimmedStatement;
-                    qWarning() << "Error:" << query.lastError().text();
-                }
+            if (trimmedStatement.isEmpty()) continue;
+
+            if (!query.exec(trimmedStatement)) {
+                qWarning() << "SQL Execution failed for statement:" << trimmedStatement;
+                qWarning() << "Error:" << query.lastError().text();
             }
         }
         qDebug() << "Success: Database architecture successfully reconstructed.";

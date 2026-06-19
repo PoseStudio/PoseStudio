@@ -1,11 +1,9 @@
 /**
  * @file preferencesmanager.h
- * @brief Defines the global PreferencesManager Singleton.
+ * @brief Declares PreferencesManager, a singleton in-memory cache of user settings.
  *
- * This file contains the class declaration for the application's preference engine.
- * It enforces a strict Singleton pattern to guarantee that only one unified memory 
- * cache of user settings exists during the application's lifecycle, preventing 
- * database read/write collisions.
+ * Settings are loaded from SQLite once at startup and kept in a QHash so reads never
+ * touch the database. Writes update the cache immediately and persist to disk.
  */
 
 #ifndef PREFERENCESMANAGER_H
@@ -17,72 +15,36 @@
 
 /**
  * @class PreferencesManager
- * @brief A globally accessible, thread-safe manager for user settings.
- * * Utilizes an in-memory `QHash` to cache settings loaded from the SQLite database.
- * This guarantees ultra-fast O(1) read access for the UI and rendering threads,
- * while transparently handling the underlying disk writes when values are updated.
+ * @brief Process-wide cache of user settings, backed by the Preferences SQLite table.
+ *
+ * Not thread-safe — like the rest of PoseStudio's UI code, this is meant to be used
+ * only from the Qt main/GUI thread.
  */
 class PreferencesManager {
 public:
-    /**
-     * @brief Retrieves the single, globally accessible instance of the manager.
-     * * Implements a "Meyers Singleton" pattern. It is instantiated lazily upon 
-     * the first call and is inherently thread-safe under C++11 standards.
-     * * @return PreferencesManager& A reference to the active global instance.
-     */
+    /// Returns the single shared instance (lazily constructed on first call).
     static PreferencesManager& instance() {
         static PreferencesManager instance;
         return instance;
     }
 
-    // =========================================================================
-    // [ SINGLETON ENFORCEMENT ]
-    // Explicitly delete copy and assignment constructors. This prevents the C++ 
-    // compiler from implicitly creating duplicate caches that would fall out of sync.
-    // =========================================================================
+    // Non-copyable: a second cache could fall out of sync with the database.
     PreferencesManager(const PreferencesManager&) = delete;
     PreferencesManager& operator=(const PreferencesManager&) = delete;
 
-    // =========================================================================
-    // [ CORE FUNCTIONALITY ]
-    // =========================================================================
-
-    /**
-     * @brief Reads all stored preferences from the database into the RAM cache.
-     */
+    /// Loads every row of the Preferences table into the in-memory cache. Call once at startup.
     void loadFromDatabase();
 
-    /**
-     * @brief Retrieves a preference from the high-speed memory cache.
-     * * @param key The unique identifier for the preference.
-     * @param defaultValue The fallback value returned if the key does not exist.
-     * @return QVariant The stored value, type-agnostic.
-     */
+    /// Returns the cached value for `key`, or `defaultValue` if it isn't set.
     QVariant getValue(const QString& key, const QVariant& defaultValue = QVariant()) const;
 
-    /**
-     * @brief Updates a preference in the memory cache and persists it to the database.
-     * * @param key The unique identifier for the preference.
-     * @param value The raw data to be stored.
-     */
+    /// Updates the cache and immediately persists the new value to the database.
     void setValue(const QString& key, const QVariant& value);
 
 private:
-    /**
-     * @brief Private default constructor.
-     * Forces the application to use the `instance()` method, guaranteeing 
-     * no external instantiation can occur.
-     */
     PreferencesManager() = default;
-    
-    /**
-     * @brief Private default destructor.
-     */
     ~PreferencesManager() = default;
 
-    /**
-     * @brief The high-speed memory cache mapping preference keys to their values.
-     */
     QHash<QString, QVariant> m_preferences;
 };
 

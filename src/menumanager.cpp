@@ -1,10 +1,10 @@
 /**
  * @file menumanager.cpp
- * @brief Implementation of the MenuManager class.
+ * @brief Builds the application's top menu bar (File / Edit / Help).
  *
- * This file handles the procedural generation of the application's top menu bar.
- * It maps user actions to UI icons, defines multi-state graphics (normal vs. disabled), 
- * and establishes the foundational hooks for global application events.
+ * Most actions here are disabled placeholders for features that don't exist yet —
+ * the goal of this file is just to establish the menu structure and icon conventions
+ * future features will slot into.
  */
 
 #include "menumanager.h"
@@ -16,132 +16,75 @@
 #include <QIcon>
 
 /**
- * @brief Constructs the MenuManager.
- * @param parent The main application window where the menu bar will be injected.
+ * @brief Loads a normal/disabled icon pair following the "name.png" / "name-d.png" convention.
  */
+static QIcon loadDualStateIcon(const QString& baseName) {
+    QIcon icon;
+    icon.addPixmap(QPixmap(QStringLiteral(":/resources/icons/%1.png").arg(baseName)), QIcon::Normal);
+    icon.addPixmap(QPixmap(QStringLiteral(":/resources/icons/%1-d.png").arg(baseName)), QIcon::Disabled);
+    return icon;
+}
+
 MenuManager::MenuManager(QMainWindow *parent) : QObject(parent), mainWindow(parent) {}
 
-/**
- * @brief Initializes and populates the global menu bar.
- * * Builds the File, Edit, and Help menus. Most actions are currently initialized 
- * in a disabled state (`setEnabled(false)`) acting as placeholders for future 
- * feature implementations.
- */
 void MenuManager::setupMenus() {
     if (!mainWindow) return;
 
     // =========================================================================
-    // [ FILE MENU ]
-    // Handles document lifecycle, importing, exporting, and application exit.
+    // FILE MENU — document lifecycle, import/export, and application exit
     // =========================================================================
     QMenu *fileMenu = mainWindow->menuBar()->addMenu("File");
 
-    // --- New ---
-    QIcon newIcon;
-    newIcon.addPixmap(QPixmap(":/resources/icons/new.png"), QIcon::Normal);
-    newIcon.addPixmap(QPixmap(":/resources/icons/new-d.png"), QIcon::Disabled);
-    fileMenu->addAction(QIcon(newIcon), "New...")->setEnabled(false);
-
-    // --- Open ---
-    QIcon openIcon;
-    openIcon.addPixmap(QPixmap(":/resources/icons/open.png"), QIcon::Normal);
-    openIcon.addPixmap(QPixmap(":/resources/icons/open-d.png"), QIcon::Disabled);
-    fileMenu->addAction(QIcon(openIcon), "Open...")->setEnabled(false);
-
+    fileMenu->addAction(loadDualStateIcon("new"), "New...")->setEnabled(false);
+    fileMenu->addAction(loadDualStateIcon("open"), "Open...")->setEnabled(false);
     fileMenu->addAction("Open Recent...")->setEnabled(false);
     fileMenu->addSeparator();
 
-    // --- Save ---
-    QIcon saveIcon;
-    saveIcon.addPixmap(QPixmap(":/resources/icons/save.png"), QIcon::Normal);
-    saveIcon.addPixmap(QPixmap(":/resources/icons/save-d.png"), QIcon::Disabled);
-    fileMenu->addAction(QIcon(saveIcon), "Save")->setEnabled(false);
-
+    fileMenu->addAction(loadDualStateIcon("save"), "Save")->setEnabled(false);
     fileMenu->addAction("Save As...")->setEnabled(false);
     fileMenu->addAction("Save Copy...")->setEnabled(false);
     fileMenu->addSeparator();
 
-    // --- Import / Export ---
-    QIcon importIcon;
-    importIcon.addPixmap(QPixmap(":/resources/icons/import.png"), QIcon::Normal);
-    importIcon.addPixmap(QPixmap(":/resources/icons/import-d.png"), QIcon::Disabled);
-    fileMenu->addAction(QIcon(importIcon), "Import...")->setEnabled(false);
-
-    QIcon exportIcon;
-    exportIcon.addPixmap(QPixmap(":/resources/icons/export.png"), QIcon::Normal);
-    exportIcon.addPixmap(QPixmap(":/resources/icons/export-d.png"), QIcon::Disabled);
-    fileMenu->addAction(QIcon(exportIcon), "Export...")->setEnabled(false);
-
+    fileMenu->addAction(loadDualStateIcon("import"), "Import...")->setEnabled(false);
+    fileMenu->addAction(loadDualStateIcon("export"), "Export...")->setEnabled(false);
     fileMenu->addSeparator();
-    
-    // --- Quit ---
+
     QAction *quitAction = fileMenu->addAction("Quit");
+    // Ctrl+Q covers Windows/Linux explicitly; QKeySequence::Quit adds the platform-standard
+    // binding too (e.g. Cmd+Q on macOS), so both are listed rather than picking just one.
     quitAction->setShortcuts({QKeySequence("Ctrl+Q"), QKeySequence::Quit});
     QObject::connect(quitAction, &QAction::triggered, QApplication::instance(), &QApplication::quit);
 
-
     // =========================================================================
-    // [ EDIT MENU ]
-    // Handles history (Undo/Redo), clipboard actions, and global preferences.
+    // EDIT MENU — undo/redo history, clipboard, and preferences
     // =========================================================================
     QMenu *editMenu = mainWindow->menuBar()->addMenu("Edit");
 
-    // --- History ---
-    QIcon undoIcon;
-    undoIcon.addPixmap(QPixmap(":/resources/icons/undo.png"), QIcon::Normal);
-    undoIcon.addPixmap(QPixmap(":/resources/icons/undo-d.png"), QIcon::Disabled);
-    editMenu->addAction(QIcon(undoIcon), "Undo")->setEnabled(false);
-
-    QIcon redoIcon;
-    redoIcon.addPixmap(QPixmap(":/resources/icons/redo.png"), QIcon::Normal);
-    redoIcon.addPixmap(QPixmap(":/resources/icons/redo-d.png"), QIcon::Disabled);
-    editMenu->addAction(QIcon(redoIcon), "Redo")->setEnabled(false);
-
+    editMenu->addAction(loadDualStateIcon("undo"), "Undo")->setEnabled(false);
+    editMenu->addAction(loadDualStateIcon("redo"), "Redo")->setEnabled(false);
     editMenu->addAction("Undo History...")->setEnabled(false);
     editMenu->addSeparator();
 
-    // --- Clipboard ---
-    QIcon copyIcon;
-    copyIcon.addPixmap(QPixmap(":/resources/icons/copy.png"), QIcon::Normal);
-    copyIcon.addPixmap(QPixmap(":/resources/icons/copy-d.png"), QIcon::Disabled);
-    editMenu->addAction(QIcon(copyIcon), "Copy")->setEnabled(false);
-
+    editMenu->addAction(loadDualStateIcon("copy"), "Copy")->setEnabled(false);
     editMenu->addAction("Paste")->setEnabled(false);
     editMenu->addSeparator();
 
-    // --- Preferences ---
-    QIcon preferencesIcon;
-    preferencesIcon.addPixmap(QPixmap(":/resources/icons/preferences.png"), QIcon::Normal);
-    preferencesIcon.addPixmap(QPixmap(":/resources/icons/preferences-d.png"), QIcon::Disabled);
-    editMenu->addAction(QIcon(preferencesIcon), "Preferences")->setEnabled(false);
-
+    editMenu->addAction(loadDualStateIcon("preferences"), "Preferences")->setEnabled(false);
 
     // =========================================================================
-    // [ HELP MENU ]
-    // Handles documentation, external links, and application metadata.
+    // HELP MENU — documentation, support links, and the About dialog
     // =========================================================================
     QMenu *helpMenu = mainWindow->menuBar()->addMenu("Help");
 
     helpMenu->addAction("Release Notes")->setEnabled(false);
-
-    QIcon tutorialsIcon;
-    tutorialsIcon.addPixmap(QPixmap(":/resources/icons/tutorials.png"), QIcon::Normal);
-    tutorialsIcon.addPixmap(QPixmap(":/resources/icons/tutorials-d.png"), QIcon::Disabled);
-    helpMenu->addAction(QIcon(tutorialsIcon), "Tutorials")->setEnabled(false);
-
+    helpMenu->addAction(loadDualStateIcon("tutorials"), "Tutorials")->setEnabled(false);
     helpMenu->addAction("Support")->setEnabled(false);
     helpMenu->addSeparator();
 
-    // --- About Dialog ---
-    // Triggers the reusable SplashOverlay to display branding and version info
-    QIcon aboutIcon;
-    aboutIcon.addPixmap(QPixmap(":/resources/icons/about.png"), QIcon::Normal);
-    aboutIcon.addPixmap(QPixmap(":/resources/icons/about-d.png"), QIcon::Disabled);
-    
-    QAction *aboutAction = helpMenu->addAction(aboutIcon, "About PoseStudio");
-    
+    // "About" reuses the boot splash overlay for branding/version info
+    QAction *aboutAction = helpMenu->addAction(loadDualStateIcon("about"), "About PoseStudio");
     QObject::connect(aboutAction, &QAction::triggered, mainWindow, [this]() {
-        SplashOverlay *splash = new SplashOverlay(this->mainWindow);
+        SplashOverlay *splash = new SplashOverlay(mainWindow);
         splash->show();
     });
 }

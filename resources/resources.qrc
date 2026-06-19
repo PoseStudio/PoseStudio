@@ -39,6 +39,7 @@
 
         <file>icons/favorites.png</file>
         <file>icons/favorite-item.png</file>
+        <file>icons/folder.png</file>
         <file>icons/folder-empty.png</file>
         <file>icons/folder-hit.png</file>
         <file>icons/folder-full.png</file>
