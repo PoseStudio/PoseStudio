@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Collection name uniqueness is now per-parent, not global:** "New Collection"/"New Sub-Collection" actions auto-generate a unique sibling name ("New Collection (2)", etc.) instead of silently reusing an existing collection of the same name under the same parent.
 - **Dialog styling:** `QMessageBox`/`QDialog` now follow the app's dark theme (background, text color, button styling) instead of the default light Fusion appearance.
+- **All icons replaced with Lucide Icons:** Every icon in `resources/icons/` has been re-sourced from the [Lucide](https://lucide.dev/) icon library for a more consistent visual language. Lucide will be the default icon source for new icons going forward.
 
 ### Fixed
 - **Sub-collection renames not persisting:** The rename handler only wrote to the database for top-level collections; renaming a nested sub-collection updated the tree but reverted on restart. It now keys off the collection's own ID regardless of nesting depth.
