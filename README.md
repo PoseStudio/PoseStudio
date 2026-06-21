@@ -144,6 +144,7 @@ This project is built using the following core technologies and design resources
 
 * **Core Language:** C++
 * **Application Framework:** [Qt Framework](https://www.qt.io/)
+* Code generation and troubleshooting assistance provided by Anthropic's Claude.
 * **UI Iconography:** [Lucide Icons](https://lucide.dev/) (See `ATTRIBUTIONS.md` for full design credits)
 
 ## Contributors ✨
