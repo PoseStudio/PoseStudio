@@ -22,6 +22,7 @@
 #include <QDirIterator>
 #include <QContextMenuEvent>
 #include <QEnterEvent>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
 #include <QHash>
@@ -295,7 +296,8 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
 
     if (role == Qt::DecorationRole || role == Qt::ForegroundRole) {
         FolderHitState state = NoHit;
-        if (path.startsWith("COLLECTION_")) {
+        const bool isCollection = path.startsWith("COLLECTION_");
+        if (isCollection) {
             if (!hasHitCache.contains(path)) {
                 int collId = path.mid(11).toInt();
                 bool found = false;
@@ -337,6 +339,8 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
         if (role == Qt::ForegroundRole) {
             return (state == NoHit) ? QColor(110, 110, 110) : QVariant();
         }
+
+        if (isCollection) return QIcon(QStringLiteral(":/resources/icons/sub-collection.png"));
 
         if (state == DirectHit) return QIcon(QStringLiteral(":/resources/icons/folder-full.png"));
         if (state == IndirectHit) return QIcon(QStringLiteral(":/resources/icons/folder-hit.png"));
@@ -645,6 +649,26 @@ void AssetManagerWidget::setupUI() {
     topLayout->addWidget(searchSeparator);
     topLayout->addWidget(dirTreeView);
 
+    // =====================================================================
+    // EMPTY-STATE HINT: shown over the directory tree only while no asset library is configured
+    // =====================================================================
+    addLibraryHintLabel = new QLabel(dirTreeView->viewport());
+    addLibraryHintLabel->setObjectName("AssetManagerAddLibraryHint");
+    addLibraryHintLabel->setTextFormat(Qt::RichText);
+    addLibraryHintLabel->setText(QStringLiteral("<a href=\"#\" style=\"color: #ffffff;\">Add Asset Folder</a>"));
+    addLibraryHintLabel->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+    addLibraryHintLabel->setCursor(Qt::PointingHandCursor);
+    addLibraryHintLabel->hide();
+    connect(addLibraryHintLabel, &QLabel::linkActivated, this, [this](const QString&) {
+        promptAddAssetLibrary();
+    });
+
+    // A layout on the viewport centers the hint and keeps it centered across resizes,
+    // without interfering with the tree's own item painting (not child widgets).
+    QVBoxLayout *hintLayout = new QVBoxLayout(dirTreeView->viewport());
+    hintLayout->addWidget(addLibraryHintLabel, 0, Qt::AlignCenter);
+    // =====================================================================
+
     // --- 2. Bottom Panel: Asset Thumbnail Grid ---
     QWidget *bottomPanel = new QWidget(splitter);
     QVBoxLayout *bottomLayout = new QVBoxLayout(bottomPanel);
@@ -711,6 +735,26 @@ void AssetManagerWidget::setupUI() {
         searchInput->clear();
         runSearch(QString());
     });
+
+    refreshAssetManager();
+}
+
+/**
+ * @brief Prompts the user for a folder via the native file dialog and registers it as a
+ *        new Asset Library, then refreshes the tree so it appears immediately.
+ */
+void AssetManagerWidget::promptAddAssetLibrary() {
+    const QString folderPath = QFileDialog::getExistingDirectory(
+        this, "Select Asset Library Folder", QDir::homePath());
+    if (folderPath.isEmpty()) return;
+
+    QSqlQuery q(QSqlDatabase::database("db_conn"));
+    q.prepare("INSERT OR IGNORE INTO AssetLibraries (AssetLibraryPath) VALUES (:path)");
+    q.bindValue(":path", folderPath);
+    if (!q.exec()) {
+        qWarning() << "[!] Failed to add asset library:" << q.lastError().text();
+        return;
+    }
 
     refreshAssetManager();
 }
@@ -816,33 +860,7 @@ void AssetManagerWidget::refreshAssetManager() {
     collectionsRootItem->setFlags(collectionsRootItem->flags() & ~Qt::ItemIsEditable);
     dirModel->appendRow(collectionsRootItem);
 
-    QSqlQuery collQuery(QSqlDatabase::database("db_conn"));
-    collQuery.exec("SELECT AssetCollectionID, AssetCollectionName FROM AssetCollections");
-    
-    while (collQuery.next()) {
-        QString colId = collQuery.value(0).toString();
-        QString colName = collQuery.value(1).toString();
-
-        QStandardItem *colItem = new QStandardItem(colName);
-        colItem->setData("COLLECTION_" + colId, Qt::UserRole); 
-        
-        colItem->setFlags(colItem->flags() | Qt::ItemIsEditable);
-        collectionsRootItem->appendRow(colItem);
-
-        // Load folder shortcuts for this collection
-        QSqlQuery folderQuery(QSqlDatabase::database("db_conn"));
-        folderQuery.prepare("SELECT AssetCollectionFolderPath, AssetCollectionFolderName FROM AssetCollectionFolders WHERE AssetCollectionFolderCol = :id");
-        folderQuery.bindValue(":id", colId.toInt());
-        if (folderQuery.exec()) {
-            while (folderQuery.next()) {
-                QString fPath = folderQuery.value(0).toString();
-                QString fName = folderQuery.value(1).toString();
-                if (fName.isEmpty()) fName = QDir(fPath).dirName();
-                addFolderToCollection(fPath, fName, colId.toInt(), false);
-            }
-        }
-    }
-    collectionsRootItem->sortChildren(0, Qt::AscendingOrder);
+    loadCollectionsInto(collectionsRootItem, 0);
 
     // ---------------------------------------------------------
     // 4. Build Visual Separator
@@ -857,25 +875,28 @@ void AssetManagerWidget::refreshAssetManager() {
     // ---------------------------------------------------------
     QSqlQuery libQuery(QSqlDatabase::database("db_conn"));
     libQuery.exec("SELECT AssetLibraryPath FROM AssetLibraries WHERE AssetLibraryEnabled = 1");
-    
+
+    bool anyLibraryAdded = false;
     while (libQuery.next()) {
         QString path = libQuery.value(0).toString();
         QDir dir(path);
-        
+
         if (dir.exists()) {
             QStandardItem *rootItem = new QStandardItem(dir.dirName());
-            rootItem->setData(path, Qt::UserRole); 
+            rootItem->setData(path, Qt::UserRole);
             rootItem->setFlags(rootItem->flags() & ~Qt::ItemIsEditable);
-            
+
             QDirIterator it(path, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::NoIteratorFlags);
             if (it.hasNext()) {
                 rootItem->appendRow(new QStandardItem("..."));
             }
             dirModel->appendRow(rootItem);
+            anyLibraryAdded = true;
         } else {
             qWarning() << "Library path does not exist on disk:" << path;
         }
     }
+    addLibraryHintLabel->setVisible(!anyLibraryAdded);
 
     // =========================================================================
     // 6. RESTORE STATE AFTER WIPE
@@ -1582,7 +1603,7 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         if (expandAction && selectedAction == expandAction) dirTreeView->expand(proxyIndex);
         else if (collapseAction && selectedAction == collapseAction) collapseNodeRecursively(proxyIndex);
         else if (selectedAction == newCollAction) {
-            int cid = getOrCreateCollection("New Collection");
+            int cid = getOrCreateCollection(uniqueCollectionName("New Collection", 0), 0);
             if (cid > 0) navigateToCollectionNode(cid, true);
         }
         else if (selectedAction == refreshAction) refreshAssetManager();
@@ -1596,7 +1617,7 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
     if (folderPath.startsWith("COLLECTION_")) {
         const int collId = folderPath.mid(11).toInt();
 
-        // Deletable only when both asset items and folder shortcuts are absent
+        // Deletable only when asset items, folder shortcuts, and sub-collections are all absent
         bool collIsEmpty = true;
         {
             QSqlQuery chk(QSqlDatabase::database("db_conn"));
@@ -1607,6 +1628,12 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         if (collIsEmpty) {
             QSqlQuery chk(QSqlDatabase::database("db_conn"));
             chk.prepare("SELECT COUNT(*) FROM AssetCollectionFolders WHERE AssetCollectionFolderCol = :id");
+            chk.bindValue(":id", collId);
+            if (chk.exec() && chk.next() && chk.value(0).toInt() > 0) collIsEmpty = false;
+        }
+        if (collIsEmpty) {
+            QSqlQuery chk(QSqlDatabase::database("db_conn"));
+            chk.prepare("SELECT COUNT(*) FROM AssetCollections WHERE AssetCollectionParentID = :id");
             chk.bindValue(":id", collId);
             if (chk.exec() && chk.next() && chk.value(0).toInt() > 0) collIsEmpty = false;
         }
@@ -1633,6 +1660,9 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         }
 
         collMenu.addSeparator();
+        QAction *newSubCollAction = collMenu.addAction(QIcon(":/resources/icons/add-col.png"), "New Sub-Collection");
+
+        collMenu.addSeparator();
         QAction *refreshAction = collMenu.addAction(QIcon(":/resources/icons/refresh.png"), "Refresh");
 
         QAction *selectedAction = collMenu.exec(dirTreeView->viewport()->mapToGlobal(pos));
@@ -1653,6 +1683,9 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
             dirTreeView->expand(proxyIndex);
         } else if (collapseAction && selectedAction == collapseAction) {
             collapseNodeRecursively(proxyIndex);
+        } else if (selectedAction == newSubCollAction) {
+            int cid = getOrCreateCollection(uniqueCollectionName("New Collection", collId), collId);
+            if (cid > 0) navigateToCollectionNode(cid, true);
         } else if (selectedAction == refreshAction) {
             refreshAssetManager();
         }
@@ -1874,31 +1907,24 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
         copyMenu->setObjectName("AssetManagerContextMenu");
     }
 
-    // Dynamically query collections from SQLite
-    QSqlQuery collQuery(QSqlDatabase::database("db_conn"));
-    collQuery.exec("SELECT AssetCollectionID, AssetCollectionName FROM AssetCollections");
-
+    const QList<QPair<int, QString>> collections = collectionPathList();
     bool hasOtherCollections = false; // Tracks if there are valid destinations to move/copy to
 
     // "New Collection" always at the top of the Add menu
     if (currentCollectionId == -1) {
         QAction *newCollAction = addMenu->addAction("New Collection");
         connect(newCollAction, &QAction::triggered, [this, fullPath]() {
-            int cid = getOrCreateCollection("New Collection");
+            int cid = getOrCreateCollection(uniqueCollectionName("New Collection", 0), 0);
             if (cid > 0) { addAssetToCollection(fullPath, cid); navigateToCollectionNode(cid, true); }
         });
     }
 
     bool hasExistingForAdd = false;
-    while (collQuery.next()) {
-        int colId = collQuery.value(0).toInt();
-        QString colName = collQuery.value(1).toString();
-
+    for (const auto& [colId, colPath] : collections) {
         if (currentCollectionId == -1) {
-            if (colName == "New Collection") continue; // already pinned at top
             if (!hasExistingForAdd) { addMenu->addSeparator(); hasExistingForAdd = true; }
             // STANDARD ADD
-            QAction *addAction = addMenu->addAction(colName);
+            QAction *addAction = addMenu->addAction(colPath);
             connect(addAction, &QAction::triggered, [this, colId, fullPath]() {
                 addAssetToCollection(fullPath, colId); navigateToCollectionNode(colId);
             });
@@ -1908,7 +1934,7 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
                 hasOtherCollections = true;
 
                 // Move Lambda: Remove from current, Add to new, Refresh Grid
-                QAction *moveAction = moveMenu->addAction(colName);
+                QAction *moveAction = moveMenu->addAction(colPath);
                 connect(moveAction, &QAction::triggered, [this, fullPath, currentCollectionId, colId, currentTreeIndex]() {
                     removeAssetFromCollection(fullPath, currentCollectionId);
                     addAssetToCollection(fullPath, colId);
@@ -1916,7 +1942,7 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
                 });
 
                 // Copy Lambda: Just Add to new (No refresh needed, it stays in the current view)
-                QAction *copyAction = copyMenu->addAction(colName);
+                QAction *copyAction = copyMenu->addAction(colPath);
                 connect(copyAction, &QAction::triggered, [this, fullPath, colId]() {
                     addAssetToCollection(fullPath, colId);
                 });
@@ -2004,25 +2030,24 @@ void AssetManagerWidget::onItemChanged(QStandardItem *item) {
     if (!item) return;
 
     // ---------------------------------------------------------
-    // Handle Collection Renaming
+    // Handle Collection Renaming (at any nesting depth, not just top-level collections)
     // ---------------------------------------------------------
-    if (item->parent() == collectionsRootItem) {
+    QString dataStr = item->data(Qt::UserRole).toString();
+    if (dataStr.startsWith("COLLECTION_")) {
         QString newName = item->text();
-        QString dataStr = item->data(Qt::UserRole).toString();
+        int collId = dataStr.mid(11).toInt();
 
-        if (dataStr.startsWith("COLLECTION_")) {
-            int collId = dataStr.mid(11).toInt(); 
+        QSqlQuery query(QSqlDatabase::database("db_conn"));
+        query.prepare("UPDATE AssetCollections SET AssetCollectionName = :name WHERE AssetCollectionID = :id");
+        query.bindValue(":name", newName);
+        query.bindValue(":id", collId);
 
-            QSqlQuery query(QSqlDatabase::database("db_conn"));
-            query.prepare("UPDATE AssetCollections SET AssetCollectionName = :name WHERE AssetCollectionID = :id");
-            query.bindValue(":name", newName);
-            query.bindValue(":id", collId);
-
-            if (!query.exec()) {
-                qWarning() << "[!] Failed to update collection name in DB:" << query.lastError().text();
-            } else {
-                collectionsRootItem->sortChildren(0, Qt::AscendingOrder);
-            }
+        if (!query.exec()) {
+            qWarning() << "[!] Failed to update collection name in DB:" << query.lastError().text();
+        } else if (item->parent()) {
+            item->parent()->sortChildren(0, Qt::AscendingOrder);
+        } else {
+            collectionsRootItem->sortChildren(0, Qt::AscendingOrder);
         }
     }
 }
@@ -2266,9 +2291,100 @@ void AssetManagerWidget::navigateToCollectionNode(int collectionId, bool enterEd
 }
 
 /**
+ * @brief Recursively searches the entire Collections subtree (not just direct children) for the
+ *        tree item tagged "COLLECTION_<collectionId>", so callers can find a node at any nesting depth.
+ */
+QStandardItem* AssetManagerWidget::findCollectionTreeItem(QStandardItem* parent, int collectionId) const {
+    if (!parent) return nullptr;
+    const QString target = QString("COLLECTION_%1").arg(collectionId);
+
+    for (int i = 0; i < parent->rowCount(); ++i) {
+        QStandardItem *child = parent->child(i);
+        if (child->data(Qt::UserRole).toString() == target) return child;
+        if (QStandardItem *found = findCollectionTreeItem(child, collectionId)) return found;
+    }
+    return nullptr;
+}
+
+/**
+ * @brief Recursively populates a Collections tree node with its child collections (and each
+ *        child's folder shortcuts), so the Collections branch can be nested arbitrarily deep.
+ * @param parentItem The tree node to populate (collectionsRootItem for the top level).
+ * @param parentCollectionId The DB collection ID whose children to load (0 = top-level).
+ */
+void AssetManagerWidget::loadCollectionsInto(QStandardItem* parentItem, int parentCollectionId) {
+    QSqlQuery collQuery(QSqlDatabase::database("db_conn"));
+    collQuery.prepare("SELECT AssetCollectionID, AssetCollectionName FROM AssetCollections "
+                       "WHERE AssetCollectionParentID = :pid ORDER BY AssetCollectionName COLLATE NOCASE");
+    collQuery.bindValue(":pid", parentCollectionId);
+    if (!collQuery.exec()) return;
+
+    while (collQuery.next()) {
+        const int colId = collQuery.value(0).toInt();
+        const QString colName = collQuery.value(1).toString();
+
+        QStandardItem *colItem = new QStandardItem(colName);
+        colItem->setData(QString("COLLECTION_%1").arg(colId), Qt::UserRole);
+        colItem->setFlags(colItem->flags() | Qt::ItemIsEditable);
+        parentItem->appendRow(colItem);
+
+        // Load this collection's own folder shortcuts
+        QSqlQuery folderQuery(QSqlDatabase::database("db_conn"));
+        folderQuery.prepare("SELECT AssetCollectionFolderPath, AssetCollectionFolderName FROM AssetCollectionFolders WHERE AssetCollectionFolderCol = :id");
+        folderQuery.bindValue(":id", colId);
+        if (folderQuery.exec()) {
+            while (folderQuery.next()) {
+                QString fPath = folderQuery.value(0).toString();
+                QString fName = folderQuery.value(1).toString();
+                if (fName.isEmpty()) fName = QDir(fPath).dirName();
+                addFolderToCollection(fPath, fName, colId, false);
+            }
+        }
+
+        // Recurse into this collection's own sub-collections
+        loadCollectionsInto(colItem, colId);
+    }
+
+    parentItem->sortChildren(0, Qt::AscendingOrder);
+}
+
+/**
+ * @brief Returns every collection as (id, full path) pairs, e.g. (7, "Clothing / Shirts"),
+ *        sorted by path, so flat pickers can let the user target any nesting depth directly.
+ */
+QList<QPair<int, QString>> AssetManagerWidget::collectionPathList() const {
+    QHash<int, QPair<QString, int>> info; // id -> (name, parentId)
+    QSqlQuery q(QSqlDatabase::database("db_conn"));
+    q.exec("SELECT AssetCollectionID, AssetCollectionName, AssetCollectionParentID FROM AssetCollections");
+    while (q.next())
+        info.insert(q.value(0).toInt(), {q.value(1).toString(), q.value(2).toInt()});
+
+    QList<QPair<int, QString>> result;
+    result.reserve(info.size());
+    for (auto it = info.cbegin(); it != info.cend(); ++it) {
+        QStringList parts;
+        int cur = it.key();
+        QSet<int> seen; // guards against an accidental parent cycle
+        while (info.contains(cur) && !seen.contains(cur)) {
+            seen.insert(cur);
+            parts.prepend(info[cur].first);
+            cur = info[cur].second;
+            if (cur == 0) break;
+        }
+        result.append({it.key(), parts.join(" / ")});
+    }
+
+    std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
+        return a.second.compare(b.second, Qt::CaseInsensitive) < 0;
+    });
+    return result;
+}
+
+/**
  * @brief Builds an "Add To Collection" submenu for a physical folder: a pinned "New Collection"
- *        entry followed by every existing collection, each wired to add the folder as a shortcut
- *        and then jump the tree to that collection. Caller owns the returned menu (parent it).
+ *        entry followed by every existing collection (shown by full path), each wired to add the
+ *        folder as a shortcut and then jump the tree to that collection. Caller owns the returned
+ *        menu (parent it).
  */
 QMenu* AssetManagerWidget::buildAddToCollectionMenu(QWidget* parentMenu, const QString& folderPath, const QString& folderName) {
     QMenu *addMenu = new QMenu("Add To Collection", parentMenu);
@@ -2279,19 +2395,15 @@ QMenu* AssetManagerWidget::buildAddToCollectionMenu(QWidget* parentMenu, const Q
 
     QAction *newCollAction = addMenu->addAction("New Collection");
     connect(newCollAction, &QAction::triggered, this, [this, folderPath, name]() {
-        int cid = getOrCreateCollection("New Collection");
+        int cid = getOrCreateCollection(uniqueCollectionName("New Collection", 0), 0);
         if (cid > 0) { addFolderToCollection(folderPath, name, cid); navigateToCollectionNode(cid, true); }
     });
 
-    bool hasExisting = false;
-    QSqlQuery collQuery(QSqlDatabase::database("db_conn"));
-    collQuery.exec("SELECT AssetCollectionID, AssetCollectionName FROM AssetCollections");
-    while (collQuery.next()) {
-        if (collQuery.value(1).toString() == "New Collection") continue; // already pinned at top
-        if (!hasExisting) { addMenu->addSeparator(); hasExisting = true; }
+    const QList<QPair<int, QString>> collections = collectionPathList();
+    if (!collections.isEmpty()) addMenu->addSeparator();
 
-        const int colId = collQuery.value(0).toInt();
-        QAction *addAction = addMenu->addAction(collQuery.value(1).toString());
+    for (const auto& [colId, colPath] : collections) {
+        QAction *addAction = addMenu->addAction(colPath);
         connect(addAction, &QAction::triggered, this, [this, folderPath, name, colId]() {
             addFolderToCollection(folderPath, name, colId); navigateToCollectionNode(colId);
         });
@@ -2304,15 +2416,8 @@ QMenu* AssetManagerWidget::buildAddToCollectionMenu(QWidget* parentMenu, const Q
  * @brief Adds a folder shortcut to a Collection and saves it to the database.
  */
 void AssetManagerWidget::addFolderToCollection(const QString& folderPath, const QString& displayName, int collectionId, bool saveToDb) {
-    // Find the collection item in the tree
-    QStandardItem *collItem = nullptr;
-    for (int i = 0; i < collectionsRootItem->rowCount(); ++i) {
-        QStandardItem *child = collectionsRootItem->child(i);
-        if (child->data(Qt::UserRole).toString() == QString("COLLECTION_%1").arg(collectionId)) {
-            collItem = child;
-            break;
-        }
-    }
+    // Find the collection item in the tree, at any nesting depth
+    QStandardItem *collItem = findCollectionTreeItem(collectionsRootItem, collectionId);
     if (!collItem) return;
 
     // Prevent duplicates
@@ -2361,9 +2466,8 @@ void AssetManagerWidget::removeFolderFromCollection(const QString& folderPath, i
     q.bindValue(":col", collectionId);
     if (!q.exec()) qWarning() << "[!] Failed to remove collection folder:" << q.lastError().text();
 
-    for (int i = 0; i < collectionsRootItem->rowCount(); ++i) {
-        QStandardItem *collItem = collectionsRootItem->child(i);
-        if (collItem->data(Qt::UserRole).toString() != QString("COLLECTION_%1").arg(collectionId)) continue;
+    QStandardItem *collItem = findCollectionTreeItem(collectionsRootItem, collectionId);
+    if (collItem) {
         for (int j = 0; j < collItem->rowCount(); ++j) {
             if (collItem->child(j)->data(Qt::UserRole).toString() == folderPath) {
                 collItem->removeRow(j);
@@ -2374,23 +2478,55 @@ void AssetManagerWidget::removeFolderFromCollection(const QString& folderPath, i
     }
 }
 
-int AssetManagerWidget::getOrCreateCollection(const QString& name) {
+/**
+ * @brief Returns baseName if no sibling under parentCollectionId already has it, otherwise
+ *        "baseName (2)", "baseName (3)", etc. — lets repeated "New Collection" clicks under the
+ *        same parent each create a distinct collection instead of colliding on name.
+ */
+QString AssetManagerWidget::uniqueCollectionName(const QString& baseName, int parentCollectionId) const {
     QSqlQuery q(QSqlDatabase::database("db_conn"));
-    q.prepare("SELECT AssetCollectionID FROM AssetCollections WHERE AssetCollectionName = :name");
+    q.prepare("SELECT AssetCollectionName FROM AssetCollections WHERE AssetCollectionParentID = :pid");
+    q.bindValue(":pid", parentCollectionId);
+    q.exec();
+
+    QSet<QString> existingNames;
+    while (q.next()) existingNames.insert(q.value(0).toString());
+
+    if (!existingNames.contains(baseName)) return baseName;
+
+    int suffix = 2;
+    QString candidate;
+    do {
+        candidate = QStringLiteral("%1 (%2)").arg(baseName).arg(suffix++);
+    } while (existingNames.contains(candidate));
+
+    return candidate;
+}
+
+int AssetManagerWidget::getOrCreateCollection(const QString& name, int parentCollectionId) {
+    QSqlQuery q(QSqlDatabase::database("db_conn"));
+    q.prepare("SELECT AssetCollectionID FROM AssetCollections WHERE AssetCollectionName = :name AND AssetCollectionParentID = :pid");
     q.bindValue(":name", name);
+    q.bindValue(":pid", parentCollectionId);
     if (q.exec() && q.next()) return q.value(0).toInt();
 
     QSqlQuery ins(QSqlDatabase::database("db_conn"));
-    ins.prepare("INSERT INTO AssetCollections (AssetCollectionName) VALUES (:name)");
+    ins.prepare("INSERT INTO AssetCollections (AssetCollectionName, AssetCollectionParentID) VALUES (:name, :pid)");
     ins.bindValue(":name", name);
+    ins.bindValue(":pid", parentCollectionId);
     if (!ins.exec()) return -1;
     int newId = ins.lastInsertId().toInt();
+
+    QStandardItem *parentItem = (parentCollectionId == 0)
+        ? collectionsRootItem
+        : findCollectionTreeItem(collectionsRootItem, parentCollectionId);
+    if (!parentItem) return newId;
 
     QStandardItem *colItem = new QStandardItem(name);
     colItem->setData("COLLECTION_" + QString::number(newId), Qt::UserRole);
     colItem->setFlags(colItem->flags() | Qt::ItemIsEditable);
-    collectionsRootItem->appendRow(colItem);
-    collectionsRootItem->sortChildren(0, Qt::AscendingOrder);
+    parentItem->appendRow(colItem);
+    parentItem->sortChildren(0, Qt::AscendingOrder);
 
     return newId;
 }

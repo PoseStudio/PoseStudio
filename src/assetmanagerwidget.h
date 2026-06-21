@@ -175,6 +175,7 @@ private:
     QVBoxLayout *mainLayout;
     QLabel *titleLabel;
     QListWidget *assetListWidget;
+    QLabel *addLibraryHintLabel; ///< "Add Asset Folder" link shown over the grid when no library exists yet
 
     QLineEdit *searchInput;
     QPushButton *clearSearchButton;
@@ -205,6 +206,7 @@ private:
     QStringList m_breadcrumbPaths;
 
     void setupUI();
+    void promptAddAssetLibrary();
     void processNextThumbnailBatch();
     void runSearch(const QString& query);
     void displayFolder(const QString& folderPath, const QString& title = QString());
@@ -219,7 +221,7 @@ private:
     void navigateToFolderInTree(const QString& folderPath);
     void navigateToCollectionNode(int collectionId, bool enterEditMode = false);
     void collectDirectHits(const QString& folderPath, const QString& libRootPath, QSet<QString>& added, QList<QStandardItem*>& results);
-    int  getOrCreateCollection(const QString& name);
+    int  getOrCreateCollection(const QString& name, int parentCollectionId = 0);
     void addAssetToCollection(const QString& filePath, int collectionId);
     void removeAssetFromCollection(const QString& filePath, int collectionId);
     void addFolderToCollection(const QString& folderPath, const QString& displayName, int collectionId, bool saveToDb = true);
@@ -229,6 +231,11 @@ private:
     void restoreExpandedState(const QModelIndex &parentProxyIndex, const QSet<QString> &expandedPaths);
     QModelIndex findProxyIndexByPath(const QModelIndex &parentProxyIndex, const QString &targetPath);
     BrowseContext contextForTreeItem(QStandardItem* item) const;
+
+    void loadCollectionsInto(QStandardItem* parentItem, int parentCollectionId);
+    QStandardItem* findCollectionTreeItem(QStandardItem* parent, int collectionId) const;
+    QList<QPair<int, QString>> collectionPathList() const;
+    QString uniqueCollectionName(const QString& baseName, int parentCollectionId) const;
 
 protected:
     /// Handles the title label's resize/context-menu events and the asset grid's custom tooltips.

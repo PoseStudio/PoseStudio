@@ -9,11 +9,14 @@
 
 #include "menumanager.h"
 #include "splashoverlay.h"
+#include "database.h"
 #include <QMenu>
 #include <QMenuBar>
 #include <QAction>
 #include <QApplication>
 #include <QIcon>
+#include <QMessageBox>
+#include <QProcess>
 
 /**
  * @brief Loads a normal/disabled icon pair following the "name.png" / "name-d.png" convention.
@@ -86,5 +89,25 @@ void MenuManager::setupMenus() {
     QObject::connect(aboutAction, &QAction::triggered, mainWindow, [this]() {
         SplashOverlay *splash = new SplashOverlay(mainWindow);
         splash->show();
+    });
+
+    helpMenu->addSeparator();
+
+    // Wipes and rebuilds posestudio.db from scratch. Many widgets (AssetManagerWidget's tree,
+    // PreferencesManager's cache) hold in-memory state derived from the old data, so rather than
+    // reconciling all of that live, we relaunch the process immediately after the reset.
+    QAction *factoryResetAction = helpMenu->addAction("Factory Reset Database...");
+    QObject::connect(factoryResetAction, &QAction::triggered, mainWindow, [this]() {
+        const auto choice = QMessageBox::warning(mainWindow, "Factory Reset Database",
+            "This will permanently delete all your asset libraries, collections, and "
+            "preferences, and cannot be undone.\n\nPoseStudio will restart afterward.\n\n"
+            "Continue?",
+            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (choice != QMessageBox::Yes) return;
+
+        initializeDatabase(DbInitMode::FactoryReset);
+
+        QProcess::startDetached(QApplication::applicationFilePath(), QApplication::arguments());
+        QApplication::quit();
     });
 }

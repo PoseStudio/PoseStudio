@@ -99,3 +99,40 @@ QToolTip {
     padding: 2px 4px;
     font-size: 13px;
 }
+
+/* ========================================================================= */
+/* [ DIALOGS (QMessageBox, etc.) ]                                          */
+/* ========================================================================= */
+
+QDialog {
+    background-color: #191a1b;
+}
+
+QMessageBox QLabel {
+    /* Overrides the global white QLabel color above with a softer tone, */
+    /* and drops the 18px default size that's sized for the main window. */
+    color: #e0e0e0;
+    font-size: 13px;
+}
+
+QDialog QPushButton {
+    background-color: #2a2d30;
+    color: #e0e0e0;
+    border: 1px solid #3a3b3c;
+    border-radius: 4px;
+    padding: 6px 16px;
+    min-width: 70px;
+}
+
+QDialog QPushButton:hover {
+    background-color: #3a3b3c;
+}
+
+QDialog QPushButton:pressed {
+    background-color: #5b87cc;
+}
+
+QDialog QPushButton:default {
+    /* Highlights whichever button Enter/Return will trigger */
+    border: 1px solid #5b87cc;
+}

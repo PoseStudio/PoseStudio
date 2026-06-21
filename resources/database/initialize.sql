@@ -44,14 +44,8 @@ CREATE TABLE Preferences(PreferenceID INTEGER PRIMARY KEY AUTOINCREMENT, Prefere
 CREATE INDEX idx_PreferenceName ON Preferences(PreferenceName);
 
 CREATE TABLE AssetLibraries(AssetLibraryID INTEGER PRIMARY KEY AUTOINCREMENT, AssetLibraryPath TEXT NOT NULL UNIQUE, AssetLibraryEnabled INTEGER DEFAULT 1);
-INSERT INTO AssetLibraries(AssetLibraryPath) VALUES('C:/Users/Public/Documents/My DAZ 3D Library');
-INSERT INTO AssetLibraries(AssetLibraryPath) VALUES('D:/My PoseStudio Library');
 
-CREATE TABLE AssetCollections(AssetCollectionID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionName TEXT NOT NULL);
-INSERT INTO AssetCollections(AssetCollectionName) VALUES('Characters');
-INSERT INTO AssetCollections(AssetCollectionName) VALUES('Clothing');
-INSERT INTO AssetCollections(AssetCollectionName) VALUES('Hair');
-INSERT INTO AssetCollections(AssetCollectionName) VALUES('Props');
+CREATE TABLE AssetCollections(AssetCollectionID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionName TEXT NOT NULL, AssetCollectionParentID INTEGER NOT NULL DEFAULT 0);
 
 CREATE TABLE AssetCollectionItems(AssetCollectionItemID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionItemPath TEXT NOT NULL, AssetCollectionItemCol INTEGER NOT NULL DEFAULT 0, UNIQUE(AssetCollectionItemPath, AssetCollectionItemCol) ON CONFLICT IGNORE);
 CREATE INDEX idx_AssetCollectionItemPath ON AssetCollectionItems(AssetCollectionItemPath);

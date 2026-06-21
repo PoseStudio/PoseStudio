@@ -5,6 +5,31 @@ All notable changes to the PoseStudio project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-06-21
+
+### Added
+- **Find In Library / Browse Folder for Collections & Search Results:** Folders and assets shown anywhere under Collections or Search Results (at any nesting depth) now surface "Find In Library" and "Browse Folder" at the top of their context menus, jumping to the item's real location in the physical library tree. Added a new `tree.png` icon for the action.
+- **Nested Sub-Collections:** Collections can now contain other Collections, arbitrarily deep (e.g. `Characters > Female`, `Clothing > Shirts`). Any collection — top-level or nested — can hold its own asset items and folder shortcuts alongside further sub-collections. Added a "New Sub-Collection" action to each collection's context menu, and a "New Collection" action to the Collections root's context menu (`add-col.png`).
+- **Full-Path Collection Picker:** "Add/Move/Copy To Collection" menus now list every collection by its full path (e.g. "Clothing / Shirts") instead of a bare name, so any nested collection is selectable directly from a flat list.
+- **Factory Reset Database menu action:** Added Help → "Factory Reset Database..." with a confirmation dialog; on confirm it wipes and rebuilds `posestudio.db` from `initialize.sql` and relaunches the app.
+- **"Add Asset Folder" empty-state link:** When no asset library is configured, a clickable "Add Asset Folder" link appears in the directory tree panel, opening a native folder picker and registering the chosen folder as a new library.
+- **`sub-collection.png` icon:** All Collection nodes (top-level and nested) now render with a dedicated icon instead of sharing the physical-folder hit-state icons.
+
+### Changed
+- **Collection name uniqueness is now per-parent, not global:** "New Collection"/"New Sub-Collection" actions auto-generate a unique sibling name ("New Collection (2)", etc.) instead of silently reusing an existing collection of the same name under the same parent.
+- **Dialog styling:** `QMessageBox`/`QDialog` now follow the app's dark theme (background, text color, button styling) instead of the default light Fusion appearance.
+
+### Fixed
+- **Sub-collection renames not persisting:** The rename handler only wrote to the database for top-level collections; renaming a nested sub-collection updated the tree but reverted on restart. It now keys off the collection's own ID regardless of nesting depth.
+- **Adding a folder to a Collection not persisting:** Root cause was that the `AssetCollectionFolders` table itself didn't exist in databases created before that table was added to the schema, so every insert was silently failing at the SQL `prepare()` step. Added a migration that creates the table (and its indexes) if missing.
+- **Missing `AssetCollectionParentID` migration for existing databases:** Added an idempotent `ALTER TABLE` so existing installs gain the column needed for nested collections without requiring a factory reset.
+
+### Removed
+- **Unused icons:** Removed `favorites.png` and `favorite-item.png` (leftover from the removed Favorites feature) from `resources.qrc` and disk.
+
+### Internal
+- Added `CLAUDE.md`, project guidance for future Claude Code sessions covering build commands and architecture.
+
 ## [0.1.1] - 2026-06-19
 
 ### Added

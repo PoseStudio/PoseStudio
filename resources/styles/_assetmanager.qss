@@ -131,6 +131,10 @@ QTreeView#AssetManagerTree {
     text-align: center;
 }
 
+#AssetManagerAddLibraryHint {
+    font-size: 14px;
+}
+
 /* =========================================================================
    [ GRID SCROLLBAR ]
    ========================================================================= */

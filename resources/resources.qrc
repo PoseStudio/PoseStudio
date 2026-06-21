@@ -37,8 +37,6 @@
         <file>icons/tutorials.png</file>
         <file>icons/tutorials-d.png</file>
 
-        <file>icons/favorites.png</file>
-        <file>icons/favorite-item.png</file>
         <file>icons/folder.png</file>
         <file>icons/folder-empty.png</file>
         <file>icons/folder-hit.png</file>
@@ -56,6 +54,7 @@
         <file>icons/unfavorite.png</file>
         <file>icons/collections.png</file>
         <file>icons/add-col.png</file>
+        <file>icons/sub-collection.png</file>
         <file>icons/open-item.png</file>
 
     </qresource>

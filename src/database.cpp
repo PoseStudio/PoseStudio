@@ -86,5 +86,42 @@ QSqlDatabase initializeDatabase(DbInitMode mode) {
         qDebug() << "Success: Database architecture successfully reconstructed.";
     }
 
+    // There's no formal migration system yet, so additive schema changes for existing
+    // databases are applied here, guarded so they're a no-op once already present.
+    {
+        bool hasParentColumn = false;
+        QSqlQuery pragma(db);
+        if (pragma.exec(QStringLiteral("PRAGMA table_info(AssetCollections)"))) {
+            while (pragma.next()) {
+                if (pragma.value(QStringLiteral("name")).toString() == QStringLiteral("AssetCollectionParentID")) {
+                    hasParentColumn = true;
+                    break;
+                }
+            }
+        }
+        if (!hasParentColumn) {
+            QSqlQuery alter(db);
+            if (!alter.exec(QStringLiteral("ALTER TABLE AssetCollections ADD COLUMN AssetCollectionParentID INTEGER NOT NULL DEFAULT 0"))) {
+                qWarning() << "[!] Failed to add AssetCollectionParentID column:" << alter.lastError().text();
+            }
+        }
+    }
+
+    // AssetCollectionFolders (folder shortcuts within a Collection) was added to the schema
+    // after some users' databases were already created, so older databases are missing the
+    // table entirely. CREATE TABLE/INDEX IF NOT EXISTS makes this a no-op once it's present.
+    {
+        QSqlQuery q(db);
+        q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS AssetCollectionFolders("
+            "AssetCollectionFolderID INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "AssetCollectionFolderPath TEXT NOT NULL, "
+            "AssetCollectionFolderName TEXT NOT NULL DEFAULT '', "
+            "AssetCollectionFolderCol INTEGER NOT NULL DEFAULT 0, "
+            "UNIQUE(AssetCollectionFolderPath, AssetCollectionFolderCol) ON CONFLICT IGNORE)"));
+        q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_AssetCollectionFolderPath ON AssetCollectionFolders(AssetCollectionFolderPath)"));
+        q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_AssetCollectionFolderCol ON AssetCollectionFolders(AssetCollectionFolderCol)"));
+    }
+
     return db;
 }
