@@ -162,9 +162,15 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
 
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
-## Tech Stack
-
-- **Core Framework:** [Name of framework]
-- **Iconography:** [Lucide Icons](https://lucide.dev/) (v0.x.x)
-
 This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
+
+
+---
+
+## Tech Stack & Resources
+
+This project is built using the following core technologies and design resources:
+
+* **Core Language:** C++
+* **Application Framework:** [Qt Framework](https://www.qt.io/)
+* **UI Iconography:** [Lucide Icons](https://lucide.dev/) (See `ATTRIBUTIONS.md` for full design credits)
