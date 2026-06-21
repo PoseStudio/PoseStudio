@@ -50,6 +50,11 @@ struct AssetHit {
 
 enum FolderHitState { NoHit = 0, IndirectHit = 1, DirectHit = 2 };
 
+/// Identifies which branch of the directory tree a node lives under, regardless of nesting
+/// depth, so context menus can tell a "real" library folder apart from a Collections/Search
+/// Results shortcut pointing at the same physical path.
+enum class BrowseContext { Library, Collection, SearchResults };
+
 /**
  * @class AssetFolderProxyModel
  * @brief Intercepts data requests to dynamically style folders with custom icons and labels.
@@ -223,6 +228,7 @@ private:
     void saveExpandedState(const QModelIndex &parentProxyIndex, QSet<QString> &expandedPaths);
     void restoreExpandedState(const QModelIndex &parentProxyIndex, const QSet<QString> &expandedPaths);
     QModelIndex findProxyIndexByPath(const QModelIndex &parentProxyIndex, const QString &targetPath);
+    BrowseContext contextForTreeItem(QStandardItem* item) const;
 
 protected:
     /// Handles the title label's resize/context-menu events and the asset grid's custom tooltips.

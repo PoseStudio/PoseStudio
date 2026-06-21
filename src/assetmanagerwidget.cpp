@@ -1572,15 +1572,22 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         }
 
         rootMenu.addSeparator();
+        QAction *newCollAction = rootMenu.addAction(QIcon(":/resources/icons/add-col.png"), "New Collection");
+
+        rootMenu.addSeparator();
         QAction *refreshAction = rootMenu.addAction(QIcon(":/resources/icons/refresh.png"), "Refresh");
 
         QAction *selectedAction = rootMenu.exec(dirTreeView->viewport()->mapToGlobal(pos));
 
         if (expandAction && selectedAction == expandAction) dirTreeView->expand(proxyIndex);
-        else if (collapseAction && selectedAction == collapseAction) collapseNodeRecursively(proxyIndex); 
+        else if (collapseAction && selectedAction == collapseAction) collapseNodeRecursively(proxyIndex);
+        else if (selectedAction == newCollAction) {
+            int cid = getOrCreateCollection("New Collection");
+            if (cid > 0) navigateToCollectionNode(cid, true);
+        }
         else if (selectedAction == refreshAction) refreshAssetManager();
-        
-        return; 
+
+        return;
     }
 
     // =========================================================================
@@ -1661,9 +1668,19 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         ? clickedItem->data(Qt::UserRole + 1).toInt()
         : 0;
     bool isCollectionFolder = (parentCollectionId > 0);
+    const bool inCollectionOrSearch = (contextForTreeItem(clickedItem) != BrowseContext::Library);
 
     QMenu contextMenu(this);
     contextMenu.setObjectName("AssetManagerContextMenu");
+
+    QAction *findInLibraryAction = nullptr;
+    QAction *browseAction = nullptr;
+
+    if (inCollectionOrSearch) {
+        findInLibraryAction = contextMenu.addAction(QIcon(":/resources/icons/tree.png"), "Find In Library");
+        browseAction = contextMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
+        contextMenu.addSeparator();
+    }
 
     QAction *removeFromCollFolderAction = nullptr;
     if (isCollectionFolder) {
@@ -1676,8 +1693,10 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         contextMenu.addSeparator();
     }
 
-    QAction *browseAction = contextMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
-    contextMenu.addSeparator();
+    if (!inCollectionOrSearch) {
+        browseAction = contextMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
+        contextMenu.addSeparator();
+    }
 
     bool isExpanded = dirTreeView->isExpanded(proxyIndex);
     bool hasChildren = proxyModel->hasChildren(proxyIndex);
@@ -1702,6 +1721,8 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
 
     if (removeFromCollFolderAction && selectedAction == removeFromCollFolderAction)
         removeFolderFromCollection(folderPath, parentCollectionId);
+    else if (findInLibraryAction && selectedAction == findInLibraryAction)
+        navigateToFolderInTree(folderPath);
     else if (expandAction && selectedAction == expandAction) dirTreeView->expand(proxyIndex);
     else if (collapseAction && selectedAction == collapseAction) collapseNodeRecursively(proxyIndex);
     else if (selectedAction == expandBranchAction) expandNodeRecursively(proxyIndex);
@@ -1721,16 +1742,30 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
     if (item && item->data(Qt::UserRole + 2).toString() == QStringLiteral("FOLDER")) {
         const QString folderPath = item->data(Qt::UserRole).toString();
 
+        QStandardItem *curTreeItem = nullptr;
+        QModelIndex curTreeIndex = dirTreeView->currentIndex();
+        if (curTreeIndex.isValid())
+            curTreeItem = dirModel->itemFromIndex(proxyModel->mapToSource(curTreeIndex));
+        const bool inCollectionOrSearch = (contextForTreeItem(curTreeItem) != BrowseContext::Library);
+
         QMenu folderMenu(this);
         folderMenu.setObjectName("AssetManagerContextMenu");
 
-        QAction *openAction    = folderMenu.addAction(QIcon(":/resources/icons/open-item.png"), "Open");
+        QAction *openAction = folderMenu.addAction(QIcon(":/resources/icons/open-item.png"), "Open");
+
+        QAction *findInLibraryAction = nullptr;
+        QAction *browseAction = nullptr;
+        if (inCollectionOrSearch) {
+            findInLibraryAction = folderMenu.addAction(QIcon(":/resources/icons/tree.png"), "Find In Library");
+            browseAction = folderMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
+        }
         folderMenu.addSeparator();
 
         QMenu *addMenu = buildAddToCollectionMenu(&folderMenu, folderPath, QDir(folderPath).dirName());
         folderMenu.addMenu(addMenu);
 
-        QAction *browseAction  = folderMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
+        if (!inCollectionOrSearch)
+            browseAction = folderMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
         folderMenu.addSeparator();
         QAction *refreshAction = folderMenu.addAction(QIcon(":/resources/icons/refresh.png"), "Refresh");
 
@@ -1739,6 +1774,8 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
         if (selected == openAction) {
             deselectTree();
             displayFolder(folderPath);
+        } else if (findInLibraryAction && selected == findInLibraryAction) {
+            navigateToFolderInTree(folderPath);
         } else if (selected == browseAction) {
             QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
         } else if (selected == refreshAction) {
@@ -1785,18 +1822,27 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
 
     // Detect collection context and add collection-specific actions immediately after Open
     QAction *removeFromColAction = nullptr;
-    QAction *goToFolderAction = nullptr;
+    QAction *findInLibraryAction = nullptr;
+    QAction *browseAction = nullptr;
     int currentCollectionId = -1;
     QModelIndex currentTreeIndex = dirTreeView->currentIndex();
+    QStandardItem *curTreeItem = nullptr;
 
     if (currentTreeIndex.isValid()) {
         QModelIndex sourceIndex = proxyModel->mapToSource(currentTreeIndex);
         QString currentTreeData = dirModel->data(sourceIndex, Qt::UserRole).toString();
+        curTreeItem = dirModel->itemFromIndex(sourceIndex);
 
-        if (currentTreeData.startsWith("COLLECTION_")) {
+        if (currentTreeData.startsWith("COLLECTION_"))
             currentCollectionId = currentTreeData.mid(11).toInt();
-            goToFolderAction = itemMenu.addAction(QIcon(":/resources/icons/folder-hit.png"), "Go to Folder");
-        }
+    }
+
+    // Find In Library / Browse Folder apply to any asset shown while inside Collections or
+    // Search Results, not just ones added directly to a collection's flat item list.
+    const bool inCollectionOrSearch = (contextForTreeItem(curTreeItem) != BrowseContext::Library);
+    if (inCollectionOrSearch) {
+        findInLibraryAction = itemMenu.addAction(QIcon(":/resources/icons/tree.png"), "Find In Library");
+        browseAction = itemMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
     }
 
     itemMenu.addSeparator();
@@ -1890,8 +1936,9 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
         itemMenu.addMenu(copyMenu);
     }
 
-    // Action 3: Browse Folder
-    QAction *browseAction = itemMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
+    // Action 3: Browse Folder (already added at the top when inside Collections/Search Results)
+    if (!inCollectionOrSearch)
+        browseAction = itemMenu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
 
     itemMenu.addSeparator();
 
@@ -1908,7 +1955,7 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
         removeAssetFromCollection(fullPath, currentCollectionId);
         onFolderSelected(currentTreeIndex);
     }
-    else if (goToFolderAction && selectedAction == goToFolderAction) {
+    else if (findInLibraryAction && selectedAction == findInLibraryAction) {
         navigateToFolderInTree(folderPath);
     }
     else if (selectedAction == browseAction) {
@@ -2147,6 +2194,20 @@ void AssetManagerWidget::navigateToFolderInTree(const QString& folderPath) {
         const QModelIndex result = walkSegments(libRootProxy, segments);
         if (result.isValid()) { selectNode(result); return; }
     }
+}
+
+/**
+ * @brief Walks a tree item's ancestor chain to determine whether it lives under the
+ *        Collections or Search Results branch, no matter how deeply it's nested (e.g. a
+ *        subfolder several levels under a collection's folder shortcut still counts).
+ */
+BrowseContext AssetManagerWidget::contextForTreeItem(QStandardItem* item) const {
+    while (item) {
+        if (item == collectionsRootItem) return BrowseContext::Collection;
+        if (item == searchResultsRootItem) return BrowseContext::SearchResults;
+        item = item->parent();
+    }
+    return BrowseContext::Library;
 }
 
 // Caps a search result's displayed path to the last N segments, prefixing "..." when truncated.

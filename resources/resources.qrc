@@ -47,6 +47,7 @@
         <file>icons/search-d.png</file>
         <file>icons/clear.png</file>
         <file>icons/browse-folder.png</file>
+        <file>icons/tree.png</file>
         <file>icons/collapse.png</file>
         <file>icons/expand-branch.png</file>
         <file>icons/expand.png</file>
@@ -54,6 +55,7 @@
         <file>icons/rename.png</file>
         <file>icons/unfavorite.png</file>
         <file>icons/collections.png</file>
+        <file>icons/add-col.png</file>
         <file>icons/open-item.png</file>
 
     </qresource>
