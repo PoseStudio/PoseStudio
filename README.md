@@ -142,6 +142,10 @@ PoseStudio is open-source software licensed under the **[GNU General Public Lice
 
 This project is built using the following core technologies and design resources:
 
+* **Core Language:** C++
+* **Application Framework:** [Qt Framework](https://www.qt.io/)
+* **UI Iconography:** [Lucide Icons](https://lucide.dev/) (See `ATTRIBUTIONS.md` for full design credits)
+
 ## Contributors ✨
 
 Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
@@ -167,6 +171,3 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
 This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
-* **Core Language:** C++
-* **Application Framework:** [Qt Framework](https://www.qt.io/)
-* **UI Iconography:** [Lucide Icons](https://lucide.dev/) (See `ATTRIBUTIONS.md` for full design credits)
