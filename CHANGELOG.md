@@ -9,9 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Manual sort order for Collections:** Assets inside a Collection can now be drag-reordered, the same way Favorites already worked. Added an `AssetCollectionItemSortOrder` column to `AssetCollectionItems` (with a migration for existing databases, seeded from insertion order), and collections now load in that manual order instead of always alphabetically. New items added to a collection append to the end of its order; the info bar's "Sortable" label now also appears while browsing a Collection.
+- **Collection Asset Sorting:** Rolled out manual drag-and-drop asset sorting functionality to Collections, mirroring the behavior previously exclusive to Favorites.
+- **Database Schema Migration:** Added the `AssetCollectionItemSortOrder` column to the `AssetCollectionItems` table in `initialize.sql`, and implemented an automatic database migration in `database.cpp` to seed existing rows with a stable initial order.
+- **Empty Node Dimming:** Implemented visual dimming (greyed-out text and empty folder icons) for directory tree nodes that contain no asset hits directly or within any of their descendant subdirectories.
+- **Boolean Hit Cache:** Introduced a highly optimized, boolean-based hit cache (`directFolderHasHit`, `subtreeHasHit`) that automatically clears on model reset, supporting the new empty node dimming feature without the severe performance overhead of counting total assets.
 
 ### Changed
 - **Generalized the drag-reorder mechanism:** The hand-rolled grid drag-reorder code (ghost thumbnail, drop-line indicator, edge auto-scroll) was Favorites-only; it's now shared between Favorites and Collections behind a single `isSortableView()` check, with the relevant methods/members renamed from Favorites-specific names (`beginFavoritesDrag`, etc.) to generic ones (`beginGridDrag`, etc.).
+- **Repository Sync:** Fast-forwarded the local `main` branch to match `origin/main`, pulling in recent upstream features including nested sub-collections, library empty-state, factory reset, dialog theming, and documentation updates.
+- **Drag-and-Drop Refactor:** Generalized the drag-and-drop grid logic by renaming and refactoring Favorites-specific methods (e.g., `persistGridOrder()`, `beginGridDrag()`, `isSortableView()`) to seamlessly share the manual reordering implementation between Favorites and Collections.
+- **Context Menu Performance:** Massively improved the performance of the "Expand Branch" context menu action by batching UI repaints (`setUpdatesEnabled(false)`) and leveraging Qt's native `expandRecursively()` method, preventing application freezes on large directory trees.
+
+### Fixed
+- **Search Result Folder Naming:** Fixed an issue where adding a folder to a collection directly from search results incorrectly saved the full breadcrumb path (e.g., `Characters / Female / Hair`) instead of isolating just the leaf folder name (`Hair`).
+- **Header Breadcrumb Clipping:** Increased the right-side padding margin (`kMargin` adjusted to 65px) in the asset window header to guarantee that the breadcrumb asset count suffix does not get clipped off-screen when the window is resized to be very small.
+
+### Removed
+- **Tree Node Hit Counts:** Completely removed the numeric asset "Hit" counts (previously displayed in parentheses) from tree nodes to clean up the UI and eliminate the expensive, synchronous recursive disk/database scanning operations that were slowing down the application.
 
 ## [0.1.2] - 2026-06-21
 
