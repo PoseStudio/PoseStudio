@@ -1,0 +1,26 @@
+{
+  "orderId": "A-94823",
+  "customerName": "Jane Doe",
+  "email": "jane.doe@example.com",
+  "isVerified": true,
+  "items": [
+    {
+      "itemId": 101,
+      "productName": "Wireless Mouse",
+      "price": 25.50,
+      "quantity": 1
+    },
+    {
+      "itemId": 202,
+      "productName": "Mechanical Keyboard",
+      "price": 79.99,
+      "quantity": 2
+    }
+  ],
+  "shippingAddress": {
+    "street": "123 Main St",
+    "city": "Long Island City",
+    "state": "NY",
+    "zipCode": "11101"
+  }
+}

@@ -12,6 +12,9 @@
 #include <QMouseEvent>
 #include <QEvent>
 #include <QPixmap>
+#include <QGraphicsDropShadowEffect>
+#include <QColor>
+#include "constants.h"
 
 /**
  * @class SplashOverlay
@@ -42,7 +45,44 @@ public:
         imageLabel->setPixmap(scaledPixmap);
         imageLabel->setAlignment(Qt::AlignCenter);
         imageLabel->setStyleSheet("background-color: transparent;");
-        layout->addWidget(imageLabel);
+        // Fixed-size + centered (rather than letting the layout stretch it) so the pixmap's
+        // top-left corner is always at a known offset within imageLabel — required for the
+        // version label below to be positioned in the artwork's own coordinate space.
+        imageLabel->setFixedSize(scaledPixmap.size());
+        layout->addWidget(imageLabel, 0, Qt::AlignCenter);
+
+        // Live version number, overlaid just to the left of "BLUEPRINT" baked into the
+        // artwork, so it doesn't need to be re-baked into the image on every release.
+        // Coordinates were measured against splash_screen.png's native art (BLUEPRINT
+        // spans roughly x:1042-1147, y:90-119 out of 1200x900) and scaled to match here.
+        const qreal artScale = scaledPixmap.width() / qreal(originalPixmap.width());
+        QLabel *versionLabel = new QLabel(QString::fromLatin1(Constants::APP_VERSION), imageLabel);
+        versionLabel->setObjectName("SplashVersionLabel");
+        versionLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        // An ID selector, not a bare property list: global.qss's "QLabel { color: #ffffff; ... }"
+        // otherwise wins the cascade over an instance-level style that only sets a few properties.
+        versionLabel->setStyleSheet(
+            "#SplashVersionLabel { background-color: transparent; color: #d6d6d6; font-size: 14px; font-weight: 800; padding: 0; }");
+        constexpr int blueprintLeftOrig = 1040;
+        constexpr int blueprintCenterYOrig = 110;
+        constexpr int versionLabelWidth = 70;
+        constexpr int versionLabelHeight = 20;
+        constexpr int gapBeforeBlueprint = 6;
+        const int blueprintLeftScaled = qRound(blueprintLeftOrig * artScale);
+        const int blueprintCenterYScaled = qRound(blueprintCenterYOrig * artScale);
+        versionLabel->setGeometry(
+            blueprintLeftScaled - gapBeforeBlueprint - versionLabelWidth,
+            blueprintCenterYScaled - versionLabelHeight / 2,
+            versionLabelWidth, versionLabelHeight);
+
+        // Drop shadow so the splash image lifts off the dark overlay behind it. The overlay
+        // itself is near-black, so the shadow needs to be fully opaque and fairly large to
+        // read against it at all.
+        QGraphicsDropShadowEffect *shadow = new QGraphicsDropShadowEffect(imageLabel);
+        shadow->setBlurRadius(24);
+        shadow->setOffset(6, 6);
+        shadow->setColor(QColor(0, 0, 0, 120));
+        imageLabel->setGraphicsEffect(shadow);
 
         if (parent) {
             parent->installEventFilter(this);

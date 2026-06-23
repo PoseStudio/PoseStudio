@@ -1,0 +1,10 @@
+Maquettes
+=========
+
+This folder ships with PoseStudio and always appears at the top of your asset
+libraries. It's where built-in base meshes and starter content will live as
+those features come online.
+
+This folder is managed by PoseStudio — content placed here may be overwritten
+by future updates. Use your own asset library folders (Preferences > Assets)
+for your personal content.

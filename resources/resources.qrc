@@ -5,6 +5,7 @@
         <file>styles/global.qss</file>
         <file>styles/_assetmanager.qss</file>
         <file>styles/_menumanager.qss</file>
+        <file>styles/_preferences.qss</file>
         
         <file>database/initialize.sql</file>
 
@@ -36,6 +37,7 @@
         <file>icons/about-d.png</file>
         <file>icons/tutorials.png</file>
         <file>icons/tutorials-d.png</file>
+        <file>icons/globe.png</file>
 
         <file>icons/folder.png</file>
         <file>icons/folder-empty.png</file>
@@ -53,6 +55,7 @@
         <file>icons/rename.png</file>
         <file>icons/unfavorite.png</file>
         <file>icons/collections.png</file>
+        <file>icons/favorite.png</file>
         <file>icons/add-col.png</file>
         <file>icons/sub-collection.png</file>
         <file>icons/open-item.png</file>

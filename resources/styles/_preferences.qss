@@ -1,0 +1,143 @@
+/* =========================================================================
+   [ PREFERENCES DIALOG ]
+   Vertical tab nav (left) driving a stack of panels (right).
+   ========================================================================= */
+
+#PreferencesNav {
+    background-color: #191a1b;
+    border: none;
+    outline: 0;
+    padding-top: 8px;
+}
+
+#PreferencesNav::item {
+    color: #c8c8c8;
+    padding: 10px 16px;
+    border-left: 3px solid transparent; /* reserves space so selection doesn't shift text */
+}
+
+#PreferencesNav::item:hover {
+    background-color: #1f2123;
+    color: #ffffff;
+}
+
+#PreferencesNav::item:selected {
+    background-color: #252627;        /* matches the panel area, so the tab "connects" to it */
+    color: #ffffff;
+    border-left: 3px solid #314d7a;   /* accent marker — matches the Asset Manager selection blue */
+}
+
+/* =========================================================================
+   [ PANEL AREA ]
+   ========================================================================= */
+
+#PreferencesPanel {
+    background-color: #252627;
+}
+
+#PreferencesPanelHeading {
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+#PreferencesPlaceholder {
+    color: #888888;
+    font-size: 13px;
+}
+
+#PreferencesDescription {
+    color: #9a9a9a;
+    font-size: 12px;
+}
+
+#PreferencesSectionHeading {
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+/* =========================================================================
+   [ ASSET LIBRARY LIST — "Assets" tab ]
+   ========================================================================= */
+
+/* Mirrors #AssetManagerTree's item styling exactly so the two select/hover identically.
+   Crucially, no `border` is set on ::item — declaring one (even `border: none`) flips Qt to
+   full CSS box-model rendering, which inflates the selection rect and overlaps adjacent rows.
+   Source order also matters: :selected comes after :hover so it wins when a row is both. */
+#AssetLibraryList {
+    background-color: #1e1f22;
+    color: #e0e0e0;
+    border: 1px solid #3a3b3c;
+    border-radius: 4px;
+    outline: none;
+}
+
+#AssetLibraryList::item {
+    /* No padding here: on the default (non-custom) item delegate, QSS padding inflates the
+       drawn selection/hover box beyond the item's layout rect, which both makes the highlight
+       look oversized and leaves clipping artifacts when an adjacent row repaints on hover.
+       Row height is instead set via each item's sizeHint in C++ (see reloadLibraries). */
+    padding-left: 6px;
+    padding-right: 6px;
+}
+
+#AssetLibraryList::item:hover {
+    background-color: #2a2c2e;
+}
+
+#AssetLibraryList::item:selected {
+    background-color: #314d7a;
+    color: #ffffff;
+}
+
+/* =========================================================================
+   [ FACTORY RESET CONFIRM INPUT — plain input, no native focus glow/hover ]
+   ========================================================================= */
+
+#FactoryResetConfirmInput {
+    background-color: #1e1f20;
+    border: 1px solid #3a3b3c;
+    border-radius: 4px;
+    color: #e0e0e0;
+    padding: 4px 6px;
+    font-size: 12px;
+    selection-background-color: #314d7a;
+}
+
+#FactoryResetConfirmInput:hover {
+    background-color: #1e1f20;
+    border: 1px solid #3a3b3c;
+}
+
+#FactoryResetConfirmInput:focus {
+    border: 1px solid #3a3b3c;
+    outline: 0;
+}
+
+/* =========================================================================
+   [ FACTORY RESET BUTTON — themed in the app's accent blue ]
+   ========================================================================= */
+
+#FactoryResetButton {
+    background-color: #3a5a8c;
+    color: #ffffff;
+    border: 1px solid #5b87cc;
+    border-radius: 4px;
+    padding: 6px 16px;
+    min-width: 70px;
+}
+
+#FactoryResetButton:hover {
+    background-color: #46689e;
+}
+
+#FactoryResetButton:pressed {
+    background-color: #5b87cc;
+}
+
+#FactoryResetButton:disabled {
+    background-color: #262a30;
+    color: #6a7280;
+    border: 1px solid #34404f;
+}

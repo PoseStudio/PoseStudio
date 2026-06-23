@@ -131,6 +131,16 @@ QTreeView#AssetManagerTree {
     text-align: center;
 }
 
+/* =========================================================================
+   [ INFO BAR FOOTER ]
+   ========================================================================= */
+
+#AssetManagerInfoBar {
+    padding: 0px 4px 8px 12px;
+    color: #aaaaaa;
+    font-size: 12px;
+}
+
 #AssetManagerAddLibraryHint {
     font-size: 14px;
 }

@@ -19,8 +19,9 @@
 
 /**
  * @brief Opens (or rebuilds) the SQLite database and returns the active connection.
- * @param mode Normal just opens the existing file (creating it if missing). FactoryReset
- *             deletes the existing file first and rebuilds the schema from initialize.sql.
+ * @param mode Normal opens the existing file, building the schema only if this is the first
+ *             launch (no file yet). FactoryReset deletes the existing file first and always
+ *             rebuilds the schema from initialize.sql.
  */
 QSqlDatabase initializeDatabase(DbInitMode mode) {
     const QString connectionName = QStringLiteral("db_conn");
@@ -28,6 +29,10 @@ QSqlDatabase initializeDatabase(DbInitMode mode) {
     // The database lives next to the .exe, not the current working directory
     const QString dbPath = QDir(QCoreApplication::applicationDirPath())
                                 .filePath(QStringLiteral("posestudio.db"));
+
+    // A genuinely fresh install (no file yet) needs the schema built just as much as a
+    // FactoryReset does — check this before FactoryReset deletes the file out from under us.
+    const bool isFirstLaunch = !QFile::exists(dbPath);
 
     if (mode == DbInitMode::FactoryReset) {
         // Close any open handle first — SQLite can't delete a file Qt still has locked
@@ -58,8 +63,8 @@ QSqlDatabase initializeDatabase(DbInitMode mode) {
         return db;
     }
 
-    // Schema only needs rebuilding after we just deleted the file above
-    if (mode == DbInitMode::FactoryReset) {
+    // Schema needs (re)building after we just deleted the file above, or on a first-ever launch
+    if (mode == DbInitMode::FactoryReset || isFirstLaunch) {
         QFile sqlFile(QStringLiteral(":/resources/database/initialize.sql"));
         if (!sqlFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
             qCritical() << "Fatal Error: Missing initialize.sql blueprint in resources.";
@@ -107,20 +112,110 @@ QSqlDatabase initializeDatabase(DbInitMode mode) {
         }
     }
 
-    // AssetCollectionFolders (folder shortcuts within a Collection) was added to the schema
-    // after some users' databases were already created, so older databases are missing the
-    // table entirely. CREATE TABLE/INDEX IF NOT EXISTS makes this a no-op once it's present.
+    // Favorites (a single flat list of favorited asset paths) was added after the initial
+    // schema, so older databases are missing the table. CREATE TABLE IF NOT EXISTS is a no-op
+    // once present.
     {
         QSqlQuery q(db);
         q.exec(QStringLiteral(
-            "CREATE TABLE IF NOT EXISTS AssetCollectionFolders("
-            "AssetCollectionFolderID INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "AssetCollectionFolderPath TEXT NOT NULL, "
-            "AssetCollectionFolderName TEXT NOT NULL DEFAULT '', "
-            "AssetCollectionFolderCol INTEGER NOT NULL DEFAULT 0, "
-            "UNIQUE(AssetCollectionFolderPath, AssetCollectionFolderCol) ON CONFLICT IGNORE)"));
-        q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_AssetCollectionFolderPath ON AssetCollectionFolders(AssetCollectionFolderPath)"));
-        q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_AssetCollectionFolderCol ON AssetCollectionFolders(AssetCollectionFolderCol)"));
+            "CREATE TABLE IF NOT EXISTS Favorites("
+            "FavoriteID INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "FavoritePath TEXT NOT NULL UNIQUE, "
+            "FavoriteSortOrder INTEGER NOT NULL DEFAULT 0)"));
+    }
+
+    // FavoriteSortOrder (user-defined drag order in the Favorites pane) was added after the
+    // Favorites table itself, so databases that already have Favorites may lack the column.
+    {
+        bool hasSortColumn = false;
+        QSqlQuery pragma(db);
+        if (pragma.exec(QStringLiteral("PRAGMA table_info(Favorites)"))) {
+            while (pragma.next()) {
+                if (pragma.value(QStringLiteral("name")).toString() == QStringLiteral("FavoriteSortOrder")) {
+                    hasSortColumn = true;
+                    break;
+                }
+            }
+        }
+        if (!hasSortColumn) {
+            QSqlQuery alter(db);
+            if (!alter.exec(QStringLiteral("ALTER TABLE Favorites ADD COLUMN FavoriteSortOrder INTEGER NOT NULL DEFAULT 0"))) {
+                qWarning() << "[!] Failed to add FavoriteSortOrder column:" << alter.lastError().text();
+            } else {
+                // Seed existing rows with a stable initial order (their insertion order).
+                QSqlQuery seed(db);
+                seed.exec(QStringLiteral("UPDATE Favorites SET FavoriteSortOrder = FavoriteID"));
+            }
+        }
+    }
+
+    // AssetCollectionItemSortOrder (user-defined drag order within a Collection) was added after
+    // the AssetCollectionItems table itself, so existing databases may lack the column.
+    {
+        bool hasSortColumn = false;
+        QSqlQuery pragma(db);
+        if (pragma.exec(QStringLiteral("PRAGMA table_info(AssetCollectionItems)"))) {
+            while (pragma.next()) {
+                if (pragma.value(QStringLiteral("name")).toString() == QStringLiteral("AssetCollectionItemSortOrder")) {
+                    hasSortColumn = true;
+                    break;
+                }
+            }
+        }
+        if (!hasSortColumn) {
+            QSqlQuery alter(db);
+            if (!alter.exec(QStringLiteral("ALTER TABLE AssetCollectionItems ADD COLUMN AssetCollectionItemSortOrder INTEGER NOT NULL DEFAULT 0"))) {
+                qWarning() << "[!] Failed to add AssetCollectionItemSortOrder column:" << alter.lastError().text();
+            } else {
+                // Seed existing rows with a stable initial order (their insertion order).
+                QSqlQuery seed(db);
+                seed.exec(QStringLiteral("UPDATE AssetCollectionItems SET AssetCollectionItemSortOrder = AssetCollectionItemID"));
+            }
+        }
+    }
+
+    // AssetLibraryIsBuiltIn flags the single "Maquettes" row below as shipped-with-the-app
+    // rather than user-added, so the UI knows not to offer removing it.
+    {
+        bool hasBuiltInColumn = false;
+        QSqlQuery pragma(db);
+        if (pragma.exec(QStringLiteral("PRAGMA table_info(AssetLibraries)"))) {
+            while (pragma.next()) {
+                if (pragma.value(QStringLiteral("name")).toString() == QStringLiteral("AssetLibraryIsBuiltIn")) {
+                    hasBuiltInColumn = true;
+                    break;
+                }
+            }
+        }
+        if (!hasBuiltInColumn) {
+            QSqlQuery alter(db);
+            if (!alter.exec(QStringLiteral("ALTER TABLE AssetLibraries ADD COLUMN AssetLibraryIsBuiltIn INTEGER NOT NULL DEFAULT 0"))) {
+                qWarning() << "[!] Failed to add AssetLibraryIsBuiltIn column:" << alter.lastError().text();
+            }
+        }
+    }
+
+    // Ensure the built-in "Maquettes" library exists, on disk and in AssetLibraries, every
+    // launch — re-synced to the current install location in case the app was moved since
+    // the row was first created. CMake mirrors resources/Maquettes next to the executable
+    // at build time; mkpath here is just a safety net if that step hasn't run yet.
+    {
+        const QString maquettesPath = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("Maquettes"));
+        QDir().mkpath(maquettesPath);
+
+        QSqlQuery update(db);
+        update.prepare(QStringLiteral("UPDATE AssetLibraries SET AssetLibraryPath = :path WHERE AssetLibraryIsBuiltIn = 1"));
+        update.bindValue(":path", maquettesPath);
+        if (!update.exec()) {
+            qWarning() << "[!] Failed to sync built-in Maquettes library path:" << update.lastError().text();
+        } else if (update.numRowsAffected() == 0) {
+            QSqlQuery insert(db);
+            insert.prepare(QStringLiteral("INSERT OR IGNORE INTO AssetLibraries (AssetLibraryPath, AssetLibraryIsBuiltIn) VALUES (:path, 1)"));
+            insert.bindValue(":path", maquettesPath);
+            if (!insert.exec()) {
+                qWarning() << "[!] Failed to create built-in Maquettes library:" << insert.lastError().text();
+            }
+        }
     }
 
     return db;

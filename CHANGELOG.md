@@ -5,6 +5,14 @@ All notable changes to the PoseStudio project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-06-23
+
+### Added
+- **Manual sort order for Collections:** Assets inside a Collection can now be drag-reordered, the same way Favorites already worked. Added an `AssetCollectionItemSortOrder` column to `AssetCollectionItems` (with a migration for existing databases, seeded from insertion order), and collections now load in that manual order instead of always alphabetically. New items added to a collection append to the end of its order; the info bar's "Sortable" label now also appears while browsing a Collection.
+
+### Changed
+- **Generalized the drag-reorder mechanism:** The hand-rolled grid drag-reorder code (ghost thumbnail, drop-line indicator, edge auto-scroll) was Favorites-only; it's now shared between Favorites and Collections behind a single `isSortableView()` check, with the relevant methods/members renamed from Favorites-specific names (`beginFavoritesDrag`, etc.) to generic ones (`beginGridDrag`, etc.).
+
 ## [0.1.2] - 2026-06-21
 
 ### Added

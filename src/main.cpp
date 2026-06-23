@@ -12,6 +12,7 @@
 #include "constants.h"
 #include "preferencesmanager.h"
 #include "assetmanagerwidget.h"
+#include "appproxystyle.h"
 
 #include <QApplication>
 #include <QDebug>
@@ -32,7 +33,8 @@ static QString loadStylesheets() {
     const QStringList filesToLoad = {
         QStringLiteral(":/resources/styles/global.qss"),
         QStringLiteral(":/resources/styles/_assetmanager.qss"),
-        QStringLiteral(":/resources/styles/_menumanager.qss")
+        QStringLiteral(":/resources/styles/_menumanager.qss"),
+        QStringLiteral(":/resources/styles/_preferences.qss")
     };
 
     for (const QString& filePath : filesToLoad) {
@@ -64,9 +66,15 @@ int main(int argc, char *argv[]) {
     // --- 2. Branding & theming ---
     app.setWindowIcon(QIcon(QStringLiteral(":/resources/icon.png")));
 
-    // Force Fusion so the custom dark theme renders identically on every platform,
-    // instead of inheriting whatever native style the OS happens to use.
-    app.setStyle(QStringLiteral("Fusion"));
+    // Disable the OS-level slide/fade animations for all tooltips (the asset grid uses a
+    // custom interactive tooltip and expects instant show/hide).
+    QApplication::setEffectEnabled(Qt::UI_AnimateTooltip, false);
+    QApplication::setEffectEnabled(Qt::UI_FadeTooltip, false);
+
+    // AppProxyStyle layered over Fusion: forces the custom dark theme to render identically on
+    // every platform (never the native OS style), and adds app-wide tweaks (tooltip delays,
+    // submenu overlap, dimmed disabled icons). The proxy takes ownership of the Fusion base.
+    app.setStyle(new AppProxyStyle(QStringLiteral("Fusion")));
     app.setStyleSheet(loadStylesheets());
 
     // --- 3. Main window layout ---
@@ -97,9 +105,11 @@ int main(int argc, char *argv[]) {
     sidePanel->addTab(assetsTab, QStringLiteral("Asset Manager"));
     sidePanel->addTab(new QWidget(), QStringLiteral("Properties")); // placeholder tab
 
+    menuManager->setAssetManagerWidget(assetsTab);
+
     mainSplitter->addWidget(viewportPlaceholder);
     mainSplitter->addWidget(sidePanel);
-    mainSplitter->setSizes({1500, 480});
+    mainSplitter->setSizes({1500, 500});
 
     mainWindow.setCentralWidget(mainSplitter);
 

@@ -9,14 +9,15 @@
 
 #include "menumanager.h"
 #include "splashoverlay.h"
-#include "database.h"
+#include "preferencesdialog.h"
+#include "assetmanagerwidget.h"
 #include <QMenu>
 #include <QMenuBar>
 #include <QAction>
 #include <QApplication>
 #include <QIcon>
-#include <QMessageBox>
-#include <QProcess>
+#include <QDesktopServices>
+#include <QUrl>
 
 /**
  * @brief Loads a normal/disabled icon pair following the "name.png" / "name-d.png" convention.
@@ -72,7 +73,10 @@ void MenuManager::setupMenus() {
     editMenu->addAction("Paste")->setEnabled(false);
     editMenu->addSeparator();
 
-    editMenu->addAction(loadDualStateIcon("preferences"), "Preferences")->setEnabled(false);
+    QAction *preferencesAction = editMenu->addAction(loadDualStateIcon("preferences"), "Preferences");
+    QObject::connect(preferencesAction, &QAction::triggered, mainWindow, [this]() {
+        openPreferencesDialog();
+    });
 
     // =========================================================================
     // HELP MENU — documentation, support links, and the About dialog
@@ -84,30 +88,37 @@ void MenuManager::setupMenus() {
     helpMenu->addAction("Support")->setEnabled(false);
     helpMenu->addSeparator();
 
+    QAction *websiteAction = helpMenu->addAction(QIcon(":/resources/icons/globe.png"), "PoseStudio.org");
+    QObject::connect(websiteAction, &QAction::triggered, mainWindow, []() {
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://posestudio.org")));
+    });
+    helpMenu->addSeparator();
+
     // "About" reuses the boot splash overlay for branding/version info
     QAction *aboutAction = helpMenu->addAction(loadDualStateIcon("about"), "About PoseStudio");
     QObject::connect(aboutAction, &QAction::triggered, mainWindow, [this]() {
         SplashOverlay *splash = new SplashOverlay(mainWindow);
         splash->show();
     });
+}
 
-    helpMenu->addSeparator();
+void MenuManager::setAssetManagerWidget(AssetManagerWidget *widget) {
+    assetManagerWidget = widget;
+    if (!assetManagerWidget) return;
 
-    // Wipes and rebuilds posestudio.db from scratch. Many widgets (AssetManagerWidget's tree,
-    // PreferencesManager's cache) hold in-memory state derived from the old data, so rather than
-    // reconciling all of that live, we relaunch the process immediately after the reset.
-    QAction *factoryResetAction = helpMenu->addAction("Factory Reset Database...");
-    QObject::connect(factoryResetAction, &QAction::triggered, mainWindow, [this]() {
-        const auto choice = QMessageBox::warning(mainWindow, "Factory Reset Database",
-            "This will permanently delete all your asset libraries, collections, and "
-            "preferences, and cannot be undone.\n\nPoseStudio will restart afterward.\n\n"
-            "Continue?",
-            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
-        if (choice != QMessageBox::Yes) return;
+    QObject::connect(assetManagerWidget, &AssetManagerWidget::manageAssetFoldersRequested,
+                      mainWindow, [this]() { openPreferencesDialog(QStringLiteral("Assets")); });
+}
 
-        initializeDatabase(DbInitMode::FactoryReset);
+void MenuManager::openPreferencesDialog(const QString &initialTab) {
+    PreferencesDialog dialog(mainWindow);
+    if (!initialTab.isEmpty()) dialog.selectTab(initialTab);
 
-        QProcess::startDetached(QApplication::applicationFilePath(), QApplication::arguments());
-        QApplication::quit();
-    });
+    if (assetManagerWidget) {
+        QObject::connect(&dialog, &PreferencesDialog::assetLibrariesChanged,
+                          assetManagerWidget, &AssetManagerWidget::refreshAssetManager);
+        QObject::connect(&dialog, &PreferencesDialog::navigateToLibraryRequested,
+                          assetManagerWidget, &AssetManagerWidget::navigateToLibraryRoot);
+    }
+    dialog.exec();
 }

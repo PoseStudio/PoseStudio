@@ -18,6 +18,7 @@
 #include <QList>
 #include <QModelIndex>
 #include <QPersistentModelIndex>
+#include <QPoint>
 #include <QHash>
 #include <QSet>
 #include <QIcon>
@@ -27,6 +28,7 @@
 #include <QTreeView>
 
 // Forward declarations drastically improve project compilation times
+class QDir;
 class QVBoxLayout;
 class QLabel;
 class QLineEdit;
@@ -52,8 +54,8 @@ enum FolderHitState { NoHit = 0, IndirectHit = 1, DirectHit = 2 };
 
 /// Identifies which branch of the directory tree a node lives under, regardless of nesting
 /// depth, so context menus can tell a "real" library folder apart from a Collections/Search
-/// Results shortcut pointing at the same physical path.
-enum class BrowseContext { Library, Collection, SearchResults };
+/// Results/Favorites shortcut pointing at the same physical path.
+enum class BrowseContext { Library, Collection, SearchResults, Favorites };
 
 /**
  * @class AssetFolderProxyModel
@@ -161,6 +163,16 @@ public:
     void collapseNodeRecursively(const QModelIndex &proxyIndex);
     void refreshAssetManager();
 
+    /// Selects and displays a top-level library's own root node (e.g. from Preferences'
+    /// Assets list) — unlike navigateToFolderInTree, the target is the library root itself,
+    /// not a descendant of it.
+    void navigateToLibraryRoot(const QString& libraryPath);
+
+signals:
+    /// Emitted when the user picks "Manage Asset Folders" from a tree context menu, so
+    /// whatever owns the Preferences dialog can open it directly to the Assets tab.
+    void manageAssetFoldersRequested();
+
 private slots:
     void onFolderSelected(const QModelIndex &index);
     void onTreeExpanded(const QModelIndex &index); 
@@ -175,6 +187,7 @@ private:
     QVBoxLayout *mainLayout;
     QLabel *titleLabel;
     QListWidget *assetListWidget;
+    QLabel *infoBarLabel;        ///< Footer below the grid: "Assets: X   Folders: X   Sortable"
     QLabel *addLibraryHintLabel; ///< "Add Asset Folder" link shown over the grid when no library exists yet
 
     QLineEdit *searchInput;
@@ -190,13 +203,26 @@ private:
     AssetTreeView *dirTreeView; 
     
     QStandardItem *searchResultsRootItem;
+    QStandardItem *favoritesRootItem;
     QStandardItem *collectionsRootItem;
 
     QList<QPair<int, QString>> m_pendingThumbs;
+
+    // Manual drag-reorder state for sortable grids (Favorites and Collections — see eventFilter).
+    QListWidgetItem *m_dragItem = nullptr;
+    QPoint m_dragStartPos;
+    bool m_dragging = false;
+    QLabel *m_dragPreview = nullptr;  ///< Floating ghost thumbnail that follows the cursor mid-drag
+    QWidget *m_dropLine = nullptr;    ///< Vertical line marking where the dragged item will drop
+    QTimer *m_scrollTimer = nullptr;  ///< Drives edge auto-scroll while reordering
+    int m_scrollDir = 0;              ///< -1 = scroll up, +1 = scroll down, 0 = idle
+    QPoint m_dragLastPos;             ///< Last cursor pos (viewport coords) during a drag
+
     QString m_currentFolderPath;
     QString m_currentTitleText;   ///< Plain display name for virtual/collection titles (no breadcrumb)
     QString m_hoveredBreadcrumbLink;
     int m_currentAssetCount = 0;
+    int m_currentFolderCount = 0; ///< Subfolder count for the currently displayed physical folder (0 for virtual sources)
 
     // Cached breadcrumb structure for the current physical folder, rebuilt on each displayFolder()
     // call and re-laid-out (without recomputation) whenever the label is resized.
@@ -213,20 +239,44 @@ private:
     void deselectTree();
     void resolveBreadcrumb(const QString& folderPath);
     void refreshTitleLabel();
+    /// Rebuilds the "Assets: X   Folders: X   Sortable" footer, hiding any segment that isn't
+    /// relevant to what's currently displayed (zero count, or a non-sortable view).
+    void refreshInfoBar();
     QString buildBreadcrumbHtml(int availableWidth) const;
 
     QList<AssetHit> parseFolderAssets(const QString& folderPath);
     QList<AssetHit> parseCollectionAssets(int collectionId);
+    QList<AssetHit> parseFavorites();
+    /// Shared by parseCollectionAssets/parseFavorites: groups a flat list of asset file paths by
+    /// folder and resolves each asset's best thumbnail. Skips paths that no longer exist on disk.
+    QList<AssetHit> buildAssetHits(const QStringList& assetPaths);
 
     void navigateToFolderInTree(const QString& folderPath);
     void navigateToCollectionNode(int collectionId, bool enterEditMode = false);
-    void collectDirectHits(const QString& folderPath, const QString& libRootPath, QSet<QString>& added, QList<QStandardItem*>& results);
+    void navigateToCollectionAssetItem(int collectionId, const QString& assetFullPath);
+    void collectDirectHits(const QString& folderPath, const QDir& libRootDir, QSet<QString>& added, QList<QStandardItem*>& results);
     int  getOrCreateCollection(const QString& name, int parentCollectionId = 0);
     void addAssetToCollection(const QString& filePath, int collectionId);
     void removeAssetFromCollection(const QString& filePath, int collectionId);
-    void addFolderToCollection(const QString& folderPath, const QString& displayName, int collectionId, bool saveToDb = true);
-    QMenu* buildAddToCollectionMenu(QWidget* parentMenu, const QString& folderPath, const QString& folderName);
-    void removeFolderFromCollection(const QString& folderPath, int collectionId);
+    void addAssetToFavorites(const QString& filePath);
+    void removeAssetFromFavorites(const QString& filePath);
+    /// True for any view with a manual drag order (Favorites or a Collection) — gates the
+    /// drag-reorder handling in eventFilter and the "Sortable" info-bar label.
+    bool isSortableView() const;
+    /// Writes the current visual order of the grid back to FavoriteSortOrder or
+    /// AssetCollectionItemSortOrder (whichever the current view backs onto), so a
+    /// drag-reorder survives navigation and restarts.
+    void persistGridOrder();
+    void beginGridDrag(); ///< Starts a reorder: floats a ghost thumbnail + drop line.
+    void endGridDrag();   ///< Tears down the ghost/drop line and clears drag state.
+    /// Insertion index (0..count) the cursor points at, in the grid's reading order.
+    int  gridInsertIndex(const QPoint& viewportPos) const;
+    /// Positions the drop-line indicator at the gap the cursor points at.
+    void updateGridDropIndicator(const QPoint& viewportPos);
+    /// Creates a new sub-collection named after `folderPath` under `parentCollectionId` (0 = top
+    /// level) and fills it with the folder's own assets, ignoring subfolders. Returns the new id.
+    int addFolderAsCollection(const QString& folderPath, int parentCollectionId);
+    QMenu* buildAddToCollectionMenu(QWidget* parentMenu, const QString& folderPath);
     void saveExpandedState(const QModelIndex &parentProxyIndex, QSet<QString> &expandedPaths);
     void restoreExpandedState(const QModelIndex &parentProxyIndex, const QSet<QString> &expandedPaths);
     QModelIndex findProxyIndexByPath(const QModelIndex &parentProxyIndex, const QString &targetPath);

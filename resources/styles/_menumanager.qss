@@ -9,13 +9,19 @@ QMenuBar {
     color: white; 
 }
 
-QMenuBar::item { 
+QMenuBar::item {
     padding: 6px 12px;
+    /* A transparent background (and matching radius) forces this base state through the same
+       stylesheet box rendering as :selected below. Without it, the unstyled base renders
+       natively while the hovered state renders via the stylesheet, and the two paths lay the
+       text out slightly differently — the "font changes / shifts on hover" artifact. */
+    background-color: transparent;
+    border-radius: 4px;
 }
 
-QMenuBar::item:selected { 
-    border-radius: 4px; 
-    background-color: #323232; 
+QMenuBar::item:selected {
+    border-radius: 4px;
+    background-color: #323232;
 }
 
 /* =========================================================================

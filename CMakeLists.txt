@@ -6,7 +6,7 @@
 #              Qt's meta-object compilation, and links all source files.
 # ==============================================================================
 
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.17)
 project(PoseStudio VERSION 1.0 LANGUAGES CXX)
 
 # ==============================================================================
@@ -51,14 +51,35 @@ add_executable(
     src/constants.h  
     
     # --- UI & Layout ---
-    src/menumanager.cpp        
-    src/menumanager.h          
-    src/splashoverlay.h      
+    src/menumanager.cpp
+    src/menumanager.h
+    src/splashoverlay.h
+    src/appproxystyle.h
     
     # --- Tools & Widgets ---
     src/assetmanagerwidget.cpp
     src/assetmanagerwidget.h
-    
+
+    # --- Preferences ---
+    src/preferencesdialog.cpp
+    src/preferencesdialog.h
+    src/preferencespanel.cpp
+    src/preferencespanel.h
+    src/generalpreferencespanel.cpp
+    src/generalpreferencespanel.h
+    src/interfacepreferencespanel.cpp
+    src/interfacepreferencespanel.h
+    src/assetspreferencespanel.cpp
+    src/assetspreferencespanel.h
+    src/inputpreferencespanel.cpp
+    src/inputpreferencespanel.h
+    src/navigationpreferencespanel.cpp
+    src/navigationpreferencespanel.h
+    src/systempreferencespanel.cpp
+    src/systempreferencespanel.h
+    src/factoryresetpreferencespanel.cpp
+    src/factoryresetpreferencespanel.h
+
     # --- Data Layer & Storage ---
     src/database.cpp 
     src/database.h
@@ -79,3 +100,25 @@ target_include_directories(PoseStudio PRIVATE src)
 
 # Link the compiled executable to the required Qt binaries
 target_link_libraries(PoseStudio PRIVATE Qt6::Widgets Qt6::Sql)
+
+# ==============================================================================
+# [ SHIPPED ASSET CONTENT ]
+# ==============================================================================
+
+# The "Maquettes" library is real, on-disk content (not embedded in the binary via
+# resources.qrc) because the Asset Manager browses libraries through QDir/QDirIterator,
+# not Qt's resource filesystem. Mirror it next to the executable after every build so
+# it's always present at the path database.cpp registers as the built-in library.
+#
+# We remove the destination first so this is a true MIRROR, not just an overlay: plain
+# copy_directory never deletes files that were removed/renamed in source, which would leave
+# stale assets (e.g. old thumbnail names) lingering in the deployed library.
+add_custom_command(
+    TARGET PoseStudio POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E rm -rf
+            "$<TARGET_FILE_DIR:PoseStudio>/Maquettes"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/resources/Maquettes"
+            "$<TARGET_FILE_DIR:PoseStudio>/Maquettes"
+    COMMENT "Mirroring built-in Maquettes library next to the executable"
+)
