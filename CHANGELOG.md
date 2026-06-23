@@ -6,26 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.3] - 2026-06-23
-
 ### Added
-- **Manual sort order for Collections:** Assets inside a Collection can now be drag-reordered, the same way Favorites already worked. Added an `AssetCollectionItemSortOrder` column to `AssetCollectionItems` (with a migration for existing databases, seeded from insertion order), and collections now load in that manual order instead of always alphabetically. New items added to a collection append to the end of its order; the info bar's "Sortable" label now also appears while browsing a Collection.
-- **Collection Asset Sorting:** Rolled out manual drag-and-drop asset sorting functionality to Collections, mirroring the behavior previously exclusive to Favorites.
-- **Database Schema Migration:** Added the `AssetCollectionItemSortOrder` column to the `AssetCollectionItems` table in `initialize.sql`, and implemented an automatic database migration in `database.cpp` to seed existing rows with a stable initial order.
-- **Empty Node Dimming:** Implemented visual dimming (greyed-out text and empty folder icons) for directory tree nodes that contain no asset hits directly or within any of their descendant subdirectories.
-- **Boolean Hit Cache:** Introduced a highly optimized, boolean-based hit cache (`directFolderHasHit`, `subtreeHasHit`) that automatically clears on model reset, supporting the new empty node dimming feature without the severe performance overhead of counting total assets.
+* **Collection Asset Sorting:** Assets inside a Collection can now be manually drag-reordered, mirroring the behavior previously exclusive to Favorites. 
+  * Added the `AssetCollectionItemSortOrder` column to the `AssetCollectionItems` table in `initialize.sql`.
+  * Implemented an automatic database migration in `database.cpp` to seed existing rows with a stable initial order based on insertion order.
+  * Collections now load in this manual order instead of alphabetically, and new items append to the end.
+  * The info bar's "Sortable" label now dynamically appears while browsing a Collection.
+* **Drag-and-Drop UX Enhancements:** * Replaced the per-item hover highlight with a precise, blue insertion drop-line indicator to clearly show where a dragged asset will land.
+  * Implemented an edge auto-scroll feature that activates when dragging an asset near the top or bottom of the window to scroll to items above or below the fold.
+  * Added a translucent ghost thumbnail that follows the cursor during a drag operation.
+* **Asset Panel Info Bar:** Introduced a new dynamic info bar footer at the bottom of the asset panel. It conditionally displays "Assets: X", "Folders: X", and "Sortable" based strictly on the relevance of the currently viewed folder or collection.
+* **Empty Node Dimming:** Implemented visual dimming (greyed-out text and empty folder icons) for directory tree nodes that contain no asset hits directly or within any of their descendant subdirectories.
+* **Boolean Hit Cache:** Introduced a highly optimized, boolean-based hit cache (`directFolderHasHit`, `subtreeHasHit`) that automatically clears on model reset, supporting the new empty node dimming feature without the severe performance overhead of counting total assets.
 
 ### Changed
-- **Generalized the drag-reorder mechanism:** The hand-rolled grid drag-reorder code (ghost thumbnail, drop-line indicator, edge auto-scroll) was Favorites-only; it's now shared between Favorites and Collections behind a single `isSortableView()` check, with the relevant methods/members renamed from Favorites-specific names (`beginFavoritesDrag`, etc.) to generic ones (`beginGridDrag`, etc.).
-- **Repository Sync:** Fast-forwarded the local `main` branch to match `origin/main`, pulling in recent upstream features including nested sub-collections, library empty-state, factory reset, dialog theming, and documentation updates.
-- **Drag-and-Drop Refactor:** Generalized the drag-and-drop grid logic by renaming and refactoring Favorites-specific methods (e.g., `persistGridOrder()`, `beginGridDrag()`, `isSortableView()`) to seamlessly share the manual reordering implementation between Favorites and Collections.
-- **Context Menu Performance:** Massively improved the performance of the "Expand Branch" context menu action by batching UI repaints (`setUpdatesEnabled(false)`) and leveraging Qt's native `expandRecursively()` method, preventing application freezes on large directory trees.
+* **Drag-and-Drop Code Refactor:** Generalized the hand-rolled grid drag-reorder mechanism (ghost thumbnail, drop-line indicator, edge auto-scroll) to be shared seamlessly between Favorites and Collections. This is now gated behind a single `isSortableView()` check, with previously Favorites-specific methods renamed to generic equivalents (e.g., `beginFavoritesDrag` renamed to `beginGridDrag`, `persistGridOrder()`, etc.).
+* **Folder-to-Collection Refactor:** Completely changed the behavior of adding a folder to a collection. Instead of creating a folder shortcut, it now automatically creates a new sub-collection named after the target folder, populated exclusively with the direct assets inside that folder (ignoring subfolders and their contents).
+* **Library Root Sorting:** Updated the sorting logic for top-level library roots (e.g., Maquettes, My DAZ 3D Library) to sort alphabetically by folder name, rather than by their database insertion order.
+* **Repository Sync:** Fast-forwarded the local `main` branch to match `origin/main`, pulling in recent upstream features including nested sub-collections, library empty-state, factory reset, dialog theming, and documentation updates.
+* **Context Menu Performance:** Massively improved the performance of the "Expand Branch" context menu action by batching UI repaints (`setUpdatesEnabled(false)`) and leveraging Qt's native `expandRecursively()` method, preventing application freezes on large directory trees.
 
 ### Fixed
-- **Search Result Folder Naming:** Fixed an issue where adding a folder to a collection directly from search results incorrectly saved the full breadcrumb path (e.g., `Characters / Female / Hair`) instead of isolating just the leaf folder name (`Hair`).
-- **Header Breadcrumb Clipping:** Increased the right-side padding margin (`kMargin` adjusted to 65px) in the asset window header to guarantee that the breadcrumb asset count suffix does not get clipped off-screen when the window is resized to be very small.
+* **Asset Sort Order Persistence:** Fixed a root-cause bug where `buildAssetHits` grouped results by folder and returned them in hash-iteration order, destroying the database's visual sort order. It now builds a path-to-hit map and emits results in the strict input order.
+* **Drag-and-Drop Reshuffling:** Fixed an issue where the asset grid would live-shuffle incorrectly mid-drag. The original item now stays in place during the drag, and the layout remains stable until the drop target is computed upon release.
+* **Info Bar Formatting:** Corrected asymmetric padding and set explicit vertical alignment to perfectly center the text within the new Info Bar footer, adding appropriate spacing before the "Sortable" indicator.
+* **Search Result Folder Naming:** Fixed an issue where adding a folder to a collection directly from search results incorrectly saved the full breadcrumb path (e.g., `Characters / Female / Hair`) instead of isolating just the leaf folder name (`Hair`).
+* **Header Breadcrumb Clipping:** Increased the right-side padding margin (`kMargin` adjusted to 65px) in the asset window header to guarantee that the breadcrumb asset count suffix does not get clipped off-screen when the window is resized to be very small.
 
 ### Removed
-- **Tree Node Hit Counts:** Completely removed the numeric asset "Hit" counts (previously displayed in parentheses) from tree nodes to clean up the UI and eliminate the expensive, synchronous recursive disk/database scanning operations that were slowing down the application.
+* **Tree Node Hit Counts:** Completely removed the numeric asset "Hit" counts (previously displayed in parentheses) from tree nodes to clean up the UI and eliminate the expensive, synchronous recursive disk/database scanning operations that were slowing down the application.
+* **Header Asset Count:** Removed the blue `(x)` numeric count suffix from the Asset Panel Header title to simplify the UI and defer to the new Info Bar footer.
+* **Folder Shortcuts Mechanism:** Completely abandoned and removed all code associated with the old folder shortcut feature, including deleting the `AssetCollectionFolders` table from the SQL schema, removing it from migration scripts, and eliminating related context menu actions.
 
 ## [0.1.2] - 2026-06-21
 
