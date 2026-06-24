@@ -18,6 +18,7 @@
 #include <QList>
 #include <QModelIndex>
 #include <QPersistentModelIndex>
+#include <QMimeData>
 #include <QPoint>
 #include <QHash>
 #include <QSet>
@@ -39,6 +40,10 @@ class QStandardItemModel;
 class QStandardItem;
 class QMenu;
 class CustomToolTip;
+class QDragMoveEvent;
+class QDragLeaveEvent;
+class QDropEvent;
+class QPaintEvent;
 
 /**
  * @struct AssetHit
@@ -70,6 +75,23 @@ public:
     void invalidateAndRefresh(const QString& path);
     bool hasHit(const QString& folderPath)      const { return folderHitState(folderPath) != NoHit; }
     bool isDirectHit(const QString& folderPath) const { return folderHitState(folderPath) == DirectHit; }
+
+    // --- Drag-and-drop: lets the user drag a Collection onto another Collection (or onto the
+    // Collections root) to reparent it. Validation/gesture handling lives here; the actual DB
+    // update + tree-node move is performed by AssetManagerWidget via the signal below, keeping
+    // this model read-mostly like the rest of its responsibilities.
+    Qt::ItemFlags flags(const QModelIndex &index) const override;
+    Qt::DropActions supportedDropActions() const override { return Qt::MoveAction; }
+    QStringList mimeTypes() const override;
+    QMimeData* mimeData(const QModelIndexList &indexes) const override;
+    bool canDropMimeData(const QMimeData *data, Qt::DropAction action,
+                          int row, int column, const QModelIndex &parent) const override;
+    bool dropMimeData(const QMimeData *data, Qt::DropAction action,
+                       int row, int column, const QModelIndex &parent) override;
+
+signals:
+    /// Emitted once a drag-drop reparent passes validation; newParentId is 0 for the Collections root.
+    void collectionReparentRequested(int collectionId, int newParentId);
 
 private slots:
     void processPendingHitCheck();
@@ -140,8 +162,17 @@ protected:
         }
     }
 
+    // Qt's built-in drop indicator (between-items lines + stray edge rects) reads as confusing
+    // ghost highlights mid-drag. It's disabled in setupUI; instead we track the valid drop target
+    // under the cursor and paint a single, definitive highlight over just that node.
+    void dragMoveEvent(QDragMoveEvent *event) override;
+    void dragLeaveEvent(QDragLeaveEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
+    void paintEvent(QPaintEvent *event) override;
+
 private:
     QColor m_separatorColor;
+    QPersistentModelIndex m_dropTarget; ///< Drop-enabled node currently under the cursor during a drag
 };
 
 // =============================================================================
@@ -183,6 +214,10 @@ private slots:
 
     void onItemChanged(QStandardItem *item);
 
+    /// Moves a collection (and its entire subtree) to a new parent in response to a validated
+    /// drag-drop from AssetFolderProxyModel. newParentId is 0 for the Collections root.
+    void reparentCollection(int collectionId, int newParentId);
+
 private:
     QVBoxLayout *mainLayout;
     QLabel *titleLabel;
@@ -203,6 +238,7 @@ private:
     AssetTreeView *dirTreeView; 
     
     QStandardItem *searchResultsRootItem;
+    QStandardItem *searchSeparatorItem; ///< Separator between Search Results and Favorites; hidden together with searchResultsRootItem when no search is active
     QStandardItem *favoritesRootItem;
     QStandardItem *collectionsRootItem;
 
@@ -235,6 +271,7 @@ private:
     void promptAddAssetLibrary();
     void processNextThumbnailBatch();
     void runSearch(const QString& query);
+    void updateSearchVisibility(bool active);
     void displayFolder(const QString& folderPath, const QString& title = QString());
     void deselectTree();
     void resolveBreadcrumb(const QString& folderPath);

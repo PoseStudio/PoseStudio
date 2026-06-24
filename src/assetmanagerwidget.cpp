@@ -33,7 +33,11 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QDragLeaveEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QMouseEvent>
+#include <QPaintEvent>
 #include <QPainter>
 #include <QPushButton>
 #include <QSet>
@@ -298,6 +302,151 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
     }
 
     return QIdentityProxyModel::data(proxyIndex, role);
+}
+
+namespace {
+    const QString kCollectionMimeType = QStringLiteral("application/x-posestudio-collection");
+}
+
+/**
+ * @brief Only Collection rows are draggable; only Collection rows and the Collections root
+ *        accept drops. Every other row (physical folders/roots, Search Results, Favorites,
+ *        separators) gets neither, overriding QStandardItem's drag/drop-enabled-by-default flags.
+ */
+Qt::ItemFlags AssetFolderProxyModel::flags(const QModelIndex &index) const {
+    Qt::ItemFlags f = QIdentityProxyModel::flags(index) & ~(Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
+    if (!index.isValid() || index.column() != 0) return f;
+
+    const QString path = sourceModel()->data(mapToSource(index), Qt::UserRole).toString();
+    if (path.startsWith(QStringLiteral("COLLECTION_"))) {
+        f |= Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled;
+    } else if (path == QStringLiteral("COLLECTIONS_ROOT")) {
+        f |= Qt::ItemIsDropEnabled;
+    }
+    return f;
+}
+
+QStringList AssetFolderProxyModel::mimeTypes() const {
+    return { kCollectionMimeType };
+}
+
+QMimeData* AssetFolderProxyModel::mimeData(const QModelIndexList &indexes) const {
+    if (indexes.isEmpty()) return nullptr;
+    const QString path = sourceModel()->data(mapToSource(indexes.first()), Qt::UserRole).toString();
+    if (!path.startsWith(QStringLiteral("COLLECTION_"))) return nullptr;
+
+    QMimeData *mime = new QMimeData();
+    mime->setData(kCollectionMimeType, path.toUtf8());
+    return mime;
+}
+
+bool AssetFolderProxyModel::canDropMimeData(const QMimeData *data, Qt::DropAction action,
+                                             int row, int column, const QModelIndex &parent) const {
+    Q_UNUSED(row);
+    Q_UNUSED(column);
+    if (action != Qt::MoveAction || !data->hasFormat(kCollectionMimeType)) return false;
+
+    const QString draggedPath = QString::fromUtf8(data->data(kCollectionMimeType));
+    // The tree's true invisible root (parent invalid) is never a valid target — only the
+    // Collections root or another Collection are.
+    if (!parent.isValid()) return false;
+    const QString targetPath = sourceModel()->data(mapToSource(parent), Qt::UserRole).toString();
+    if (targetPath != QStringLiteral("COLLECTIONS_ROOT") && !targetPath.startsWith(QStringLiteral("COLLECTION_")))
+        return false;
+
+    if (targetPath == draggedPath) return false; // dropping onto itself is a no-op
+
+    // Reject dropping into one of its own descendants — would create a cycle.
+    for (QModelIndex walk = parent; walk.isValid(); walk = walk.parent()) {
+        if (sourceModel()->data(mapToSource(walk), Qt::UserRole).toString() == draggedPath) return false;
+    }
+    return true;
+}
+
+bool AssetFolderProxyModel::dropMimeData(const QMimeData *data, Qt::DropAction action,
+                                          int row, int column, const QModelIndex &parent) {
+    if (!canDropMimeData(data, action, row, column, parent)) return false;
+
+    const QString draggedPath = QString::fromUtf8(data->data(kCollectionMimeType));
+    const int draggedId = draggedPath.mid(QStringLiteral("COLLECTION_").length()).toInt();
+
+    const QString targetPath = sourceModel()->data(mapToSource(parent), Qt::UserRole).toString();
+    const int newParentId = (targetPath == QStringLiteral("COLLECTIONS_ROOT"))
+        ? 0 : targetPath.mid(QStringLiteral("COLLECTION_").length()).toInt();
+
+    emit collectionReparentRequested(draggedId, newParentId);
+
+    // Return false so Qt's own InternalMove machinery does NOT also remove the "source" row:
+    // we move the tree item ourselves in reparentCollection (wired as a queued connection so it
+    // runs after this drop event fully unwinds). Returning true here would make the view delete
+    // the row we just relocated, so the collection would vanish until the next refresh/restart.
+    return false;
+}
+
+// =============================================================================
+// [ TREE VIEW: CUSTOM DROP-TARGET HIGHLIGHT ]
+// =============================================================================
+// Built-in drop indicator is turned off (setupUI). We track only the valid drop-enabled node
+// under the cursor and paint one clean highlight over it, so there are no stray between-items
+// lines or faint edge rects elsewhere.
+
+void AssetTreeView::dragMoveEvent(QDragMoveEvent *event) {
+    QTreeView::dragMoveEvent(event); // keeps Qt's edge auto-scroll working
+
+    // Validate against canDropMimeData (rejects self / own-descendant / non-collection targets),
+    // not just the drop-enabled flag, so the highlight and the accepted cursor match the rules.
+    const QModelIndex idx = indexAt(event->position().toPoint());
+    const bool ok = idx.isValid() && model()
+        && model()->canDropMimeData(event->mimeData(), Qt::MoveAction, -1, -1, idx);
+
+    const QModelIndex target = ok ? idx : QModelIndex();
+    if (QModelIndex(m_dropTarget) != target) {
+        m_dropTarget = target;
+        viewport()->update();
+    }
+
+    // We resolve the drop target ourselves from the cursor position (Qt collapses targeting to
+    // the viewport root while its drop indicator is disabled), so set acceptance explicitly.
+    if (ok) event->acceptProposedAction();
+    else    event->ignore();
+}
+
+void AssetTreeView::dragLeaveEvent(QDragLeaveEvent *event) {
+    if (m_dropTarget.isValid()) {
+        m_dropTarget = QModelIndex();
+        viewport()->update();
+    }
+    QTreeView::dragLeaveEvent(event);
+}
+
+void AssetTreeView::dropEvent(QDropEvent *event) {
+    // Resolve the target from the cursor and hand it to the model directly — don't defer to
+    // QTreeView::dropEvent, which (with the drop indicator disabled) collapses the target to the
+    // viewport root and gets rejected. dropMimeData validates and emits the reparent (queued).
+    const QModelIndex idx = indexAt(event->position().toPoint());
+    if (idx.isValid() && model())
+        model()->dropMimeData(event->mimeData(), Qt::MoveAction, -1, -1, idx);
+
+    m_dropTarget = QModelIndex();
+    viewport()->update();
+    event->ignore(); // reparent performed ourselves; prevent Qt's InternalMove source-row removal
+}
+
+void AssetTreeView::paintEvent(QPaintEvent *event) {
+    QTreeView::paintEvent(event);
+    if (!m_dropTarget.isValid()) return;
+
+    const QRect r = visualRect(m_dropTarget);
+    if (!r.isValid()) return;
+
+    QPainter p(viewport());
+    p.setRenderHint(QPainter::Antialiasing);
+    QColor accent(0x49, 0x7f, 0xd4); // Constants::COLOR_ACCENT_BLUE
+    QColor fill = accent;
+    fill.setAlpha(55);
+    p.setPen(QPen(accent, 1));
+    p.setBrush(fill);
+    p.drawRoundedRect(r.adjusted(1, 1, -2, -2), 3, 3);
 }
 
 // =============================================================================
@@ -583,8 +732,20 @@ void AssetManagerWidget::setupUI() {
     dirTreeView->setEditTriggers(QAbstractItemView::SelectedClicked | QAbstractItemView::EditKeyPressed);
     dirTreeView->setContextMenuPolicy(Qt::CustomContextMenu);
 
+    // Collection drag-and-drop reparenting (see AssetFolderProxyModel's flags/mimeData/
+    // canDropMimeData/dropMimeData overrides for what's actually draggable/droppable).
+    dirTreeView->setDragEnabled(true);
+    dirTreeView->setAcceptDrops(true);
+    dirTreeView->setDropIndicatorShown(false); // we paint our own drop highlight (AssetTreeView)
+    dirTreeView->setDragDropMode(QAbstractItemView::InternalMove);
+    dirTreeView->setDefaultDropAction(Qt::MoveAction);
+
     connect(dirTreeView, &QTreeView::customContextMenuRequested, this, &AssetManagerWidget::onContextMenuRequested);
     connect(dirModel, &QStandardItemModel::itemChanged, this, &AssetManagerWidget::onItemChanged);
+    // Queued so the reparent (which mutates the model via takeRow/appendRow) runs after Qt's
+    // drop event has fully unwound, rather than re-entering the model mid-drop.
+    connect(proxyModel, &AssetFolderProxyModel::collectionReparentRequested,
+            this, &AssetManagerWidget::reparentCollection, Qt::QueuedConnection);
 
     topLayout->addWidget(searchRow);
     topLayout->addWidget(searchSeparator);
@@ -812,6 +973,14 @@ void AssetManagerWidget::refreshAssetManager() {
     searchResultsRootItem->setFlags(searchResultsRootItem->flags() & ~Qt::ItemIsEditable);
     dirModel->appendRow(searchResultsRootItem);
 
+    // Separator between Search Results and Favorites — both stay hidden together until a
+    // search is actually active (see updateSearchVisibility), so the panel doesn't waste
+    // space on search UI when it isn't in use.
+    searchSeparatorItem = new QStandardItem();
+    searchSeparatorItem->setData("SEPARATOR", Qt::UserRole);
+    searchSeparatorItem->setFlags(Qt::NoItemFlags);
+    dirModel->appendRow(searchSeparatorItem);
+
     // ---------------------------------------------------------
     // 3. Build Favorites Root (a flat container of favorited asset items; no children in the
     //    tree — clicking it lists those items in the grid)
@@ -879,6 +1048,10 @@ void AssetManagerWidget::refreshAssetManager() {
     }
     addLibraryHintLabel->setVisible(!anyLibraryAdded);
 
+    // Search Results (and its separator) stay hidden until a search is actually run —
+    // a freshly rebuilt tree has no active search, regardless of stale text left in the box.
+    updateSearchVisibility(false);
+
     // =========================================================================
     // 7. RESTORE STATE AFTER WIPE
     // =========================================================================
@@ -912,6 +1085,20 @@ static bool hasAncestorIn(const QString& path, const QSet<QString>& set) {
 }
 
 /**
+ * @brief Shows or hides the Search Results root and its separator together, so the panel
+ *        doesn't reserve space for search UI while no search is active.
+ */
+void AssetManagerWidget::updateSearchVisibility(bool active) {
+    const auto setHidden = [this](QStandardItem* item, bool hidden) {
+        if (!item) return;
+        const QModelIndex proxyIdx = proxyModel->mapFromSource(dirModel->indexFromItem(item));
+        dirTreeView->setRowHidden(proxyIdx.row(), proxyIdx.parent(), hidden);
+    };
+    setHidden(searchResultsRootItem, !active);
+    setHidden(searchSeparatorItem, !active);
+}
+
+/**
  * @brief Searches every enabled asset library for files/folders matching the query and lists
  *        the results as a flat set of paths under the Search Results root node. Folders that
  *        only have matches in a subfolder (no direct hit) are skipped in favor of that subfolder,
@@ -919,6 +1106,7 @@ static bool hasAncestorIn(const QString& path, const QSet<QString>& set) {
  */
 void AssetManagerWidget::runSearch(const QString& query) {
     searchResultsRootItem->removeRows(0, searchResultsRootItem->rowCount());
+    updateSearchVisibility(!query.isEmpty());
 
     const QModelIndex searchProxyIdx = proxyModel->mapFromSource(
         dirModel->indexFromItem(searchResultsRootItem));
@@ -2690,6 +2878,43 @@ int AssetManagerWidget::getOrCreateCollection(const QString& name, int parentCol
     parentItem->sortChildren(0, Qt::AscendingOrder);
 
     return newId;
+}
+
+/**
+ * @brief Moves a collection (and its entire subtree, untouched) under a new parent, in response
+ *        to a validated drag-drop from AssetFolderProxyModel. Only the dragged collection's own
+ *        AssetCollectionParentID changes in the DB — descendants keep referencing its same ID, so
+ *        they come along structurally without any writes of their own.
+ */
+void AssetManagerWidget::reparentCollection(int collectionId, int newParentId) {
+    QStandardItem *collItem = findCollectionTreeItem(collectionsRootItem, collectionId);
+    if (!collItem) return;
+    QStandardItem *oldParentItem = collItem->parent();
+    if (!oldParentItem) return;
+
+    QStandardItem *newParentItem = (newParentId == 0)
+        ? collectionsRootItem
+        : findCollectionTreeItem(collectionsRootItem, newParentId);
+    if (!newParentItem || oldParentItem == newParentItem) return;
+
+    QSqlQuery q(QSqlDatabase::database("db_conn"));
+    q.prepare("UPDATE AssetCollections SET AssetCollectionParentID = :pid WHERE AssetCollectionID = :id");
+    q.bindValue(":pid", newParentId);
+    q.bindValue(":id", collectionId);
+    if (!q.exec()) {
+        qWarning() << "[!] Failed to reparent collection:" << q.lastError().text();
+        return;
+    }
+
+    const QList<QStandardItem*> takenRow = oldParentItem->takeRow(collItem->row());
+    newParentItem->appendRow(takenRow);
+    newParentItem->sortChildren(0, Qt::AscendingOrder);
+
+    const QModelIndex newProxyIdx = proxyModel->mapFromSource(dirModel->indexFromItem(collItem));
+    if (newProxyIdx.isValid()) {
+        dirTreeView->setCurrentIndex(newProxyIdx);
+        dirTreeView->scrollTo(newProxyIdx);
+    }
 }
 
 void AssetManagerWidget::addAssetToCollection(const QString& filePath, int collectionId) {
