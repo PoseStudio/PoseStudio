@@ -17,6 +17,41 @@
 #include <QFile>
 #include <QStringList>
 
+namespace {
+
+/// True if `table` already has a column named `column`.
+bool tableHasColumn(QSqlDatabase& db, const QString& table, const QString& column) {
+    // Identifiers can't be bound as parameters, but `table` is always a hardcoded literal
+    // from our own migration calls below — never user input — so interpolation is safe here.
+    QSqlQuery pragma(db);
+    if (!pragma.exec(QStringLiteral("PRAGMA table_info(%1)").arg(table))) return false;
+    while (pragma.next()) {
+        if (pragma.value(QStringLiteral("name")).toString() == column) return true;
+    }
+    return false;
+}
+
+/// Adds `column` (with SQL `definition`) to `table` if it's missing — the additive-migration
+/// workhorse for existing databases. A no-op once the column is present. If `seedSql` is given,
+/// it runs once right after the column is created to backfill existing rows.
+void ensureColumn(QSqlDatabase& db, const QString& table, const QString& column,
+                  const QString& definition, const QString& seedSql = QString()) {
+    if (tableHasColumn(db, table, column)) return;
+
+    QSqlQuery alter(db);
+    if (!alter.exec(QStringLiteral("ALTER TABLE %1 ADD COLUMN %2 %3").arg(table, column, definition))) {
+        qWarning() << "[!] Failed to add column" << column << "to" << table << ":" << alter.lastError().text();
+        return;
+    }
+    if (!seedSql.isEmpty()) {
+        QSqlQuery seed(db);
+        if (!seed.exec(seedSql))
+            qWarning() << "[!] Failed to seed column" << column << ":" << seed.lastError().text();
+    }
+}
+
+} // namespace
+
 /**
  * @brief Opens (or rebuilds) the SQLite database and returns the active connection.
  * @param mode Normal opens the existing file, building the schema only if this is the first
@@ -91,30 +126,15 @@ QSqlDatabase initializeDatabase(DbInitMode mode) {
         qDebug() << "Success: Database architecture successfully reconstructed.";
     }
 
-    // There's no formal migration system yet, so additive schema changes for existing
-    // databases are applied here, guarded so they're a no-op once already present.
-    {
-        bool hasParentColumn = false;
-        QSqlQuery pragma(db);
-        if (pragma.exec(QStringLiteral("PRAGMA table_info(AssetCollections)"))) {
-            while (pragma.next()) {
-                if (pragma.value(QStringLiteral("name")).toString() == QStringLiteral("AssetCollectionParentID")) {
-                    hasParentColumn = true;
-                    break;
-                }
-            }
-        }
-        if (!hasParentColumn) {
-            QSqlQuery alter(db);
-            if (!alter.exec(QStringLiteral("ALTER TABLE AssetCollections ADD COLUMN AssetCollectionParentID INTEGER NOT NULL DEFAULT 0"))) {
-                qWarning() << "[!] Failed to add AssetCollectionParentID column:" << alter.lastError().text();
-            }
-        }
-    }
+    // There's no formal migration system yet, so additive schema changes for existing databases
+    // are applied here via the ensureColumn helper (each a no-op once already present). Add new
+    // ones here, not only in initialize.sql, or pre-existing installs miss them.
 
-    // Favorites (a single flat list of favorited asset paths) was added after the initial
-    // schema, so older databases are missing the table. CREATE TABLE IF NOT EXISTS is a no-op
-    // once present.
+    // Nested collections: parent pointer (0 = top-level).
+    ensureColumn(db, "AssetCollections", "AssetCollectionParentID", "INTEGER NOT NULL DEFAULT 0");
+
+    // Favorites (a single flat list of favorited asset paths) was added after the initial schema,
+    // so older databases lack the table entirely. CREATE TABLE IF NOT EXISTS is a no-op once present.
     {
         QSqlQuery q(db);
         q.exec(QStringLiteral(
@@ -124,76 +144,16 @@ QSqlDatabase initializeDatabase(DbInitMode mode) {
             "FavoriteSortOrder INTEGER NOT NULL DEFAULT 0)"));
     }
 
-    // FavoriteSortOrder (user-defined drag order in the Favorites pane) was added after the
-    // Favorites table itself, so databases that already have Favorites may lack the column.
-    {
-        bool hasSortColumn = false;
-        QSqlQuery pragma(db);
-        if (pragma.exec(QStringLiteral("PRAGMA table_info(Favorites)"))) {
-            while (pragma.next()) {
-                if (pragma.value(QStringLiteral("name")).toString() == QStringLiteral("FavoriteSortOrder")) {
-                    hasSortColumn = true;
-                    break;
-                }
-            }
-        }
-        if (!hasSortColumn) {
-            QSqlQuery alter(db);
-            if (!alter.exec(QStringLiteral("ALTER TABLE Favorites ADD COLUMN FavoriteSortOrder INTEGER NOT NULL DEFAULT 0"))) {
-                qWarning() << "[!] Failed to add FavoriteSortOrder column:" << alter.lastError().text();
-            } else {
-                // Seed existing rows with a stable initial order (their insertion order).
-                QSqlQuery seed(db);
-                seed.exec(QStringLiteral("UPDATE Favorites SET FavoriteSortOrder = FavoriteID"));
-            }
-        }
-    }
+    // User-defined manual drag orders (Favorites pane / within a Collection). Seed existing rows
+    // with a stable initial order matching their insertion order (the autoincrement ID).
+    ensureColumn(db, "Favorites", "FavoriteSortOrder", "INTEGER NOT NULL DEFAULT 0",
+                 "UPDATE Favorites SET FavoriteSortOrder = FavoriteID");
+    ensureColumn(db, "AssetCollectionItems", "AssetCollectionItemSortOrder", "INTEGER NOT NULL DEFAULT 0",
+                 "UPDATE AssetCollectionItems SET AssetCollectionItemSortOrder = AssetCollectionItemID");
 
-    // AssetCollectionItemSortOrder (user-defined drag order within a Collection) was added after
-    // the AssetCollectionItems table itself, so existing databases may lack the column.
-    {
-        bool hasSortColumn = false;
-        QSqlQuery pragma(db);
-        if (pragma.exec(QStringLiteral("PRAGMA table_info(AssetCollectionItems)"))) {
-            while (pragma.next()) {
-                if (pragma.value(QStringLiteral("name")).toString() == QStringLiteral("AssetCollectionItemSortOrder")) {
-                    hasSortColumn = true;
-                    break;
-                }
-            }
-        }
-        if (!hasSortColumn) {
-            QSqlQuery alter(db);
-            if (!alter.exec(QStringLiteral("ALTER TABLE AssetCollectionItems ADD COLUMN AssetCollectionItemSortOrder INTEGER NOT NULL DEFAULT 0"))) {
-                qWarning() << "[!] Failed to add AssetCollectionItemSortOrder column:" << alter.lastError().text();
-            } else {
-                // Seed existing rows with a stable initial order (their insertion order).
-                QSqlQuery seed(db);
-                seed.exec(QStringLiteral("UPDATE AssetCollectionItems SET AssetCollectionItemSortOrder = AssetCollectionItemID"));
-            }
-        }
-    }
-
-    // AssetLibraryIsBuiltIn flags the single "Maquettes" row below as shipped-with-the-app
-    // rather than user-added, so the UI knows not to offer removing it.
-    {
-        bool hasBuiltInColumn = false;
-        QSqlQuery pragma(db);
-        if (pragma.exec(QStringLiteral("PRAGMA table_info(AssetLibraries)"))) {
-            while (pragma.next()) {
-                if (pragma.value(QStringLiteral("name")).toString() == QStringLiteral("AssetLibraryIsBuiltIn")) {
-                    hasBuiltInColumn = true;
-                    break;
-                }
-            }
-        }
-        if (!hasBuiltInColumn) {
-            QSqlQuery alter(db);
-            if (!alter.exec(QStringLiteral("ALTER TABLE AssetLibraries ADD COLUMN AssetLibraryIsBuiltIn INTEGER NOT NULL DEFAULT 0"))) {
-                qWarning() << "[!] Failed to add AssetLibraryIsBuiltIn column:" << alter.lastError().text();
-            }
-        }
-    }
+    // Flags the single "Maquettes" row (synced below) as shipped-with-the-app rather than
+    // user-added, so the UI knows not to offer removing it.
+    ensureColumn(db, "AssetLibraries", "AssetLibraryIsBuiltIn", "INTEGER NOT NULL DEFAULT 0");
 
     // Ensure the built-in "Maquettes" library exists, on disk and in AssetLibraries, every
     // launch — re-synced to the current install location in case the app was moved since

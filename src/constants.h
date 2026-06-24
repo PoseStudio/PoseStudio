@@ -54,6 +54,10 @@ namespace Constants {
     inline constexpr int TOOLTIP_SLEEP_DELAY_MS = 0;
     inline constexpr int TOOLTIP_HIDE_DELAY_MS = 10;
 
+    // How long an asset drag must hover over a collapsed tree node before it springs open, so the
+    // user can drill into a child node without dropping (classic "spring-loaded folder" behavior).
+    inline constexpr int DRAG_AUTO_EXPAND_HOVER_MS = 700;
+
 }
 
 #endif // CONSTANTS_H

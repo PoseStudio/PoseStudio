@@ -85,6 +85,12 @@ void PreferencesDialog::selectTab(const QString& tabLabel) {
 }
 
 void PreferencesDialog::addPanel(const QString& tabLabel, PreferencesPanel* panel) {
-    m_nav->addItem(tabLabel);
+    auto* item = new QListWidgetItem(tabLabel, m_nav);
+    // Set the row height here rather than leaning on the ::item vertical QSS padding alone: on the
+    // default delegate that padding inflates the hover/selection box past the item's layout cell
+    // (oversized highlight that bleeds into the neighbouring row), while the cells themselves stay
+    // text-tight and visually cramped. A fixed sizeHint reconciles the two so the tabs are evenly
+    // spaced and the highlight matches the row. (Same fix as AssetLibraryList — see its comment.)
+    item->setSizeHint(QSize(0, 38));
     m_stack->addWidget(panel);
 }

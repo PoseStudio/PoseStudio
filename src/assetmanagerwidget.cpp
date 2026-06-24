@@ -55,6 +55,12 @@
 #include <QVBoxLayout>
 #include <algorithm>
 
+namespace {
+// Image file extensions treated as thumbnail candidates throughout the asset manager. An asset
+// (any non-image file) is paired with the largest same-basename image in its folder.
+const QSet<QString> kImageExtensions = {"png", "jpg", "jpeg", "bmp", "webp", "gif", "tif", "tiff"};
+}
+
 // =============================================================================
 // [ CUSTOM WIDGETS ]
 // =============================================================================
@@ -69,16 +75,18 @@ public:
     explicit CustomToolTip(QWidget* parent = nullptr) : QWidget(parent, Qt::ToolTip) {
         setWindowFlags(Qt::ToolTip | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
         setAttribute(Qt::WA_ShowWithoutActivating);
-        
-        // The outer widget becomes the invisible "glass" container
-        setAttribute(Qt::WA_TranslucentBackground); 
-        setMouseTracking(true); 
 
-        // Create a layout with zero margins so the label fills the entire glass window
+        // The outer top-level widget is a transparent container; the styled label inside does the
+        // actual drawing. Rendering the rounded/bordered CSS on a child rather than directly on a
+        // top-level translucent window avoids the rectangular-background artifacts Qt otherwise
+        // leaves around the rounded corners.
+        setAttribute(Qt::WA_TranslucentBackground);
+        setMouseTracking(true);
+
+        // Zero margins so the label fills the whole container.
         QVBoxLayout* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
 
-        // The inner label safely renders the CSS without top-level window bugs!
         textLabel = new QLabel(this);
         textLabel->setStyleSheet(
             "QLabel {"
@@ -98,7 +106,7 @@ public:
         connect(hideTimer, &QTimer::timeout, this, &CustomToolTip::hide);
     }
 
-    // Bridge function so the rest of your code can still set the text easily
+    /// Sets the tooltip's rich-text content.
     void setText(const QString& text) {
         textLabel->setText(text);
     }
@@ -154,13 +162,12 @@ void AssetFolderProxyModel::invalidateAndRefresh(const QString& path) {
 }
 
 bool AssetFolderProxyModel::directFolderHasHit(const QString& folderPath) const {
-    static const QStringList imageExts = {"png", "jpg", "jpeg", "bmp", "webp", "gif", "tif", "tiff"};
     const QFileInfoList files = QDir(folderPath).entryInfoList(QDir::Files | QDir::NoSymLinks, QDir::NoSort);
 
     QSet<QString> images, nonImages;
     for (const QFileInfo& f : files) {
         const QString base = f.baseName();
-        if (imageExts.contains(f.suffix().toLower())) {
+        if (kImageExtensions.contains(f.suffix().toLower())) {
             images.insert(base);
             if (nonImages.contains(base)) return true;
         } else {
@@ -432,6 +439,85 @@ void AssetTreeView::dropEvent(QDropEvent *event) {
     event->ignore(); // reparent performed ourselves; prevent Qt's InternalMove source-row removal
 }
 
+QString AssetTreeView::updateAssetDropHighlight(const QPoint &globalPos) {
+    const QPoint vp = viewport()->mapFromGlobal(globalPos);
+    QModelIndex target;
+    QString result;
+
+    if (viewport()->rect().contains(vp)) {
+        const QModelIndex idx = indexAt(vp);
+        if (idx.isValid()) {
+            // A Collection node, the Collections header (drops there spawn a new top-level
+            // collection, same as "New Collection" from the asset context menu) or the Favorites
+            // root can receive an asset — Search Results, separators and physical folders never do.
+            const QString role = idx.data(Qt::UserRole).toString();
+            if (role == QStringLiteral("FAVORITES_ROOT") || role == QStringLiteral("COLLECTIONS_ROOT")
+                || role.startsWith(QStringLiteral("COLLECTION_"))) {
+                target = idx;
+                result = role;
+            }
+        }
+    }
+
+    if (QModelIndex(m_dropTarget) != target) {
+        m_dropTarget = target;
+        viewport()->update();
+    }
+
+    // Spring-load: dwell over a collapsed node (any expandable collection-tree node, including the
+    // Collections header — not just valid drop targets) auto-expands it so the user can reach a
+    // child. The node under the cursor drives this even when it isn't itself a droppable target.
+    const QModelIndex hovered = viewport()->rect().contains(vp) ? indexAt(vp) : QModelIndex();
+    scheduleAutoExpand(hovered);
+
+    return result;
+}
+
+void AssetTreeView::scheduleAutoExpand(const QModelIndex &index) {
+    // Spring-loading is scoped to the Collections subtree (where sub-collections — the only nodes
+    // worth drilling toward for an asset drop — live) plus the Collections header. Physical library
+    // folders, Search Results and Favorites are never asset destinations, so auto-expanding them
+    // mid-drag would just churn the tree (and needlessly lazy-load folder children).
+    const QString role = index.isValid() ? index.data(Qt::UserRole).toString() : QString();
+    const bool inCollectionsTree = (role == QStringLiteral("COLLECTIONS_ROOT")
+                                    || role.startsWith(QStringLiteral("COLLECTION_")));
+    const bool expandable = inCollectionsTree && model() && model()->hasChildren(index)
+                            && !isExpanded(index);
+
+    if (!expandable) {
+        if (m_autoExpandTimer) m_autoExpandTimer->stop();
+        m_autoExpandTarget = QModelIndex();
+        return;
+    }
+
+    if (QModelIndex(m_autoExpandTarget) == index)
+        return; // already counting down for this node — let the dwell continue
+
+    m_autoExpandTarget = index;
+    if (!m_autoExpandTimer) {
+        m_autoExpandTimer = new QTimer(this);
+        m_autoExpandTimer->setSingleShot(true);
+        connect(m_autoExpandTimer, &QTimer::timeout, this, [this]() {
+            const QModelIndex idx = m_autoExpandTarget;
+            if (idx.isValid() && !isExpanded(idx)) {
+                expand(idx);
+                scrollTo(idx); // keep the freshly revealed children in view
+            }
+            m_autoExpandTarget = QModelIndex();
+        });
+    }
+    m_autoExpandTimer->start(Constants::DRAG_AUTO_EXPAND_HOVER_MS);
+}
+
+void AssetTreeView::clearAssetDropHighlight() {
+    if (m_autoExpandTimer) m_autoExpandTimer->stop();
+    m_autoExpandTarget = QModelIndex();
+    if (m_dropTarget.isValid()) {
+        m_dropTarget = QModelIndex();
+        viewport()->update();
+    }
+}
+
 void AssetTreeView::paintEvent(QPaintEvent *event) {
     QTreeView::paintEvent(event);
     if (!m_dropTarget.isValid()) return;
@@ -441,7 +527,7 @@ void AssetTreeView::paintEvent(QPaintEvent *event) {
 
     QPainter p(viewport());
     p.setRenderHint(QPainter::Antialiasing);
-    QColor accent(0x49, 0x7f, 0xd4); // Constants::COLOR_ACCENT_BLUE
+    QColor accent(Constants::COLOR_ACCENT_BLUE);
     QColor fill = accent;
     fill.setAlpha(55);
     p.setPen(QPen(accent, 1));
@@ -1650,8 +1736,6 @@ void AssetManagerWidget::processNextThumbnailBatch() {
  * @brief Parses physical folder directories for 3D assets and paired thumbnails.
  */
 QList<AssetHit> AssetManagerWidget::parseFolderAssets(const QString& folderPath) {
-    static const QSet<QString> imageExts = {"png", "jpg", "jpeg", "bmp", "webp", "gif", "tif", "tiff"};
-
     const QFileInfoList files = QDir(folderPath).entryInfoList(QDir::Files | QDir::NoSymLinks);
 
     struct FileGroup {
@@ -1665,7 +1749,7 @@ QList<AssetHit> AssetManagerWidget::parseFolderAssets(const QString& folderPath)
 
     for (const QFileInfo& fi : files) {
         const QString base = fi.baseName();
-        if (imageExts.contains(fi.suffix().toLower())) {
+        if (kImageExtensions.contains(fi.suffix().toLower())) {
             const qint64 sz = fi.size();
             auto& g = groups[base];
             if (sz > g.maxBytes) {
@@ -1741,8 +1825,6 @@ QList<AssetHit> AssetManagerWidget::parseFavorites() {
  *        caller's input order — Favorites rely on this to preserve the user's manual drag order.
  */
 QList<AssetHit> AssetManagerWidget::buildAssetHits(const QStringList& assetPaths) {
-    static const QSet<QString> imageExts = {"png", "jpg", "jpeg", "bmp", "webp", "gif", "tif", "tiff"};
-
     // Group the (existing) paths by folder so each folder's images are scanned only once. Keep
     // the original full paths as the keys so we can re-emit in input order at the end.
     QHash<QString, QStringList> folderToPaths;
@@ -1767,7 +1849,7 @@ QList<AssetHit> AssetManagerWidget::buildAssetHits(const QStringList& assetPaths
         const QFileInfoList allFiles = QDir(folderPath).entryInfoList(QDir::Files | QDir::NoSymLinks);
         for (const QFileInfo& fi : allFiles) {
             const QString base = fi.baseName();
-            if (!relevantBases.contains(base) || !imageExts.contains(fi.suffix().toLower())) continue;
+            if (!relevantBases.contains(base) || !kImageExtensions.contains(fi.suffix().toLower())) continue;
             const qint64 sz = fi.size();
             auto& ig = imagesByBase[base];
             if (sz > ig.maxBytes) {
@@ -2393,6 +2475,7 @@ bool AssetManagerWidget::eventFilter(QObject *watched, QEvent *event) {
                 QMenu menu(this);
                 menu.setObjectName("AssetManagerContextMenu");
                 QAction *openAction   = menu.addAction(QIcon(":/resources/icons/open-item.png"), "Open");
+                openAction->setEnabled(!m_hoveredBreadcrumbLink.isEmpty());
                 menu.addSeparator();
                 QAction *browseAction = menu.addAction(QIcon(":/resources/icons/browse-folder.png"), "Browse Folder");
                 QAction *selected = menu.exec(static_cast<QContextMenuEvent*>(event)->globalPos());
@@ -2409,24 +2492,35 @@ bool AssetManagerWidget::eventFilter(QObject *watched, QEvent *event) {
 
     if (watched == assetListWidget->viewport()) {
 
-        // 0. Manual drag-reorder for sortable grids (Favorites and Collections). We avoid Qt's
-        //    QDrag/InternalMove path (in IconMode it free-positions icons rather than reordering
-        //    rows). Once the pointer crosses the drag threshold we float a translucent ghost of
-        //    the thumbnail under the cursor and show a line at the gap where it will land. The
-        //    grid is left untouched until release — moving items mid-drag would reflow the layout
-        //    and throw off where the cursor is pointing — then the item drops at the indicated
-        //    gap and the order persists.
-        if (isSortableView()) {
-            if (event->type() == QEvent::MouseButtonPress) {
+        // 0. Manual asset drag. Two destinations share one hand-rolled gesture (we avoid Qt's
+        //    QDrag/InternalMove path — in IconMode it free-positions icons rather than reordering
+        //    rows): while the cursor stays inside a *sortable* grid (Favorites/Collections) it
+        //    reorders rows; once it leaves the grid (any view) it instead drops the asset onto a
+        //    Collection/Favorites tree node, highlighting that node like a node-move. Either way,
+        //    past the drag threshold we float a translucent ghost of the thumbnail under the cursor;
+        //    in reorder mode a line marks the gap where it will land. The grid is left untouched
+        //    until release — moving items mid-drag would reflow the layout under the cursor.
+        if (event->type() == QEvent::MouseButtonPress) {
+            QMouseEvent *me = static_cast<QMouseEvent *>(event);
+            if (me->button() == Qt::LeftButton) {
+                QListWidgetItem *it = assetListWidget->itemAt(me->pos());
+                // Only asset items can be dragged — folder shortcuts are not assets.
+                m_dragItem = (it && it->data(Qt::UserRole + 2).toString() != QStringLiteral("FOLDER"))
+                                 ? it : nullptr;
+                m_dragStartPos = me->pos();
+                m_dragging = false;
+                m_assetDropTargetPath.clear();
+            }
+        } else if (event->type() == QEvent::MouseButtonRelease) {
+            if (m_dragging && m_dragItem) {
                 QMouseEvent *me = static_cast<QMouseEvent *>(event);
-                if (me->button() == Qt::LeftButton) {
-                    m_dragItem = assetListWidget->itemAt(me->pos());
-                    m_dragStartPos = me->pos();
-                    m_dragging = false;
-                }
-            } else if (event->type() == QEvent::MouseButtonRelease) {
-                if (m_dragging && m_dragItem) {
-                    QMouseEvent *me = static_cast<QMouseEvent *>(event);
+                if (!m_assetDropTargetPath.isEmpty()) {
+                    // Dropped onto a Collection/Favorites node: add (from a library/search view) or
+                    // move (from another Favorites/Collection view) the asset there.
+                    dropAssetOnTreeNode(m_dragItem, m_assetDropTargetPath);
+                } else if (isSortableView() &&
+                           assetListWidget->viewport()->rect().contains(me->pos())) {
+                    // Released inside a sortable grid: commit the reorder.
                     const int fromRow = assetListWidget->row(m_dragItem);
                     int insertIdx = gridInsertIndex(me->pos());
                     if (fromRow < insertIdx) --insertIdx; // removal shifts everything after fromRow up
@@ -2437,21 +2531,29 @@ bool AssetManagerWidget::eventFilter(QObject *watched, QEvent *event) {
                     }
                     persistGridOrder();
                 }
-                endGridDrag();
-            } else if (event->type() == QEvent::MouseMove) {
-                QMouseEvent *me = static_cast<QMouseEvent *>(event);
-                if ((me->buttons() & Qt::LeftButton) && m_dragItem) {
-                    if (!m_dragging &&
-                        (me->pos() - m_dragStartPos).manhattanLength() >= QApplication::startDragDistance()) {
-                        beginGridDrag();
+            }
+            dirTreeView->clearAssetDropHighlight();
+            endGridDrag();
+        } else if (event->type() == QEvent::MouseMove) {
+            QMouseEvent *me = static_cast<QMouseEvent *>(event);
+            if ((me->buttons() & Qt::LeftButton) && m_dragItem) {
+                if (!m_dragging &&
+                    (me->pos() - m_dragStartPos).manhattanLength() >= QApplication::startDragDistance()) {
+                    beginGridDrag();
+                }
+                if (m_dragging) {
+                    m_dragLastPos = me->pos();
+                    if (m_dragPreview) {
+                        const QPoint g = me->globalPosition().toPoint();
+                        m_dragPreview->move(g - QPoint(m_dragPreview->width() / 2,
+                                                          m_dragPreview->height() / 2));
                     }
-                    if (m_dragging) {
-                        m_dragLastPos = me->pos();
-                        if (m_dragPreview) {
-                            const QPoint g = me->globalPosition().toPoint();
-                            m_dragPreview->move(g - QPoint(m_dragPreview->width() / 2,
-                                                              m_dragPreview->height() / 2));
-                        }
+
+                    const bool insideGrid = assetListWidget->viewport()->rect().contains(me->pos());
+                    if (insideGrid && isSortableView()) {
+                        // Reorder mode: drop-line indicator + edge auto-scroll, no tree target.
+                        dirTreeView->clearAssetDropHighlight();
+                        m_assetDropTargetPath.clear();
                         updateGridDropIndicator(me->pos());
 
                         // Auto-scroll when the cursor is in (or past) the top/bottom edge zone.
@@ -2464,9 +2566,17 @@ bool AssetManagerWidget::eventFilter(QObject *watched, QEvent *event) {
                         } else {
                             m_scrollTimer->stop();
                         }
-
-                        return true; // consume during an active drag (also suppresses tooltips)
+                    } else {
+                        // Outside the grid (or a non-sortable view): the reorder "move" is suspended
+                        // while out here; instead try to drop onto a Collection/Favorites tree node.
+                        if (m_dropLine) m_dropLine->hide();
+                        m_scrollTimer->stop();
+                        m_scrollDir = 0;
+                        m_assetDropTargetPath =
+                            dirTreeView->updateAssetDropHighlight(me->globalPosition().toPoint());
                     }
+
+                    return true; // consume during an active drag (also suppresses tooltips)
                 }
             }
         }
@@ -2487,8 +2597,8 @@ bool AssetManagerWidget::eventFilter(QObject *watched, QEvent *event) {
                     customToolTip->show();
                     
                     // Only update the "owner" when a new tooltip successfully spawns
-                    activeToolTipItem = item; 
-                    return true; // Return TRUE to completely block the native OS tooltip!
+                    activeToolTipItem = item;
+                    return true; // fully suppress the native OS tooltip
                 }
             } else {
                 customToolTip->startHideTimer(Constants::TOOLTIP_HIDE_DELAY_MS);
@@ -3032,6 +3142,59 @@ void AssetManagerWidget::endGridDrag() {
     }
     m_dragItem = nullptr;
     m_dragging = false;
+    m_assetDropTargetPath.clear();
+}
+
+/**
+ * @brief Drops a grid asset onto a Collection/Favorites tree node. ADD when the asset is dragged
+ *        from a plain library/search view; MOVE (remove-from-source + add-to-target) when the
+ *        current view is itself a Favorites/Collection it's already filed in.
+ */
+void AssetManagerWidget::dropAssetOnTreeNode(QListWidgetItem* item, const QString& targetPath) {
+    if (!item || targetPath.isEmpty()) return;
+    const QString fullPath = item->data(Qt::UserRole).toString();
+    if (fullPath.isEmpty()) return;
+
+    // Dropping onto the very node the asset already lives in is a no-op.
+    if (targetPath == m_currentFolderPath) return;
+
+    // The current view decides the gesture: a Favorites/Collection source means the asset is
+    // already filed somewhere, so the drag MOVES it; a library/search source just ADDS a copy.
+    const bool sourceIsFavorites  = (m_currentFolderPath == QStringLiteral("FAVORITES_ROOT"));
+    const bool sourceIsCollection = m_currentFolderPath.startsWith(QStringLiteral("COLLECTION_"));
+
+    // Dropping on the Collections header spawns a brand-new top-level collection — same as
+    // picking "New Collection" from the asset's context menu — and files the asset into it.
+    const bool targetIsNewCollection = (targetPath == QStringLiteral("COLLECTIONS_ROOT"));
+    int newCollectionId = -1;
+
+    // Add to the target node (both inserts are UNIQUE/INSERT-OR-IGNORE, so re-filing is harmless).
+    if (targetPath == QStringLiteral("FAVORITES_ROOT"))
+        addAssetToFavorites(fullPath);
+    else if (targetIsNewCollection) {
+        newCollectionId = getOrCreateCollection(uniqueCollectionName("New Collection", 0), 0);
+        if (newCollectionId > 0) addAssetToCollection(fullPath, newCollectionId);
+    } else
+        addAssetToCollection(fullPath, targetPath.mid(11).toInt());
+
+    // Move half: drop it from the source it came out of.
+    if (sourceIsFavorites)
+        removeAssetFromFavorites(fullPath);
+    else if (sourceIsCollection)
+        removeAssetFromCollection(fullPath, m_currentFolderPath.mid(11).toInt());
+
+    if (newCollectionId > 0) {
+        // Jump to the freshly created collection and drop it straight into rename edit mode,
+        // matching the "New Collection" context-menu action.
+        navigateToCollectionNode(newCollectionId, true);
+    } else if (sourceIsFavorites || sourceIsCollection) {
+        // A move leaves the current grid; refresh it so the asset visibly disappears from this view.
+        const QModelIndex currentTreeIndex = dirTreeView->currentIndex();
+        if (currentTreeIndex.isValid())
+            onFolderSelected(currentTreeIndex);
+        else
+            displayFolder(m_currentFolderPath);
+    }
 }
 
 /**

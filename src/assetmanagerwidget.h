@@ -39,6 +39,7 @@ class QListWidgetItem;
 class QStandardItemModel;
 class QStandardItem;
 class QMenu;
+class QTimer;
 class CustomToolTip;
 class QDragMoveEvent;
 class QDragLeaveEvent;
@@ -149,6 +150,17 @@ public:
         viewport()->update();
     }
 
+    // --- Asset drag-onto-node highlight: driven by AssetManagerWidget's hand-rolled grid drag
+    // (not a Qt QDrag), so these reuse the same single drop-target highlight the collection-reparent
+    // drag paints. Given a global cursor position they light up the Collection/Favorites node under
+    // it (or clear if none), reusing AssetTreeView's paintEvent highlight for visual parity with the
+    // node-move gesture.
+    /// Highlights the droppable Collection/Favorites node at globalPos and returns its UserRole
+    /// id-string ("FAVORITES_ROOT" or "COLLECTION_<id>"), or an empty string if there's no valid
+    /// target under the cursor.
+    QString updateAssetDropHighlight(const QPoint &globalPos);
+    void clearAssetDropHighlight();
+
 protected:
     void drawBranches(QPainter *painter, const QRect &rect, const QModelIndex &index) const override {
         QVariant fg = index.data(Qt::ForegroundRole);
@@ -173,6 +185,12 @@ protected:
 private:
     QColor m_separatorColor;
     QPersistentModelIndex m_dropTarget; ///< Drop-enabled node currently under the cursor during a drag
+
+    // Spring-loaded expansion: while an asset is hovered over a collapsed node with children, a
+    // short dwell auto-expands it so the user can drill toward a child node without dropping.
+    QTimer *m_autoExpandTimer = nullptr;
+    QPersistentModelIndex m_autoExpandTarget; ///< Collapsed node the dwell timer is currently counting down for
+    void scheduleAutoExpand(const QModelIndex &index); ///< (re)arms or cancels the dwell timer for `index`
 };
 
 // =============================================================================
@@ -254,6 +272,10 @@ private:
     int m_scrollDir = 0;              ///< -1 = scroll up, +1 = scroll down, 0 = idle
     QPoint m_dragLastPos;             ///< Last cursor pos (viewport coords) during a drag
 
+    /// Tree node ("FAVORITES_ROOT"/"COLLECTION_<id>") currently highlighted as the drop target
+    /// while an asset is dragged out of the grid onto the tree; empty when there's no valid target.
+    QString m_assetDropTargetPath;
+
     QString m_currentFolderPath;
     QString m_currentTitleText;   ///< Plain display name for virtual/collection titles (no breadcrumb)
     QString m_hoveredBreadcrumbLink;
@@ -297,6 +319,10 @@ private:
     void removeAssetFromCollection(const QString& filePath, int collectionId);
     void addAssetToFavorites(const QString& filePath);
     void removeAssetFromFavorites(const QString& filePath);
+    /// Handles a grid asset dropped onto a Collection/Favorites tree node: ADDs it when the asset
+    /// comes from a library/search view, or MOVEs it (remove-from-source + add-to-target) when the
+    /// current view is itself a Favorites/Collection. No-op when target == the current source view.
+    void dropAssetOnTreeNode(QListWidgetItem* item, const QString& targetPath);
     /// True for any view with a manual drag order (Favorites or a Collection) — gates the
     /// drag-reorder handling in eventFilter and the "Sortable" info-bar label.
     bool isSortableView() const;
