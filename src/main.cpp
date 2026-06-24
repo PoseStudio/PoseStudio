@@ -13,6 +13,7 @@
 #include "preferencesmanager.h"
 #include "assetmanagerwidget.h"
 #include "appproxystyle.h"
+#include "viewport/viewportwidget.h"
 
 #include <QApplication>
 #include <QDebug>
@@ -50,6 +51,12 @@ static QString loadStylesheets() {
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
+
+    // App identity. Must be set before any QStandardPaths lookup: the per-user data dir the
+    // database now lives in (AppDataLocation) is derived from these names, so initializeDatabase
+    // below depends on it. Keep this first.
+    QApplication::setApplicationName(QStringLiteral("PoseStudio"));
+    QApplication::setApplicationDisplayName(QStringLiteral("PoseStudio"));
 
     // --- 1. Core services & data layer ---
     initializeDatabase(DbInitMode::Normal);
@@ -94,9 +101,10 @@ int main(int argc, char *argv[]) {
 
     QSplitter *mainSplitter = new QSplitter(Qt::Horizontal, &mainWindow);
 
-    // Placeholder for the eventual 3D viewport
-    QWidget *viewportPlaceholder = new QWidget(mainSplitter);
-    viewportPlaceholder->setStyleSheet(QStringLiteral("background-color: #1e1f22;"));
+    // The 3D viewport: a self-contained Vulkan-backed widget. Everything graphics-API
+    // related lives behind this facade (see src/viewport/). If Vulkan is unavailable it
+    // degrades to an inline message rather than failing to launch.
+    pose::ViewportWidget *viewport = new pose::ViewportWidget(mainSplitter);
 
     QTabWidget *sidePanel = new QTabWidget(mainSplitter);
     sidePanel->setTabPosition(QTabWidget::West);
@@ -106,8 +114,9 @@ int main(int argc, char *argv[]) {
     sidePanel->addTab(new QWidget(), QStringLiteral("Properties")); // placeholder tab
 
     menuManager->setAssetManagerWidget(assetsTab);
+    menuManager->setViewportWidget(viewport);
 
-    mainSplitter->addWidget(viewportPlaceholder);
+    mainSplitter->addWidget(viewport);
     mainSplitter->addWidget(sidePanel);
     mainSplitter->setSizes({1500, 500});
 
@@ -119,6 +128,15 @@ int main(int argc, char *argv[]) {
     // Boot branding screen; dismisses itself on the user's next click anywhere
     SplashOverlay *splash = new SplashOverlay(&mainWindow);
     splash->show();
+
+    // "Open with" / drag-onto-exe convenience: import any .obj paths passed on the command line.
+    // ViewportWidget::importObj queues them until the renderer exists, so this is safe pre-show.
+    const QStringList launchArgs = QCoreApplication::arguments();
+    for (int i = 1; i < launchArgs.size(); ++i) {
+        if (launchArgs.at(i).endsWith(QStringLiteral(".obj"), Qt::CaseInsensitive)) {
+            viewport->importObj(launchArgs.at(i));
+        }
+    }
 
     return app.exec();
 }

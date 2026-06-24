@@ -142,10 +142,31 @@ PoseStudio is open-source software licensed under the **[GNU General Public Lice
 
 This project is built using the following core technologies and design resources:
 
-* **Core Language:** C++
-* **Application Framework:** [Qt Framework](https://www.qt.io/)
+* **Core Language:** C++ (C++17)
+* **Application Framework:** [Qt 6](https://www.qt.io/)
+* **3D Graphics API:** [Vulkan](https://www.vulkan.org/) (via the [LunarG Vulkan SDK](https://vulkan.lunarg.com))
+* **Math & Memory:** [GLM](https://github.com/g-truc/glm) and the [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) (fetched automatically by CMake)
 * Code generation and troubleshooting assistance provided by Anthropic's Claude.
 * **UI Iconography:** [Lucide Icons](https://lucide.dev/) (See `ATTRIBUTIONS.md` for full design credits)
+
+## Building from Source
+
+**Prerequisites**
+
+1. **Qt 6** (developed against 6.11.1, MSVC 2022 64-bit).
+2. **CMake 3.21+**.
+3. **[LunarG Vulkan SDK](https://vulkan.lunarg.com)** — required for the 3D viewport. It provides the Vulkan headers, the loader, the validation layers, and `glslc` (the GLSL→SPIR-V shader compiler the build invokes). Without it, CMake configuration will stop with a clear message.
+
+GLM and the Vulkan Memory Allocator are header-only and are downloaded automatically by CMake (`FetchContent`) at configure time — no manual setup needed.
+
+**Build**
+
+```bash
+cmake -B build -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/msvc2022_64"
+cmake --build build
+```
+
+> Don't hardcode your personal Qt path into `CMakeLists.txt` — pass it via `-DCMAKE_PREFIX_PATH` as shown.
 
 ## Contributors ✨
 

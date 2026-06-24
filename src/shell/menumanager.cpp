@@ -11,13 +11,17 @@
 #include "splashoverlay.h"
 #include "preferencesdialog.h"
 #include "assetmanagerwidget.h"
+#include "viewport/viewportwidget.h"
 #include <QMenu>
 #include <QMenuBar>
 #include <QAction>
 #include <QApplication>
+#include <QFileDialog>
 #include <QIcon>
 #include <QDesktopServices>
+#include <QStandardPaths>
 #include <QUrl>
+#include <cstring>
 
 /**
  * @brief Loads a normal/disabled icon pair following the "name.png" / "name-d.png" convention.
@@ -49,7 +53,29 @@ void MenuManager::setupMenus() {
     fileMenu->addAction("Save Copy...")->setEnabled(false);
     fileMenu->addSeparator();
 
-    fileMenu->addAction(loadDualStateIcon("import"), "Import...")->setEnabled(false);
+    // Import submenu: one entry per supported file format, kept alphabetical. Only formats with a
+    // working importer are enabled; the rest are disabled placeholders until their importer lands.
+    QMenu *importMenu = fileMenu->addMenu(loadDualStateIcon("import"), "Import");
+    const char *importFormats[] = {
+        ".ABC (Alembic)",
+        ".BVH (Biovision Hierarchy)",
+        ".DAE (Collada)",
+        ".FBX (FBX File)",
+        ".GLB (GL Transmission Format .glTF)",
+        ".OBJ (Wavefront)",
+        ".PLY (Polygon File Format)",
+        ".STL (Stereolithography)",
+        ".USD (Universal Scene Description)",
+    };
+    for (const char *format : importFormats) {
+        QAction *action = importMenu->addAction(format);
+        if (std::strcmp(format, ".OBJ (Wavefront)") == 0) {
+            QObject::connect(action, &QAction::triggered, mainWindow, [this]() { importObjFile(); });
+        } else {
+            action->setEnabled(false); // importer not built yet
+        }
+    }
+
     fileMenu->addAction(loadDualStateIcon("export"), "Export...")->setEnabled(false);
     fileMenu->addSeparator();
 
@@ -108,6 +134,23 @@ void MenuManager::setAssetManagerWidget(AssetManagerWidget *widget) {
 
     QObject::connect(assetManagerWidget, &AssetManagerWidget::manageAssetFoldersRequested,
                       mainWindow, [this]() { openPreferencesDialog(QStringLiteral("Assets")); });
+}
+
+void MenuManager::setViewportWidget(pose::ViewportWidget *viewport) {
+    viewportWidget = viewport;
+}
+
+void MenuManager::importObjFile() {
+    if (!viewportWidget) return;
+
+    const QString startDir =
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    const QString path = QFileDialog::getOpenFileName(
+        mainWindow, QStringLiteral("Import OBJ"), startDir,
+        QStringLiteral("Wavefront OBJ (*.obj)"));
+    if (path.isEmpty()) return; // user cancelled
+
+    viewportWidget->importObj(path);
 }
 
 void MenuManager::openPreferencesDialog(const QString &initialTab) {

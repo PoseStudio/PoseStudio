@@ -7,27 +7,42 @@
 #define SPLASHOVERLAY_H
 
 #include <QWidget>
+#include <QApplication>
 #include <QLabel>
 #include <QVBoxLayout>
 #include <QMouseEvent>
+#include <QShowEvent>
 #include <QEvent>
 #include <QPixmap>
 #include <QGraphicsDropShadowEffect>
 #include <QColor>
+#include <QRect>
+#include <QPoint>
 #include "constants.h"
 
 /**
  * @class SplashOverlay
  * @brief Covers its parent window with the PoseStudio branding image until clicked.
  *
- * Tracks the parent's size via an event filter so it always fills the window, and
+ * Tracks the parent's geometry via an event filter so it always fills the window, and
  * deletes itself on the next click anywhere within it.
+ *
+ * It is a frameless, always-on-top, translucent *top-level window* (not a child widget)
+ * deliberately: the 3D viewport is hosted in a native child window
+ * (QWidget::createWindowContainer), and native windows are composited on top of ordinary
+ * overlay widgets — a child-widget overlay would be hidden behind the viewport. A top-level
+ * window owned by the parent is composited above the viewport surface instead.
  */
 class SplashOverlay : public QWidget {
 public:
     /// @param parent The window this overlay should cover (usually the QMainWindow).
-    SplashOverlay(QWidget *parent) : QWidget(parent) {
+    SplashOverlay(QWidget *parent)
+        : QWidget(parent, Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint) {
+        // Qt::Window (the window *type*, not just the hints) is what actually promotes this
+        // parented widget into a top-level window — without it the hints are ignored and it
+        // stays a child widget hidden behind the native viewport.
         setAttribute(Qt::WA_StyledBackground, true);
+        setAttribute(Qt::WA_TranslucentBackground, true); // see-through except the artwork
         setStyleSheet("background-color: rgba(0, 0, 0, 0);");
 
         QVBoxLayout *layout = new QVBoxLayout(this);
@@ -85,23 +100,70 @@ public:
         imageLabel->setGraphicsEffect(shadow);
 
         if (parent) {
-            parent->installEventFilter(this);
-            resize(parent->size());
+            syncGeometryToParent();
+        }
+        // Dismiss on the next mouse press ANYWHERE in the app, not just on the splash window.
+        // As a translucent top-level window, clicks on its fully-transparent regions fall
+        // through to the app beneath it, so watching only this widget would miss them — filter
+        // the whole application instead. (The parent's resize/move events also arrive through
+        // this same app-wide filter, which keeps the overlay aligned over the window.)
+        if (qApp) {
+            qApp->installEventFilter(this);
         }
     }
 
 protected:
     void mousePressEvent(QMouseEvent *) override {
-        // deleteLater(), not 'delete this': the click event is still being dispatched,
-        // so the widget must survive until Qt finishes processing it this iteration.
-        deleteLater();
+        dismiss(); // fallback; in practice the app-wide filter intercepts the press first
+    }
+
+    void showEvent(QShowEvent *event) override {
+        // Parent geometry may have shifted between construction and show(); re-align and
+        // make sure we're stacked above the (native) viewport.
+        syncGeometryToParent();
+        raise();
+        QWidget::showEvent(event);
     }
 
     bool eventFilter(QObject *watched, QEvent *event) override {
-        if (watched == parent() && event->type() == QEvent::Resize) {
-            resize(static_cast<QWidget*>(parent())->size());
+        const QEvent::Type type = event->type();
+        // Any mouse press anywhere in the app dismisses the splash, and is consumed so the
+        // dismissing click doesn't also act on whatever sits underneath it.
+        if (type == QEvent::MouseButtonPress) {
+            dismiss();
+            return true;
+        }
+        // As a top-level window we don't move with the parent automatically, so follow both
+        // its resizes and moves to stay aligned over the window.
+        if (watched == parent() && (type == QEvent::Resize || type == QEvent::Move)) {
+            syncGeometryToParent();
         }
         return QWidget::eventFilter(watched, event);
+    }
+
+private:
+    bool m_dismissed = false;
+
+    /// Tear down the splash exactly once. deleteLater() (not 'delete this') because the click
+    /// event may still be dispatching; the app-wide filter is removed immediately so no
+    /// further events are intercepted while we wait to be deleted.
+    void dismiss() {
+        if (m_dismissed) {
+            return;
+        }
+        m_dismissed = true;
+        if (qApp) {
+            qApp->removeEventFilter(this);
+        }
+        deleteLater();
+    }
+
+    /// Cover the parent window's client area, in global (screen) coordinates — required now
+    /// that this is a top-level window rather than a child positioned in parent-local coords.
+    void syncGeometryToParent() {
+        if (QWidget *p = parentWidget()) {
+            setGeometry(QRect(p->mapToGlobal(QPoint(0, 0)), p->size()));
+        }
     }
 };
 

@@ -5,7 +5,7 @@ namespace Constants {
     // --- Application Info ---
     // const char* (not QString) avoids a heap allocation for strings that never change.
     inline constexpr const char* APP_NAME = "PoseStudio";
-    inline constexpr const char* APP_VERSION = "0.1.3";
+    inline constexpr const char* APP_VERSION = "0.2.0";
 
     // --- Collections naming conventions ---
     inline const QString TERM_COL_PLURAL = QStringLiteral("Collections");

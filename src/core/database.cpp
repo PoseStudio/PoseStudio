@@ -2,9 +2,10 @@
  * @file database.cpp
  * @brief Opens and (when requested) rebuilds PoseStudio's SQLite database.
  *
- * The database lives next to the executable as posestudio.db. We keep a single named
- * connection ("db_conn") alive for the app's lifetime and hand that same connection back
- * to every caller, rather than opening a new one per call.
+ * The database lives in the platform's per-user app-data location as posestudio.db (an
+ * installed app's own directory is read-only on macOS/Linux, so writable state can't live
+ * there). We keep a single named connection ("db_conn") alive for the app's lifetime and hand
+ * that same connection back to every caller, rather than opening a new one per call.
  */
 
 #include "database.h"
@@ -15,6 +16,7 @@
 #include <QSqlQuery>
 #include <QDir>
 #include <QFile>
+#include <QStandardPaths>
 #include <QStringList>
 
 namespace {
@@ -61,9 +63,31 @@ void ensureColumn(QSqlDatabase& db, const QString& table, const QString& column,
 QSqlDatabase initializeDatabase(DbInitMode mode) {
     const QString connectionName = QStringLiteral("db_conn");
 
-    // The database lives next to the .exe, not the current working directory
-    const QString dbPath = QDir(QCoreApplication::applicationDirPath())
-                                .filePath(QStringLiteral("posestudio.db"));
+    // Writable per-user data belongs in the platform's app-data location, not next to the
+    // executable: an installed app's directory is read-only on macOS (.app bundle) and Linux
+    // (e.g. /usr/bin), and writing there also breaks code signing. AppDataLocation resolves
+    // per-platform (Roaming/<App> on Windows, ~/Library/Application Support/<App> on macOS,
+    // ~/.local/share/<App> on Linux) — derived from the app/org name set in main(). Create it
+    // on first use since the directory may not exist yet.
+    const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(dataDir);
+    const QString dbPath = QDir(dataDir).filePath(QStringLiteral("posestudio.db"));
+
+    // Older builds stored the database next to the executable. Migrate that file once into the
+    // new per-user location so existing libraries/collections/favorites survive the upgrade. We
+    // MOVE it (copy, then delete the original) rather than copy: a lingering legacy file would
+    // get re-migrated after a Factory Reset wipes the new one, resurrecting deleted data. Only in
+    // Normal mode — a reset wants a clean slate, not last session's data migrated back in.
+    const QString legacyDbPath = QDir(QCoreApplication::applicationDirPath())
+                                     .filePath(QStringLiteral("posestudio.db"));
+    if (mode == DbInitMode::Normal && !QFile::exists(dbPath) && QFile::exists(legacyDbPath)) {
+        if (QFile::copy(legacyDbPath, dbPath)) {
+            QFile::remove(legacyDbPath);
+            qDebug() << "Migrated database from legacy location to:" << dbPath;
+        } else {
+            qWarning() << "[!] Could not migrate legacy database from:" << legacyDbPath;
+        }
+    }
 
     // A genuinely fresh install (no file yet) needs the schema built just as much as a
     // FactoryReset does — check this before FactoryReset deletes the file out from under us.
@@ -83,6 +107,9 @@ QSqlDatabase initializeDatabase(DbInitMode mode) {
                 qCritical() << "Fatal Error: OS denied permission to delete database file.";
             }
         }
+        // Clear any leftover legacy file too, so a reset is a true clean slate and a later
+        // Normal launch can't migrate stale pre-reset data back in.
+        QFile::remove(legacyDbPath);
     }
 
     // Reuse the connection if it's already open; otherwise create it
