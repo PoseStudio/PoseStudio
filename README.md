@@ -1,4 +1,4 @@
-<a href="https://discord.gg/MqVT7TbGY"><img src="https://discord.com/api/guilds/1509182819954458624/widget.png?style=shield" align="right"></a>
+<a href="https://discord.gg/hdJfA56wn"><img src="https://discord.com/api/guilds/1509182819954458624/widget.png?style=shield" align="right"></a>
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
 [![All Contributors](https://img.shields.io/badge/all_contributors-5-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
@@ -14,7 +14,7 @@ The goal is to reduce reliance on fragmented toolchains and provide a flexible, 
 
 ## <img src="/docs/assets/icons/sponsor.png" width="28" alt="get involved"> Get Involved
 
-We are calling on anyone who can help with the project. Your support ensures that the future of character creation remains open, free, and constantly evolving. Let's build something extraordinary together! **<a href="https://discord.gg/MqVT7TbGY">Join our Discord</a>**!
+We are calling on anyone who can help with the project. Your support ensures that the future of character creation remains open, free, and constantly evolving. Let's build something extraordinary together! **<a href="https://discord.gg/hdJfA56wn">Join our Discord</a>**!
 
 **Here are some of the important roles we need to fill.**
 
@@ -31,7 +31,7 @@ We are calling on anyone who can help with the project. Your support ensures tha
 
 #### 2. Non-Technical Roles
 * **GitHub Community Manager:** Manage our **[GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions)**, issue triaging, monotor overall community health.
-* **Discord Administrator:** Manage our **[Discord Channel](https://discord.gg/MqVT7TbGY)**.
+* **Discord Administrator:** Manage our **[Discord Channel](https://discord.gg/hdJfA56wn)**.
 * **Social Media Manager:** Engage with users on Reddit, Twitter, and other forums gathering community feedback.
 * **Devlog & Content Coordinator:** Manages the public project logs and updates.
 * **Documentation Lead:** Develop the user manual, tutorials API documentation, and onboarding guides.
@@ -125,7 +125,7 @@ For more information on how to contribute changes to this repo, see our **[CONTR
 
 Building a powerful tool requires a powerful community.
 
-* **Discord:** Join the conversation on our **[Discord Channel](https://discord.gg/MqVT7TbGY)**
+* **Discord:** Join the conversation on our **[Discord Channel](https://discord.gg/hdJfA56wn)**
 * **Git Discussions:** Share feature requests and technical proposals in our **[GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions/)**
 * **Official Site:** Visit the Official **[PoseStudio Website](https://posestudio.org/)**
 * **Support:** You can reach community support at **[community@posestudio.org](mailto:community@posestudio.org)**
