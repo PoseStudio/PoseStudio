@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-PoseStudio is an early-stage, open-source Qt6/C++ desktop application for 3D character creation, posing, and scene building (think a free alternative to DAZ Studio). The codebase is currently a small skeleton: a main window shell, an asset manager side panel backed by SQLite, a Preferences dialog, a menu bar, and the foundation of a Vulkan-backed 3D viewport (`src/viewport/` — device/swapchain/renderer scaffolding that draws a Blender-style infinite floor grid through a real camera and can import + render lit Wavefront `.OBJ` meshes; see the 3D Viewport section below). The rigging, animation, and final-frame rendering systems described in README.md are still aspirational/roadmap — they don't exist in code yet.
+PoseStudio is an early-stage, open-source Qt6/C++ desktop application for 3D character creation, posing, and scene building. The codebase is currently a small skeleton: a main window shell, an asset manager side panel backed by SQLite, a Preferences dialog, a menu bar, and the foundation of a Vulkan-backed 3D viewport (`src/viewport/` — device/swapchain/renderer scaffolding that draws a Blender-style infinite floor grid through a real camera and can import + render lit Wavefront `.OBJ` meshes; see the 3D Viewport section below). The rigging, animation, and final-frame rendering systems described in README.md are still aspirational/roadmap — they don't exist in code yet.
 
 ## Build
 
