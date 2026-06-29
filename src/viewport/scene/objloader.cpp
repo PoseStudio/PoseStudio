@@ -42,8 +42,8 @@ struct IndexKeyHash {
 // Resolves a (possibly relative) MTL texture name against the .obj's directory. Returns an empty
 // string for an empty name. Absolute paths (drive-letter or leading slash) are kept as-is.
 std::string resolveTexturePath(const std::string& baseDir, const std::string& texName) {
-    // Trim surrounding whitespace and a single pair of quotes. Some exporters (e.g. DAZ Studio)
-    // quote map_Kd paths that contain spaces, and tinyobjloader passes the quotes through verbatim.
+    // Trim surrounding whitespace and a single pair of quotes. Some exporters quote map_Kd paths
+    // that contain spaces, and tinyobjloader passes the quotes through verbatim.
     std::string name = texName;
     const std::size_t first = name.find_first_not_of(" \t");
     if (first == std::string::npos) {
