@@ -275,12 +275,24 @@ add_custom_target(PoseStudioShaders DEPENDS ${COMPILED_SPV_FILES})
 add_dependencies(PoseStudio PoseStudioShaders)
 
 # Mirror the compiled shaders next to the executable on every build.
-add_custom_command(
-    TARGET PoseStudio POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E rm -rf
-            "$<TARGET_FILE_DIR:PoseStudio>/shaders"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${SHADER_BINARY_DIR}"
-            "$<TARGET_FILE_DIR:PoseStudio>/shaders"
-    COMMENT "Mirroring compiled SPIR-V shaders next to the executable"
-)
+#
+# On multi-config generators (Visual Studio, Xcode) the executable lands in a
+# per-config subdirectory (e.g. build/Release/), which differs from where the
+# shaders are compiled (${CMAKE_BINARY_DIR}/shaders), so they must be mirrored.
+# On single-config generators (Ninja, Unix Makefiles) the executable lives in
+# the build root, so $<TARGET_FILE_DIR:PoseStudio>/shaders IS SHADER_BINARY_DIR:
+# the unconditional "rm -rf <dir> && copy_directory <dir> <dir>" would delete the
+# freshly compiled SPIR-V and then fail copying a directory onto itself. Only
+# mirror when the destination actually differs from the compile output.
+get_property(_posestudio_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(_posestudio_multi_config)
+    add_custom_command(
+        TARGET PoseStudio POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E rm -rf
+                "$<TARGET_FILE_DIR:PoseStudio>/shaders"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${SHADER_BINARY_DIR}"
+                "$<TARGET_FILE_DIR:PoseStudio>/shaders"
+        COMMENT "Mirroring compiled SPIR-V shaders next to the executable"
+    )
+endif()
