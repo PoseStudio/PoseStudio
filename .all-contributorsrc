@@ -48,6 +48,15 @@
         "ideas",
         "design"
       ]
+    },
+    {
+      "login": "yash-jain221",
+      "name": "Yash Jain",
+      "avatar_url": "https://avatars.githubusercontent.com/u/67899878?v=4",
+      "profile": "https://yash-jain221.github.io/",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
