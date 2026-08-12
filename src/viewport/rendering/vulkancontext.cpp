@@ -35,6 +35,20 @@ VulkanContext::VulkanContext(VkInstance instance, VkSurfaceKHR surface, uint32_t
     pickPhysicalDevice();
     createLogicalDevice();
     createAllocator(apiVersion);
+
+    // Pick the MSAA level once: the highest of {4x, 2x} the device supports for BOTH colour and depth
+    // framebuffers, else single-sample. 4x is the quality/perf sweet spot for a viewport; the render
+    // pass, depth target, and every pipeline are built against this count.
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(m_physicalDevice, &props);
+    const VkSampleCountFlags counts =
+        props.limits.framebufferColorSampleCounts & props.limits.framebufferDepthSampleCounts;
+    for (VkSampleCountFlagBits bit : {VK_SAMPLE_COUNT_4_BIT, VK_SAMPLE_COUNT_2_BIT}) {
+        if (counts & bit) {
+            m_sampleCount = bit;
+            break;
+        }
+    }
 }
 
 VulkanContext::~VulkanContext() {

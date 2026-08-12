@@ -11,13 +11,18 @@
 #include "splashoverlay.h"
 #include "preferencesdialog.h"
 #include "assetmanagerwidget.h"
+#include "preferencesmanager.h"
+#include "constants.h"
 #include "viewport/viewportwidget.h"
 #include <QMenu>
 #include <QMenuBar>
 #include <QAction>
 #include <QApplication>
+#include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QIcon>
+#include <QMessageBox>
 #include <QDesktopServices>
 #include <QStandardPaths>
 #include <QUrl>
@@ -60,6 +65,7 @@ void MenuManager::setupMenus() {
         ".ABC (Alembic)",
         ".BVH (Biovision Hierarchy)",
         ".DAE (Collada)",
+        ".DUF (DUF File)",
         ".FBX (FBX File)",
         ".GLB (GL Transmission Format .glTF)",
         ".OBJ (Wavefront)",
@@ -71,12 +77,24 @@ void MenuManager::setupMenus() {
         QAction *action = importMenu->addAction(format);
         if (std::strcmp(format, ".OBJ (Wavefront)") == 0) {
             QObject::connect(action, &QAction::triggered, mainWindow, [this]() { importObjFile(); });
+        } else if (std::strcmp(format, ".DUF (DUF File)") == 0) {
+            // Rigged character figures: their own native scene format + pipeline (geometry + skeleton
+            // + morphs + materials), listed here as a file format alongside the mesh formats.
+            QObject::connect(action, &QAction::triggered, mainWindow, [this]() { importFigureFile(); });
         } else {
             action->setEnabled(false); // importer not built yet
         }
     }
 
     fileMenu->addAction(loadDualStateIcon("export"), "Export...")->setEnabled(false);
+    fileMenu->addSeparator();
+
+    // Pose I/O: save the current figure's joint rotations to a small text file and restore them
+    // later. Enabled regardless of scene state; the handlers warn if no figure is loaded.
+    QAction *savePoseAction = fileMenu->addAction("Save Pose...");
+    QObject::connect(savePoseAction, &QAction::triggered, mainWindow, [this]() { savePoseFile(); });
+    QAction *loadPoseAction = fileMenu->addAction("Load Pose...");
+    QObject::connect(loadPoseAction, &QAction::triggered, mainWindow, [this]() { loadPoseFile(); });
     fileMenu->addSeparator();
 
     QAction *quitAction = fileMenu->addAction("Quit");
@@ -143,14 +161,84 @@ void MenuManager::setViewportWidget(pose::ViewportWidget *viewport) {
 void MenuManager::importObjFile() {
     if (!viewportWidget) return;
 
-    const QString startDir =
-        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    // Start in the folder of the last import (persisted in Preferences), so importing several
+    // models from one folder doesn't mean re-navigating from Documents each time.
+    const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    QString startDir =
+        PreferencesManager::instance().getValue(Constants::PREF_LAST_IMPORT_DIR, documents).toString();
+    if (startDir.isEmpty() || !QDir(startDir).exists()) {
+        startDir = documents; // stored folder was moved/deleted, or nothing saved yet
+    }
+
     const QString path = QFileDialog::getOpenFileName(
         mainWindow, QStringLiteral("Import OBJ"), startDir,
         QStringLiteral("Wavefront OBJ (*.obj)"));
     if (path.isEmpty()) return; // user cancelled
 
+    // Remember the folder this model came from for the next import.
+    PreferencesManager::instance().setValue(Constants::PREF_LAST_IMPORT_DIR,
+                                            QFileInfo(path).absolutePath());
     viewportWidget->importObj(path);
+}
+
+void MenuManager::importFigureFile() {
+    if (!viewportWidget) return;
+
+    const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    QString startDir =
+        PreferencesManager::instance().getValue(Constants::PREF_LAST_IMPORT_DIR, documents).toString();
+    if (startDir.isEmpty() || !QDir(startDir).exists()) {
+        startDir = documents;
+    }
+
+    const QString path = QFileDialog::getOpenFileName(
+        mainWindow, QStringLiteral("Import Character Figure"), startDir,
+        QStringLiteral("Figure Files (*.duf *.dsf)"));
+    if (path.isEmpty()) return; // user cancelled
+
+    PreferencesManager::instance().setValue(Constants::PREF_LAST_IMPORT_DIR,
+                                            QFileInfo(path).absolutePath());
+    viewportWidget->importFigure(path);
+}
+
+void MenuManager::savePoseFile() {
+    if (!viewportWidget) return;
+    if (!viewportWidget->hasPosableFigure()) {
+        QMessageBox::information(mainWindow, QStringLiteral("Save Pose"),
+                                QStringLiteral("Import a character figure before saving a pose."));
+        return;
+    }
+
+    const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    QString path = QFileDialog::getSaveFileName(mainWindow, QStringLiteral("Save Pose"), documents,
+                                                QStringLiteral("Pose Files (*.pose)"));
+    if (path.isEmpty()) return; // user cancelled
+    if (!path.endsWith(QStringLiteral(".pose"), Qt::CaseInsensitive)) {
+        path += QStringLiteral(".pose");
+    }
+    if (!viewportWidget->savePose(path)) {
+        QMessageBox::warning(mainWindow, QStringLiteral("Save Pose"),
+                             QStringLiteral("Could not write the pose file."));
+    }
+}
+
+void MenuManager::loadPoseFile() {
+    if (!viewportWidget) return;
+    if (!viewportWidget->hasPosableFigure()) {
+        QMessageBox::information(mainWindow, QStringLiteral("Load Pose"),
+                                QStringLiteral("Import a character figure before loading a pose."));
+        return;
+    }
+
+    const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    const QString path = QFileDialog::getOpenFileName(mainWindow, QStringLiteral("Load Pose"),
+                                                      documents,
+                                                      QStringLiteral("Pose Files (*.pose)"));
+    if (path.isEmpty()) return; // user cancelled
+    if (!viewportWidget->loadPose(path)) {
+        QMessageBox::warning(mainWindow, QStringLiteral("Load Pose"),
+                             QStringLiteral("Could not read the pose file."));
+    }
 }
 
 void MenuManager::openPreferencesDialog(const QString &initialTab) {

@@ -5,11 +5,28 @@ namespace Constants {
     // --- Application Info ---
     // const char* (not QString) avoids a heap allocation for strings that never change.
     inline constexpr const char* APP_NAME = "PoseStudio";
-    inline constexpr const char* APP_VERSION = "0.2.0";
+    inline constexpr const char* APP_VERSION = "0.3.0";
 
     // --- Collections naming conventions ---
     inline const QString TERM_COL_PLURAL = QStringLiteral("Collections");
     inline const QString TERM_COL_SINGULAR = QStringLiteral("Collection");
+
+    // --- Preference keys (rows in the Preferences table) ---
+    // Parent directory of the most recently added asset-library folder. The "Add Asset Folder"
+    // browser starts here next time, so adding sibling libraries doesn't re-navigate from home.
+    // Defined once here because both add-folder entry points (Asset Manager + Preferences) use it.
+    inline constexpr const char* PREF_LAST_ASSET_FOLDER_PARENT = "LastAssetFolderParent";
+
+    // Folder of the most recently imported model file. File → Import's browser starts here next
+    // time, so importing several models from one folder doesn't re-navigate from Documents.
+    inline constexpr const char* PREF_LAST_IMPORT_DIR = "LastImportDir";
+
+    // Newline-separated list of content-library root folders (each directly containing a "data/"
+    // subfolder). The figure importer resolves a preset's cross-file references (geometry, morphs,
+    // skin, UVs) against these, in addition to auto-detecting the root from the imported file's own
+    // location. This is what lets a figure browsed from a presets-only folder (no co-located "data/")
+    // still find its geometry. Populated by the on-import "locate content library" recovery prompt.
+    inline constexpr const char* PREF_FIGURE_CONTENT_ROOTS = "FigureContentRoots";
 
     // =========================================================================
     // UI DIMENSIONS & LAYOUT

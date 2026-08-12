@@ -21,6 +21,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pose {
@@ -61,8 +62,44 @@ public:
     /// happen in the Qt layer (VulkanWindow), keeping this core free of file/codec concerns.
     void addModel(const ModelData& data);
 
+    /// Returns the index of the nearest model the @p ray hits (for picking), or -1 if none.
+    int pickModel(const Ray& ray) const;
+
+    /// Removes the model at @p index from the scene, waiting for the GPU to go idle first so its
+    /// buffers/descriptors aren't freed while an in-flight frame still references them.
+    void deleteModel(std::size_t index);
+
     /// Exposed so the window's input handlers can drive the view (orbit/pan/dolly).
     Camera& camera() { return m_camera; }
+
+    // --- Posing UI (forwarded to the Scene) ---
+    bool hasPosableFigure() const;
+    void setShowSkeleton(bool on);
+    bool showSkeleton() const;
+
+    // --- Shading (forwarded to the Scene) ---
+    /// Sets the viewport shade mode (see mesh.frag's mode table). Takes effect on the next frame.
+    void setShadeMode(int mode);
+    int  shadeMode() const;
+    /// Selects the figure joint nearest the pixel (@p px,@p py) in a @p vpW × @p vpH viewport.
+    /// Returns the selected bone index, or -1 if none.
+    int  selectBoneAt(float px, float py, float vpW, float vpH);
+    bool hasSelectedBone() const;
+    void nudgeSelectedBone(const glm::vec3& deltaEulerDegrees);
+    /// Settles the figure after an interactive pose edit (applies pose correctives). Call on drag end.
+    void finalizePose();
+
+    // --- Rotate gizmo (forwarded to the Scene; use the renderer's own camera) ---
+    int  gizmoAxisAt(float px, float py, float vpW, float vpH) const;
+    void rotateGizmo(int axis, float prevX, float prevY, float curX, float curY, float vpW, float vpH);
+
+    // --- Pose snapshot (for undo/redo) ---
+    std::vector<std::pair<std::string, glm::vec3>> capturePose() const;
+    void applyPose(const std::vector<std::pair<std::string, glm::vec3>>& pose);
+    /// Saves / loads the posed figure's joint rotations to/from @p path. Returns false if there's
+    /// no figure or the file can't be opened.
+    bool savePose(const std::string& path) const;
+    bool loadPose(const std::string& path);
 
 private:
     void createCommandPool();

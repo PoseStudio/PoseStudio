@@ -222,6 +222,14 @@ signals:
     /// whatever owns the Preferences dialog can open it directly to the Assets tab.
     void manageAssetFoldersRequested();
 
+    /// Emitted when the user double-clicks an importable model asset (e.g. an .obj) in the grid,
+    /// so the owner can load it into the 3D viewport. Carries the asset's absolute file path.
+    void importModelRequested(const QString& path);
+
+    /// Emitted when the user double-clicks a character-figure asset (`.duf`/`.dsf`) in the grid, so
+    /// the owner can import it into the 3D viewport. Carries the asset's absolute file path.
+    void importFigureRequested(const QString& path);
+
 private slots:
     void onFolderSelected(const QModelIndex &index);
     void onTreeExpanded(const QModelIndex &index); 

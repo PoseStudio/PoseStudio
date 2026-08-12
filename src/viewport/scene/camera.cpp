@@ -58,6 +58,26 @@ glm::mat4 Camera::view() const {
     return glm::lookAt(position(), m_target, glm::vec3(0.0f, 1.0f, 0.0f));
 }
 
+Ray Camera::screenPointToRay(float px, float py, float viewportWidth, float viewportHeight) const {
+    // Pixel -> normalized device coords. Vulkan NDC is [-1,1] in x/y; because the projection
+    // negates [1][1], a top-of-screen pixel (py == 0) maps to ndcY == -1 with no extra flip.
+    const float ndcX = 2.0f * px / viewportWidth - 1.0f;
+    const float ndcY = 2.0f * py / viewportHeight - 1.0f;
+
+    // Unproject the near (z=0) and far (z=1) NDC points through the same matrices used to render,
+    // so the ray is exactly consistent with what's on screen.
+    const glm::mat4 invViewProj = glm::inverse(viewProjection());
+    glm::vec4 nearPoint = invViewProj * glm::vec4(ndcX, ndcY, 0.0f, 1.0f);
+    glm::vec4 farPoint = invViewProj * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
+    nearPoint /= nearPoint.w;
+    farPoint /= farPoint.w;
+
+    Ray ray;
+    ray.origin = glm::vec3(nearPoint);
+    ray.direction = glm::normalize(glm::vec3(farPoint - nearPoint));
+    return ray;
+}
+
 void Camera::rebuildProjection() {
     // GLM_FORCE_DEPTH_ZERO_TO_ONE (set in CMake) makes perspective() emit Vulkan's
     // [0,1] depth range. Vulkan's clip-space Y also points opposite to OpenGL's, so we

@@ -129,3 +129,6 @@ ehthumbs_vista.db
 # Ignore large log files generated from rendering or crashing
 *.log
 crash_dumps/
+
+# Editor/assistant scratch directories (agent worktrees, session data) — never publish
+.claude/

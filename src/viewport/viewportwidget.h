@@ -13,10 +13,16 @@
 #define VIEWPORTWIDGET_H
 
 #include <QWidget>
+#include <QStringList>
 
 #include <memory>
 
 class QVulkanInstance;
+class QPushButton;
+class QShowEvent;
+class QHideEvent;
+class QResizeEvent;
+class QMoveEvent;
 
 namespace pose {
 
@@ -37,10 +43,43 @@ public:
     /// Vulkan-unavailable message (no window to load into).
     void importObj(const QString& path);
 
+    /// Imports a native figure file (`.duf`/`.dsf`) into the 3D scene. No-op if the viewport
+    /// degraded to the Vulkan-unavailable message.
+    void importFigure(const QString& path);
+
+    /// Whether the scene holds a posable figure (gates the pose save/load menu actions).
+    bool hasPosableFigure() const;
+    /// Saves / loads the posed figure's joint rotations to/from @p path. Returns false on failure
+    /// (no figure, degraded viewport, or unreadable/unwritable file).
+    bool savePose(const QString& path);
+    bool loadPose(const QString& path);
+
+    /// Sets the viewport shade mode by index (see shaderModeNames()). No-op if the viewport degraded.
+    void setShadeMode(int mode);
+
+    /// The user-facing shade-mode names, in the shader's mode order (index == shade mode). The single
+    /// source of truth the floating shader dropdown is populated from.
+    static QStringList shaderModeNames();
+
+protected:
+    // The shader dropdown floats as a *top-level* window over the native viewport (a child widget would
+    // be composited behind it), so it has to be repositioned as the viewport moves/resizes.
+    void showEvent(QShowEvent* event) override;
+    void hideEvent(QHideEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    void moveEvent(QMoveEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
-    std::unique_ptr<QVulkanInstance> m_instance;          // owns the VkInstance
+    void createShaderOverlay();   // builds the floating top-right shader dropdown
+    void syncOverlayPosition();   // glues it to the viewport's top-right corner (global coords)
+
+    std::unique_ptr<QVulkanInstance> m_instance;           // owns the VkInstance
     VulkanWindow*                    m_window = nullptr;    // owned by m_container
     QWidget*                         m_container = nullptr; // the createWindowContainer wrapper
+    QWidget*                         m_overlay = nullptr;   // top-level frameless host for the dropdown
+    QPushButton*                     m_shaderButton = nullptr; // opens the shader-mode QMenu
+    QWidget*                         m_filteredWindow = nullptr; // top-level we filter for move/resize
 };
 
 } // namespace pose

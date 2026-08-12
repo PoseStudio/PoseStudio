@@ -7,7 +7,10 @@
 # ==============================================================================
 
 cmake_minimum_required(VERSION 3.21)
-project(PoseStudio VERSION 1.0 LANGUAGES CXX)
+# C is enabled alongside C++ because a couple of third-party dependencies ship C implementation
+# files we compile directly into the target (e.g. miniz's inflate sources for the figure importer).
+# Without C in the language list, CMake classifies .c files as non-buildable and silently skips them.
+project(PoseStudio VERSION 0.3.0 LANGUAGES C CXX)
 
 # ==============================================================================
 # [ COMPILER CONFIGURATION ]
@@ -73,13 +76,32 @@ FetchContent_Declare(vma
 )
 # tinyobjloader: single-header Wavefront .obj/.mtl parser (used by the OBJ importer). Same
 # headers-only treatment as above — we include tiny_obj_loader.h directly and compile its
-# implementation in exactly one TU (scene/objloader.cpp), like vma_impl.cpp does for VMA.
+# implementation in exactly one TU (import/obj/objimporter.cpp), like vma_impl.cpp does for VMA.
 FetchContent_Declare(tinyobjloader
     GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
     GIT_TAG        v2.0.0rc13
     SOURCE_SUBDIR  headers-only-do-not-configure
 )
-FetchContent_MakeAvailable(glm vma tinyobjloader)
+# nlohmann/json: header-only JSON parser used by the native figure importer (import/figure/). The
+# figure scene format is JSON, and keeping the parse in a header-only lib (rather than Qt's
+# QJsonDocument) is what lets the importer stay Qt-free like the rest of the engine core. Same
+# no-configure treatment; we include <nlohmann/json.hpp> from its single_include dir below.
+FetchContent_Declare(nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        v3.11.3
+    SOURCE_SUBDIR  headers-only-do-not-configure
+)
+# miniz: small zlib-compatible (de)compressor. The figure importer needs it to inflate gzip-
+# compressed scene files. Unlike the header-only libs above, miniz has C implementation files, so
+# we still skip its CMake (no-configure) but compile its split C sources directly into the target
+# (see target_sources below) and include <miniz.h> — the same "consume the sources, not their
+# build" approach, one level up from header-only.
+FetchContent_Declare(miniz
+    GIT_REPOSITORY https://github.com/richgel999/miniz.git
+    GIT_TAG        3.1.2
+    SOURCE_SUBDIR  headers-only-do-not-configure
+)
+FetchContent_MakeAvailable(glm vma tinyobjloader nlohmann_json miniz)
 
 # ==============================================================================
 # [ TARGET DEFINITION & SOURCE FILES ]
@@ -110,6 +132,10 @@ add_executable(
     src/viewport/viewportwidget.h
     src/viewport/vulkanwindow.cpp
     src/viewport/vulkanwindow.h
+    src/viewport/modelimportservice.cpp   # orchestrates parse -> texture decode -> GPU upload
+    src/viewport/modelimportservice.h
+    src/viewport/figureimportservice.cpp  # figure analogue: figure -> ModelData -> decode -> upload
+    src/viewport/figureimportservice.h
     # Rendering core (pure Vulkan + std + GLM, no Qt):
     src/viewport/rendering/vulkancommon.h
     src/viewport/rendering/vulkancontext.cpp
@@ -127,14 +153,46 @@ add_executable(
     src/viewport/rendering/vulkanrenderer.cpp
     src/viewport/rendering/vulkanrenderer.h
     src/viewport/rendering/vma_impl.cpp
+    # Model import (format-neutral IR + one importer per format; pure std + Vulkan + GLM, no Qt).
+    # Add a format by dropping import/<fmt>/ and registering it in importerregistry.cpp.
+    src/viewport/import/vertex.h
+    src/viewport/import/modeldata.h
+    src/viewport/import/meshimporter.h
+    src/viewport/import/importerregistry.cpp
+    src/viewport/import/importerregistry.h
+    src/viewport/import/obj/objimporter.cpp   # single TINYOBJLOADER_IMPLEMENTATION TU
+    src/viewport/import/obj/objimporter.h
+    # Native figure importer (rigged/morphed characters; JSON scene format via nlohmann + miniz):
+    src/viewport/import/figure/figuredocument.cpp
+    src/viewport/import/figure/figuredocument.h
+    src/viewport/import/figure/uriresolver.cpp
+    src/viewport/import/figure/uriresolver.h
+    src/viewport/import/figure/figuredata.h
+    src/viewport/import/figure/geometryparser.cpp
+    src/viewport/import/figure/geometryparser.h
+    src/viewport/import/figure/uvparser.cpp
+    src/viewport/import/figure/uvparser.h
+    src/viewport/import/figure/materialparser.cpp
+    src/viewport/import/figure/materialparser.h
+    src/viewport/import/figure/nodeparser.cpp
+    src/viewport/import/figure/nodeparser.h
+    src/viewport/import/figure/skinparser.cpp
+    src/viewport/import/figure/skinparser.h
+    src/viewport/import/figure/morphparser.cpp
+    src/viewport/import/figure/morphparser.h
+    src/viewport/import/figure/morphresolver.cpp
+    src/viewport/import/figure/morphresolver.h
+    src/viewport/import/figure/correctiveparser.cpp
+    src/viewport/import/figure/correctiveparser.h
+    src/viewport/import/figure/subdivision.cpp
+    src/viewport/import/figure/subdivision.h
+    src/viewport/import/figure/figureimporter.cpp
+    src/viewport/import/figure/figureimporter.h
     # Scene:
     src/viewport/scene/camera.cpp
     src/viewport/scene/camera.h
     src/viewport/scene/grid.cpp
     src/viewport/scene/grid.h
-    src/viewport/scene/vertex.h
-    src/viewport/scene/objloader.cpp
-    src/viewport/scene/objloader.h
     src/viewport/scene/mesh.cpp
     src/viewport/scene/mesh.h
     src/viewport/scene/scene.cpp
@@ -194,9 +252,25 @@ target_include_directories(PoseStudio PRIVATE
     src/viewport
     src/viewport/rendering
     src/viewport/scene
-    ${glm_SOURCE_DIR}              # so <glm/glm.hpp> resolves
-    ${vma_SOURCE_DIR}/include      # so <vk_mem_alloc.h> resolves
-    ${tinyobjloader_SOURCE_DIR}    # so <tiny_obj_loader.h> resolves
+    src/viewport/import
+    src/viewport/import/obj
+    src/viewport/import/figure
+    ${glm_SOURCE_DIR}                        # so <glm/glm.hpp> resolves
+    ${vma_SOURCE_DIR}/include                # so <vk_mem_alloc.h> resolves
+    ${tinyobjloader_SOURCE_DIR}             # so <tiny_obj_loader.h> resolves
+    ${nlohmann_json_SOURCE_DIR}/single_include # so <nlohmann/json.hpp> resolves
+    ${miniz_SOURCE_DIR}                      # so <miniz.h> resolves
+    ${CMAKE_SOURCE_DIR}/cmake/miniz-shim     # supplies miniz_export.h (miniz's CMake is skipped)
+)
+
+# miniz's C implementation, compiled directly into the target (its split source layout: core +
+# inflate + deflate + zip). We only need inflate for the figure importer, but compiling the whole
+# small set is link-safe and avoids feature-macro fiddling. Marked as C so MSVC uses the C compiler.
+target_sources(PoseStudio PRIVATE
+    ${miniz_SOURCE_DIR}/miniz.c
+    ${miniz_SOURCE_DIR}/miniz_tinfl.c
+    ${miniz_SOURCE_DIR}/miniz_tdef.c
+    ${miniz_SOURCE_DIR}/miniz_zip.c
 )
 
 # GLM must be told, project-wide, to match Vulkan conventions: angles in radians and a
@@ -256,6 +330,8 @@ set(SHADER_SOURCES
     grid.frag
     mesh.vert
     mesh.frag
+    skeleton.vert
+    skeleton.frag
 )
 
 set(COMPILED_SPV_FILES "")

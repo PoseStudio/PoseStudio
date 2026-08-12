@@ -17,6 +17,7 @@
 namespace pose {
 
 class VulkanContext;
+class ImmediateBatch;
 
 /**
  * @class VulkanBuffer
@@ -54,6 +55,12 @@ private:
 /// and a one-time graphics-queue copy (blocks until the copy completes). For vertex/index data.
 VulkanBuffer createDeviceLocalBuffer(VulkanContext& context, const void* data, VkDeviceSize size,
                                      VkBufferUsageFlags usage);
+
+/// Batched variant: records the staging->device copy into @p batch (so many buffers share one
+/// submit) and hands the staging buffer to the batch to keep alive until it completes. Does not
+/// block; the caller flushes @p batch once all uploads are recorded.
+VulkanBuffer createDeviceLocalBuffer(VulkanContext& context, const void* data, VkDeviceSize size,
+                                     VkBufferUsageFlags usage, ImmediateBatch& batch);
 
 /// Creates a host-visible, persistently-mapped uniform buffer (write via mappedData() each frame).
 VulkanBuffer createMappedUniformBuffer(VulkanContext& context, VkDeviceSize size);

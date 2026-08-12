@@ -19,6 +19,7 @@
 namespace pose {
 
 class VulkanContext;
+class ImmediateBatch;
 
 /**
  * @class VulkanTexture
@@ -27,8 +28,17 @@ class VulkanContext;
 class VulkanTexture {
 public:
     VulkanTexture() = default;
-    /// @param pixels Tightly packed RGBA8, exactly width*height*4 bytes.
-    VulkanTexture(VulkanContext& context, const uint8_t* pixels, uint32_t width, uint32_t height);
+    /// @param pixels Tightly packed RGBA8, exactly width*height*4 bytes. Uploads on its own
+    ///   submit + fence wait (fine for a one-off texture).
+    /// @param srgb  true for colour maps (diffuse — the view linearises on sample); false for data
+    ///   maps (normal/bump/roughness), which must be sampled verbatim as a LINEAR (_UNORM) texture.
+    VulkanTexture(VulkanContext& context, const uint8_t* pixels, uint32_t width, uint32_t height,
+                  bool srgb = true);
+    /// Batched variant: records the upload + mip generation into @p batch (so many textures share
+    /// one submit) and hands its staging buffer to the batch. The image is ready for sampling once
+    /// the batch's submitAndWait() completes.
+    VulkanTexture(VulkanContext& context, const uint8_t* pixels, uint32_t width, uint32_t height,
+                  ImmediateBatch& batch, bool srgb = true);
     ~VulkanTexture();
 
     VulkanTexture(const VulkanTexture&) = delete;
@@ -40,6 +50,9 @@ public:
     VkSampler   sampler()   const { return m_sampler; }
 
 private:
+    /// Allocates the image, records its upload + mip-chain generation into @p batch, retains the
+    /// staging buffer in @p batch, and creates the view + sampler. Shared by both constructors.
+    void recordUpload(ImmediateBatch& batch, const uint8_t* pixels, uint32_t width, uint32_t height);
     void destroy();
 
     VulkanContext* m_context    = nullptr;
@@ -49,6 +62,7 @@ private:
     VkImageView    m_view       = VK_NULL_HANDLE;
     VkSampler      m_sampler    = VK_NULL_HANDLE;
     uint32_t       m_mipLevels  = 1;
+    VkFormat       m_format     = VK_FORMAT_R8G8B8A8_SRGB; // _UNORM for linear data (normal/bump) maps
 };
 
 } // namespace pose

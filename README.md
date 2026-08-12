@@ -52,7 +52,7 @@ PoseStudio is being designed as a complete end-to-end character creation and ren
 #### 1. Next-Gen Character Creation & Rigging
 - Create and customize 3D characters with advanced morphing and rigging tools
 - Intuitive morph blending for highly detailed characters and facial customization
-- Smart Joint Controlled Morphs (JCMs) and tension mapping to preserve anatomical volume during extreme poses
+- Smart joint-driven corrective morphs and tension mapping to preserve anatomical volume during extreme poses
 - Superior auto-fitting systems that adapt clothing and accessories across a wide range of character shapes
 - AI-assisted rigging and weight painting workflows for faster setup and iteration
 
@@ -147,6 +147,7 @@ This project is built using the following core technologies and design resources
 * **3D Graphics API:** [Vulkan](https://www.vulkan.org/) (via the [LunarG Vulkan SDK](https://vulkan.lunarg.com))
 * **Math & Memory:** [GLM](https://github.com/g-truc/glm) and the [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) (fetched automatically by CMake)
 * **Model Import:** [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader) — the Wavefront `.obj`/`.mtl` parser (also fetched automatically by CMake)
+* **Figure Import:** [nlohmann/json](https://github.com/nlohmann/json) (JSON parsing) and [miniz](https://github.com/richgel999/miniz) (gzip inflate), used by the native rigged-figure importer (also fetched automatically by CMake)
 * Code generation and troubleshooting assistance provided by Anthropic's Claude.
 * **UI Iconography:** [Lucide Icons](https://lucide.dev/) (See `ATTRIBUTIONS.md` for full design credits)
 
@@ -158,7 +159,7 @@ This project is built using the following core technologies and design resources
 2. **CMake 3.21+**.
 3. **[LunarG Vulkan SDK](https://vulkan.lunarg.com)** — required for the 3D viewport. It provides the Vulkan headers, the loader, the validation layers, and `glslc` (the GLSL→SPIR-V shader compiler the build invokes). Without it, CMake configuration will stop with a clear message.
 
-GLM, the Vulkan Memory Allocator, and tinyobjloader are header-only and are downloaded automatically by CMake (`FetchContent`) at configure time — no manual setup needed.
+GLM, the Vulkan Memory Allocator, tinyobjloader, nlohmann/json, and miniz are downloaded automatically by CMake (`FetchContent`) at configure time — no manual setup needed.
 
 **Build**
 

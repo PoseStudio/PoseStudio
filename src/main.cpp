@@ -17,12 +17,52 @@
 
 #include <QApplication>
 #include <QDebug>
+#include <QEvent>
 #include <QFile>
 #include <QMainWindow>
+#include <QMenu>
+#include <QPainterPath>
 #include <QScreen>
 #include <QSplitter>
 #include <QTabWidget>
 #include <QIcon>
+
+namespace {
+/**
+ * @brief Strips the heavy native drop shadow from every popup menu, application-wide.
+ *
+ * Rounded menus (the border-radius in _menumanager.qss) are *translucent* popup windows, which Windows
+ * gives a heavy native drop shadow. Setting Qt::NoDropShadowWindowHint on each menu removes that shadow
+ * while keeping the rounded corners. It's applied on the menu's Polish event — before its native window
+ * is created, so the shadow never appears — which covers menu-bar dropdowns, their submenus, context
+ * menus, and the viewport's shader menu alike, from one place.
+ */
+class MenuShadowFilter : public QObject {
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        auto* menu = qobject_cast<QMenu*>(watched);
+        if (!menu) {
+            return QObject::eventFilter(watched, event);
+        }
+        if (event->type() == QEvent::Polish) {
+            menu->setWindowFlag(Qt::NoDropShadowWindowHint, true);
+            menu->setAttribute(Qt::WA_TranslucentBackground, true);
+        } else if (event->type() == QEvent::Resize) {
+            // NoDropShadowWindowHint leaves a 2-3px opaque black speck at each sharp outer corner (the
+            // triangle outside the border-radius won't clear to transparent). Clip the popup to its
+            // rounded-rect shape so those specks are cut away — the mask radius matches the 4px QSS
+            // border-radius, so it removes only the corner triangles and not the visible border.
+            QPainterPath path;
+            path.addRoundedRect(QRectF(menu->rect()), 4, 4);
+            menu->setMask(QRegion(path.toFillPolygon().toPolygon()));
+        }
+        return QObject::eventFilter(watched, event);
+    }
+};
+} // namespace
 
 /**
  * @brief Concatenates the app's QSS modules into one stylesheet, in cascade order
@@ -84,6 +124,10 @@ int main(int argc, char *argv[]) {
     app.setStyle(new AppProxyStyle(QStringLiteral("Fusion")));
     app.setStyleSheet(loadStylesheets());
 
+    // Strip the native drop shadow from every popup menu app-wide, keeping their rounded corners
+    // (see MenuShadowFilter). Parented to the app so it lives for the whole session.
+    app.installEventFilter(new MenuShadowFilter(&app));
+
     // --- 3. Main window layout ---
     QMainWindow mainWindow;
     mainWindow.setWindowTitle(QStringLiteral("%1 %2").arg(Constants::APP_NAME, Constants::APP_VERSION));
@@ -116,6 +160,14 @@ int main(int argc, char *argv[]) {
     menuManager->setAssetManagerWidget(assetsTab);
     menuManager->setViewportWidget(viewport);
 
+    // Double-clicking an asset in the grid imports it into the viewport — the same entry points the
+    // menu and command-line "open with" use: an .obj as a static model, a character figure (.duf/.dsf)
+    // through the figure pipeline.
+    QObject::connect(assetsTab, &AssetManagerWidget::importModelRequested,
+                     viewport, &pose::ViewportWidget::importObj);
+    QObject::connect(assetsTab, &AssetManagerWidget::importFigureRequested,
+                     viewport, &pose::ViewportWidget::importFigure);
+
     mainSplitter->addWidget(viewport);
     mainSplitter->addWidget(sidePanel);
     mainSplitter->setSizes({1500, 500});
@@ -129,12 +181,19 @@ int main(int argc, char *argv[]) {
     SplashOverlay *splash = new SplashOverlay(&mainWindow);
     splash->show();
 
-    // "Open with" / drag-onto-exe convenience: import any .obj paths passed on the command line.
-    // ViewportWidget::importObj queues them until the renderer exists, so this is safe pre-show.
+    // "Open with" / drag-onto-exe convenience: import any model/figure paths passed on the command
+    // line. The importers queue them until the renderer exists, so this is safe pre-show.
     const QStringList launchArgs = QCoreApplication::arguments();
     for (int i = 1; i < launchArgs.size(); ++i) {
-        if (launchArgs.at(i).endsWith(QStringLiteral(".obj"), Qt::CaseInsensitive)) {
-            viewport->importObj(launchArgs.at(i));
+        const QString& arg = launchArgs.at(i);
+        if (arg.endsWith(QStringLiteral(".obj"), Qt::CaseInsensitive)) {
+            viewport->importObj(arg);
+        } else if (arg.endsWith(QStringLiteral(".duf"), Qt::CaseInsensitive) ||
+                   arg.endsWith(QStringLiteral(".dsf"), Qt::CaseInsensitive)) {
+            viewport->importFigure(arg);
+        } else if (arg.endsWith(QStringLiteral(".pose"), Qt::CaseInsensitive)) {
+            // A pose file applies onto whichever figure was imported (queued until the figure exists).
+            viewport->loadPose(arg);
         }
     }
 

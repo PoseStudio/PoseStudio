@@ -59,6 +59,11 @@ namespace {
 // Image file extensions treated as thumbnail candidates throughout the asset manager. An asset
 // (any non-image file) is paired with the largest same-basename image in its folder.
 const QSet<QString> kImageExtensions = {"png", "jpg", "jpeg", "bmp", "webp", "gif", "tif", "tiff"};
+
+// Extensions that are never listed as assets in their own right: sidecar/companion files that
+// belong to another asset rather than being one (e.g. a Wavefront .mtl material library ships
+// alongside its .obj). Compared lower-case.
+const QSet<QString> kIgnoredAssetExtensions = {"mtl"};
 }
 
 // =============================================================================
@@ -166,8 +171,10 @@ bool AssetFolderProxyModel::directFolderHasHit(const QString& folderPath) const 
 
     QSet<QString> images, nonImages;
     for (const QFileInfo& f : files) {
+        const QString suffix = f.suffix().toLower();
+        if (kIgnoredAssetExtensions.contains(suffix)) continue; // sidecar file, not an asset
         const QString base = f.baseName();
-        if (kImageExtensions.contains(f.suffix().toLower())) {
+        if (kImageExtensions.contains(suffix)) {
             images.insert(base);
             if (nonImages.contains(base)) return true;
         } else {
@@ -949,8 +956,17 @@ void AssetManagerWidget::setupUI() {
  *        new Asset Library, then refreshes the tree so it appears immediately.
  */
 void AssetManagerWidget::promptAddAssetLibrary() {
+    // Start the browser in the parent of the last folder added (persisted in Preferences), so
+    // adding several sibling libraries doesn't mean re-navigating from home each time.
+    QString startDir = PreferencesManager::instance()
+                           .getValue(Constants::PREF_LAST_ASSET_FOLDER_PARENT, QDir::homePath())
+                           .toString();
+    if (startDir.isEmpty() || !QDir(startDir).exists()) {
+        startDir = QDir::homePath(); // stored folder was moved/deleted, or nothing saved yet
+    }
+
     const QString folderPath = QFileDialog::getExistingDirectory(
-        this, "Select Asset Library Folder", QDir::homePath());
+        this, "Select Asset Library Folder", startDir);
     if (folderPath.isEmpty()) return;
 
     QSqlQuery q(QSqlDatabase::database("db_conn"));
@@ -961,6 +977,9 @@ void AssetManagerWidget::promptAddAssetLibrary() {
         return;
     }
 
+    // Remember this folder's parent as the default location for the next add.
+    PreferencesManager::instance().setValue(Constants::PREF_LAST_ASSET_FOLDER_PARENT,
+                                            QFileInfo(folderPath).absolutePath());
     refreshAssetManager();
 }
 
@@ -1748,8 +1767,10 @@ QList<AssetHit> AssetManagerWidget::parseFolderAssets(const QString& folderPath)
     groups.reserve(files.size());
 
     for (const QFileInfo& fi : files) {
+        const QString suffix = fi.suffix().toLower();
+        if (kIgnoredAssetExtensions.contains(suffix)) continue; // sidecar file (e.g. .mtl), not a listable asset
         const QString base = fi.baseName();
-        if (kImageExtensions.contains(fi.suffix().toLower())) {
+        if (kImageExtensions.contains(suffix)) {
             const qint64 sz = fi.size();
             auto& g = groups[base];
             if (sz > g.maxBytes) {
@@ -2452,6 +2473,13 @@ void AssetManagerWidget::onGridItemDoubleClicked(QListWidgetItem *item) {
     if (item->data(Qt::UserRole + 2).toString() == QStringLiteral("FOLDER")) {
         deselectTree();
         displayFolder(path);
+    } else if (path.endsWith(QStringLiteral(".obj"), Qt::CaseInsensitive)) {
+        // Importable model: load it into the 3D viewport rather than the OS default app.
+        emit importModelRequested(path);
+    } else if (path.endsWith(QStringLiteral(".duf"), Qt::CaseInsensitive) ||
+               path.endsWith(QStringLiteral(".dsf"), Qt::CaseInsensitive)) {
+        // Character figure: import it into the 3D viewport (same path as File → Import / open-with).
+        emit importFigureRequested(path);
     } else {
         QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     }

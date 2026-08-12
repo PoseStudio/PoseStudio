@@ -10,6 +10,7 @@
 #include "vulkancontext.h"
 
 #include <cstring>
+#include <utility>
 
 namespace pose {
 
@@ -69,22 +70,30 @@ VulkanBuffer& VulkanBuffer::operator=(VulkanBuffer&& other) noexcept {
 }
 
 VulkanBuffer createDeviceLocalBuffer(VulkanContext& context, const void* data, VkDeviceSize size,
-                                     VkBufferUsageFlags usage) {
+                                     VkBufferUsageFlags usage, ImmediateBatch& batch) {
     // Host-visible staging buffer we can memcpy into directly.
     VulkanBuffer staging(context, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO,
                          VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                              VMA_ALLOCATION_CREATE_MAPPED_BIT);
     std::memcpy(staging.mappedData(), data, static_cast<size_t>(size));
 
-    // Device-local destination, then copy staging -> device on the graphics queue.
+    // Device-local destination; record the copy into the shared batch rather than submitting now.
     VulkanBuffer buffer(context, size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                         VMA_MEMORY_USAGE_AUTO, 0);
-    submitImmediate(context, [&](VkCommandBuffer cmd) {
-        VkBufferCopy region{};
-        region.size = size;
-        vkCmdCopyBuffer(cmd, staging.handle(), buffer.handle(), 1, &region);
-    });
-    return buffer; // staging frees itself on scope exit
+    VkBufferCopy region{};
+    region.size = size;
+    vkCmdCopyBuffer(batch.commandBuffer(), staging.handle(), buffer.handle(), 1, &region);
+    batch.retain(std::move(staging)); // the GPU reads it until the batch's submit completes
+    return buffer;
+}
+
+VulkanBuffer createDeviceLocalBuffer(VulkanContext& context, const void* data, VkDeviceSize size,
+                                     VkBufferUsageFlags usage) {
+    // Single-buffer convenience: one batch, one submit.
+    ImmediateBatch batch(context);
+    VulkanBuffer buffer = createDeviceLocalBuffer(context, data, size, usage, batch);
+    batch.submitAndWait();
+    return buffer;
 }
 
 VulkanBuffer createMappedUniformBuffer(VulkanContext& context, VkDeviceSize size) {

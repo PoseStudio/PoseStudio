@@ -43,6 +43,8 @@ struct PipelineConfig {
     bool               depthTestEnable    = true;
     bool               depthWriteEnable   = true;
     VkCullModeFlags    cullMode           = VK_CULL_MODE_NONE;          // back/front/none
+    VkPrimitiveTopology topology          = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; // e.g. LINE_LIST for overlays
+    float              lineWidth          = 1.0f;                        // only meaningful for line topology
 
     // Vertex input. Empty (the default) means "no vertex buffers" — vertices come from
     // gl_VertexIndex (the grid). The mesh pipeline supplies an interleaved binding + attributes.

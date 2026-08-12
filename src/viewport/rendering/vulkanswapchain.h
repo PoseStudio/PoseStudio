@@ -52,6 +52,7 @@ public:
 private:
     void createSwapchain(VkExtent2D extentHint);
     void createImageViews();
+    void createColorResources(); // the multisampled colour target (MSAA only)
     void createDepthResources();
     void createRenderPass();
     void createFramebuffers();
@@ -68,14 +69,21 @@ private:
     VkRenderPass              m_renderPass  = VK_NULL_HANDLE;
     VkFormat                  m_colorFormat = VK_FORMAT_UNDEFINED;
     VkFormat                  m_depthFormat = VK_FORMAT_UNDEFINED;
+    VkSampleCountFlagBits     m_samples     = VK_SAMPLE_COUNT_1_BIT; // MSAA level (from the context)
     VkExtent2D                m_extent      = {0, 0};
 
     std::vector<VkImage>      m_images;       // owned by the swapchain, not destroyed individually
     std::vector<VkImageView>  m_imageViews;
     std::vector<VkFramebuffer> m_framebuffers;
 
+    // Multisampled colour target rendered into and resolved to the swapchain image each frame.
+    // Only created when m_samples > 1; single-sample rendering draws straight to the swapchain image.
+    VkImage       m_colorImage      = VK_NULL_HANDLE;
+    VmaAllocation m_colorAllocation = VK_NULL_HANDLE;
+    VkImageView   m_colorView       = VK_NULL_HANDLE;
+
     // Single shared depth target (we don't render frames-in-flight into the same depth
-    // buffer concurrently because acquire/present serialises per image).
+    // buffer concurrently because acquire/present serialises per image). Multisampled when m_samples>1.
     VkImage       m_depthImage      = VK_NULL_HANDLE;
     VmaAllocation m_depthAllocation = VK_NULL_HANDLE;
     VkImageView   m_depthView       = VK_NULL_HANDLE;

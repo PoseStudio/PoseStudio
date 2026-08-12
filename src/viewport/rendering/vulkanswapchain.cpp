@@ -17,8 +17,10 @@ namespace pose {
 VulkanSwapchain::VulkanSwapchain(VulkanContext& context, VkExtent2D extentHint)
     : m_context(context) {
     m_depthFormat = m_context.findDepthFormat();
+    m_samples = m_context.sampleCount();
     createSwapchain(extentHint);
     createImageViews();
+    createColorResources();
     createDepthResources();
     createRenderPass();
     createFramebuffers();
@@ -33,9 +35,10 @@ VulkanSwapchain::~VulkanSwapchain() {
 
 void VulkanSwapchain::recreate(VkExtent2D extentHint) {
     cleanupResolutionResources();
-    // Render pass survives: it depends only on formats, which don't change on resize.
+    // Render pass survives: it depends only on formats + sample count, which don't change on resize.
     createSwapchain(extentHint);
     createImageViews();
+    createColorResources();
     createDepthResources();
     createFramebuffers();
 }
@@ -56,6 +59,16 @@ void VulkanSwapchain::cleanupResolutionResources() {
         vmaDestroyImage(m_context.allocator(), m_depthImage, m_depthAllocation);
         m_depthImage = VK_NULL_HANDLE;
         m_depthAllocation = VK_NULL_HANDLE;
+    }
+
+    if (m_colorView != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, m_colorView, nullptr);
+        m_colorView = VK_NULL_HANDLE;
+    }
+    if (m_colorImage != VK_NULL_HANDLE) {
+        vmaDestroyImage(m_context.allocator(), m_colorImage, m_colorAllocation);
+        m_colorImage = VK_NULL_HANDLE;
+        m_colorAllocation = VK_NULL_HANDLE;
     }
 
     for (VkImageView view : m_imageViews) {
@@ -177,6 +190,43 @@ void VulkanSwapchain::createImageViews() {
     }
 }
 
+void VulkanSwapchain::createColorResources() {
+    if (m_samples == VK_SAMPLE_COUNT_1_BIT) {
+        return; // single-sample: draw straight into the swapchain image, no intermediate colour target
+    }
+    // A multisampled colour target the frame renders into; it's resolved down to the (single-sample)
+    // swapchain image in the render pass. TRANSIENT lets the driver keep it on-chip where it can
+    // (never stored to real memory — storeOp is DONT_CARE), so peak VRAM stays low.
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.format = m_colorFormat;
+    imageInfo.extent = {m_extent.width, m_extent.height, 1};
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.samples = m_samples;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+
+    VK_CHECK(vmaCreateImage(m_context.allocator(), &imageInfo, &allocInfo, &m_colorImage,
+                            &m_colorAllocation, nullptr));
+
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = m_colorImage;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = m_colorFormat;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.layerCount = 1;
+    VK_CHECK(vkCreateImageView(m_context.device(), &viewInfo, nullptr, &m_colorView));
+}
+
 void VulkanSwapchain::createDepthResources() {
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -185,7 +235,7 @@ void VulkanSwapchain::createDepthResources() {
     imageInfo.extent = {m_extent.width, m_extent.height, 1};
     imageInfo.mipLevels = 1;
     imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.samples = m_samples; // must match the colour attachment's sample count
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -212,19 +262,24 @@ void VulkanSwapchain::createDepthResources() {
 }
 
 void VulkanSwapchain::createRenderPass() {
+    const bool msaa = (m_samples != VK_SAMPLE_COUNT_1_BIT);
+
+    // Attachment 0: the colour target the fragments write. Multisampled under MSAA (then resolved and
+    // discarded — storeOp DONT_CARE), or the swapchain image itself when single-sample (stored+presented).
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = m_colorFormat;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.samples = m_samples;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.storeOp = msaa ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
     colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    colorAttachment.finalLayout =
+        msaa ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
     VkAttachmentDescription depthAttachment{};
     depthAttachment.format = m_depthFormat;
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.samples = m_samples;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // not sampled later (yet)
     depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -232,14 +287,27 @@ void VulkanSwapchain::createRenderPass() {
     depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+    // Attachment 2 (MSAA only): the single-sample swapchain image the multisampled colour resolves into.
+    VkAttachmentDescription resolveAttachment{};
+    resolveAttachment.format = m_colorFormat;
+    resolveAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    resolveAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; // fully overwritten by the resolve
+    resolveAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    resolveAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    resolveAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    resolveAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    resolveAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
     VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
     VkAttachmentReference depthRef{1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+    VkAttachmentReference resolveRef{2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
 
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorRef;
     subpass.pDepthStencilAttachment = &depthRef;
+    subpass.pResolveAttachments = msaa ? &resolveRef : nullptr; // resolve MSAA -> swapchain image
 
     // Make the subpass wait for the acquired image and for the previous frame's depth
     // use to finish before we write either attachment.
@@ -254,10 +322,12 @@ void VulkanSwapchain::createRenderPass() {
     dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
                                VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
-    const std::array<VkAttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
+    // Ordered [colour(0), depth(1), resolve(2)]; the resolve attachment only exists under MSAA.
+    const std::array<VkAttachmentDescription, 3> attachments = {colorAttachment, depthAttachment,
+                                                                resolveAttachment};
     VkRenderPassCreateInfo ci{};
     ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    ci.attachmentCount = static_cast<uint32_t>(attachments.size());
+    ci.attachmentCount = msaa ? 3u : 2u;
     ci.pAttachments = attachments.data();
     ci.subpassCount = 1;
     ci.pSubpasses = &subpass;
@@ -268,13 +338,23 @@ void VulkanSwapchain::createRenderPass() {
 }
 
 void VulkanSwapchain::createFramebuffers() {
+    const bool msaa = (m_samples != VK_SAMPLE_COUNT_1_BIT);
     m_framebuffers.resize(m_imageViews.size());
     for (size_t i = 0; i < m_imageViews.size(); ++i) {
-        const std::array<VkImageView, 2> attachments = {m_imageViews[i], m_depthView};
+        // Order matches the render pass attachments: colour(0), depth(1), resolve(2). Under MSAA the
+        // colour attachment is the shared multisampled target and the swapchain image is the resolve
+        // target; single-sample renders straight into the swapchain image at attachment 0.
+        std::array<VkImageView, 3> attachments{};
+        uint32_t count = 0;
+        attachments[count++] = msaa ? m_colorView : m_imageViews[i];
+        attachments[count++] = m_depthView;
+        if (msaa) {
+            attachments[count++] = m_imageViews[i];
+        }
         VkFramebufferCreateInfo ci{};
         ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         ci.renderPass = m_renderPass;
-        ci.attachmentCount = static_cast<uint32_t>(attachments.size());
+        ci.attachmentCount = count;
         ci.pAttachments = attachments.data();
         ci.width = m_extent.width;
         ci.height = m_extent.height;

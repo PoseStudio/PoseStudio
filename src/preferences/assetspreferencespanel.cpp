@@ -5,6 +5,9 @@
 
 #include "assetspreferencespanel.h"
 
+#include "constants.h"
+#include "preferencesmanager.h"
+
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QListWidget>
@@ -13,6 +16,7 @@
 #include <QPushButton>
 #include <QFileDialog>
 #include <QDir>
+#include <QFileInfo>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlError>
@@ -80,8 +84,17 @@ void AssetsPreferencesPanel::reloadLibraries() {
 }
 
 void AssetsPreferencesPanel::promptAddLibrary() {
+    // Start the browser in the parent of the last folder added (persisted in Preferences), so
+    // adding several sibling libraries doesn't mean re-navigating from home each time.
+    QString startDir = PreferencesManager::instance()
+                           .getValue(Constants::PREF_LAST_ASSET_FOLDER_PARENT, QDir::homePath())
+                           .toString();
+    if (startDir.isEmpty() || !QDir(startDir).exists()) {
+        startDir = QDir::homePath(); // stored folder was moved/deleted, or nothing saved yet
+    }
+
     const QString folderPath = QFileDialog::getExistingDirectory(
-        this, "Select Asset Library Folder", QDir::homePath());
+        this, "Select Asset Library Folder", startDir);
     if (folderPath.isEmpty()) return;
 
     QSqlQuery q(QSqlDatabase::database(QStringLiteral("db_conn")));
@@ -92,6 +105,9 @@ void AssetsPreferencesPanel::promptAddLibrary() {
         return;
     }
 
+    // Remember this folder's parent as the default location for the next add.
+    PreferencesManager::instance().setValue(Constants::PREF_LAST_ASSET_FOLDER_PARENT,
+                                            QFileInfo(folderPath).absolutePath());
     reloadLibraries();
     emit librariesChanged();
 }

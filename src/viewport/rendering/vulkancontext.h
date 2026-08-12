@@ -58,6 +58,11 @@ public:
     uint32_t         presentFamily()   const { return m_presentFamily; }
     VmaAllocator     allocator()       const { return m_allocator; }
 
+    /// The MSAA sample count the viewport renders at — min(4x, device max) supported for both colour
+    /// and depth attachments. VK_SAMPLE_COUNT_1_BIT when the device can't multisample (then the
+    /// swapchain uses the plain single-sample path). Chosen once at device creation.
+    VkSampleCountFlagBits sampleCount() const { return m_sampleCount; }
+
     /// Picks the first format the device supports for the depth/stencil attachment,
     /// preferring a pure 32-bit depth format. Throws if none are available.
     VkFormat findDepthFormat() const;
@@ -80,6 +85,7 @@ private:
     uint32_t         m_graphicsFamily = 0;
     uint32_t         m_presentFamily  = 0;
     VmaAllocator     m_allocator      = VK_NULL_HANDLE;
+    VkSampleCountFlagBits m_sampleCount = VK_SAMPLE_COUNT_1_BIT; // MSAA level (see sampleCount())
 };
 
 } // namespace pose

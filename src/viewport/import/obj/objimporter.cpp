@@ -1,6 +1,6 @@
 /**
- * @file objloader.cpp
- * @brief OBJ/MTL parsing via tinyobjloader. See objloader.h.
+ * @file objimporter.cpp
+ * @brief OBJ/MTL parsing via tinyobjloader. See objimporter.h.
  *
  * This is the project's single tinyobjloader translation unit: it defines
  * TINYOBJLOADER_IMPLEMENTATION before the header (the same pattern vma_impl.cpp uses for VMA).
@@ -9,7 +9,7 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
-#include "objloader.h"
+#include "objimporter.h"
 
 #include <glm/glm.hpp>
 
@@ -92,7 +92,7 @@ void generateSmoothNormals(MeshData& mesh) {
 
 } // namespace
 
-ModelData loadObj(const std::string& path) {
+ModelData ObjImporter::load(const std::string& path) const {
     tinyobj::ObjReaderConfig config;
     config.triangulate = true;
     // Resolve the .mtl (and its relative texture paths) next to the .obj.
@@ -130,7 +130,7 @@ ModelData loadObj(const std::string& path) {
         if (materialId >= 0 && materialId < static_cast<int>(materials.size())) {
             const tinyobj::material_t& mat = materials[materialId];
             mesh.baseColor = glm::vec3(mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]);
-            mesh.diffuseTexturePath = resolveTexturePath(config.mtl_search_path, mat.diffuse_texname);
+            mesh.diffuse.path = resolveTexturePath(config.mtl_search_path, mat.diffuse_texname);
         }
         result.meshes.push_back(std::move(mesh));
         vertexCaches.emplace_back();

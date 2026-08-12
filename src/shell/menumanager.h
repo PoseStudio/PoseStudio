@@ -42,6 +42,13 @@ private:
     /// Opens a file dialog and imports the chosen OBJ into the viewport.
     void importObjFile();
 
+    /// Opens a file dialog and imports the chosen native figure (`.duf`/`.dsf`) into the viewport.
+    void importFigureFile();
+
+    /// Saves / loads the current figure's pose to/from a `.pose` file via a file dialog.
+    void savePoseFile();
+    void loadPoseFile();
+
     QMainWindow *mainWindow;
     AssetManagerWidget *assetManagerWidget = nullptr;
     pose::ViewportWidget *viewportWidget = nullptr;

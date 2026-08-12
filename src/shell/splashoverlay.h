@@ -27,20 +27,27 @@
  * Tracks the parent's geometry via an event filter so it always fills the window, and
  * deletes itself on the next click anywhere within it.
  *
- * It is a frameless, always-on-top, translucent *top-level window* (not a child widget)
- * deliberately: the 3D viewport is hosted in a native child window
- * (QWidget::createWindowContainer), and native windows are composited on top of ordinary
- * overlay widgets — a child-widget overlay would be hidden behind the viewport. A top-level
- * window owned by the parent is composited above the viewport surface instead.
+ * It is a frameless, translucent *top-level window* (not a child widget) deliberately: the
+ * 3D viewport is hosted in a native child window (QWidget::createWindowContainer), and native
+ * windows are composited on top of ordinary overlay widgets — a child-widget overlay would be
+ * hidden behind the viewport. A top-level window *owned by the parent* (the parent pointer plus
+ * the Qt::Window type) is composited above the viewport surface instead.
+ *
+ * Crucially it is NOT a global always-on-top window (no Qt::WindowStaysOnTopHint): because it's
+ * an *owned* window, the OS keeps it above PoseStudio's own window/viewport, but it still yields
+ * to other applications when they take focus. An always-on-top splash would float over and block
+ * every other app — even ones the user switched to — which is a bad experience.
  */
 class SplashOverlay : public QWidget {
 public:
     /// @param parent The window this overlay should cover (usually the QMainWindow).
     SplashOverlay(QWidget *parent)
-        : QWidget(parent, Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint) {
+        : QWidget(parent, Qt::Window | Qt::FramelessWindowHint) {
         // Qt::Window (the window *type*, not just the hints) is what actually promotes this
         // parented widget into a top-level window — without it the hints are ignored and it
-        // stays a child widget hidden behind the native viewport.
+        // stays a child widget hidden behind the native viewport. Note: deliberately NO
+        // Qt::WindowStaysOnTopHint — as an owned window it already sits above its parent's
+        // viewport, and a global topmost hint would also block every *other* application.
         setAttribute(Qt::WA_StyledBackground, true);
         setAttribute(Qt::WA_TranslucentBackground, true); // see-through except the artwork
         setStyleSheet("background-color: rgba(0, 0, 0, 0);");

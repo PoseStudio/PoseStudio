@@ -7,7 +7,7 @@
 
 #include "camera.h"
 #include "mesh.h"
-#include "objloader.h"
+#include "modeldata.h"
 #include "vertex.h"
 #include "vulkancommon.h"
 #include "vulkancontext.h"
@@ -17,26 +17,69 @@
 #include <glm/glm.hpp>
 
 #include <array>
+#include <cmath>
+#include <cstddef>
 #include <cstring>
+#include <fstream>
+#include <limits>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace pose {
 
 namespace {
 
 // std140-compatible camera + lighting block. vec3 fields are padded to vec4. Must match the
-// `CameraUbo` block declared in mesh.vert / mesh.frag.
+// `CameraUbo` block declared in mesh.vert / mesh.frag. Layout (std140) must match both shaders.
 struct CameraUbo {
     glm::mat4 viewProj;
+    glm::mat4 view;        // world -> view (fragment modes derive view-space normals for matcaps)
     glm::vec4 cameraPos;   // xyz world-space eye
     glm::vec4 lightDir;    // xyz = normalized direction TO the key light
     glm::vec4 lightColor;  // rgb
+    glm::vec4 fillDir;     // fill light (dir TO light)
+    glm::vec4 fillColor;   // rgb (intensity baked in)
+    glm::vec4 rimDir;      // rim / back light (dir TO light)
+    glm::vec4 rimColor;    // rgb (intensity baked in)
     glm::vec4 ambient;     // rgb ambient/fill term
+    glm::vec4 params;      // x = shade mode (see mesh.frag)
 };
+
+// A vertex of the skeleton overlay: a world-space point + its colour. Must match skeleton.vert.
+struct LineVertex {
+    glm::vec3 pos;
+    glm::vec3 color;
+};
+constexpr uint32_t kMaxSkeletonVerts = 8192; // 2 per bone segment + gizmo rings; far above any figure's
+
+constexpr int   kGizmoRingSegments = 48;    // line segments per gizmo ring
+constexpr float kGizmoPickTolerancePx = 12.0f;
+
+// Screen-roughly-constant gizmo ring radius: a small fraction of the distance to the camera (so it
+// stays a consistent on-screen size as you dolly in/out) — sized to sit around a joint, grabbable.
+float gizmoRadius(const glm::vec3& center, const Camera& camera) {
+    return 0.048f * glm::length(center - camera.position());
+}
+
+// Projects a world point to pixel coordinates matching the mouse convention (viewProj carries
+// Vulkan's Y flip, same as selectBoneAt). Returns false if behind the camera.
+bool projectToPixels(const glm::mat4& viewProj, const glm::vec3& world, float vpW, float vpH,
+                     glm::vec2& outPx) {
+    const glm::vec4 clip = viewProj * glm::vec4(world, 1.0f);
+    if (clip.w <= 1e-4f) {
+        return false;
+    }
+    const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+    outPx = glm::vec2((ndc.x * 0.5f + 0.5f) * vpW, (ndc.y * 0.5f + 0.5f) * vpH);
+    return true;
+}
 
 } // namespace
 
-Scene::Scene(VulkanContext& context, VkRenderPass renderPass,
-             const std::vector<char>& vertSpirv, const std::vector<char>& fragSpirv)
+Scene::Scene(VulkanContext& context, VkRenderPass renderPass, const std::vector<char>& vertSpirv,
+             const std::vector<char>& fragSpirv, const std::vector<char>& skeletonVertSpirv,
+             const std::vector<char>& skeletonFragSpirv)
     : m_context(context) {
     createDescriptorResources();
 
@@ -44,6 +87,10 @@ Scene::Scene(VulkanContext& context, VkRenderPass renderPass,
     // sampling white and multiplying by baseColor just yields baseColor.
     const uint8_t white[4] = {255, 255, 255, 255};
     m_fallbackTexture = std::make_unique<VulkanTexture>(m_context, white, 1, 1);
+    // 1x1 flat-normal fallback (tangent-space +Z, i.e. no perturbation) for meshes with no detail
+    // map. Linear, not sRGB — normal/bump data must be sampled verbatim.
+    const uint8_t flatNormal[4] = {128, 128, 255, 255};
+    m_fallbackNormal = std::make_unique<VulkanTexture>(m_context, flatNormal, 1, 1, /*srgb=*/false);
 
     PipelineConfig config;
     config.pushConstantSize = sizeof(MeshPushConstants);
@@ -57,12 +104,56 @@ Scene::Scene(VulkanContext& context, VkRenderPass renderPass,
     config.cullMode = VK_CULL_MODE_NONE;
 
     const VkVertexInputBindingDescription binding = Vertex::bindingDescription();
-    const std::array<VkVertexInputAttributeDescription, 3> attrs = Vertex::attributeDescriptions();
+    const auto attrs = Vertex::attributeDescriptions();
     config.vertexBindings.assign(1, binding);
     config.vertexAttributes.assign(attrs.begin(), attrs.end());
-    config.descriptorSetLayouts = {m_setLayout, m_materialSetLayout}; // set 0 = camera, set 1 = material
+    // set 0 = camera, set 1 = material textures, set 2 = per-model skinning joint matrices.
+    config.descriptorSetLayouts = {m_setLayout, m_materialSetLayout, m_jointSetLayout};
 
     m_pipeline = std::make_unique<VulkanPipeline>(m_context, renderPass, vertSpirv, fragSpirv, config);
+
+    // Transparent variant for see-through material zones (eye moisture, cornea, later hair/lashes):
+    // alpha-blend over what's already there, and keep depth *testing* (so opaque geometry in front
+    // still occludes) but disable depth *writes* (so overlapping transparent layers don't reject
+    // each other and nothing behind the mostly-clear surface gets occluded). Drawn after the opaque
+    // pass. Same shaders/layout — only the blend + depth-write state differs.
+    config.blendEnable = true;
+    config.depthWriteEnable = false;
+    m_transparentPipeline =
+        std::make_unique<VulkanPipeline>(m_context, renderPass, vertSpirv, fragSpirv, config);
+
+    // Skeleton overlay: a coloured line list drawn over the figure (depth test OFF, so every joint is
+    // visible and pickable through the body). Uses set 0 (camera) only; per-vertex colour.
+    PipelineConfig lineConfig;
+    lineConfig.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    lineConfig.depthTestEnable = false;
+    lineConfig.depthWriteEnable = false;
+    lineConfig.blendEnable = false;
+    lineConfig.pushConstantSize = 0;
+    VkVertexInputBindingDescription lineBinding{};
+    lineBinding.binding = 0;
+    lineBinding.stride = sizeof(LineVertex);
+    lineBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    std::array<VkVertexInputAttributeDescription, 2> lineAttrs{};
+    lineAttrs[0].location = 0;
+    lineAttrs[0].binding = 0;
+    lineAttrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    lineAttrs[0].offset = offsetof(LineVertex, pos);
+    lineAttrs[1].location = 1;
+    lineAttrs[1].binding = 0;
+    lineAttrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+    lineAttrs[1].offset = offsetof(LineVertex, color);
+    lineConfig.vertexBindings.assign(1, lineBinding);
+    lineConfig.vertexAttributes.assign(lineAttrs.begin(), lineAttrs.end());
+    lineConfig.descriptorSetLayouts = {m_setLayout}; // set 0 = camera UBO
+    m_skeletonPipeline = std::make_unique<VulkanPipeline>(m_context, renderPass, skeletonVertSpirv,
+                                                          skeletonFragSpirv, lineConfig);
+
+    m_skeletonVertexBuffer =
+        VulkanBuffer(m_context, kMaxSkeletonVerts * sizeof(LineVertex),
+                     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO,
+                     VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                         VMA_ALLOCATION_CREATE_MAPPED_BIT);
 }
 
 Scene::~Scene() {
@@ -71,7 +162,10 @@ Scene::~Scene() {
 
     m_models.clear();         // frees mesh buffers, textures, and per-model descriptor pools
     m_pipeline.reset();
+    m_transparentPipeline.reset();
+    m_skeletonPipeline.reset();
     m_fallbackTexture.reset();
+    m_fallbackNormal.reset();
     m_cameraBuffers.clear();   // VulkanBuffers free themselves
 
     VkDevice device = m_context.device();
@@ -83,6 +177,9 @@ Scene::~Scene() {
     }
     if (m_materialSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(device, m_materialSetLayout, nullptr);
+    }
+    if (m_jointSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, m_jointSetLayout, nullptr);
     }
 }
 
@@ -101,18 +198,34 @@ void Scene::createDescriptorResources() {
     layoutInfo.pBindings = &binding;
     VK_CHECK(vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &m_setLayout));
 
-    // Set 1: a single combined image sampler (the diffuse texture), read in the fragment stage.
-    VkDescriptorSetLayoutBinding samplerBinding{};
-    samplerBinding.binding = 0;
-    samplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerBinding.descriptorCount = 1;
-    samplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    // Set 1: two combined image samplers read in the fragment stage — binding 0 = diffuse,
+    // binding 1 = detail (normal/bump) map.
+    std::array<VkDescriptorSetLayoutBinding, 2> samplerBindings{};
+    for (uint32_t i = 0; i < samplerBindings.size(); ++i) {
+        samplerBindings[i].binding = i;
+        samplerBindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        samplerBindings[i].descriptorCount = 1;
+        samplerBindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
 
     VkDescriptorSetLayoutCreateInfo materialLayoutInfo{};
     materialLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    materialLayoutInfo.bindingCount = 1;
-    materialLayoutInfo.pBindings = &samplerBinding;
+    materialLayoutInfo.bindingCount = static_cast<uint32_t>(samplerBindings.size());
+    materialLayoutInfo.pBindings = samplerBindings.data();
     VK_CHECK(vkCreateDescriptorSetLayout(device, &materialLayoutInfo, nullptr, &m_materialSetLayout));
+
+    // Set 2: the per-model skinning joint-matrix storage buffer, read in the vertex stage.
+    VkDescriptorSetLayoutBinding jointBinding{};
+    jointBinding.binding = 0;
+    jointBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    jointBinding.descriptorCount = 1;
+    jointBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    VkDescriptorSetLayoutCreateInfo jointLayoutInfo{};
+    jointLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    jointLayoutInfo.bindingCount = 1;
+    jointLayoutInfo.pBindings = &jointBinding;
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &jointLayoutInfo, nullptr, &m_jointSetLayout));
 
     VkDescriptorPoolSize poolSize{};
     poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -155,8 +268,27 @@ void Scene::createDescriptorResources() {
 }
 
 void Scene::addModel(const ModelData& data) {
-    m_models.push_back(std::make_unique<Model>(m_context, data, m_materialSetLayout,
-                                               *m_fallbackTexture));
+    m_models.push_back(std::make_unique<Model>(m_context, data, m_materialSetLayout, m_jointSetLayout,
+                                               *m_fallbackTexture, *m_fallbackNormal));
+}
+
+int Scene::pickModel(const Ray& ray) const {
+    int best = -1;
+    float bestT = std::numeric_limits<float>::max();
+    for (std::size_t i = 0; i < m_models.size(); ++i) {
+        float t = 0.0f;
+        if (m_models[i]->intersectRay(ray, t) && t < bestT) {
+            bestT = t;
+            best = static_cast<int>(i);
+        }
+    }
+    return best;
+}
+
+void Scene::removeModel(std::size_t index) {
+    if (index < m_models.size()) {
+        m_models.erase(m_models.begin() + static_cast<std::ptrdiff_t>(index));
+    }
 }
 
 void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex) {
@@ -166,21 +298,268 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
 
     // Update this frame's camera + lighting UBO. The key light is a fixed studio-ish direction for
     // now (above/front), with a soft ambient fill; later this comes from real scene lighting.
+    // Three-point studio rig, world-space (fixed relative to the subject, so lighting stays consistent
+    // as the camera orbits — like a real studio). Directions point TO each light.
+    //  - Key:  the main, brightest light, ~45° off to the front-right and above — creates the form + shadows.
+    //  - Fill: softer + clearly dimmer, opposite side (front-left), lower — opens the shadow side only.
+    //  - Back/rim: behind + above the subject — rims the hair/shoulders so the figure pops off the grid.
+    // Intensities are baked into the colours (PBR scales the key up a bit further before tonemapping).
     CameraUbo ubo{};
     ubo.viewProj = camera.viewProjection();
+    ubo.view = camera.view();
     ubo.cameraPos = glm::vec4(camera.position(), 1.0f);
-    ubo.lightDir = glm::vec4(glm::normalize(glm::vec3(0.4f, 0.9f, 0.5f)), 0.0f);
-    ubo.lightColor = glm::vec4(1.0f, 0.98f, 0.95f, 0.0f);
-    ubo.ambient = glm::vec4(0.18f, 0.19f, 0.22f, 0.0f);
+    ubo.lightDir = glm::vec4(glm::normalize(glm::vec3(0.62f, 0.5f, 0.55f)), 0.0f);   // key: front-right, ~45°
+    ubo.lightColor = glm::vec4(1.0f, 0.96f, 0.9f, 0.0f);
+    ubo.fillDir = glm::vec4(glm::normalize(glm::vec3(-0.6f, 0.28f, 0.5f)), 0.0f);    // fill: opposite, lower
+    ubo.fillColor = glm::vec4(0.26f, 0.31f, 0.4f, 0.0f);                              // dim + cool (~1/4 key)
+    ubo.rimDir = glm::vec4(glm::normalize(glm::vec3(-0.15f, 0.55f, -0.9f)), 0.0f);   // back: behind + above
+    ubo.rimColor = glm::vec4(1.2f, 1.28f, 1.45f, 0.0f);                               // cool, localised to edges
+    ubo.ambient = glm::vec4(0.10f, 0.11f, 0.13f, 0.0f);
+    ubo.params = glm::vec4(static_cast<float>(m_shadeMode), 0.0f, 0.0f, 0.0f);
     std::memcpy(m_cameraBuffers[frameIndex].mappedData(), &ubo, sizeof(ubo));
 
+    // Opaque pass: bind the camera set (set 0) once — it stays bound for the transparent pass too,
+    // since both pipelines share the same layout.
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->handle());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->layout(), 0, 1,
                             &m_cameraSets[frameIndex], 0, nullptr);
-
     for (const std::unique_ptr<Model>& model : m_models) {
-        model->record(cmd, m_pipeline->layout());
+        model->record(cmd, m_pipeline->layout(), /*transparentPass=*/false);
     }
+
+    // Transparent pass: alpha-blended, depth-write off, drawn after all opaque geometry so it blends
+    // over what's behind it (e.g. the eye's moisture/cornea over the iris).
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_transparentPipeline->handle());
+    for (const std::unique_ptr<Model>& model : m_models) {
+        model->record(cmd, m_transparentPipeline->layout(), /*transparentPass=*/true);
+    }
+
+    // Posing overlay: the rotate gizmo for the selected joint, and (only when enabled) the skeleton
+    // line list. The skeleton is hidden by default — the gizmo is the visual affordance — but joints
+    // stay clickable regardless, because picking (selectBoneAt) is independent of what's drawn here.
+    if (Model* fig = figureModel(); fig && fig->boneCount() > 0) {
+        auto* verts = static_cast<LineVertex*>(m_skeletonVertexBuffer.mappedData());
+        uint32_t count = 0;
+        const int selected = fig->selectedBone();
+
+        // Skeleton as line segments (joint -> parent); the selected joint's segments are highlighted.
+        if (m_showSkeleton) {
+            const glm::vec3 boneColor(0.25f, 0.85f, 1.0f); // cyan
+            const glm::vec3 selColor(1.0f, 0.8f, 0.1f);    // yellow highlight
+            for (std::size_t i = 0; i < fig->boneCount() && count + 2 <= kMaxSkeletonVerts; ++i) {
+                const int parent = fig->boneParent(i);
+                if (parent < 0) {
+                    continue;
+                }
+                const bool hot = (static_cast<int>(i) == selected || parent == selected);
+                const glm::vec3 c = hot ? selColor : boneColor;
+                verts[count++] = {fig->boneWorldPosition(static_cast<std::size_t>(parent)), c};
+                verts[count++] = {fig->boneWorldPosition(i), c};
+            }
+        }
+
+        // Rotate gizmo: three axis rings around the selected joint (X=red, Y=green, Z=blue), in the
+        // joint's own rotation frame so each ring visibly rotates the joint about one Euler channel.
+        glm::vec3 center;
+        glm::mat3 axes;
+        if (selected >= 0 && fig->selectedBoneFrame(center, axes)) {
+            const float radius = gizmoRadius(center, camera);
+            const glm::vec3 axisColor[3] = {
+                glm::vec3(1.0f, 0.35f, 0.35f), glm::vec3(0.4f, 1.0f, 0.4f), glm::vec3(0.45f, 0.55f, 1.0f)};
+            constexpr float kTwoPi = 6.2831853f;
+            for (int a = 0; a < 3 && count + 2 * kGizmoRingSegments <= kMaxSkeletonVerts; ++a) {
+                const glm::vec3 u = axes[(a + 1) % 3];
+                const glm::vec3 v = axes[(a + 2) % 3];
+                glm::vec3 prev = center + radius * u; // theta = 0
+                for (int s = 1; s <= kGizmoRingSegments; ++s) {
+                    const float t = kTwoPi * static_cast<float>(s) / static_cast<float>(kGizmoRingSegments);
+                    const glm::vec3 p = center + radius * (std::cos(t) * u + std::sin(t) * v);
+                    verts[count++] = {prev, axisColor[a]};
+                    verts[count++] = {p, axisColor[a]};
+                    prev = p;
+                }
+            }
+        }
+
+        if (count > 0) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_skeletonPipeline->handle());
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                    m_skeletonPipeline->layout(), 0, 1, &m_cameraSets[frameIndex], 0,
+                                    nullptr);
+            const VkBuffer vb = m_skeletonVertexBuffer.handle();
+            const VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &offset);
+            vkCmdDraw(cmd, count, 1, 0, 0);
+        }
+    }
+}
+
+Model* Scene::figureModel() const {
+    for (const std::unique_ptr<Model>& model : m_models) {
+        if (model->hasSkeleton()) {
+            return model.get();
+        }
+    }
+    return nullptr;
+}
+
+bool Scene::hasPosableFigure() const { return figureModel() != nullptr; }
+
+bool Scene::hasSelectedBone() const {
+    const Model* fig = figureModel();
+    return fig != nullptr && fig->selectedBone() >= 0;
+}
+
+int Scene::selectBoneAt(float px, float py, float vpW, float vpH, const Camera& camera) {
+    Model* fig = figureModel();
+    if (!fig) {
+        return -1;
+    }
+    const glm::mat4 viewProj = camera.viewProjection();
+    int best = -1;
+    float bestDist = 1e9f;
+    for (std::size_t i = 0; i < fig->boneCount(); ++i) {
+        const glm::vec4 clip = viewProj * glm::vec4(fig->boneWorldPosition(i), 1.0f);
+        if (clip.w <= 1e-4f) {
+            continue; // behind the camera
+        }
+        const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+        const float sx = (ndc.x * 0.5f + 0.5f) * vpW;
+        const float sy = (ndc.y * 0.5f + 0.5f) * vpH; // viewProj already carries Vulkan's Y flip
+        const float dist = glm::length(glm::vec2(sx - px, sy - py));
+        if (dist < bestDist) {
+            bestDist = dist;
+            best = static_cast<int>(i);
+        }
+    }
+    // (Re)select only when the click lands near a joint. On a miss return -1 (so the caller orbits the
+    // camera) but keep the current selection — the gizmo stays up and the figure can be orbited while
+    // a joint is selected.
+    constexpr float kPickRadiusPx = 32.0f; // click tolerance around a projected joint
+    if (best >= 0 && bestDist <= kPickRadiusPx) {
+        fig->setSelectedBone(best);
+        return best;
+    }
+    return -1;
+}
+
+void Scene::nudgeSelectedBone(const glm::vec3& deltaEulerDegrees) {
+    if (Model* fig = figureModel()) {
+        fig->nudgeSelectedBone(deltaEulerDegrees);
+    }
+}
+
+void Scene::finalizePose() {
+    if (Model* fig = figureModel()) {
+        fig->refreshCorrectives();
+    }
+}
+
+int Scene::gizmoAxisAt(float px, float py, float vpW, float vpH, const Camera& camera) const {
+    Model* fig = figureModel();
+    glm::vec3 center;
+    glm::mat3 axes;
+    if (!fig || !fig->selectedBoneFrame(center, axes)) {
+        return -1;
+    }
+    const float radius = gizmoRadius(center, camera);
+    const glm::mat4 viewProj = camera.viewProjection();
+    constexpr float kTwoPi = 6.2831853f;
+    int bestAxis = -1;
+    float bestDist = kGizmoPickTolerancePx;
+    for (int a = 0; a < 3; ++a) {
+        const glm::vec3 u = axes[(a + 1) % 3];
+        const glm::vec3 v = axes[(a + 2) % 3];
+        for (int s = 0; s < kGizmoRingSegments; ++s) {
+            const float t = kTwoPi * static_cast<float>(s) / static_cast<float>(kGizmoRingSegments);
+            const glm::vec3 p = center + radius * (std::cos(t) * u + std::sin(t) * v);
+            glm::vec2 px2;
+            if (!projectToPixels(viewProj, p, vpW, vpH, px2)) {
+                continue;
+            }
+            const float d = glm::length(px2 - glm::vec2(px, py));
+            if (d < bestDist) {
+                bestDist = d;
+                bestAxis = a;
+            }
+        }
+    }
+    return bestAxis;
+}
+
+void Scene::rotateGizmo(int axis, float prevX, float prevY, float curX, float curY, float vpW,
+                        float vpH, const Camera& camera) {
+    Model* fig = figureModel();
+    glm::vec3 center;
+    glm::mat3 axes;
+    if (!fig || axis < 0 || axis > 2 || !fig->selectedBoneFrame(center, axes)) {
+        return;
+    }
+    glm::vec2 c;
+    if (!projectToPixels(camera.viewProjection(), center, vpW, vpH, c)) {
+        return;
+    }
+    // Signed screen-angle the cursor swept around the joint, from prev to cur.
+    const float a0 = std::atan2(prevY - c.y, prevX - c.x);
+    const float a1 = std::atan2(curY - c.y, curX - c.x);
+    float delta = a1 - a0;
+    constexpr float kPi = 3.14159265f;
+    while (delta > kPi) delta -= 2.0f * kPi;
+    while (delta < -kPi) delta += 2.0f * kPi;
+    // Flip when the ring's axis points away from the camera, so a drag always follows the cursor.
+    const float facing = glm::dot(axes[axis], center - camera.position());
+    const float sign = (facing > 0.0f) ? 1.0f : -1.0f;
+    glm::vec3 nudge(0.0f);
+    nudge[axis] = glm::degrees(delta) * sign;
+    fig->nudgeSelectedBone(nudge);
+}
+
+std::vector<std::pair<std::string, glm::vec3>> Scene::capturePose() const {
+    const Model* fig = figureModel();
+    return fig ? fig->capturePose() : std::vector<std::pair<std::string, glm::vec3>>{};
+}
+
+void Scene::applyPose(const std::vector<std::pair<std::string, glm::vec3>>& pose) {
+    if (Model* fig = figureModel()) {
+        fig->applyPose(pose);
+    }
+}
+
+bool Scene::savePose(const std::string& path) const {
+    const Model* fig = figureModel();
+    if (!fig) {
+        return false;
+    }
+    std::ofstream out(path);
+    if (!out) {
+        return false;
+    }
+    // One line per posed joint: "boneName rx ry rz" (Euler degrees).
+    for (const auto& [name, euler] : fig->capturePose()) {
+        out << name << ' ' << euler.x << ' ' << euler.y << ' ' << euler.z << '\n';
+    }
+    return true;
+}
+
+bool Scene::loadPose(const std::string& path) {
+    Model* fig = figureModel();
+    if (!fig) {
+        return false;
+    }
+    std::ifstream in(path);
+    if (!in) {
+        return false;
+    }
+    std::vector<std::pair<std::string, glm::vec3>> pose;
+    std::string name;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    while (in >> name >> x >> y >> z) {
+        pose.emplace_back(name, glm::vec3(x, y, z));
+    }
+    fig->applyPose(pose);
+    return true;
 }
 
 } // namespace pose

@@ -16,6 +16,12 @@
 
 namespace pose {
 
+/// A world-space ray (origin + normalized direction), e.g. for mouse picking.
+struct Ray {
+    glm::vec3 origin;
+    glm::vec3 direction;
+};
+
 /**
  * @class Camera
  * @brief Orbit-style viewport camera producing Vulkan-ready view/projection matrices.
@@ -38,6 +44,12 @@ public:
     glm::mat4 projection() const { return m_projection; }
     glm::mat4 viewProjection() const { return m_projection * view(); }
     glm::vec3 position() const;
+
+    /// Builds a world-space picking ray through the pixel (@p px, @p py) of a viewport of size
+    /// @p viewportWidth x @p viewportHeight. Pixel coords are top-left origin, y down — matching
+    /// both Qt mouse coords and Vulkan's framebuffer convention (the projection's Y-flip already
+    /// accounts for the sign), so no extra flip is needed. The direction is normalized.
+    Ray screenPointToRay(float px, float py, float viewportWidth, float viewportHeight) const;
 
 private:
     void rebuildProjection();

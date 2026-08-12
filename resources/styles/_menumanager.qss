@@ -21,28 +21,31 @@ QMenuBar::item {
 
 QMenuBar::item:selected {
     border-radius: 4px;
-    background-color: #323232;
+    background-color: #314D7A;
 }
 
 /* =========================================================================
    [ DROPDOWN MENUS ]
    ========================================================================= */
 
-QMenu { 
-    padding: 4px; 
-    border: 1px solid #555555; 
-    border-radius: 4px; 
-    background-color: #323232; 
-    color: white; 
+/* Rounded corners make a QMenu a *translucent* popup window, which on Windows gets a heavy native drop
+   shadow. We keep the rounded corners and instead strip that shadow app-wide via MenuShadowFilter in
+   main.cpp (it sets Qt::NoDropShadowWindowHint on every menu). Result: rounded corners, no shadow. */
+QMenu {
+    padding: 4px;
+    border: 1px solid #555555;
+    border-radius: 4px;
+    background-color: #252627;
+    color: white;
 }
 
-QMenu::item { 
-    padding: 6px 4px 6px 6px; 
+QMenu::item {
+    padding: 6px 4px 6px 6px;
 }
 
-QMenu::item:selected { 
-    border-radius: 4px; 
-    background-color: #555555; 
+QMenu::item:selected {
+    border-radius: 4px;
+    background-color: #314D7A;
 }
 
 QMenu::item:disabled { 

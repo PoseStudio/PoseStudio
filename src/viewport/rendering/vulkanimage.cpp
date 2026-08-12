@@ -13,12 +13,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 namespace pose {
 
 namespace {
-
-constexpr VkFormat kTextureFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
 // Inserts an image-memory barrier for a single mip level, moving it between layouts.
 void transitionMip(VkCommandBuffer cmd, VkImage image, uint32_t mip, VkImageLayout oldLayout,
@@ -44,13 +43,31 @@ void transitionMip(VkCommandBuffer cmd, VkImage image, uint32_t mip, VkImageLayo
 } // namespace
 
 VulkanTexture::VulkanTexture(VulkanContext& context, const uint8_t* pixels, uint32_t width,
-                             uint32_t height)
-    : m_context(&context), m_allocator(context.allocator()) {
+                             uint32_t height, bool srgb)
+    : m_context(&context), m_allocator(context.allocator()),
+      m_format(srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM) {
+    // One-off upload: record into a single-use batch and flush it immediately.
+    ImmediateBatch batch(context);
+    recordUpload(batch, pixels, width, height);
+    batch.submitAndWait();
+}
+
+VulkanTexture::VulkanTexture(VulkanContext& context, const uint8_t* pixels, uint32_t width,
+                             uint32_t height, ImmediateBatch& batch, bool srgb)
+    : m_context(&context), m_allocator(context.allocator()),
+      m_format(srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM) {
+    // Batched upload: the caller flushes @p batch once for the whole import.
+    recordUpload(batch, pixels, width, height);
+}
+
+void VulkanTexture::recordUpload(ImmediateBatch& batch, const uint8_t* pixels, uint32_t width,
+                                 uint32_t height) {
+    VulkanContext& context = *m_context;
     const VkDeviceSize imageSize = static_cast<VkDeviceSize>(width) * height * 4;
 
     // Mipmaps need linear blit support for this format; fall back to a single level if absent.
     VkFormatProperties formatProps{};
-    vkGetPhysicalDeviceFormatProperties(context.physicalDevice(), kTextureFormat, &formatProps);
+    vkGetPhysicalDeviceFormatProperties(context.physicalDevice(), m_format, &formatProps);
     const bool canMip = (formatProps.optimalTilingFeatures &
                          VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0 &&
                         (formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) != 0 &&
@@ -69,7 +86,7 @@ VulkanTexture::VulkanTexture(VulkanContext& context, const uint8_t* pixels, uint
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = kTextureFormat;
+    imageInfo.format = m_format;
     imageInfo.extent = {width, height, 1};
     imageInfo.mipLevels = m_mipLevels;
     imageInfo.arrayLayers = 1;
@@ -84,69 +101,70 @@ VulkanTexture::VulkanTexture(VulkanContext& context, const uint8_t* pixels, uint
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     VK_CHECK(vmaCreateImage(m_allocator, &imageInfo, &allocInfo, &m_image, &m_allocation, nullptr));
 
-    submitImmediate(context, [&](VkCommandBuffer cmd) {
-        // mip 0: UNDEFINED -> TRANSFER_DST, copy pixels in.
-        transitionMip(cmd, m_image, 0, VK_IMAGE_LAYOUT_UNDEFINED,
+    VkCommandBuffer cmd = batch.commandBuffer();
+    // mip 0: UNDEFINED -> TRANSFER_DST, copy pixels in.
+    transitionMip(cmd, m_image, 0, VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+    VkBufferImageCopy copy{};
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.mipLevel = 0;
+    copy.imageSubresource.layerCount = 1;
+    copy.imageExtent = {width, height, 1};
+    vkCmdCopyBufferToImage(cmd, staging.handle(), m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                           &copy);
+
+    // Generate the mip chain by successively halving + blitting from the previous level.
+    int32_t mipW = static_cast<int32_t>(width);
+    int32_t mipH = static_cast<int32_t>(height);
+    for (uint32_t i = 1; i < m_mipLevels; ++i) {
+        // Previous level: TRANSFER_DST -> TRANSFER_SRC (it becomes the blit source).
+        transitionMip(cmd, m_image, i - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+                      VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                      VK_PIPELINE_STAGE_TRANSFER_BIT);
+        // Bring level i from UNDEFINED to TRANSFER_DST so it can receive the blit.
+        transitionMip(cmd, m_image, i, VK_IMAGE_LAYOUT_UNDEFINED,
                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
                       VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-        VkBufferImageCopy copy{};
-        copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        copy.imageSubresource.mipLevel = 0;
-        copy.imageSubresource.layerCount = 1;
-        copy.imageExtent = {width, height, 1};
-        vkCmdCopyBufferToImage(cmd, staging.handle(), m_image,
-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        VkImageBlit blit{};
+        blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.srcSubresource.mipLevel = i - 1;
+        blit.srcSubresource.layerCount = 1;
+        blit.srcOffsets[1] = {mipW, mipH, 1};
+        blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.dstSubresource.mipLevel = i;
+        blit.dstSubresource.layerCount = 1;
+        blit.dstOffsets[1] = {std::max(mipW / 2, 1), std::max(mipH / 2, 1), 1};
+        vkCmdBlitImage(cmd, m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_image,
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
 
-        // Generate the mip chain by successively halving + blitting from the previous level.
-        int32_t mipW = static_cast<int32_t>(width);
-        int32_t mipH = static_cast<int32_t>(height);
-        for (uint32_t i = 1; i < m_mipLevels; ++i) {
-            // Previous level: TRANSFER_DST -> TRANSFER_SRC (it becomes the blit source).
-            transitionMip(cmd, m_image, i - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
-                          VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                          VK_PIPELINE_STAGE_TRANSFER_BIT);
-            // This level was created as TRANSFER_DST (initial layout for all levels via the
-            // first barrier? No — only level 0 was transitioned. Bring level i in now.)
-            transitionMip(cmd, m_image, i, VK_IMAGE_LAYOUT_UNDEFINED,
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
-                          VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-            VkImageBlit blit{};
-            blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            blit.srcSubresource.mipLevel = i - 1;
-            blit.srcSubresource.layerCount = 1;
-            blit.srcOffsets[1] = {mipW, mipH, 1};
-            blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            blit.dstSubresource.mipLevel = i;
-            blit.dstSubresource.layerCount = 1;
-            blit.dstOffsets[1] = {std::max(mipW / 2, 1), std::max(mipH / 2, 1), 1};
-            vkCmdBlitImage(cmd, m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_image,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
-
-            // Previous level is finished: TRANSFER_SRC -> SHADER_READ_ONLY.
-            transitionMip(cmd, m_image, i - 1, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_READ_BIT,
-                          VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-
-            mipW = std::max(mipW / 2, 1);
-            mipH = std::max(mipH / 2, 1);
-        }
-
-        // The last level is still TRANSFER_DST -> SHADER_READ_ONLY.
-        transitionMip(cmd, m_image, m_mipLevels - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+        // Previous level is finished: TRANSFER_SRC -> SHADER_READ_ONLY.
+        transitionMip(cmd, m_image, i - 1, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_READ_BIT,
                       VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-    });
+
+        mipW = std::max(mipW / 2, 1);
+        mipH = std::max(mipH / 2, 1);
+    }
+
+    // The last level is still TRANSFER_DST -> SHADER_READ_ONLY.
+    transitionMip(cmd, m_image, m_mipLevels - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+                  VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+
+    // The GPU reads the staging buffer until the batch submits; hand it ownership to keep it alive.
+    batch.retain(std::move(staging));
 
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = m_image;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = kTextureFormat;
+    viewInfo.format = m_format;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.levelCount = m_mipLevels;
     viewInfo.subresourceRange.layerCount = 1;

@@ -47,7 +47,7 @@ VulkanPipeline::VulkanPipeline(VulkanContext& context, VkRenderPass renderPass,
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.topology = config.topology;
 
     // Viewport/scissor are dynamic so the pipeline survives window resizes untouched —
     // the renderer sets them per frame from the swapchain extent.
@@ -61,11 +61,12 @@ VulkanPipeline::VulkanPipeline(VulkanContext& context, VkRenderPass renderPass,
     raster.polygonMode = VK_POLYGON_MODE_FILL;
     raster.cullMode = config.cullMode; // default NONE; mesh/grid both opt out of culling
     raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    raster.lineWidth = 1.0f;
+    raster.lineWidth = config.lineWidth;
 
+    // Must match the render pass's sample count (all pipelines share the one MSAA render pass).
     VkPipelineMultisampleStateCreateInfo multisample{};
     multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisample.rasterizationSamples = m_context.sampleCount();
 
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;

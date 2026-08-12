@@ -23,7 +23,8 @@ VulkanRenderer::VulkanRenderer(VulkanContext& context, VkExtent2D initialExtent,
     m_swapchain = std::make_unique<VulkanSwapchain>(m_context, m_windowExtent);
 
     m_scene = std::make_unique<Scene>(m_context, m_swapchain->renderPass(),
-                                      loadSpirv("mesh.vert.spv"), loadSpirv("mesh.frag.spv"));
+                                      loadSpirv("mesh.vert.spv"), loadSpirv("mesh.frag.spv"),
+                                      loadSpirv("skeleton.vert.spv"), loadSpirv("skeleton.frag.spv"));
 
     m_grid = std::make_unique<Grid>(m_context, m_swapchain->renderPass(),
                                     loadSpirv("grid.vert.spv"), loadSpirv("grid.frag.spv"));
@@ -56,6 +57,82 @@ void VulkanRenderer::notifyResize(VkExtent2D newExtent) {
 
 void VulkanRenderer::addModel(const ModelData& data) {
     m_scene->addModel(data);
+}
+
+int VulkanRenderer::pickModel(const Ray& ray) const {
+    return m_scene->pickModel(ray);
+}
+
+void VulkanRenderer::deleteModel(std::size_t index) {
+    // The model's buffers and descriptor sets may be referenced by command buffers still in
+    // flight; wait for the device to finish before the scene frees them.
+    vkDeviceWaitIdle(m_context.device());
+    m_scene->removeModel(index);
+}
+
+bool VulkanRenderer::hasPosableFigure() const { return m_scene && m_scene->hasPosableFigure(); }
+
+void VulkanRenderer::setShowSkeleton(bool on) {
+    if (m_scene) {
+        m_scene->setShowSkeleton(on);
+    }
+}
+
+bool VulkanRenderer::showSkeleton() const { return m_scene && m_scene->showSkeleton(); }
+
+void VulkanRenderer::setShadeMode(int mode) {
+    if (m_scene) {
+        m_scene->setShadeMode(mode);
+    }
+}
+
+int VulkanRenderer::shadeMode() const { return m_scene ? m_scene->shadeMode() : 0; }
+
+int VulkanRenderer::selectBoneAt(float px, float py, float vpW, float vpH) {
+    return m_scene ? m_scene->selectBoneAt(px, py, vpW, vpH, m_camera) : -1;
+}
+
+bool VulkanRenderer::hasSelectedBone() const { return m_scene && m_scene->hasSelectedBone(); }
+
+void VulkanRenderer::nudgeSelectedBone(const glm::vec3& deltaEulerDegrees) {
+    if (m_scene) {
+        m_scene->nudgeSelectedBone(deltaEulerDegrees);
+    }
+}
+
+void VulkanRenderer::finalizePose() {
+    if (m_scene) {
+        m_scene->finalizePose();
+    }
+}
+
+int VulkanRenderer::gizmoAxisAt(float px, float py, float vpW, float vpH) const {
+    return m_scene ? m_scene->gizmoAxisAt(px, py, vpW, vpH, m_camera) : -1;
+}
+
+void VulkanRenderer::rotateGizmo(int axis, float prevX, float prevY, float curX, float curY,
+                                 float vpW, float vpH) {
+    if (m_scene) {
+        m_scene->rotateGizmo(axis, prevX, prevY, curX, curY, vpW, vpH, m_camera);
+    }
+}
+
+std::vector<std::pair<std::string, glm::vec3>> VulkanRenderer::capturePose() const {
+    return m_scene ? m_scene->capturePose() : std::vector<std::pair<std::string, glm::vec3>>{};
+}
+
+void VulkanRenderer::applyPose(const std::vector<std::pair<std::string, glm::vec3>>& pose) {
+    if (m_scene) {
+        m_scene->applyPose(pose);
+    }
+}
+
+bool VulkanRenderer::savePose(const std::string& path) const {
+    return m_scene && m_scene->savePose(path);
+}
+
+bool VulkanRenderer::loadPose(const std::string& path) {
+    return m_scene && m_scene->loadPose(path);
 }
 
 void VulkanRenderer::createCommandPool() {
