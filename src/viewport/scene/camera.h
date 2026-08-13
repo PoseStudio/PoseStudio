@@ -54,10 +54,13 @@ public:
 private:
     void rebuildProjection();
 
-    glm::vec3 m_target = glm::vec3(0.0f);
-    float m_distance = 4.0f;
-    float m_yaw = glm::radians(45.0f);   // around the world up axis
-    float m_pitch = glm::radians(25.0f); // above the horizon
+    // Defaults framed for a standing figure imported at the origin (feet at y=0, ~1.8 units tall):
+    // aim at mid-torso and sit close enough that the whole body loads centered in the view. Targeting
+    // the floor/feet (y=0) at a larger distance is what left the figure high and pushed back in frame.
+    glm::vec3 m_target = glm::vec3(0.0f, 0.9f, 0.0f); // ~mid-torso of a standing figure
+    float m_distance = 2.6f;
+    float m_yaw = glm::radians(25.0f);   // around the world up axis; slight three-quarter view
+    float m_pitch = glm::radians(10.0f); // just above the horizon — a gentle look-down
     float m_fovYRadians = glm::radians(50.0f);
     float m_aspect = 1.0f;
     float m_nearPlane = 0.05f;

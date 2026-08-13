@@ -6,18 +6,11 @@
 // weight (1,0,0,0), so this same path leaves them untransformed. Passes a world-space normal, UV,
 // and world position (the last feeds the specular view vector) to the fragment.
 
+// Shared set-0 camera/lighting UBO. The fragment stage declares the full block (view + lighting rig +
+// SH + params — see mesh.frag / scene.cpp's CameraUbo); the vertex stage only needs the view-projection,
+// so it declares just that first member (std140 offset 0, so no other fields need to be spelled out).
 layout(set = 0, binding = 0) uniform CameraUbo {
     mat4 viewProj;
-    mat4 view;        // world -> view (fragment shader modes use it for view-space normals)
-    vec4 cameraPos;
-    vec4 lightDir;    // key light (dir TO light)
-    vec4 lightColor;
-    vec4 fillDir;     // fill light
-    vec4 fillColor;
-    vec4 rimDir;      // rim / back light
-    vec4 rimColor;
-    vec4 ambient;
-    vec4 params;      // x = shade mode (see mesh.frag)
 } cam;
 
 layout(push_constant) uniform Push {

@@ -2,10 +2,11 @@
  * @file mesh.h
  * @brief GPU-resident geometry: a Mesh (one material group) and a Model (one imported file).
  *
- * A Mesh owns device-local vertex + index buffers, its material base color, and its diffuse
- * texture (or none, in which case it points at the scene's shared white fallback), plus the
- * descriptor set (set 1) that binds that texture. A Model groups the meshes of one OBJ under a
- * shared transform and owns the descriptor pool those sets are allocated from. Qt-free.
+ * A Mesh owns device-local vertex + index buffers, its material parameters (base color, roughness,
+ * opacity), and its two textures — a diffuse map and a detail (normal/bump) map, each falling back to
+ * a shared 1x1 texture when absent — bound through its own descriptor set (set 1, two samplers). A
+ * Model groups the meshes of one imported file under a shared transform, owns the descriptor pool
+ * those sets are allocated from, and carries the runtime skeleton for skinned figures. Qt-free.
  */
 
 #ifndef MESH_H
@@ -37,11 +38,12 @@ struct Ray;
 struct MeshPushConstants {
     glm::mat4 model;
     glm::vec4 baseColor; // rgb tint; a = opacity (1 = opaque)
-    glm::vec4 material;  // x = roughness, y = normalMode (0 none / 1 normal / 2 bump), z,w reserved
+    glm::vec4 material;  // x = roughness, y = normalMode (0 none / 1 normal / 2 bump), z = metalness, w reserved
 };
 
-/// One material group of a model: device-local vertex/index buffers, base color, and a diffuse
-/// texture bound through its own set-1 descriptor.
+/// One material group of a model: device-local vertex/index buffers, material params (base color,
+/// roughness, opacity), and its diffuse + detail (normal/bump) textures bound through its own set-1
+/// descriptor (two samplers, each with a shared 1x1 fallback when the map is absent).
 class Mesh {
 public:
     /// @param materialSetLayout  The shared set-1 layout (Scene owns it).

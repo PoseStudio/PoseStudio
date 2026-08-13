@@ -13,6 +13,7 @@
 #include "preferencesmanager.h"
 #include "assetmanagerwidget.h"
 #include "appproxystyle.h"
+#include "environmentpanel.h"
 #include "viewport/viewportwidget.h"
 
 #include <QApplication>
@@ -75,7 +76,8 @@ static QString loadStylesheets() {
         QStringLiteral(":/resources/styles/global.qss"),
         QStringLiteral(":/resources/styles/_assetmanager.qss"),
         QStringLiteral(":/resources/styles/_menumanager.qss"),
-        QStringLiteral(":/resources/styles/_preferences.qss")
+        QStringLiteral(":/resources/styles/_preferences.qss"),
+        QStringLiteral(":/resources/styles/_environment.qss")
     };
 
     for (const QString& filePath : filesToLoad) {
@@ -156,6 +158,8 @@ int main(int argc, char *argv[]) {
     AssetManagerWidget *assetsTab = new AssetManagerWidget();
     sidePanel->addTab(assetsTab, QStringLiteral("Asset Manager"));
     sidePanel->addTab(new QWidget(), QStringLiteral("Properties")); // placeholder tab
+    // The Environment tab: live image-based-lighting controls for the viewport (see EnvironmentPanel).
+    sidePanel->addTab(new pose::EnvironmentPanel(viewport), QStringLiteral("Environment"));
 
     menuManager->setAssetManagerWidget(assetsTab);
     menuManager->setViewportWidget(viewport);

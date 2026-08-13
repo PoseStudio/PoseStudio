@@ -1,6 +1,6 @@
 /**
  * @file grid.h
- * @brief The infinite ground-plane grid drawn as a viewport overlay (Blender-style floor).
+ * @brief The infinite ground-plane grid drawn as a viewport overlay (a construction-plane floor).
  *
  * Self-contained so VulkanRenderer doesn't accumulate per-feature pipeline/push-constant
  * code: Grid owns its own graphics pipeline and knows how to record its draw. The pipeline

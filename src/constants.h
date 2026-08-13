@@ -5,7 +5,7 @@ namespace Constants {
     // --- Application Info ---
     // const char* (not QString) avoids a heap allocation for strings that never change.
     inline constexpr const char* APP_NAME = "PoseStudio";
-    inline constexpr const char* APP_VERSION = "0.3.0";
+    inline constexpr const char* APP_VERSION = "0.3.1";
 
     // --- Collections naming conventions ---
     inline const QString TERM_COL_PLURAL = QStringLiteral("Collections");
@@ -21,11 +21,11 @@ namespace Constants {
     // time, so importing several models from one folder doesn't re-navigate from Documents.
     inline constexpr const char* PREF_LAST_IMPORT_DIR = "LastImportDir";
 
-    // Newline-separated list of content-library root folders (each directly containing a "data/"
+    // Newline-separated list of content-root folders (each directly containing a "data/"
     // subfolder). The figure importer resolves a preset's cross-file references (geometry, morphs,
     // skin, UVs) against these, in addition to auto-detecting the root from the imported file's own
     // location. This is what lets a figure browsed from a presets-only folder (no co-located "data/")
-    // still find its geometry. Populated by the on-import "locate content library" recovery prompt.
+    // still find its geometry. Populated by the on-import "locate content folder" recovery prompt.
     inline constexpr const char* PREF_FIGURE_CONTENT_ROOTS = "FigureContentRoots";
 
     // =========================================================================

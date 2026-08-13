@@ -31,6 +31,8 @@ class VulkanSwapchain;
 class Grid;
 class Scene;
 struct ModelData;
+struct BakedEnvironment;
+struct LightingSettings;
 
 /**
  * @class VulkanRenderer
@@ -71,6 +73,14 @@ public:
 
     /// Exposed so the window's input handlers can drive the view (orbit/pan/dolly).
     Camera& camera() { return m_camera; }
+
+    /// Uploads a CPU-baked lighting environment (SH + prefiltered specular; see bakeEnvironment) and
+    /// swaps it in. The bake is done off the render thread by the Qt layer — keeping both the CPU work
+    /// and the image codec out of this core. No-op if the scene doesn't exist yet.
+    void applyBakedEnvironment(const BakedEnvironment& baked);
+
+    /// Applies the live lighting/exposure dials (Environment panel). No-op if the scene doesn't exist.
+    void setLightingSettings(const LightingSettings& settings);
 
     // --- Posing UI (forwarded to the Scene) ---
     bool hasPosableFigure() const;

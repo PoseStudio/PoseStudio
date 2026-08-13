@@ -22,17 +22,24 @@ layout(set = 0, binding = 0) uniform CameraUbo {
     vec4 rimDir;      // rim / back light (behind the subject, pops the silhouette)
     vec4 rimColor;
     vec4 ambient;
-    vec4 params; // x = shade mode
+    vec4 params;  // x = shade mode, y = exposure, z = specularIntensity, w = ambientFill
+    vec4 sh[9];   // environment diffuse irradiance: 9 SH coefficients (rgb in .xyz)
+    vec4 params2; // x = diffuseIntensity, y = keyIntensity, z = envRotation(rad), w = tonemap(0/1)
 } cam;
 
 layout(push_constant) uniform Push {
     mat4 model;
     vec4 baseColor; // rgb tint, a = opacity
-    vec4 material;  // x = roughness, y = normalMode (0 none / 1 normal / 2 bump)
+    vec4 material;  // x = roughness, y = normalMode (0 none / 1 normal / 2 bump), z = metalness
 } pc;
 
 layout(set = 1, binding = 0) uniform sampler2D uDiffuse; // sRGB colour map (white 1x1 fallback)
 layout(set = 1, binding = 1) uniform sampler2D uDetail;  // linear normal/bump map (flat fallback)
+
+// IBL maps (set 3): the specular half of split-sum image-based lighting. The diffuse half is the SH
+// in the camera UBO. Prefiltered cube: mip = roughness. BRDF LUT: (NdotV, roughness) -> (scale, bias).
+layout(set = 3, binding = 0) uniform samplerCube uPrefilteredSpec;
+layout(set = 3, binding = 1) uniform sampler2D  uBrdfLut;
 
 layout(location = 0) in vec3 vWorldNormal;
 layout(location = 1) in vec2 vUv;
@@ -63,12 +70,28 @@ vec3 tonemapACES(vec3 x) {
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
-// Cheap image-based-lighting stand-in: a two-colour hemisphere (cool sky above, warm-dark ground below).
-// Deliberately dim — it's a fill-of-last-resort for the darkest areas, not a scene light.
-vec3 hemiAmbient(vec3 dir) {
-    const vec3 sky    = vec3(0.30, 0.34, 0.42);
-    const vec3 ground = vec3(0.11, 0.10, 0.09);
-    return mix(ground, sky, clamp(dir.y * 0.5 + 0.5, 0.0, 1.0));
+// Rotates a direction about the vertical (Y) axis — used to spin the lighting environment (its SH
+// diffuse and prefiltered specular) around the subject without re-baking, from the panel's rotation dial.
+vec3 rotateY(vec3 v, float angle) {
+    float c = cos(angle), s = sin(angle);
+    return vec3(c * v.x + s * v.z, v.y, -s * v.x + c * v.z);
+}
+
+// Reconstructs the environment's diffuse irradiance E(n) from the 9 SH coefficients in the camera
+// UBO (Ramamoorthi & Hanrahan's irradiance-environment-map form; the cosine-lobe convolution is
+// folded into the c1..c5 constants). This is the real image-based ambient — soft, directional, and
+// tinted by the environment — that replaces the old flat `ambient` constant for the PBR mode.
+vec3 shIrradiance(vec3 n) {
+    const float c1 = 0.429043, c2 = 0.511664, c3 = 0.743125, c4 = 0.886227, c5 = 0.247708;
+    vec3 L00 = cam.sh[0].rgb;
+    vec3 L1m1 = cam.sh[1].rgb, L10 = cam.sh[2].rgb, L11 = cam.sh[3].rgb;
+    vec3 L2m2 = cam.sh[4].rgb, L2m1 = cam.sh[5].rgb, L20 = cam.sh[6].rgb;
+    vec3 L21 = cam.sh[7].rgb, L22 = cam.sh[8].rgb;
+    float x = n.x, y = n.y, z = n.z;
+    vec3 E = c1 * L22 * (x * x - y * y) + c3 * L20 * (z * z) + c4 * L00 - c5 * L20
+           + 2.0 * c1 * (L2m2 * x * y + L21 * x * z + L2m1 * y * z)
+           + 2.0 * c2 * (L11 * x + L1m1 * y + L10 * z);
+    return max(E, vec3(0.0));
 }
 
 // --- Cook-Torrance microfacet BRDF terms (GGX / Smith / Schlick) ------------------------------------
@@ -78,7 +101,8 @@ float distGGX(float ndh, float a) {
     return a2 / max(PI * d * d, 1e-6);
 }
 float geomSmith(float ndv, float ndl, float a) {
-    float k = (a * a) * 0.5;
+    // @p a is roughness²; the Schlick-GGX direct-light remap is k = roughness²/2 (i.e. a/2).
+    float k = a * 0.5;
     float gv = ndv / (ndv * (1.0 - k) + k);
     float gl = ndl / (ndl * (1.0 - k) + k);
     return gv * gl;
@@ -104,9 +128,9 @@ vec3 pbrDirect(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float a, vec3
     vec3  spec = (D * G) * F / max(4.0 * ndv * ndl, 1e-4);
     vec3  kd = vec3(1.0) - F;
     // Specular dialed down: full-strength dielectric spec makes skin read oily/plastic and blows the
-    // glossy eye catchlight into a white blob over the pupil. ~40% keeps a believable sheen + catchlight
+    // glossy eye catchlight into a white blob over the pupil. ~25% keeps a believable sheen + catchlight
     // without either artifact (skin isn't a true dielectric — subsurface scatters much of it away).
-    return (kd * albedo / PI + spec * 0.4) * radiance * ndl;
+    return (kd * albedo / PI + spec * 0.25) * radiance * ndl;
 }
 
 // --- Procedural matcaps: shade a "material sphere" from the view-space normal (vn.z points at eye) ---
@@ -232,43 +256,65 @@ void main() {
         return;
     }
 
-    // --- PBR: Cook-Torrance GGX lit by a 3-point studio rig + hemisphere IBL (the photoreal mode) ---
+    // --- PBR: Cook-Torrance GGX with image-based lighting (the default photoreal mode) ---
+    // The environment does the heavy lifting: SH-reconstructed diffuse irradiance gives the soft,
+    // directional, colour-bleeding ambient a flat term never could, and one analytic key light adds
+    // crisp form + a highlight on top. No fill/rim lights — the environment supplies wrap + rim.
     if (mode == 1) {
-        const vec3 f0 = vec3(0.04); // dielectric (no metal maps in the source yet)
-        const float a = rough * rough;
+        // Live dials from the Environment panel (via the UBO).
+        float exposure    = cam.params.y;
+        float specScale   = cam.params.z;
+        float ambientFill = cam.params.w;
+        float diffuseInt  = cam.params2.x;
+        float keyInt      = cam.params2.y;
+        float envRot      = cam.params2.z;   // environment Y-rotation (radians)
+        float tonemapOn   = cam.params2.w;
 
-        // Three-point rig: a dominant warm key, a soft cool fill that only opens the shadows, and a
-        // back/rim light that separates the silhouette from the background. Each is a full BRDF eval.
+        float metallic = clamp(pc.material.z, 0.0, 1.0);
+        vec3  f0 = mix(vec3(0.04), albedo, metallic);   // dielectric 4% ramping to metal = albedo tint
+        vec3  diffuseAlbedo = albedo * (1.0 - metallic); // metals have no diffuse
+        float a = rough * rough;
+
         vec3 color = vec3(0.0);
-        color += pbrDirect(n, v, normalize(cam.lightDir.xyz), cam.lightColor.rgb * 2.42, albedo, a, f0);
-        color += pbrDirect(n, v, normalize(cam.fillDir.xyz),  cam.fillColor.rgb * 1.1,   albedo, a, f0);
-        color += pbrDirect(n, v, normalize(cam.rimDir.xyz),   cam.rimColor.rgb * 1.1,    albedo, a, f0);
 
-        // Cheap subsurface scattering: a warm reddish band just past the key light's terminator, so
-        // skin reads as translucent flesh rather than opaque plastic (a stand-in for true SSS).
+        // Key light: a low-intensity analytic fill for a touch of directional shape. Kept small — a
+        // directional HDRI already lights the form, so a strong key over-lights the front. Its
+        // specular is dialed low in pbrDirect.
+        color += pbrDirect(n, v, normalize(cam.lightDir.xyz), cam.lightColor.rgb * keyInt, diffuseAlbedo, a, f0);
+
+        // Environment diffuse: per-normal irradiance from the SH bake (sampled through the environment
+        // rotation). Energy-split by Fresnel so grazing angles hand energy to the specular (kS+kD=1).
+        vec3  kS = fresnelSchlick(ndv, f0);
+        vec3  kD = (1.0 - kS) * (1.0 - metallic);
+        vec3  irradiance = shIrradiance(rotateY(n, envRot));
+        color += kD * diffuseAlbedo * irradiance * (1.0 / PI) * diffuseInt;
+
+        // Ambient fill: a small flat lift on the diffuse albedo so the shadow side of a directional
+        // HDRI (the figure's back/far side) doesn't crush to near-black — reduces front-to-back contrast.
+        color += diffuseAlbedo * ambientFill;
+
+        // Environment specular (split-sum): prefiltered environment radiance sampled along the (rotated)
+        // reflection at a mip chosen by roughness, scaled by the environment-BRDF LUT and by specScale —
+        // dialed well below physical for skin, a subsurface dielectric that reads as wet plastic at full
+        // dielectric specular.
+        vec3 R = reflect(-v, n);
+        float specMip = rough * float(textureQueryLevels(uPrefilteredSpec) - 1);
+        vec3 prefiltered = textureLod(uPrefilteredSpec, rotateY(R, envRot), specMip).rgb;
+        vec2 brdf = texture(uBrdfLut, vec2(ndv, rough)).rg;
+        color += prefiltered * (f0 * brdf.x + brdf.y) * specScale;
+
+        // Cheap subsurface scattering: a warm reddish band just past the key terminator, so skin reads
+        // as translucent flesh rather than opaque plastic (a stand-in for true SSS).
         float keyNdl  = dot(n, normalize(cam.lightDir.xyz));
         float sssBand = pow(clamp(0.5 - keyNdl, 0.0, 1.0), 2.0);
-        color += albedo * cam.lightColor.rgb * vec3(0.30, 0.085, 0.05) * sssBand * 0.9;
+        color += diffuseAlbedo * cam.lightColor.rgb * vec3(0.30, 0.085, 0.05) * sssBand * 0.7;
 
-        // Hemisphere-IBL ambient: a soft diffuse wrap + a roughness-attenuated reflection, so surfaces
-        // pick up environment colour and smoother materials show a faint sky reflection. Kept low so it
-        // only lifts the darkest areas rather than flat-lighting the whole subject.
-        vec3 r  = reflect(-v, n);
-        vec3 Fr = fresnelSchlick(ndv, f0);
-        vec3 diffuseIBL = hemiAmbient(n) * albedo;
-        vec3 specIBL    = hemiAmbient(r) * mix(vec3(0.04), vec3(1.0), Fr) * (1.0 - rough);
-        color += diffuseIBL * 0.35 + specIBL * 0.2;
-
-        // Fresnel rim tinted by the back light — a thin edge on grazing angles that pops the silhouette
-        // (gated by facing the rim light so it only lights the true back edge).
-        float rimF = pow(1.0 - ndv, 4.0) * clamp(dot(n, normalize(cam.rimDir.xyz)) * 0.5 + 0.5, 0.0, 1.0);
-        color += cam.rimColor.rgb * rimF * 0.12;
-
-        outColor = vec4(tonemapACES(color), alpha);
+        color *= exposure;
+        outColor = vec4(tonemapOn > 0.5 ? tonemapACES(color) : clamp(color, 0.0, 1.0), alpha);
         return;
     }
 
-    // --- Rendered (default, mode 0): skin-friendly Blinn-Phong + subsurface, lit by the 3-point rig ---
+    // --- Rendered (mode 0): skin-friendly Blinn-Phong + subsurface, lit by the analytic 3-point rig ---
     float shininess = 2.0 / (rough * rough) - 2.0;
     float spec = pow(ndh, max(shininess, 1.0)) * ndl;
     float fresnel = mix(0.03, 1.0, pow(1.0 - ndv, 5.0));

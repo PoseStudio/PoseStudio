@@ -6,6 +6,7 @@
         <file>styles/_assetmanager.qss</file>
         <file>styles/_menumanager.qss</file>
         <file>styles/_preferences.qss</file>
+        <file>styles/_environment.qss</file>
         
         <file>database/initialize.sql</file>
 

@@ -1,6 +1,6 @@
 #version 450
 
-// Infinite ground-plane grid (Blender-style floor). Rather than drawing line geometry, we
+// Infinite ground-plane grid (a construction-plane floor). Rather than drawing line geometry, we
 // draw a single full-screen quad and reconstruct the world-space point on the y=0 plane in
 // the fragment shader — so the grid is mathematically infinite and perfectly anti-aliased.
 //

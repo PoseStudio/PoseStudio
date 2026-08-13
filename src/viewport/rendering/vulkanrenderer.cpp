@@ -86,6 +86,18 @@ void VulkanRenderer::setShadeMode(int mode) {
     }
 }
 
+void VulkanRenderer::applyBakedEnvironment(const BakedEnvironment& baked) {
+    if (m_scene) {
+        m_scene->applyBakedEnvironment(baked);
+    }
+}
+
+void VulkanRenderer::setLightingSettings(const LightingSettings& settings) {
+    if (m_scene) {
+        m_scene->setLightingSettings(settings);
+    }
+}
+
 int VulkanRenderer::shadeMode() const { return m_scene ? m_scene->shadeMode() : 0; }
 
 int VulkanRenderer::selectBoneAt(float px, float py, float vpW, float vpH) {

@@ -27,6 +27,7 @@ class QMoveEvent;
 namespace pose {
 
 class VulkanWindow;
+struct LightingSettings;
 
 /**
  * @class ViewportWidget
@@ -57,6 +58,11 @@ public:
     /// Sets the viewport shade mode by index (see shaderModeNames()). No-op if the viewport degraded.
     void setShadeMode(int mode);
 
+    /// Loads @p hdrPath as the lighting environment (re-bakes the IBL). No-op if the viewport degraded.
+    void setEnvironment(const QString& hdrPath);
+    /// Applies the live lighting/exposure dials (Environment panel). No-op if the viewport degraded.
+    void setLightingSettings(const LightingSettings& settings);
+
     /// The user-facing shade-mode names, in the shader's mode order (index == shade mode). The single
     /// source of truth the floating shader dropdown is populated from.
     static QStringList shaderModeNames();
@@ -78,7 +84,7 @@ private:
     VulkanWindow*                    m_window = nullptr;    // owned by m_container
     QWidget*                         m_container = nullptr; // the createWindowContainer wrapper
     QWidget*                         m_overlay = nullptr;   // top-level frameless host for the dropdown
-    QPushButton*                     m_shaderButton = nullptr; // opens the shader-mode QMenu
+    QPushButton*                     m_shaderButton = nullptr;   // opens the shader-mode QMenu
     QWidget*                         m_filteredWindow = nullptr; // top-level we filter for move/resize
 };
 

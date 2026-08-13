@@ -26,7 +26,7 @@ namespace pose {
 
 /**
  * @class FigureImporter
- * @brief Assembles a FigureData from a native figure file and the content-library roots.
+ * @brief Assembles a FigureData from a native figure file and the content roots.
  */
 class FigureImporter {
 public:

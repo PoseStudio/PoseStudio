@@ -104,6 +104,18 @@ void ViewportWidget::setShadeMode(int mode) {
     }
 }
 
+void ViewportWidget::setEnvironment(const QString& hdrPath) {
+    if (m_window) {
+        m_window->setEnvironmentFile(hdrPath);
+    }
+}
+
+void ViewportWidget::setLightingSettings(const LightingSettings& settings) {
+    if (m_window) {
+        m_window->setLightingSettings(settings);
+    }
+}
+
 QStringList ViewportWidget::shaderModeNames() {
     // Order IS the shade-mode index the shader reads (cam.params.x); keep in sync with mesh.frag.
     return {
@@ -167,10 +179,12 @@ void ViewportWidget::createShaderOverlay() {
     // indent from a couple of spaces to keep the mode name off the left border (the menu items, which
     // honour padding normally, stay unindented).
     const auto fieldLabel = [](const QString& name) { return QStringLiteral("  ") + name; };
+    // PBR/IBL is the default shade mode (index 1) — see mesh.frag and Scene's m_shadeMode.
+    constexpr int kDefaultShadeMode = 1;
     for (int i = 0; i < names.size(); ++i) {
         QAction* action = menu->addAction(names.at(i));
         action->setCheckable(true);
-        action->setChecked(i == 0);
+        action->setChecked(i == kDefaultShadeMode);
         group->addAction(action);
         connect(action, &QAction::triggered, this, [this, i, name = names.at(i), fieldLabel] {
             setShadeMode(i);
@@ -178,7 +192,7 @@ void ViewportWidget::createShaderOverlay() {
         });
     }
     m_shaderButton->setMenu(menu); // QPushButton drops the menu straight down from the button
-    m_shaderButton->setText(fieldLabel(names.at(0)));
+    m_shaderButton->setText(fieldLabel(names.at(kDefaultShadeMode)));
     lay->addWidget(m_shaderButton);
 
     m_overlay->adjustSize();

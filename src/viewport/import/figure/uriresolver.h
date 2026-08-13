@@ -6,7 +6,7 @@
  * which references a UV set (.dsf), morphs (.dsf), etc. References are URIs like
  *   "/data/Vendor/FigureBase/basefigure.dsf#geometry"
  * — a URL-encoded, root-relative file path plus a "#fragment" naming an asset inside that file.
- * This resolver turns a URI into an on-disk path (searching the configured content-library roots),
+ * This resolver turns a URI into an on-disk path (searching the configured content roots),
  * URL-decodes it, and caches the parsed documents it loads so a shared base file isn't re-read and
  * re-inflated for every reference into it. Pure std (+ FigureDocument) — no Qt, no Vulkan.
  */
@@ -37,7 +37,7 @@ struct ResolvedUri {
  */
 class UriResolver {
 public:
-    /// @param contentRoots Content-library root directories (each directly containing "data/").
+    /// @param contentRoots Content-root directories (each directly containing "data/").
     ///   Tried in order for root-relative ("/...") URIs.
     explicit UriResolver(std::vector<std::string> contentRoots);
 

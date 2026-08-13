@@ -11,7 +11,7 @@
 #include "import/figure/figureimporter.h"
 #include "rendering/vulkanrenderer.h"
 
-#include "preferencesmanager.h" // user-configured content-library roots
+#include "preferencesmanager.h" // user-configured content roots
 #include "constants.h"          // PREF_FIGURE_CONTENT_ROOTS
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -38,7 +38,7 @@ namespace pose {
 
 namespace {
 
-// Walks up from the imported file to the content-library root — the first ancestor directory that
+// Walks up from the imported file to the content root — the first ancestor directory that
 // contains a "data" folder (the anchor every "/data/..." and "/Runtime/..." URI resolves against).
 // Returns an empty list if none is found (the importer then can't resolve the base geometry).
 std::vector<std::string> detectContentRoots(const QString& path) {
@@ -129,10 +129,10 @@ ModelData toModelData(FigureData&& fig) {
     return model;
 }
 
-// --- Content-library root resolution ---------------------------------------------------------
+// --- Content-root resolution ---------------------------------------------------------------------
 //
 // A figure preset references its geometry/morphs/skin/UVs by root-relative URI ("/data/...#id"),
-// resolved against a content-library root (a folder directly containing "data/"). detectContentRoots
+// resolved against a content root (a folder directly containing "data/"). detectContentRoots
 // above finds that root by walking up from the imported file — which works for a self-contained
 // library, but fails when the browsed folder holds only presets and the "data/" library lives
 // elsewhere (a common content layout). To cover that, we also let the user configure/point at their
@@ -165,7 +165,7 @@ std::vector<std::string> buildContentRoots(const QString& path) {
     return roots;
 }
 
-// Appends a content-library root to the persisted list (deduplicated, case-insensitive).
+// Appends a content root to the persisted list (deduplicated, case-insensitive).
 void persistContentRoot(const QString& dir) {
     const QString norm = QDir::cleanPath(dir);
     const QString stored =
@@ -181,21 +181,21 @@ void persistContentRoot(const QString& dir) {
                                             parts.join(QLatin1Char('\n')));
 }
 
-// Interactive recovery: explain that the figure's "data/" library wasn't found and offer to browse
+// Interactive recovery: explain that the figure's "data" folder wasn't found and offer to browse
 // for it. Returns the chosen folder (persisted by the caller), or empty if the user declined.
-QString promptLocateContentLibrary(const QString& path) {
+QString promptLocateContentFolder(const QString& path) {
     QMessageBox box(QApplication::activeWindow());
     box.setIcon(QMessageBox::Warning);
-    box.setWindowTitle(QStringLiteral("Content Library Needed"));
+    box.setWindowTitle(QStringLiteral("Content Folder Needed"));
     box.setText(QStringLiteral("PoseStudio couldn't find the geometry and morph data for:\n%1")
                     .arg(QFileInfo(path).fileName()));
     box.setInformativeText(QStringLiteral(
-        "The folder you imported from contains the figure's presets but not its \"data\" library "
+        "The folder you imported from contains the figure's presets but not its \"data\" folder "
         "(where the mesh, skeleton, morphs and skin weights live).\n\n"
-        "Point PoseStudio at your content library — the folder that directly contains the \"data\" "
-        "folder — and it will be remembered for future imports."));
+        "Point PoseStudio at the figure's content folder — the folder that directly contains the "
+        "\"data\" folder — and it will be remembered for future imports."));
     QPushButton* locateBtn =
-        box.addButton(QStringLiteral("Locate Content Library…"), QMessageBox::AcceptRole);
+        box.addButton(QStringLiteral("Locate Content Folder…"), QMessageBox::AcceptRole);
     box.addButton(QMessageBox::Cancel);
     box.exec();
     if (box.clickedButton() != locateBtn) {
@@ -205,7 +205,7 @@ QString promptLocateContentLibrary(const QString& path) {
     // Browse starting near the imported file (the library root is often an ancestor of the presets).
     const QString dir = QFileDialog::getExistingDirectory(
         QApplication::activeWindow(),
-        QStringLiteral("Select Content Library Folder (the one containing \"data\")"),
+        QStringLiteral("Select the Content Folder (the one containing \"data\")"),
         QFileInfo(path).absolutePath());
     if (dir.isEmpty()) {
         return QString();
@@ -231,8 +231,8 @@ void showImportFailureMessage(const QString& path, const QString& detail, bool n
                    .arg(QFileInfo(path).fileName(), detail);
     } else if (missingContent) {
         body = QStringLiteral("Could not import a character figure from:\n%1\n\nThe figure's geometry "
-                              "and morph data (its \"data\" library) couldn't be found. Import again "
-                              "and choose \"Locate Content Library…\" to point PoseStudio at the folder "
+                              "and morph data (its \"data\" folder) couldn't be found. Import again "
+                              "and choose \"Locate Content Folder…\" to point PoseStudio at the folder "
                               "that contains \"data\".\n\nDetails: %2")
                    .arg(QFileInfo(path).fileName(), detail);
     } else {
@@ -263,7 +263,7 @@ void runFigureImport(VulkanRenderer& renderer, const QString& path,
     timer.start();
 
     if (roots.empty()) {
-        qWarning() << "[viewport] Figure import: no content-library root (a folder containing 'data') "
+        qWarning() << "[viewport] Figure import: no content root (a folder containing 'data') "
                       "auto-detected above"
                    << path << "and none configured";
     }
@@ -337,7 +337,7 @@ bool FigureImportService::importInto(VulkanRenderer& renderer, const QString& pa
                 (roots.empty() || detail.contains(QStringLiteral("resolve"), Qt::CaseInsensitive));
 
             if (missingContent && attempt == 0) {
-                const QString located = promptLocateContentLibrary(path);
+                const QString located = promptLocateContentFolder(path);
                 if (!located.isEmpty()) {
                     persistContentRoot(located);
                     roots = buildContentRoots(path); // fold in the newly located root, then retry

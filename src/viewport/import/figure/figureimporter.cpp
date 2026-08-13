@@ -19,6 +19,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -209,6 +211,72 @@ std::string findGeometryUri(const nlohmann::json& root) {
     return {};
 }
 
+// Builds a bone's rest-orientation matrix from its Euler orientation (degrees), composed X·Y·Z — the
+// same frame the poser rotates in (mesh.cpp's eulerMatrix(orientation, "XYZ")). Since the bind
+// transform is translation-only, this matrix's columns are the bone's three world-space rotation-
+// channel axes (the axes its pose Euler angles rotate about).
+glm::mat3 orientationAxes(const glm::vec3& degrees) {
+    const glm::mat4 m =
+        glm::rotate(glm::mat4(1.0f), glm::radians(degrees.x), glm::vec3(1.0f, 0.0f, 0.0f)) *
+        glm::rotate(glm::mat4(1.0f), glm::radians(degrees.y), glm::vec3(0.0f, 1.0f, 0.0f)) *
+        glm::rotate(glm::mat4(1.0f), glm::radians(degrees.z), glm::vec3(0.0f, 0.0f, 1.0f));
+    return glm::mat3(m);
+}
+
+// A "twist" bone (lThighTwist, rForearmTwist, …) sits partway along a limb — mid-femur, mid-forearm —
+// where a human has no joint; it exists only to spread the limb's axial twist across the skin. It
+// should rotate about its own length (the twist) but must never bend, or the limb folds mid-bone where
+// nothing can. Figures leave such a bone's bend axes unconstrained, so we constrain them here: find the
+// rotation-channel axis most aligned with the bone's length (its twist axis) and lock the other two to
+// zero. Detection is by the "twist" name convention (stable across figure generations) plus a child
+// bone to define the length direction; a bone missing either is left untouched. The runtime's existing
+// clampBoneEuler() then enforces the lock across every posing path (gizmo, drag, loaded pose).
+void lockTwistBoneBendAxes(std::vector<FigureBone>& bones) {
+    std::vector<int> firstChild(bones.size(), -1);
+    for (int i = 0; i < static_cast<int>(bones.size()); ++i) {
+        const int p = bones[static_cast<std::size_t>(i)].parent;
+        if (p >= 0 && p < static_cast<int>(bones.size()) && firstChild[static_cast<std::size_t>(p)] < 0) {
+            firstChild[static_cast<std::size_t>(p)] = i;
+        }
+    }
+    for (std::size_t i = 0; i < bones.size(); ++i) {
+        FigureBone& bone = bones[i];
+        std::string lowered = bone.name;
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (lowered.find("twist") == std::string::npos) {
+            continue; // not a twist bone
+        }
+        const int child = firstChild[i];
+        if (child < 0) {
+            continue; // no child to define the bone's length direction
+        }
+        const glm::vec3 along = bones[static_cast<std::size_t>(child)].origin - bone.origin;
+        if (glm::dot(along, along) < 1e-12f) {
+            continue; // degenerate: child coincides with this joint
+        }
+        const glm::vec3 dir = glm::normalize(along);
+        const glm::mat3 axes = orientationAxes(bone.orientation);
+        int   twistAxis = 0;
+        float bestAlignment = -1.0f;
+        for (int a = 0; a < 3; ++a) {
+            const float alignment = std::abs(glm::dot(dir, glm::normalize(axes[a])));
+            if (alignment > bestAlignment) {
+                bestAlignment = alignment;
+                twistAxis = a;
+            }
+        }
+        for (int a = 0; a < 3; ++a) {
+            if (a == twistAxis) {
+                continue; // keep the twist axis as the figure defined it
+            }
+            bone.rotationMin[a] = 0.0f;
+            bone.rotationMax[a] = 0.0f;
+            bone.rotationLimited[a] = true; // clamped to [0,0] => no bend
+        }
+    }
+}
+
 } // namespace
 
 FigureData FigureImporter::load(const std::string& path,
@@ -308,6 +376,11 @@ FigureData FigureImporter::load(const std::string& path,
     }
 
     if (!out.bones.empty()) {
+        // Twist bones sit mid-limb where there's no real joint; keep their axial twist but forbid the
+        // mid-bone bend the figure would otherwise allow. Done after the origins (incl. morph-driven
+        // offsets) are final, so each bone's length direction reflects the character's proportions.
+        lockTwistBoneBendAxes(out.bones);
+
         std::unordered_map<std::string, int> boneNameToIndex;
         for (int i = 0; i < static_cast<int>(out.bones.size()); ++i) {
             boneNameToIndex.emplace(out.bones[i].name, i);

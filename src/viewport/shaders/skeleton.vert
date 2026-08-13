@@ -4,12 +4,11 @@
 // per-frame camera view-projection (the same set-0 UBO the mesh pipeline uses). Per-vertex colour
 // lets the selected joint be highlighted.
 
+// Shared set-0 camera/lighting UBO (the same buffer the mesh pipeline fills). The overlay only needs
+// the view-projection, so it declares just the first member — declaring a partial-but-misordered
+// subset (e.g. skipping `view`) would put later fields at the wrong std140 offsets.
 layout(set = 0, binding = 0) uniform CameraUbo {
     mat4 viewProj;
-    vec4 cameraPos;
-    vec4 lightDir;
-    vec4 lightColor;
-    vec4 ambient;
 } cam;
 
 layout(location = 0) in vec3 inPos;

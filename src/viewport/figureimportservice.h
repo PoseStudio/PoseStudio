@@ -2,7 +2,7 @@
  * @file figureimportservice.h
  * @brief The Qt-facing orchestration that imports a native figure into the scene.
  *
- * The figure analogue of ModelImportService. It locates the content-library root for the file,
+ * The figure analogue of ModelImportService. It locates the content root for the file,
  * runs the Qt-free FigureImporter (import/figure/) to assemble a FigureData, converts it to the
  * renderer's ModelData (applying the cm->world unit scale), decodes its textures via QImage (reusing
  * ModelImportService::decodeMeshTexture), and uploads it — driving a modal progress dialog. As with

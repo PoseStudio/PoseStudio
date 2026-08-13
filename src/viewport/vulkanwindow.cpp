@@ -5,6 +5,7 @@
 
 #include "vulkanwindow.h"
 
+#include "environmentsource.h"
 #include "figureimportservice.h"
 #include "modelimportservice.h"
 #include "rendering/vulkancommon.h"
@@ -12,18 +13,24 @@
 #include "rendering/vulkanrenderer.h"
 
 #include <QAction>
+#include <QCoreApplication>
 #include <QDebug>
+#include <QFileInfo>
+#include <QFutureWatcher>
 #include <QMenu>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QResizeEvent>
 #include <QVulkanInstance>
 #include <QWheelEvent>
+#include <QtConcurrent>
 #include <QtGui/qevent.h> // QPlatformSurfaceEvent lives here (no separate qpa header in binary Qt)
 
 #include <glm/glm.hpp>
 
 #include <cmath>
+#include <memory>
+#include <optional>
 
 namespace pose {
 
@@ -68,6 +75,12 @@ void VulkanWindow::initializeVulkan() {
         m_renderer = std::make_unique<VulkanRenderer>(*m_context, pixelExtent(),
                                                       m_shaderDir.toStdString());
         m_renderer->setShadeMode(m_shadeMode); // apply a mode chosen before first expose
+        m_renderer->setLightingSettings(m_lighting); // apply any dials set before first expose
+
+        // Image-based lighting: bake a real HDR panorama over the renderer's built-in procedural studio
+        // (the environment the user picked before first expose, else the default). The bake runs off the
+        // UI thread; the first frames render the procedural studio (from the Scene ctor) until it lands.
+        beginEnvironmentBake(m_environmentPath.isEmpty() ? defaultEnvironmentPath() : m_environmentPath);
         m_initialized = true;
 
         // Drain any imports requested before the renderer existed (e.g. user hit Import while
@@ -100,6 +113,58 @@ void VulkanWindow::initializeVulkan() {
         m_context.reset();
         m_deviceFailed = true;
         qCritical() << "[Vulkan] Viewport initialisation failed:" << e.what();
+    }
+}
+
+QString VulkanWindow::defaultEnvironmentPath() const {
+    // An explicit <appDir>/environment.hdr override wins; otherwise the bundled default panorama.
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QString override = appDir + QStringLiteral("/environment.hdr");
+    return QFileInfo::exists(override) ? override
+                                       : appDir + QStringLiteral("/hdri/Golden Gate Hills.hdr");
+}
+
+void VulkanWindow::beginEnvironmentBake(const QString& hdrPath) {
+    if (!m_renderer || hdrPath.isEmpty() || !QFileInfo::exists(hdrPath)) {
+        return; // no renderer yet, or nothing to load — the procedural default stays
+    }
+    // Decode + bake the HDRI off the UI thread: the CPU prefilter is hundreds of ms and would freeze the
+    // app on every switch. The viewport keeps rendering the current environment until the result lands.
+    // A per-request id discards a slower earlier bake whose selection a newer one has since superseded.
+    const quint64 requestId = ++m_environmentRequestId;
+    auto* watcher = new QFutureWatcher<std::shared_ptr<BakedEnvironment>>(this);
+    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, requestId]() {
+        const std::shared_ptr<BakedEnvironment> baked = watcher->result();
+        watcher->deleteLater();
+        // The GPU upload runs here on the GUI thread; apply only the newest request that still has a
+        // live renderer and a successful bake.
+        if (requestId == m_environmentRequestId && m_renderer && baked) {
+            m_renderer->applyBakedEnvironment(*baked);
+            requestUpdate();
+        }
+    });
+    // The task captures only the path (by value); it touches no window/renderer state, so it stays safe
+    // even if the window is torn down before it finishes (the watcher, a child of `this`, won't fire).
+    watcher->setFuture(QtConcurrent::run([hdrPath]() -> std::shared_ptr<BakedEnvironment> {
+        std::optional<EnvironmentImage> env = loadHdrEnvironment(hdrPath.toStdString());
+        if (!env) {
+            qWarning() << "[viewport] Failed to decode HDR environment:" << hdrPath;
+            return nullptr;
+        }
+        return std::make_shared<BakedEnvironment>(bakeEnvironment(std::move(*env)));
+    }));
+}
+
+void VulkanWindow::setEnvironmentFile(const QString& hdrPath) {
+    m_environmentPath = hdrPath; // remembered so it survives a device loss / applies before first expose
+    beginEnvironmentBake(hdrPath); // no-op until the renderer exists (init kicks off the first bake)
+}
+
+void VulkanWindow::setLightingSettings(const LightingSettings& settings) {
+    m_lighting = settings; // remembered so it applies before first expose / after a device loss
+    if (m_renderer) {
+        m_renderer->setLightingSettings(settings);
+        requestUpdate();
     }
 }
 

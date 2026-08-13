@@ -159,6 +159,8 @@ void Mesh::record(VkCommandBuffer cmd, VkPipelineLayout layout, const glm::mat4&
     MeshPushConstants push{};
     push.model = model;
     push.baseColor = glm::vec4(m_baseColor, m_opacity);
+    // material.z = metalness: always 0 for now (the OBJ/figure sources carry no metalness map), but the
+    // PBR shader reads it, so a metal-map slot drops in here without a shader change.
     push.material = glm::vec4(m_roughness, static_cast<float>(m_normalMode), 0.0f, 0.0f);
     vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                        sizeof(push), &push);

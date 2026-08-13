@@ -16,6 +16,8 @@
 #ifndef VULKANWINDOW_H
 #define VULKANWINDOW_H
 
+#include "scene/lightingsettings.h" // stored by value; applied to the renderer once it exists
+
 #include <QWindow>
 
 #include <vulkan/vulkan.h> // for VkExtent2D in the pixelExtent() signature
@@ -71,6 +73,14 @@ public:
     /// Remembered and applied once the renderer exists if it isn't built yet.
     void setShadeMode(int mode);
 
+    /// Loads @p hdrPath as the lighting environment and re-bakes the IBL. Remembered and applied
+    /// once the renderer exists if it isn't built yet. Decoding happens in this Qt layer.
+    void setEnvironmentFile(const QString& hdrPath);
+
+    /// Applies the live lighting/exposure dials (Environment panel). Remembered and applied once the
+    /// renderer exists if it isn't built yet.
+    void setLightingSettings(const LightingSettings& settings);
+
 protected:
     void exposeEvent(QExposeEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
@@ -88,6 +98,8 @@ private:
     void redoPose(); // Ctrl+Y: reapply an undone edit
 
     void initializeVulkan();   // safe to call repeatedly; no-ops once initialised
+    void beginEnvironmentBake(const QString& hdrPath); // decode + bake off-thread, then swap in on the GUI thread
+    QString defaultEnvironmentPath() const;            // <appDir>/environment.hdr override, else bundled HDRI
     void releaseVulkan();      // tears down renderer + context (surface still valid)
     void renderFrame();        // one frame, then schedules the next while exposed
     VkExtent2D pixelExtent() const; // window size in physical pixels
@@ -108,7 +120,10 @@ private:
     std::vector<QString> m_pendingModels;  // OBJ imports requested before the renderer existed
     std::vector<QString> m_pendingFigures; // figure imports requested before the renderer existed
     QString              m_pendingPose;    // pose file to apply once the queued figure is loaded
-    int                  m_shadeMode = 0;  // viewport shade mode; applied to the renderer once it exists
+    int                  m_shadeMode = 1;  // viewport shade mode (1 = PBR/IBL); applied to the renderer once it exists
+    QString              m_environmentPath;         // chosen HDRI (empty = the default at init); applied once the renderer exists
+    quint64              m_environmentRequestId = 0; // ++ per HDRI request; a slower earlier bake with a stale id is discarded
+    LightingSettings     m_lighting;                // live lighting dials; applied to the renderer once it exists
 
     QPointF          m_lastMousePos;
     // Buttons whose drag actually began with a press in this window. We gate camera moves on

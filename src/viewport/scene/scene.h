@@ -11,6 +11,8 @@
 #ifndef SCENE_H
 #define SCENE_H
 
+#include "environment.h"
+#include "lightingsettings.h"
 #include "vulkanbuffer.h"
 
 #include <glm/glm.hpp>
@@ -30,6 +32,7 @@ class VulkanPipeline;
 class VulkanTexture;
 class Camera;
 class Model;
+class IblMaps;
 struct ModelData;
 struct Ray;
 
@@ -53,6 +56,17 @@ public:
 
     /// Number of models currently in the scene.
     std::size_t modelCount() const { return m_models.size(); }
+
+    /// Uploads a CPU-baked environment (SH irradiance + prefiltered specular; see bakeEnvironment) and
+    /// points the IBL descriptor set at it. Waits for the GPU to idle first, since it swaps the maps the
+    /// mesh pipeline samples. The heavy CPU bake is done by the caller (off the render thread for
+    /// interactive HDRI switches); this does only the fast GPU work.
+    void applyBakedEnvironment(const BakedEnvironment& baked);
+
+    /// Live lighting/exposure controls (the Environment panel drives these). All shader-side, so this
+    /// is just a cached value read into the next frame's UBO — no re-bake.
+    void                   setLightingSettings(const LightingSettings& settings) { m_lighting = settings; }
+    const LightingSettings& lightingSettings() const { return m_lighting; }
 
     /// Returns the index of the nearest model whose bounding box @p ray hits, or -1 if none.
     int pickModel(const Ray& ray) const;
@@ -117,7 +131,15 @@ private:
     std::unique_ptr<VulkanPipeline> m_skeletonPipeline;    // line overlay for the posing skeleton
     VulkanBuffer                    m_skeletonVertexBuffer; // host-mapped line vertices (pos+color)
     bool                            m_showSkeleton = false;
-    int                             m_shadeMode = 0;        // viewport shade mode (see mesh.frag)
+    int                             m_shadeMode = 1;        // viewport shade mode (see mesh.frag); 1 = PBR/IBL
+
+    // Lighting environment: the baked diffuse-irradiance SH (feeds the per-frame camera UBO so the PBR
+    // mode is image-based-lit) and the environment-independent split-sum BRDF LUT (integrated once,
+    // reused on every re-bake). The prefiltered specular cubemap lives in m_iblMaps. A CPU-baked
+    // BakedEnvironment (SH + specular) is applied via applyBakedEnvironment(); no source image is kept.
+    EnvironmentSH    m_environmentSH;
+    BrdfLut          m_brdfLut;
+    LightingSettings m_lighting; // live exposure/diffuse/specular/fill/key/rotation/tonemap dials (Environment panel)
 
     // Per-frame camera/lighting UBO (set 0, binding 0): one buffer + one set per frame-in-flight.
     VkDescriptorSetLayout        m_setLayout = VK_NULL_HANDLE;
@@ -136,6 +158,14 @@ private:
     // Per-model skinning joint matrices (set 2, binding 0): a storage buffer of skin matrices read
     // in the vertex stage. The layout is shared; each Model owns its own buffer + set (see mesh.h).
     VkDescriptorSetLayout m_jointSetLayout = VK_NULL_HANDLE;
+
+    // Image-based lighting (set 3): the prefiltered specular cubemap + BRDF LUT (owned by m_iblMaps),
+    // bound scene-wide. The diffuse half is the SH in m_environmentSH (fed via the camera UBO). One
+    // static set, its images (re)filled by applyBakedEnvironment() when the environment changes.
+    VkDescriptorSetLayout    m_iblSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool         m_iblPool = VK_NULL_HANDLE;
+    VkDescriptorSet          m_iblSet = VK_NULL_HANDLE;
+    std::unique_ptr<IblMaps> m_iblMaps;
 
     std::vector<std::unique_ptr<Model>> m_models;
 };

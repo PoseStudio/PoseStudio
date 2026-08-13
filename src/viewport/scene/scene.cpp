@@ -6,6 +6,8 @@
 #include "scene.h"
 
 #include "camera.h"
+#include "environment.h"
+#include "iblmaps.h"
 #include "mesh.h"
 #include "modeldata.h"
 #include "vertex.h"
@@ -43,8 +45,11 @@ struct CameraUbo {
     glm::vec4 rimDir;      // rim / back light (dir TO light)
     glm::vec4 rimColor;    // rgb (intensity baked in)
     glm::vec4 ambient;     // rgb ambient/fill term
-    glm::vec4 params;      // x = shade mode (see mesh.frag)
+    glm::vec4 params;      // x = shade mode, y = exposure, z = specularIntensity, w = ambientFill
+    glm::vec4 sh[9];       // environment diffuse irradiance: 9 SH coefficients (rgb in .xyz)
+    glm::vec4 params2;     // x = diffuseIntensity, y = keyIntensity, z = envRotation(rad), w = tonemap(0/1)
 };
+
 
 // A vertex of the skeleton overlay: a world-space point + its colour. Must match skeleton.vert.
 struct LineVertex {
@@ -83,6 +88,11 @@ Scene::Scene(VulkanContext& context, VkRenderPass renderPass, const std::vector<
     : m_context(context) {
     createDescriptorResources();
 
+    // Bake the default procedural studio environment synchronously so descriptor set 3 is valid before
+    // the first frame. A real HDRI is baked off the render thread (VulkanWindow) and swapped in when
+    // ready via applyBakedEnvironment().
+    applyBakedEnvironment(bakeEnvironment(generateStudioEnvironment()));
+
     // 1x1 opaque-white fallback texture so untextured meshes can share the same pipeline/shader:
     // sampling white and multiplying by baseColor just yields baseColor.
     const uint8_t white[4] = {255, 255, 255, 255};
@@ -107,8 +117,9 @@ Scene::Scene(VulkanContext& context, VkRenderPass renderPass, const std::vector<
     const auto attrs = Vertex::attributeDescriptions();
     config.vertexBindings.assign(1, binding);
     config.vertexAttributes.assign(attrs.begin(), attrs.end());
-    // set 0 = camera, set 1 = material textures, set 2 = per-model skinning joint matrices.
-    config.descriptorSetLayouts = {m_setLayout, m_materialSetLayout, m_jointSetLayout};
+    // set 0 = camera, set 1 = material textures, set 2 = per-model skinning joint matrices,
+    // set 3 = IBL maps (prefiltered specular cubemap + BRDF LUT).
+    config.descriptorSetLayouts = {m_setLayout, m_materialSetLayout, m_jointSetLayout, m_iblSetLayout};
 
     m_pipeline = std::make_unique<VulkanPipeline>(m_context, renderPass, vertSpirv, fragSpirv, config);
 
@@ -166,9 +177,16 @@ Scene::~Scene() {
     m_skeletonPipeline.reset();
     m_fallbackTexture.reset();
     m_fallbackNormal.reset();
+    m_iblMaps.reset();         // frees the specular cubemap + BRDF LUT images
     m_cameraBuffers.clear();   // VulkanBuffers free themselves
 
     VkDevice device = m_context.device();
+    if (m_iblPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(device, m_iblPool, nullptr); // frees the IBL set too
+    }
+    if (m_iblSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, m_iblSetLayout, nullptr);
+    }
     if (m_descriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(device, m_descriptorPool, nullptr); // frees the camera sets too
     }
@@ -227,6 +245,37 @@ void Scene::createDescriptorResources() {
     jointLayoutInfo.pBindings = &jointBinding;
     VK_CHECK(vkCreateDescriptorSetLayout(device, &jointLayoutInfo, nullptr, &m_jointSetLayout));
 
+    // Set 3: image-based-lighting maps — binding 0 = prefiltered specular cubemap, binding 1 = BRDF
+    // LUT, both fragment-stage. One static set for the whole scene; the images are filled by applyBakedEnvironment().
+    std::array<VkDescriptorSetLayoutBinding, 2> iblBindings{};
+    for (uint32_t i = 0; i < iblBindings.size(); ++i) {
+        iblBindings[i].binding = i;
+        iblBindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        iblBindings[i].descriptorCount = 1;
+        iblBindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
+    VkDescriptorSetLayoutCreateInfo iblLayoutInfo{};
+    iblLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    iblLayoutInfo.bindingCount = static_cast<uint32_t>(iblBindings.size());
+    iblLayoutInfo.pBindings = iblBindings.data();
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &iblLayoutInfo, nullptr, &m_iblSetLayout));
+
+    std::array<VkDescriptorPoolSize, 1> iblPoolSizes{};
+    iblPoolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    iblPoolSizes[0].descriptorCount = 2;
+    VkDescriptorPoolCreateInfo iblPoolInfo{};
+    iblPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    iblPoolInfo.poolSizeCount = static_cast<uint32_t>(iblPoolSizes.size());
+    iblPoolInfo.pPoolSizes = iblPoolSizes.data();
+    iblPoolInfo.maxSets = 1;
+    VK_CHECK(vkCreateDescriptorPool(device, &iblPoolInfo, nullptr, &m_iblPool));
+    VkDescriptorSetAllocateInfo iblAlloc{};
+    iblAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    iblAlloc.descriptorPool = m_iblPool;
+    iblAlloc.descriptorSetCount = 1;
+    iblAlloc.pSetLayouts = &m_iblSetLayout;
+    VK_CHECK(vkAllocateDescriptorSets(device, &iblAlloc, &m_iblSet));
+
     VkDescriptorPoolSize poolSize{};
     poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSize.descriptorCount = kMaxFramesInFlight;
@@ -267,6 +316,35 @@ void Scene::createDescriptorResources() {
     }
 }
 
+void Scene::applyBakedEnvironment(const BakedEnvironment& baked) {
+    // The mesh pipeline samples the specular cubemap + LUT this is about to replace; ensure no in-flight
+    // frame is still reading the old IblMaps before it's destroyed. (The expensive CPU bake — SH +
+    // prefiltered specular — already happened in bakeEnvironment(), off the render thread for switches.)
+    vkDeviceWaitIdle(m_context.device());
+    m_environmentSH = baked.sh;
+    // The BRDF LUT is environment-independent (roughness + NdotV only), so integrate it once and reuse
+    // — re-running the ~8M-sample integration on every HDRI swap would be pure waste.
+    if (m_brdfLut.data.empty()) {
+        m_brdfLut = integrateBrdfLut();
+    }
+    m_iblMaps = std::make_unique<IblMaps>(m_context, baked.specular, m_brdfLut);
+
+    const VkDescriptorImageInfo specInfo = m_iblMaps->specularInfo();
+    const VkDescriptorImageInfo brdfInfo = m_iblMaps->brdfInfo();
+    std::array<VkWriteDescriptorSet, 2> writes{};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = m_iblSet;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[0].descriptorCount = 1;
+    writes[0].pImageInfo = &specInfo;
+    writes[1] = writes[0];
+    writes[1].dstBinding = 1;
+    writes[1].pImageInfo = &brdfInfo;
+    vkUpdateDescriptorSets(m_context.device(), static_cast<uint32_t>(writes.size()), writes.data(), 0,
+                           nullptr);
+}
+
 void Scene::addModel(const ModelData& data) {
     m_models.push_back(std::make_unique<Model>(m_context, data, m_materialSetLayout, m_jointSetLayout,
                                                *m_fallbackTexture, *m_fallbackNormal));
@@ -296,14 +374,14 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
         return; // nothing to draw; the grid still renders on its own
     }
 
-    // Update this frame's camera + lighting UBO. The key light is a fixed studio-ish direction for
-    // now (above/front), with a soft ambient fill; later this comes from real scene lighting.
-    // Three-point studio rig, world-space (fixed relative to the subject, so lighting stays consistent
-    // as the camera orbits — like a real studio). Directions point TO each light.
-    //  - Key:  the main, brightest light, ~45° off to the front-right and above — creates the form + shadows.
-    //  - Fill: softer + clearly dimmer, opposite side (front-left), lower — opens the shadow side only.
-    //  - Back/rim: behind + above the subject — rims the hair/shoulders so the figure pops off the grid.
-    // Intensities are baked into the colours (PBR scales the key up a bit further before tonemapping).
+    // Update this frame's camera + lighting UBO. The default (PBR) mode is image-based-lit — its diffuse
+    // comes from the environment's SH irradiance (filled in below) and its specular from the prefiltered-
+    // environment cubemap (set 3). The analytic lights below feed only the *non-IBL* shade modes: only
+    // Rendered (mode 0) uses the full key/fill/rim rig; the other analytic modes use just the key +
+    // ambient, and PBR uses only the key (scaled by the panel's keyIntensity). The rig is world-space
+    // (fixed relative to the subject, so lighting stays consistent as the camera orbits). Dirs point TO
+    // each light: Key = front-right & above (form + shadows); Fill = opposite side, lower + dimmer (opens
+    // the shadow side); Back/rim = behind + above (rims the shoulders so the figure pops off the grid).
     CameraUbo ubo{};
     ubo.viewProj = camera.viewProjection();
     ubo.view = camera.view();
@@ -315,7 +393,15 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
     ubo.rimDir = glm::vec4(glm::normalize(glm::vec3(-0.15f, 0.55f, -0.9f)), 0.0f);   // back: behind + above
     ubo.rimColor = glm::vec4(1.2f, 1.28f, 1.45f, 0.0f);                               // cool, localised to edges
     ubo.ambient = glm::vec4(0.10f, 0.11f, 0.13f, 0.0f);
-    ubo.params = glm::vec4(static_cast<float>(m_shadeMode), 0.0f, 0.0f, 0.0f);
+    ubo.params = glm::vec4(static_cast<float>(m_shadeMode), m_lighting.exposure,
+                           m_lighting.specularIntensity, m_lighting.ambientFill);
+    ubo.params2 = glm::vec4(m_lighting.diffuseIntensity, m_lighting.keyIntensity,
+                            glm::radians(m_lighting.environmentRotationDeg), m_lighting.tonemap ? 1.0f : 0.0f);
+    // Environment diffuse irradiance (SH). The PBR mode reconstructs per-normal ambient from these
+    // instead of the flat `ambient` constant, so shadow sides pick up the environment's colour.
+    for (int i = 0; i < 9; ++i) {
+        ubo.sh[i] = glm::vec4(m_environmentSH.c[i], 0.0f);
+    }
     std::memcpy(m_cameraBuffers[frameIndex].mappedData(), &ubo, sizeof(ubo));
 
     // Opaque pass: bind the camera set (set 0) once — it stays bound for the transparent pass too,
@@ -323,6 +409,10 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->handle());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->layout(), 0, 1,
                             &m_cameraSets[frameIndex], 0, nullptr);
+    // Set 3 (IBL maps) is scene-global — bind once; it stays bound for the transparent pass too, since
+    // both pipelines share the layout (like the camera set).
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->layout(), 3, 1, &m_iblSet,
+                            0, nullptr);
     for (const std::unique_ptr<Model>& model : m_models) {
         model->record(cmd, m_pipeline->layout(), /*transparentPass=*/false);
     }

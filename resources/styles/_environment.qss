@@ -1,0 +1,131 @@
+/* ============================================================================
+ * _environment.qss — the Environment properties tab (see src/properties/environmentpanel.*)
+ * Concatenated after global.qss (main.cpp loadStylesheets), so these rules override the base.
+ * Everything is scoped under #EnvironmentPanel so it can't leak into other widgets.
+ * Palette matches the app: pane #252627, inputs #2a2b2d, borders #3a3b3d/#4a4b4d,
+ * accent #5b87cc, hover #314D7A, text #e0e0e0.
+ * ==========================================================================*/
+
+#EnvironmentPanel,
+#EnvironmentContent {
+    background-color: #252627; /* same as the QTabWidget::pane the tab sits in */
+}
+
+#EnvironmentPanel QScrollArea {
+    background: transparent;
+    border: none;
+}
+
+/* Row labels: the global QLabel rule is white/18px — far too big here. Reset to the app's body size. */
+#EnvironmentPanel QLabel {
+    color: #c7c8cb;
+    font-size: 12px;
+    padding: 0;
+}
+
+/* Section frames. */
+#EnvironmentGroup {
+    border: 1px solid #3a3b3d;
+    border-radius: 5px;
+    margin-top: 14px;       /* room for the title sitting on the top border */
+    padding: 12px 8px 8px 8px;
+    font-size: 12px;
+    color: #cfcfd2;
+}
+#EnvironmentGroup::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 8px;
+    padding: 0 4px;
+    color: #8b9096;
+}
+
+/* Combo box (HDRI selector) + its popup. */
+#EnvironmentPanel QComboBox {
+    background-color: #2a2b2d;
+    color: #e0e0e0;
+    border: 1px solid #4a4b4d;
+    border-radius: 4px;
+    padding: 4px 8px;
+    min-height: 20px;
+}
+#EnvironmentPanel QComboBox:hover { border-color: #5b87cc; }
+#EnvironmentPanel QComboBox::drop-down { border: none; width: 18px; }
+#EnvironmentPanel QComboBox QAbstractItemView {
+    background-color: #252627;
+    color: #e0e0e0;
+    border: 1px solid #4a4b4d;
+    selection-background-color: #314D7A;
+    selection-color: #ffffff;
+    outline: none;
+}
+
+/* Numeric spin boxes. */
+#EnvironmentPanel QDoubleSpinBox {
+    background-color: #2a2b2d;
+    color: #e0e0e0;
+    border: 1px solid #4a4b4d;
+    border-radius: 4px;
+    padding: 2px 4px;
+    selection-background-color: #5b87cc;
+}
+#EnvironmentPanel QDoubleSpinBox:hover { border-color: #5b87cc; }
+#EnvironmentPanel QDoubleSpinBox::up-button,
+#EnvironmentPanel QDoubleSpinBox::down-button {
+    background-color: #333436;
+    width: 14px;
+    border: none;
+}
+#EnvironmentPanel QDoubleSpinBox::up-button:hover,
+#EnvironmentPanel QDoubleSpinBox::down-button:hover {
+    background-color: #3f4042;
+}
+
+/* Sliders: thin groove, accent fill, round handle. */
+#EnvironmentPanel QSlider::groove:horizontal {
+    height: 4px;
+    background: #3a3b3d;
+    border-radius: 2px;
+}
+#EnvironmentPanel QSlider::sub-page:horizontal {
+    background: #5b87cc;
+    border-radius: 2px;
+}
+#EnvironmentPanel QSlider::handle:horizontal {
+    background: #cfd3d8;
+    width: 12px;
+    margin: -5px 0;
+    border-radius: 6px;
+}
+#EnvironmentPanel QSlider::handle:horizontal:hover { background: #ffffff; }
+
+/* Tonemap checkbox. */
+#EnvironmentPanel QCheckBox {
+    color: #c7c8cb;
+    font-size: 12px;
+    spacing: 6px;
+}
+#EnvironmentPanel QCheckBox::indicator {
+    width: 15px;
+    height: 15px;
+    border: 1px solid #4a4b4d;
+    border-radius: 3px;
+    background: #2a2b2d;
+}
+#EnvironmentPanel QCheckBox::indicator:checked {
+    background: #5b87cc;
+    border-color: #5b87cc;
+}
+
+/* Reset button: quiet, secondary. */
+#EnvironmentResetButton {
+    background-color: #2a2b2d;
+    color: #d0d0d3;
+    border: 1px solid #4a4b4d;
+    border-radius: 4px;
+    padding: 5px 12px;
+}
+#EnvironmentResetButton:hover {
+    background-color: #314D7A;
+    color: #ffffff;
+}

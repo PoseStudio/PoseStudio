@@ -10,7 +10,7 @@ cmake_minimum_required(VERSION 3.21)
 # C is enabled alongside C++ because a couple of third-party dependencies ship C implementation
 # files we compile directly into the target (e.g. miniz's inflate sources for the figure importer).
 # Without C in the language list, CMake classifies .c files as non-buildable and silently skips them.
-project(PoseStudio VERSION 0.3.0 LANGUAGES C CXX)
+project(PoseStudio VERSION 0.3.1 LANGUAGES C CXX)
 
 # ==============================================================================
 # [ COMPILER CONFIGURATION ]
@@ -33,7 +33,7 @@ if(NOT DEFINED CMAKE_PREFIX_PATH)
 endif()
 
 # Locate required Qt modules. The build will fatally abort if these are missing.
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Sql)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Sql Concurrent)
 
 # Automatically invoke Qt's pre-processors during the build:
 set(CMAKE_AUTOMOC ON) # Meta-Object Compiler (Handles Signals & Slots)
@@ -48,6 +48,18 @@ set(CMAKE_AUTORCC ON) # Resource Compiler (Handles .qrc binary embedding)
 # installed (https://vulkan.lunarg.com): it supplies the headers, the loader, the
 # validation layers, and the glslc shader compiler used below. find_package fails
 # fast with a clear message if the SDK is missing.
+#
+# On Windows the installer sets VULKAN_SDK in the user environment, but IDE-launched
+# CMake processes sometimes don't inherit it. Fall back to the canonical install root
+# so developers don't have to pass -DVulkan_* manually.
+if(WIN32 AND NOT DEFINED ENV{VULKAN_SDK})
+    file(GLOB _vulkan_sdk_candidates "C:/VulkanSDK/*")
+    if(_vulkan_sdk_candidates)
+        list(SORT _vulkan_sdk_candidates ORDER DESCENDING)
+        list(GET _vulkan_sdk_candidates 0 _vulkan_sdk_root)
+        set(ENV{VULKAN_SDK} "${_vulkan_sdk_root}")
+    endif()
+endif()
 find_package(Vulkan REQUIRED)
 
 if(NOT Vulkan_GLSLC_EXECUTABLE)
@@ -101,7 +113,15 @@ FetchContent_Declare(miniz
     GIT_TAG        3.1.2
     SOURCE_SUBDIR  headers-only-do-not-configure
 )
-FetchContent_MakeAvailable(glm vma tinyobjloader nlohmann_json miniz)
+# stb: single-header image loaders. We use stb_image's HDR decoder (stbi_loadf) to load the .hdr
+# environment panoramas for image-based lighting. Header-only, so compiled in one TU (stb_impl.cpp),
+# same treatment as VMA/tinyobjloader. Pinned to a commit (the repo has no release tags).
+FetchContent_Declare(stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG        013ac3beddff3dbffafd5177e7972067cd2b5083
+    SOURCE_SUBDIR  headers-only-do-not-configure
+)
+FetchContent_MakeAvailable(glm vma tinyobjloader nlohmann_json miniz stb)
 
 # ==============================================================================
 # [ TARGET DEFINITION & SOURCE FILES ]
@@ -126,6 +146,10 @@ add_executable(
     src/assets/assetmanagerwidget.cpp
     src/assets/assetmanagerwidget.h
 
+    # --- Properties panels (right-docker tabs) ---
+    src/properties/environmentpanel.cpp
+    src/properties/environmentpanel.h
+
     # --- 3D Viewport (Vulkan) ---
     # Qt-facing layer (the only viewport files that touch Qt):
     src/viewport/viewportwidget.cpp
@@ -136,6 +160,9 @@ add_executable(
     src/viewport/modelimportservice.h
     src/viewport/figureimportservice.cpp  # figure analogue: figure -> ModelData -> decode -> upload
     src/viewport/figureimportservice.h
+    src/viewport/environmentsource.cpp    # decodes .hdr panoramas (stb) -> EnvironmentImage (codec layer)
+    src/viewport/environmentsource.h
+    src/viewport/stb_impl.cpp             # single TU that compiles stb_image's implementation
     # Rendering core (pure Vulkan + std + GLM, no Qt):
     src/viewport/rendering/vulkancommon.h
     src/viewport/rendering/vulkancontext.cpp
@@ -148,6 +175,8 @@ add_executable(
     src/viewport/rendering/vulkanbuffer.h
     src/viewport/rendering/vulkanimage.cpp
     src/viewport/rendering/vulkanimage.h
+    src/viewport/rendering/iblmaps.cpp    # GPU prefiltered-specular cubemap + BRDF LUT (IBL set 3)
+    src/viewport/rendering/iblmaps.h
     src/viewport/rendering/vulkancommands.cpp
     src/viewport/rendering/vulkancommands.h
     src/viewport/rendering/vulkanrenderer.cpp
@@ -191,6 +220,9 @@ add_executable(
     # Scene:
     src/viewport/scene/camera.cpp
     src/viewport/scene/camera.h
+    src/viewport/scene/environment.cpp   # procedural studio env + IBL bakes (SH, prefilter, BRDF LUT)
+    src/viewport/scene/environment.h
+    src/viewport/scene/lightingsettings.h # live lighting dials shared with the Environment panel
     src/viewport/scene/grid.cpp
     src/viewport/scene/grid.h
     src/viewport/scene/mesh.cpp
@@ -248,6 +280,7 @@ target_include_directories(PoseStudio PRIVATE
     src/core
     src/shell
     src/assets
+    src/properties
     src/preferences
     src/viewport
     src/viewport/rendering
@@ -261,6 +294,7 @@ target_include_directories(PoseStudio PRIVATE
     ${nlohmann_json_SOURCE_DIR}/single_include # so <nlohmann/json.hpp> resolves
     ${miniz_SOURCE_DIR}                      # so <miniz.h> resolves
     ${CMAKE_SOURCE_DIR}/cmake/miniz-shim     # supplies miniz_export.h (miniz's CMake is skipped)
+    ${stb_SOURCE_DIR}                        # so <stb_image.h> resolves
 )
 
 # miniz's C implementation, compiled directly into the target (its split source layout: core +
@@ -287,6 +321,7 @@ target_link_libraries(PoseStudio PRIVATE
     Qt6::Widgets
     Qt6::Gui
     Qt6::Sql
+    Qt6::Concurrent  # off-thread IBL bake on HDRI switches (QtConcurrent::run + QFutureWatcher)
     Vulkan::Vulkan
 )
 
@@ -310,6 +345,19 @@ add_custom_command(
             "${CMAKE_SOURCE_DIR}/resources/Maquettes"
             "$<TARGET_FILE_DIR:PoseStudio>/Maquettes"
     COMMENT "Mirroring built-in Maquettes library next to the executable"
+)
+
+# The HDRI panoramas (CC0 equirectangular .hdr environments) that light the viewport via IBL. Like
+# Maquettes, they're real on-disk content the app loads at runtime from <applicationDirPath>/hdri,
+# not embedded in the binary. Mirrored (rm -rf then copy) so removed/renamed files don't linger.
+add_custom_command(
+    TARGET PoseStudio POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E rm -rf
+            "$<TARGET_FILE_DIR:PoseStudio>/hdri"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/resources/hdri"
+            "$<TARGET_FILE_DIR:PoseStudio>/hdri"
+    COMMENT "Mirroring HDRI environments next to the executable"
 )
 
 # ==============================================================================
