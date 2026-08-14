@@ -10,7 +10,7 @@ cmake_minimum_required(VERSION 3.21)
 # C is enabled alongside C++ because a couple of third-party dependencies ship C implementation
 # files we compile directly into the target (e.g. miniz's inflate sources for the figure importer).
 # Without C in the language list, CMake classifies .c files as non-buildable and silently skips them.
-project(PoseStudio VERSION 0.3.2 LANGUAGES C CXX)
+project(PoseStudio VERSION 0.3.3 LANGUAGES C CXX)
 
 # ==============================================================================
 # [ COMPILER CONFIGURATION ]
@@ -256,6 +256,8 @@ add_executable(
     # --- Data Layer & Storage ---
     src/core/database.cpp
     src/core/database.h
+    src/core/librarypaths.cpp             # resolves the per-user "My PoseStudio Library" (+ hdri/)
+    src/core/librarypaths.h
     src/core/preferencesmanager.cpp
     src/core/preferencesmanager.h
     
@@ -350,18 +352,10 @@ add_custom_command(
     COMMENT "Mirroring built-in Maquettes library next to the executable"
 )
 
-# The HDRI panoramas (CC0 equirectangular .hdr environments) that light the viewport via IBL. Like
-# Maquettes, they're real on-disk content the app loads at runtime from <applicationDirPath>/hdri,
-# not embedded in the binary. Mirrored (rm -rf then copy) so removed/renamed files don't linger.
-add_custom_command(
-    TARGET PoseStudio POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E rm -rf
-            "$<TARGET_FILE_DIR:PoseStudio>/hdri"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/resources/hdri"
-            "$<TARGET_FILE_DIR:PoseStudio>/hdri"
-    COMMENT "Mirroring HDRI environments next to the executable"
-)
+# NOTE: HDRI environment panoramas are user content, not build output. They live in the user's own
+# asset library ("My PoseStudio Library/hdri" — see src/core/librarypaths.h), where users add their
+# own; packaging/installers are responsible for placing the stock set there. Nothing is mirrored
+# next to the executable.
 
 # ==============================================================================
 # [ SHADER COMPILATION (GLSL -> SPIR-V) ]

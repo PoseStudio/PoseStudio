@@ -16,6 +16,7 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QIcon>
+#include <QWidget>
 
 #include "constants.h"
 

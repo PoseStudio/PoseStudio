@@ -25,6 +25,7 @@ layout(set = 0, binding = 0) uniform CameraUbo {
     vec4 params;  // x = shade mode, y = exposure, z = specularIntensity, w = ambientFill
     vec4 sh[9];   // environment diffuse irradiance: 9 SH coefficients (rgb in .xyz)
     vec4 params2; // x = diffuseIntensity, y = keyIntensity, z = envRotation(rad), w = tonemap(0/1)
+    vec4 params3; // x = subsurface, y = rimIntensity, z/w reserved
 } cam;
 
 layout(push_constant) uniform Push {
@@ -109,28 +110,6 @@ float geomSmith(float ndv, float ndl, float a) {
 }
 vec3 fresnelSchlick(float cosTheta, vec3 f0) {
     return f0 + (1.0 - f0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
-}
-
-// One analytic light's Cook-Torrance contribution: Lambert diffuse (energy-conserving via kd = 1-F) +
-// GGX specular, scaled by the light's radiance and N·L. @p a is roughness². Returns 0 for back-facing L.
-vec3 pbrDirect(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float a, vec3 f0) {
-    float ndl = dot(N, L);
-    if (ndl <= 0.0) {
-        return vec3(0.0);
-    }
-    vec3  H   = normalize(V + L);
-    float ndv = max(dot(N, V), 1e-4);
-    float ndh = max(dot(N, H), 0.0);
-    float vdh = max(dot(V, H), 0.0);
-    float D = distGGX(ndh, a);
-    float G = geomSmith(ndv, ndl, a);
-    vec3  F = fresnelSchlick(vdh, f0);
-    vec3  spec = (D * G) * F / max(4.0 * ndv * ndl, 1e-4);
-    vec3  kd = vec3(1.0) - F;
-    // Specular dialed down: full-strength dielectric spec makes skin read oily/plastic and blows the
-    // glossy eye catchlight into a white blob over the pupil. ~25% keeps a believable sheen + catchlight
-    // without either artifact (skin isn't a true dielectric — subsurface scatters much of it away).
-    return (kd * albedo / PI + spec * 0.25) * radiance * ndl;
 }
 
 // --- Procedural matcaps: shade a "material sphere" from the view-space normal (vn.z points at eye) ---
@@ -269,24 +248,47 @@ void main() {
         float keyInt      = cam.params2.y;
         float envRot      = cam.params2.z;   // environment Y-rotation (radians)
         float tonemapOn   = cam.params2.w;
+        float sssAmount   = cam.params3.x;   // 0 = opaque Lambert, 1 = strongly translucent skin
+        float rimInt      = cam.params3.y;   // photographic back-rim intensity (0 = off)
 
         float metallic = clamp(pc.material.z, 0.0, 1.0);
         vec3  f0 = mix(vec3(0.04), albedo, metallic);   // dielectric 4% ramping to metal = albedo tint
         vec3  diffuseAlbedo = albedo * (1.0 - metallic); // metals have no diffuse
         float a = rough * rough;
 
-        vec3 color = vec3(0.0);
-
-        // Key light: a low-intensity analytic fill for a touch of directional shape. Kept small — a
-        // directional HDRI already lights the form, so a strong key over-lights the front. Its
-        // specular is dialed low in pbrDirect.
-        color += pbrDirect(n, v, normalize(cam.lightDir.xyz), cam.lightColor.rgb * keyInt, diffuseAlbedo, a, f0);
-
-        // Environment diffuse: per-normal irradiance from the SH bake (sampled through the environment
-        // rotation). Energy-split by Fresnel so grazing angles hand energy to the specular (kS+kD=1).
+        // Fresnel energy split shared by the key + environment diffuse (kS + kD = 1).
         vec3  kS = fresnelSchlick(ndv, f0);
         vec3  kD = (1.0 - kS) * (1.0 - metallic);
-        vec3  irradiance = shIrradiance(rotateY(n, envRot));
+
+        vec3 color = vec3(0.0);
+
+        // Key light — kept modest (the environment already lights the form; a strong key double-lights
+        // the facing side and blows the skin out). Its diffuse is a per-channel *wrapped* Lambert, the
+        // classic cheap skin-translucency model: red wraps farthest past the terminator, then green,
+        // then blue — producing the warm terminator band of real skin that decays to NEUTRAL darkness
+        // deep in shadow (the previous additive band saturated across the whole far side, which is what
+        // tinted the figure's back red). The (1+w)² denominator keeps each channel energy-conserving,
+        // which also slightly relaxes the lit side instead of stacking onto it. Subsurface = 0 reduces
+        // to plain Lambert.
+        {
+            vec3 wrapW   = vec3(0.40, 0.16, 0.08) * sssAmount;
+            vec3 onePlus = vec3(1.0) + wrapW;
+            vec3 wrapped = clamp((vec3(rawNdl) + wrapW) / (onePlus * onePlus), 0.0, 1.0);
+            color += kD * diffuseAlbedo * (1.0 / PI) * wrapped * cam.lightColor.rgb * keyInt;
+            if (rawNdl > 0.0) {
+                // GGX specular, dialed to ~25%: full dielectric spec reads oily/plastic on skin and
+                // blows the eye catchlight into a white blob (skin scatters much of it subsurface).
+                float D = distGGX(ndh, a);
+                float G = geomSmith(ndv, rawNdl, a);
+                vec3  F = fresnelSchlick(vdh, f0);
+                vec3  spec = (D * G) * F / max(4.0 * ndv * rawNdl, 1e-4);
+                color += spec * 0.25 * cam.lightColor.rgb * keyInt * rawNdl;
+            }
+        }
+
+        // Environment diffuse: per-normal irradiance from the SH bake (sampled through the environment
+        // rotation), Fresnel-split so grazing angles hand energy to the specular.
+        vec3 irradiance = shIrradiance(rotateY(n, envRot));
         color += kD * diffuseAlbedo * irradiance * (1.0 / PI) * diffuseInt;
 
         // Ambient fill: a small flat lift on the diffuse albedo so the shadow side of a directional
@@ -303,11 +305,11 @@ void main() {
         vec2 brdf = texture(uBrdfLut, vec2(ndv, rough)).rg;
         color += prefiltered * (f0 * brdf.x + brdf.y) * specScale;
 
-        // Cheap subsurface scattering: a warm reddish band just past the key terminator, so skin reads
-        // as translucent flesh rather than opaque plastic (a stand-in for true SSS).
-        float keyNdl  = dot(n, normalize(cam.lightDir.xyz));
-        float sssBand = pow(clamp(0.5 - keyNdl, 0.0, 1.0), 2.0);
-        color += diffuseAlbedo * cam.lightColor.rgb * vec3(0.30, 0.085, 0.05) * sssBand * 0.7;
+        // Photographic back-rim: a cool edge where the surface grazes the view while facing the fixed
+        // back light — the portrait rim that lifts the dark side off the background (what a studio
+        // photographer adds precisely because the unlit side of a subject otherwise goes flat/dark).
+        float rimEdge = pow(1.0 - ndv, 3.0) * max(dot(n, normalize(cam.rimDir.xyz)), 0.0);
+        color += cam.rimColor.rgb * rimEdge * rimInt;
 
         color *= exposure;
         outColor = vec4(tonemapOn > 0.5 ? tonemapACES(color) : clamp(color, 0.0, 1.0), alpha);

@@ -5,6 +5,17 @@ All notable changes to the PoseStudio project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-08-14
+### Added
+* **New Environment-tab controls.** The Key Light group gained **Azimuth°/Elevation°** sliders (the key light is finally movable — it was hardcoded front-right; all analytic shade modes follow it), and a new **Skin & Rim** group holds **Subsurface** (the strength of the skin-translucency terminator) and **Rim light** (a photographic back light that lifts the figure's dark side off the background). All live shader dials — no re-bake — and covered by Reset to defaults.
+* **Default user library ("My PoseStudio Library").** On first launch the app creates a "My PoseStudio Library" folder in the user's Documents and registers it as an ordinary asset library (fully user-manageable; an existing library by that name — wherever the user keeps it — is honoured instead, and a deliberate later removal isn't recreated). This is the user-facing home for personal content the app itself consumes, starting with HDRI environments.
+* **HDRI thumbnail menu.** The Environment tab's HDRI selector is now a drop-down showing a large (178×89) image **thumbnail of each panorama** next to its name — a same-basename image file in the same folder (any common format; the stock previews ship as `.jpg`), matched the same way the Asset Manager pairs thumbnails. The list shows six environments at a time with a scroll bar for the rest (the current one highlighted and scrolled into view), rebuilds every time it opens so files added while the app runs appear immediately, and ends with a left-aligned "Open HDRI Folder…" link that jumps straight to the folder to drop new panoramas into. The tab's numeric spin buttons also gained **+/−** glyphs so the increment/decrement direction reads at a glance.
+
+### Changed
+* **PBR mode: more photoreal skin.** Two root causes of the "blown-out front, reddish dark back" look are fixed. The cheap subsurface term used to be an additive red band that saturated across the *entire* shadow hemisphere — the whole unlit side rendered dark red; it's replaced by a physically-grounded **per-channel wrapped Lambert** on the key light (red wraps farthest past the terminator, then green, then blue — energy-conserving), which produces the warm terminator of translucent skin and decays to neutral darkness in shadow. The front was double-lit by the analytic key stacked on an environment that already contains the sky's light — the key's default intensity is reduced (0.85) and the wrap's energy conservation relaxes the lit side further. The shadow side is lifted by a higher default ambient fill (0.16) and a new dialable photographic **rim light**, so the figure's dark side stays readable and separates from the background instead of crushing.
+* **HDRI environments now live in the user's asset library** (`My PoseStudio Library/hdri`) instead of a read-only folder next to the executable — a folder the user is accustomed to browsing, where adding an environment is just dropping an `.hdr` file (plus an optional same-basename preview image for the menu thumbnail). The viewport's default environment and the Environment tab both read this folder; `<appDir>/environment.hdr` still works as an explicit override, and with no panoramas present the built-in procedural studio takes over. The `resources/hdri` folder and its build-time mirror step are gone — HDRIs are user content, not build output (packaging/installers are responsible for placing the stock set into the user library).
+* **Stock HDRI previews converted `.webp` → `.jpg`** — Qt only decodes `.webp` when the optional "Qt Image Formats" add-on is installed, so the bundled previews now use a format every Qt build decodes. User-supplied `.webp` previews still work where that add-on is present.
+
 ## [0.3.2] - 2026-08-14
 ### Changed
 * **The viewport renders on demand, not continuously.** The render loop no longer re-arms itself every frame — a frame is drawn only when something changed (camera input, posing, imports, lighting/shade-mode changes, resize). Previously the GPU redrew at full swap rate even when idle, and the vsynced present throttled the whole GUI thread, making the entire app feel sluggish; the viewport now idles at zero GPU cost. A follow-up frame is self-scheduled only when the swapchain was just rebuilt. Un-obscuring the window also no longer forces a needless swapchain rebuild (only a real size change does).
@@ -319,8 +330,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core open-source community files including `LICENSE`, `.gitignore`, and `CODE_OF_CONDUCT.md`.
 - Associated domain linkages for posestudio.org.
 - Updated Code of Conduct.
-
-## [Unreleased]
-### Added
-- Foundational architectural planning for 3D character posing and rigging features.
-- Initial scaffolding for the core application framework.

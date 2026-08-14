@@ -99,7 +99,7 @@ private:
 
     void initializeVulkan();   // safe to call repeatedly; no-ops once initialised
     void beginEnvironmentBake(const QString& hdrPath); // decode + bake off-thread, then swap in on the GUI thread
-    QString defaultEnvironmentPath() const;            // <appDir>/environment.hdr override, else bundled HDRI
+    QString defaultEnvironmentPath() const;            // <appDir>/environment.hdr override, else the user library's hdri/
     void releaseVulkan();      // tears down renderer + context (surface still valid)
     void renderFrame();        // one frame, then schedules the next while exposed
     VkExtent2D pixelExtent() const; // window size in physical pixels

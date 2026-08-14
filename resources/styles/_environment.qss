@@ -40,25 +40,66 @@
     color: #8b9096;
 }
 
-/* Combo box (HDRI selector) + its popup. */
-#EnvironmentPanel QComboBox {
+/* HDRI selector: a button showing the current environment's name; clicking drops a menu hosting a
+ * scrollable thumbnail list (#HdriList) + a footer link. The menu chrome ("HdriMenu") inherits the
+ * app-wide QMenu look from _menumanager.qss, exactly like the viewport's shader-mode menu. */
+#EnvironmentHdriButton {
     background-color: #2a2b2d;
     color: #e0e0e0;
     border: 1px solid #4a4b4d;
     border-radius: 4px;
-    padding: 4px 8px;
+    padding: 4px 24px 4px 18px; /* generous left inset for the name; right room for the indicator */
     min-height: 20px;
+    text-align: left;
 }
-#EnvironmentPanel QComboBox:hover { border-color: #5b87cc; }
-#EnvironmentPanel QComboBox::drop-down { border: none; width: 18px; }
-#EnvironmentPanel QComboBox QAbstractItemView {
+#EnvironmentHdriButton:hover { border-color: #5b87cc; }
+#EnvironmentHdriButton::menu-indicator {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    right: 6px;
+}
+
+/* The thumbnail list inside the HDRI menu: tight rows, menu-style hover/selection, dark scroll bar. */
+#HdriList {
     background-color: #252627;
     color: #e0e0e0;
-    border: 1px solid #4a4b4d;
-    selection-background-color: #314D7A;
-    selection-color: #ffffff;
-    outline: none;
+    outline: none; /* no dotted focus ring */
 }
+#HdriList::item {
+    padding: 2px 6px;   /* tight vertical rhythm between rows */
+}
+#HdriList::item:hover    { background-color: #314D7A; color: #ffffff; }
+#HdriList::item:selected { background-color: #2f3f5c; color: #ffffff; }
+#HdriList QScrollBar:vertical {
+    background: #252627;
+    width: 10px;
+    margin: 0;
+}
+#HdriList QScrollBar::handle:vertical {
+    background: #4a4b4d;
+    border-radius: 5px;
+    min-height: 24px;
+}
+#HdriList QScrollBar::handle:vertical:hover { background: #5b87cc; }
+#HdriList QScrollBar::add-line:vertical,
+#HdriList QScrollBar::sub-line:vertical { height: 0; }
+#HdriList QScrollBar::add-page:vertical,
+#HdriList QScrollBar::sub-page:vertical { background: transparent; }
+
+/* Footer link under the list: left-justified, quiet, menu-item hover. */
+#HdriFolderLink {
+    background: transparent;
+    color: #c7c8cb;
+    border: none;
+    border-radius: 4px;
+    padding: 5px 8px;
+    text-align: left;
+}
+#HdriFolderLink:hover {
+    background-color: #314D7A;
+    color: #ffffff;
+}
+#HdriEmptyLabel { color: #8b9096; }
 
 /* Numeric spin boxes. */
 #EnvironmentPanel QDoubleSpinBox {
@@ -79,6 +120,17 @@
 #EnvironmentPanel QDoubleSpinBox::up-button:hover,
 #EnvironmentPanel QDoubleSpinBox::down-button:hover {
     background-color: #3f4042;
+}
+/* +/- glyphs so the increment/decrement buttons read at a glance (up = +, down = -). */
+#EnvironmentPanel QDoubleSpinBox::up-arrow {
+    image: url(:/resources/icons/plus.png);
+    width: 7px;
+    height: 7px;
+}
+#EnvironmentPanel QDoubleSpinBox::down-arrow {
+    image: url(:/resources/icons/minus.png);
+    width: 7px;
+    height: 7px;
 }
 
 /* Sliders: thin groove, accent fill, round handle. */

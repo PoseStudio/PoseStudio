@@ -48,6 +48,7 @@ struct CameraUbo {
     glm::vec4 params;      // x = shade mode, y = exposure, z = specularIntensity, w = ambientFill
     glm::vec4 sh[9];       // environment diffuse irradiance: 9 SH coefficients (rgb in .xyz)
     glm::vec4 params2;     // x = diffuseIntensity, y = keyIntensity, z = envRotation(rad), w = tonemap(0/1)
+    glm::vec4 params3;     // x = subsurface, y = rimIntensity, z/w reserved
 };
 
 
@@ -390,7 +391,12 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
     ubo.viewProj = camera.viewProjection();
     ubo.view = camera.view();
     ubo.cameraPos = glm::vec4(camera.position(), 1.0f);
-    ubo.lightDir = glm::vec4(glm::normalize(glm::vec3(0.62f, 0.5f, 0.55f)), 0.0f);   // key: front-right, ~45°
+    // Key direction from the Environment panel's azimuth/elevation dials (world-fixed relative to
+    // the subject; defaults reproduce the old hardcoded front-right ~30° direction).
+    const float keyAz = glm::radians(m_lighting.keyAzimuthDeg);
+    const float keyEl = glm::radians(m_lighting.keyElevationDeg);
+    ubo.lightDir = glm::vec4(std::cos(keyEl) * std::sin(keyAz), std::sin(keyEl),
+                             std::cos(keyEl) * std::cos(keyAz), 0.0f);
     ubo.lightColor = glm::vec4(1.0f, 0.96f, 0.9f, 0.0f);
     ubo.fillDir = glm::vec4(glm::normalize(glm::vec3(-0.6f, 0.28f, 0.5f)), 0.0f);    // fill: opposite, lower
     ubo.fillColor = glm::vec4(0.26f, 0.31f, 0.4f, 0.0f);                              // dim + cool (~1/4 key)
@@ -401,6 +407,7 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
                            m_lighting.specularIntensity, m_lighting.ambientFill);
     ubo.params2 = glm::vec4(m_lighting.diffuseIntensity, m_lighting.keyIntensity,
                             glm::radians(m_lighting.environmentRotationDeg), m_lighting.tonemap ? 1.0f : 0.0f);
+    ubo.params3 = glm::vec4(m_lighting.subsurface, m_lighting.rimIntensity, 0.0f, 0.0f);
     // Environment diffuse irradiance (SH). The PBR mode reconstructs per-normal ambient from these
     // instead of the flat `ambient` constant, so shadow sides pick up the environment's colour.
     for (int i = 0; i < 9; ++i) {

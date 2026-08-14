@@ -7,6 +7,7 @@
 
 #include "environmentsource.h"
 #include "figureimportservice.h"
+#include "librarypaths.h"
 #include "modelimportservice.h"
 #include "rendering/vulkancommon.h"
 #include "rendering/vulkancontext.h"
@@ -15,6 +16,7 @@
 #include <QAction>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QDir>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QMenu>
@@ -117,11 +119,23 @@ void VulkanWindow::initializeVulkan() {
 }
 
 QString VulkanWindow::defaultEnvironmentPath() const {
-    // An explicit <appDir>/environment.hdr override wins; otherwise the bundled default panorama.
-    const QString appDir = QCoreApplication::applicationDirPath();
-    const QString override = appDir + QStringLiteral("/environment.hdr");
-    return QFileInfo::exists(override) ? override
-                                       : appDir + QStringLiteral("/hdri/Golden Gate Hills.hdr");
+    // An explicit <appDir>/environment.hdr override wins; otherwise the panoramas live in the user
+    // library's hdri/ folder (see librarypaths.h — the same folder the Environment panel lists).
+    // Prefer the stock default by name, else the first .hdr alphabetically; an empty return leaves
+    // the procedural studio environment (beginEnvironmentBake no-ops on it).
+    const QString override =
+        QCoreApplication::applicationDirPath() + QStringLiteral("/environment.hdr");
+    if (QFileInfo::exists(override)) {
+        return override;
+    }
+    const QDir hdriDir(LibraryPaths::hdriDirectory());
+    const QString preferred = hdriDir.filePath(QStringLiteral("Golden Gate Hills.hdr"));
+    if (QFileInfo::exists(preferred)) {
+        return preferred;
+    }
+    const QStringList hdrs =
+        hdriDir.entryList(QStringList{QStringLiteral("*.hdr")}, QDir::Files, QDir::Name);
+    return hdrs.isEmpty() ? QString() : hdriDir.filePath(hdrs.first());
 }
 
 void VulkanWindow::beginEnvironmentBake(const QString& hdrPath) {

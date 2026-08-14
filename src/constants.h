@@ -5,7 +5,13 @@ namespace Constants {
     // --- Application Info ---
     // const char* (not QString) avoids a heap allocation for strings that never change.
     inline constexpr const char* APP_NAME = "PoseStudio";
-    inline constexpr const char* APP_VERSION = "0.3.1";
+    inline constexpr const char* APP_VERSION = "0.3.3";
+
+    // Folder name of the default per-user asset library ("My PoseStudio Library"). Created in the
+    // user's Documents on first launch (unless a library by this name is already registered) and
+    // resolved through the AssetLibraries table thereafter — see src/core/librarypaths.h. Its hdri/
+    // subfolder is the user-facing home for environment panoramas.
+    inline constexpr const char* USER_LIBRARY_DIRNAME = "My PoseStudio Library";
 
     // --- Collections naming conventions ---
     inline const QString TERM_COL_PLURAL = QStringLiteral("Collections");

@@ -17,10 +17,11 @@
 
 #include <QWidget>
 
-class QComboBox;
 class QCheckBox;
 class QDoubleSpinBox;
 class QFormLayout;
+class QMenu;
+class QPushButton;
 
 namespace pose {
 
@@ -35,8 +36,10 @@ public:
 
 private:
     void buildUi();
-    void populateEnvironments(QComboBox* combo); // fills the HDRI list from <appDir>/hdri
-    void pushSettings();                         // sends m_settings to the viewport
+    void buildEnvironmentSelector(QFormLayout* form); // the HDRI button + its thumbnail menu
+    void rebuildEnvironmentMenu();  // (re)fills the menu from the user library's hdri/ folder
+    void chooseEnvironment(const QString& path, const QString& name);
+    void pushSettings();            // sends m_settings to the viewport
     void resetToDefaults();
 
     // Builds a labelled row (slider + spin box, kept in sync) into @p form and returns the spin box,
@@ -47,7 +50,12 @@ private:
     ViewportWidget*  m_viewport = nullptr;
     LightingSettings m_settings;   // current values; the source of truth pushed to the viewport
 
-    QComboBox*      m_envCombo = nullptr;
+    // HDRI selector: a button (showing the current environment's name) that drops a menu of every
+    // .hdr in the user library's hdri/ folder, each with its image thumbnail. The menu is rebuilt
+    // on every open so files the user adds/removes while the app runs show up immediately.
+    QPushButton*    m_envButton = nullptr;
+    QMenu*          m_envMenu = nullptr;
+    QString         m_currentEnvPath;
     QDoubleSpinBox* m_rotation = nullptr;
     QDoubleSpinBox* m_exposure = nullptr;
     QCheckBox*      m_tonemap = nullptr;
@@ -55,6 +63,10 @@ private:
     QDoubleSpinBox* m_specular = nullptr;
     QDoubleSpinBox* m_ambientFill = nullptr;
     QDoubleSpinBox* m_keyIntensity = nullptr;
+    QDoubleSpinBox* m_keyAzimuth = nullptr;
+    QDoubleSpinBox* m_keyElevation = nullptr;
+    QDoubleSpinBox* m_subsurface = nullptr;
+    QDoubleSpinBox* m_rim = nullptr;
 };
 
 } // namespace pose

@@ -9,6 +9,7 @@
  */
 
 #include "database.h"
+#include "constants.h"
 #include <QCoreApplication>
 #include <QSqlDatabase>
 #include <QSqlError>
@@ -181,6 +182,56 @@ QSqlDatabase initializeDatabase(DbInitMode mode) {
     // Flags the single "Maquettes" row (synced below) as shipped-with-the-app rather than
     // user-added, so the UI knows not to offer removing it.
     ensureColumn(db, "AssetLibraries", "AssetLibraryIsBuiltIn", "INTEGER NOT NULL DEFAULT 0");
+
+    // One-time default user library: "My PoseStudio Library" in the user's Documents — the
+    // writable, user-facing home for personal content, including the hdri/ folder the Environment
+    // panel reads (see src/core/librarypaths.h). Runs only on the very first launch (flag row in
+    // Preferences) and only if the user doesn't already have a non-built-in library by that name
+    // registered — so a later deliberate rename/removal isn't fought on every start (unlike the
+    // built-in Maquettes row below, which IS re-synced every launch by design).
+    {
+        QSqlQuery flagQuery(db);
+        bool alreadyDone = false;
+        if (flagQuery.exec(QStringLiteral(
+                "SELECT 1 FROM Preferences WHERE PreferenceName = 'UserLibraryCreated'"))) {
+            alreadyDone = flagQuery.next();
+        }
+        if (!alreadyDone) {
+            bool haveUserLibrary = false;
+            QSqlQuery existing(db);
+            if (existing.exec(QStringLiteral(
+                    "SELECT AssetLibraryPath FROM AssetLibraries WHERE AssetLibraryIsBuiltIn = 0"))) {
+                while (existing.next()) {
+                    if (QDir(existing.value(0).toString())
+                            .dirName()
+                            .compare(QLatin1String(Constants::USER_LIBRARY_DIRNAME),
+                                     Qt::CaseInsensitive) == 0) {
+                        haveUserLibrary = true;
+                        break;
+                    }
+                }
+            }
+            if (!haveUserLibrary) {
+                const QString root =
+                    QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
+                        .filePath(QLatin1String(Constants::USER_LIBRARY_DIRNAME));
+                QDir().mkpath(QDir(root).filePath(QStringLiteral("hdri")));
+                QSqlQuery insert(db);
+                insert.prepare(QStringLiteral(
+                    "INSERT OR IGNORE INTO AssetLibraries (AssetLibraryPath, AssetLibraryIsBuiltIn) "
+                    "VALUES (:path, 0)"));
+                insert.bindValue(QStringLiteral(":path"), root);
+                if (!insert.exec()) {
+                    qWarning() << "[!] Failed to create default user library:"
+                               << insert.lastError().text();
+                }
+            }
+            QSqlQuery setFlag(db);
+            setFlag.exec(QStringLiteral(
+                "INSERT OR REPLACE INTO Preferences (PreferenceName, PreferenceValue) "
+                "VALUES ('UserLibraryCreated', '1')"));
+        }
+    }
 
     // Ensure the built-in "Maquettes" library exists, on disk and in AssetLibraries, every
     // launch — re-synced to the current install location in case the app was moved since
