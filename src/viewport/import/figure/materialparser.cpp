@@ -15,12 +15,19 @@ namespace pose {
 
 namespace {
 
-// Reads a float_color channel's "value" (the tint multiplier) into an RGB vector, if present.
+// Reads a float_color channel's colour (the tint multiplier) into an RGB vector, if present.
+// "current_value" is the *dialed* colour and must win over "value", which is only the channel's
+// default — the same convention channelScalar() follows. Reading "value" alone rendered every
+// zone with the channel default (a 0.75 grey): textures came out ~25% too dark, and a pupil
+// whose material dials its diffuse to black (common across figure generations) drew as a bright
+// grey/white dot in the eye instead.
 bool readColorValue(const nlohmann::json& channel, glm::vec3& out) {
-    const auto it = channel.find("value");
-    if (it != channel.end() && it->is_array() && it->size() >= 3) {
-        out = glm::vec3((*it)[0].get<float>(), (*it)[1].get<float>(), (*it)[2].get<float>());
-        return true;
+    for (const char* key : {"current_value", "value"}) {
+        const auto it = channel.find(key);
+        if (it != channel.end() && it->is_array() && it->size() >= 3) {
+            out = glm::vec3((*it)[0].get<float>(), (*it)[1].get<float>(), (*it)[2].get<float>());
+            return true;
+        }
     }
     return false;
 }

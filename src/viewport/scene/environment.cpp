@@ -6,6 +6,8 @@
 
 #include "environment.h"
 
+#include "parallelfor.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -213,38 +215,45 @@ PrefilteredSpecular prefilterSpecular(const EnvironmentImage& env, int baseSize,
         out.faces[face].resize(mipCount);
         for (int mip = 0; mip < mipCount; ++mip) {
             const int size = std::max(1, baseSize >> mip);
-            const float roughness = (mipCount > 1) ? static_cast<float>(mip) / (mipCount - 1) : 0.0f;
-            std::vector<glm::vec4>& dst = out.faces[face][mip];
-            dst.resize(static_cast<std::size_t>(size) * size);
-            for (int y = 0; y < size; ++y) {
-                const float v = 2.0f * (y + 0.5f) / size - 1.0f;
-                for (int x = 0; x < size; ++x) {
-                    const float u = 2.0f * (x + 0.5f) / size - 1.0f;
-                    const glm::vec3 n = cubeDir(face, u, v);
-                    glm::vec3 color(0.0f);
-                    if (roughness <= 0.0f) {
-                        color = env.sample(n); // mirror reflection: sample the environment directly
-                    } else {
-                        // Split-sum prefilter: importance-sample GGX around N (== V == R), accumulate
-                        // env radiance weighted by N·L (Karis 2013).
-                        const glm::vec3 vv = n;
-                        float weight = 0.0f;
-                        for (int s = 0; s < samples; ++s) {
-                            const glm::vec3 h = importanceSampleGGX(hammersley(s, samples), n, roughness);
-                            const glm::vec3 l = glm::normalize(2.0f * glm::dot(vv, h) * h - vv);
-                            const float ndl = glm::dot(n, l);
-                            if (ndl > 0.0f) {
-                                color += env.sample(l) * ndl;
-                                weight += ndl;
-                            }
-                        }
-                        color = (weight > 0.0f) ? color / weight : env.sample(n);
-                    }
-                    dst[static_cast<std::size_t>(y) * size + x] = glm::vec4(color, 1.0f);
-                }
-            }
+            out.faces[face][mip].resize(static_cast<std::size_t>(size) * size);
         }
     }
+    // Each (face, mip) slab is independent (env.sample is const), so prefilter them in parallel —
+    // this bake is the dominant cost of an environment switch (and of the synchronous startup bake).
+    parallelFor(6 * mipCount, [&](int job) {
+        const int face = job / mipCount;
+        const int mip = job % mipCount;
+        const int size = std::max(1, baseSize >> mip);
+        const float roughness = (mipCount > 1) ? static_cast<float>(mip) / (mipCount - 1) : 0.0f;
+        std::vector<glm::vec4>& dst = out.faces[face][mip];
+        for (int y = 0; y < size; ++y) {
+            const float v = 2.0f * (y + 0.5f) / size - 1.0f;
+            for (int x = 0; x < size; ++x) {
+                const float u = 2.0f * (x + 0.5f) / size - 1.0f;
+                const glm::vec3 n = cubeDir(face, u, v);
+                glm::vec3 color(0.0f);
+                if (roughness <= 0.0f) {
+                    color = env.sample(n); // mirror reflection: sample the environment directly
+                } else {
+                    // Split-sum prefilter: importance-sample GGX around N (== V == R), accumulate
+                    // env radiance weighted by N·L (Karis 2013).
+                    const glm::vec3 vv = n;
+                    float weight = 0.0f;
+                    for (int s = 0; s < samples; ++s) {
+                        const glm::vec3 h = importanceSampleGGX(hammersley(s, samples), n, roughness);
+                        const glm::vec3 l = glm::normalize(2.0f * glm::dot(vv, h) * h - vv);
+                        const float ndl = glm::dot(n, l);
+                        if (ndl > 0.0f) {
+                            color += env.sample(l) * ndl;
+                            weight += ndl;
+                        }
+                    }
+                    color = (weight > 0.0f) ? color / weight : env.sample(n);
+                }
+                dst[static_cast<std::size_t>(y) * size + x] = glm::vec4(color, 1.0f);
+            }
+        }
+    });
     return out;
 }
 
@@ -253,7 +262,9 @@ BrdfLut integrateBrdfLut(int size, int samples) {
     lut.size = size;
     lut.data.resize(static_cast<std::size_t>(size) * size);
     const glm::vec3 n(0.0f, 0.0f, 1.0f);
-    for (int y = 0; y < size; ++y) {
+    // Rows are independent — integrate them in parallel (size×size×samples ≈ 8M GGX samples; this
+    // runs once, but on the GUI thread during the first synchronous startup bake).
+    parallelFor(size, [&](int y) {
         const float roughness = (y + 0.5f) / size;
         for (int x = 0; x < size; ++x) {
             const float ndv = std::max((x + 0.5f) / size, 1e-3f);
@@ -278,7 +289,7 @@ BrdfLut integrateBrdfLut(int size, int samples) {
             }
             lut.data[static_cast<std::size_t>(y) * size + x] = glm::vec2(a, b) / static_cast<float>(samples);
         }
-    }
+    });
     return lut;
 }
 

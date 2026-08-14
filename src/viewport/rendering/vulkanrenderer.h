@@ -52,8 +52,11 @@ public:
     VulkanRenderer& operator=(const VulkanRenderer&) = delete;
 
     /// Records and presents one frame. Cheaply no-ops while the window is zero-sized
-    /// (e.g. minimised). Recreates the swapchain on its own when needed.
-    void drawFrame();
+    /// (e.g. minimised). Recreates the swapchain on its own when needed. Returns true when the
+    /// caller should schedule one more frame (the swapchain was just rebuilt, or this frame was
+    /// skipped mid-rebuild, so what's on screen doesn't yet reflect the current state) — the
+    /// window renders on demand, not continuously, so this is the only self-rearm signal.
+    bool drawFrame();
 
     /// Records the new physical-pixel size; the actual swapchain rebuild is deferred to
     /// the next drawFrame() so a burst of resize events coalesces into one rebuild.

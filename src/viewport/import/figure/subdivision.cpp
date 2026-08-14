@@ -191,29 +191,52 @@ std::vector<glm::vec3> applyField(const LevelTopo& t, const std::vector<glm::vec
     return out;
 }
 
-// Blends skin-weight vectors: accumulate per joint, keep the top 4, renormalize.
+// Blends skin-weight vectors: accumulate per joint, keep the top 4, renormalize. Called once per
+// cage face + edge (~50k times per subdivision level), so it accumulates into a small fixed array —
+// at most count(≤4) × 4 distinct joints — instead of allocating a hash map per call.
 VertexSkin blendSkins(const VertexSkin* items, int count) {
-    std::unordered_map<int, float> acc;
+    int   joints[16];
+    float weights[16];
+    int   n = 0;
     for (int i = 0; i < count; ++i) {
         for (int k = 0; k < 4; ++k) {
             const float w = items[i].weights[k];
-            if (w > 0.0f) {
-                acc[items[i].joints[k]] += w;
+            if (w <= 0.0f) {
+                continue;
             }
+            const int j = items[i].joints[k];
+            int slot = -1;
+            for (int s = 0; s < n; ++s) {
+                if (joints[s] == j) {
+                    slot = s;
+                    break;
+                }
+            }
+            if (slot < 0) {
+                slot = n++;
+                joints[slot] = j;
+                weights[slot] = 0.0f;
+            }
+            weights[slot] += w;
         }
     }
-    std::vector<std::pair<int, float>> sorted(acc.begin(), acc.end());
-    const std::size_t keep = std::min<std::size_t>(4, sorted.size());
-    std::partial_sort(sorted.begin(), sorted.begin() + keep, sorted.end(),
-                      [](const auto& x, const auto& y) { return x.second > y.second; });
     VertexSkin out;
     out.joints = glm::ivec4(0);
     out.weights = glm::vec4(0.0f);
+    const int keep = std::min(4, n);
     float sum = 0.0f;
-    for (std::size_t i = 0; i < keep; ++i) {
-        out.joints[static_cast<int>(i)] = sorted[i].first;
-        out.weights[static_cast<int>(i)] = sorted[i].second;
-        sum += sorted[i].second;
+    for (int k = 0; k < keep; ++k) { // selection of the top `keep` by weight
+        int best = k;
+        for (int s = k + 1; s < n; ++s) {
+            if (weights[s] > weights[best]) {
+                best = s;
+            }
+        }
+        std::swap(weights[k], weights[best]);
+        std::swap(joints[k], joints[best]);
+        out.joints[k] = joints[k];
+        out.weights[k] = weights[k];
+        sum += weights[k];
     }
     if (sum > 0.0f) {
         out.weights /= sum;

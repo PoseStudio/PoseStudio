@@ -29,6 +29,7 @@
 #include <QHBoxLayout>
 #include <QHelpEvent>
 #include <QIcon>
+#include <QImageReader>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -237,6 +238,18 @@ void AssetFolderProxyModel::processPendingHitCheck() {
 QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) const {
     if (proxyIndex.column() != 0) return QIdentityProxyModel::data(proxyIndex, role);
 
+    // data() runs for every visible row on every repaint (hover, scroll, expand), so the icons are
+    // constructed once and reused — building a QIcon from a resource path per call re-did that work
+    // in the tree's hottest path.
+    static const QIcon kSearchIcon(QStringLiteral(":/resources/icons/search.png"));
+    static const QIcon kSearchDisabledIcon(QStringLiteral(":/resources/icons/search-d.png"));
+    static const QIcon kCollectionsIcon(QStringLiteral(":/resources/icons/collections.png"));
+    static const QIcon kFavoritesIcon(QStringLiteral(":/resources/icons/favorite.png"));
+    static const QIcon kSubCollectionIcon(QStringLiteral(":/resources/icons/sub-collection.png"));
+    static const QIcon kFolderFullIcon(QStringLiteral(":/resources/icons/folder-full.png"));
+    static const QIcon kFolderHitIcon(QStringLiteral(":/resources/icons/folder-hit.png"));
+    static const QIcon kFolderEmptyIcon(QStringLiteral(":/resources/icons/folder-empty.png"));
+
     QModelIndex sourceIndex = mapToSource(proxyIndex);
     QString path = sourceModel()->data(sourceIndex, Qt::UserRole).toString();
 
@@ -247,18 +260,17 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
         if (role == Qt::DecorationRole || role == Qt::ForegroundRole) {
             const bool hasResults = sourceModel()->rowCount(mapToSource(proxyIndex)) > 0;
             if (role == Qt::DecorationRole)
-                return hasResults ? QIcon(":/resources/icons/search.png")
-                                  : QIcon(":/resources/icons/search-d.png");
+                return hasResults ? kSearchIcon : kSearchDisabledIcon;
             return hasResults ? QVariant() : QColor(110, 110, 110);
         }
         return QIdentityProxyModel::data(proxyIndex, role);
     }
     if (path == "COLLECTIONS_ROOT") {
-        if (role == Qt::DecorationRole) return QIcon(":/resources/icons/collections.png");
+        if (role == Qt::DecorationRole) return kCollectionsIcon;
         return QIdentityProxyModel::data(proxyIndex, role);
     }
     if (path == "FAVORITES_ROOT") {
-        if (role == Qt::DecorationRole) return QIcon(":/resources/icons/favorite.png");
+        if (role == Qt::DecorationRole) return kFavoritesIcon;
         return QIdentityProxyModel::data(proxyIndex, role);
     }
 
@@ -299,7 +311,7 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
                     }
                 }
                 if (role == Qt::ForegroundRole) return QVariant();
-                return QIcon(QStringLiteral(":/resources/icons/folder-hit.png"));
+                return kFolderHitIcon;
             }
             state = hasHitCache.value(path);
         }
@@ -308,11 +320,11 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
             return (state == NoHit) ? QColor(110, 110, 110) : QVariant();
         }
 
-        if (isCollection) return QIcon(QStringLiteral(":/resources/icons/sub-collection.png"));
+        if (isCollection) return kSubCollectionIcon;
 
-        if (state == DirectHit) return QIcon(QStringLiteral(":/resources/icons/folder-full.png"));
-        if (state == IndirectHit) return QIcon(QStringLiteral(":/resources/icons/folder-hit.png"));
-        return QIcon(QStringLiteral(":/resources/icons/folder-empty.png"));
+        if (state == DirectHit) return kFolderFullIcon;
+        if (state == IndirectHit) return kFolderHitIcon;
+        return kFolderEmptyIcon;
     }
 
     return QIdentityProxyModel::data(proxyIndex, role);
@@ -1718,11 +1730,24 @@ void AssetManagerWidget::processNextThumbnailBatch() {
         const QPair<int, QString> job = m_pendingThumbs.takeFirst();
         QListWidgetItem* item = assetListWidget->item(job.first);
         if (item) {
-            QPixmap raw(job.second);
-            if (!raw.isNull()) {
-                const QPixmap scaled = raw.scaled(
-                    QSize(Constants::THUMB_RENDER_SIZE, Constants::THUMB_RENDER_SIZE),
-                    Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            // Decode at thumbnail size rather than decoding the full image and scaling down:
+            // setScaledSize lets the codec do the reduction (JPEG can decode at 1/2..1/8 DCT
+            // scale), which is what keeps big preview images from stalling the GUI thread here.
+            QImageReader reader(job.second);
+            reader.setAutoTransform(true);
+            const QSize origSize = reader.size(); // header-only read for most formats
+            if (origSize.isValid()) {
+                reader.setScaledSize(origSize.scaled(Constants::THUMB_RENDER_SIZE,
+                                                     Constants::THUMB_RENDER_SIZE, Qt::KeepAspectRatio));
+            }
+            QPixmap scaled = QPixmap::fromImage(reader.read());
+            if (!scaled.isNull()) {
+                if (scaled.width() > Constants::THUMB_RENDER_SIZE ||
+                    scaled.height() > Constants::THUMB_RENDER_SIZE) {
+                    // Codec couldn't report a size up front — fall back to scaling after decode.
+                    scaled = scaled.scaled(QSize(Constants::THUMB_RENDER_SIZE, Constants::THUMB_RENDER_SIZE),
+                                           Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                }
 
                 QPixmap canvas(Constants::THUMB_RENDER_SIZE, Constants::THUMB_CANVAS_HEIGHT);
                 canvas.fill(Qt::transparent);

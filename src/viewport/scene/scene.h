@@ -129,7 +129,10 @@ private:
     std::unique_ptr<VulkanPipeline> m_pipeline;            // opaque pass (depth write on)
     std::unique_ptr<VulkanPipeline> m_transparentPipeline; // alpha-blended pass (depth write off)
     std::unique_ptr<VulkanPipeline> m_skeletonPipeline;    // line overlay for the posing skeleton
-    VulkanBuffer                    m_skeletonVertexBuffer; // host-mapped line vertices (pos+color)
+    // Host-mapped line vertices (pos+color), one buffer per frame-in-flight: record() rewrites the
+    // overlay every frame, so a single shared buffer would be CPU-written while the previous
+    // frame's GPU read of it is still in flight.
+    std::vector<VulkanBuffer>       m_skeletonVertexBuffers;
     bool                            m_showSkeleton = false;
     int                             m_shadeMode = 1;        // viewport shade mode (see mesh.frag); 1 = PBR/IBL
 

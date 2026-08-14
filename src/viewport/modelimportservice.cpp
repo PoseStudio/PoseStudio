@@ -8,6 +8,7 @@
 #include "import/importerregistry.h"
 #include "import/meshimporter.h"
 #include "import/modeldata.h"
+#include "import/texturegutters.h"
 #include "rendering/vulkanrenderer.h"
 
 #include <QApplication>
@@ -59,6 +60,10 @@ void ModelImportService::decodeMeshTexture(MeshData& mesh) {
     if (!decodeTexture(mesh.normal, mesh.normalPixels, mesh.normalWidth, mesh.normalHeight)) {
         mesh.normalMode = 0;
     }
+    // Dilate each image's UV-island colours into its unused background so the GPU-built mip chain
+    // never averages the atlas background through a seam (visible as bright seam lines when zoomed
+    // out; see texturegutters.h). Runs after decode, before upload — covered texels are untouched.
+    fillTextureGutters(mesh);
 }
 
 bool ModelImportService::importInto(VulkanRenderer& renderer, const QString& path,

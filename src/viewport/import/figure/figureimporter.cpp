@@ -13,6 +13,7 @@
 #include "morphresolver.h"
 #include "nodeparser.h"
 #include "skinparser.h"
+#include "parallelfor.h"
 #include "subdivision.h"
 #include "uriresolver.h"
 #include "uvparser.h"
@@ -247,6 +248,20 @@ void lockTwistBoneBendAxes(std::vector<FigureBone>& bones) {
         if (lowered.find("twist") == std::string::npos) {
             continue; // not a twist bone
         }
+        // If the figure already pins an axis via the format's `locked` channel flag (read by
+        // nodeparser), trust that authored data over this geometric fallback — re-deriving the
+        // twist axis here could disagree with it and kill the legitimate twist channel. This
+        // heuristic only remains for old figure generations that don't write `locked` at all.
+        bool formatLocked = false;
+        for (int a = 0; a < 3; ++a) {
+            if (bone.rotationLimited[a] && bone.rotationMin[a] == bone.rotationMax[a]) {
+                formatLocked = true;
+                break;
+            }
+        }
+        if (formatLocked) {
+            continue;
+        }
         const int child = firstChild[i];
         if (child < 0) {
             continue; // no child to define the bone's length direction
@@ -419,7 +434,12 @@ FigureData FigureImporter::load(const std::string& path,
     if (kSubdivisionLevels > 0) {
         SubdivisionResult sub = subdivideFigure(geo, uv, out.vertexSkins, kSubdivisionLevels);
         out.meshes = std::move(sub.meshes);
-        for (PoseCorrective& pc : out.correctives) {
+        // Carry each corrective's sparse delta field onto the subdivided cage. Every corrective is
+        // independent (subdivideDeltaField only reads the shared topology), and a figure ships ~100+
+        // of them, each a full-mesh stencil pass — the dominant slice of the subdivision's import
+        // cost — so run them across cores.
+        parallelFor(static_cast<int>(out.correctives.size()), [&](int ci) {
+            PoseCorrective& pc = out.correctives[static_cast<std::size_t>(ci)];
             std::vector<glm::vec3> field(geo.positions.size(), glm::vec3(0.0f));
             for (const auto& [index, delta] : pc.deltas) {
                 if (index < field.size()) {
@@ -434,7 +454,7 @@ FigureData FigureImporter::load(const std::string& path,
                 }
             }
             pc.deltas = std::move(dense);
-        }
+        });
     } else {
         out.meshes = assembleFigureMeshes(geo, uv, out.vertexSkins);
     }

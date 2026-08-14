@@ -10,7 +10,7 @@ cmake_minimum_required(VERSION 3.21)
 # C is enabled alongside C++ because a couple of third-party dependencies ship C implementation
 # files we compile directly into the target (e.g. miniz's inflate sources for the figure importer).
 # Without C in the language list, CMake classifies .c files as non-buildable and silently skips them.
-project(PoseStudio VERSION 0.3.1 LANGUAGES C CXX)
+project(PoseStudio VERSION 0.3.2 LANGUAGES C CXX)
 
 # ==============================================================================
 # [ COMPILER CONFIGURATION ]
@@ -162,9 +162,12 @@ add_executable(
     src/viewport/figureimportservice.h
     src/viewport/environmentsource.cpp    # decodes .hdr panoramas (stb) -> EnvironmentImage (codec layer)
     src/viewport/environmentsource.h
+    src/viewport/import/texturegutters.cpp # UV-island gutter dilation (kills mip-bleed seam lines)
+    src/viewport/import/texturegutters.h
     src/viewport/stb_impl.cpp             # single TU that compiles stb_image's implementation
     # Rendering core (pure Vulkan + std + GLM, no Qt):
     src/viewport/rendering/vulkancommon.h
+    src/viewport/rendering/parallelfor.h  # index-parallel loop for CPU bakes (IBL prefilter, corrective subdivision)
     src/viewport/rendering/vulkancontext.cpp
     src/viewport/rendering/vulkancontext.h
     src/viewport/rendering/vulkanswapchain.cpp

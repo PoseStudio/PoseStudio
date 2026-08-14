@@ -51,6 +51,11 @@ VulkanRenderer::~VulkanRenderer() {
 }
 
 void VulkanRenderer::notifyResize(VkExtent2D newExtent) {
+    // Expose events report the current size too — only a real change needs a swapchain rebuild,
+    // otherwise every un-obscure of the window would trigger a device-idle + full rebuild.
+    if (newExtent.width == m_windowExtent.width && newExtent.height == m_windowExtent.height) {
+        return;
+    }
     m_windowExtent = newExtent;
     m_framebufferResized = true;
 }
@@ -231,9 +236,9 @@ void VulkanRenderer::recreateSwapchain() {
     m_framebufferResized = false;
 }
 
-void VulkanRenderer::drawFrame() {
+bool VulkanRenderer::drawFrame() {
     if (m_windowExtent.width == 0 || m_windowExtent.height == 0) {
-        return; // minimised: nothing to draw
+        return false; // minimised: nothing to draw (the next expose/resize re-arms drawing)
     }
 
     VkDevice device = m_context.device();
@@ -245,7 +250,7 @@ void VulkanRenderer::drawFrame() {
                                              VK_NULL_HANDLE, &imageIndex);
     if (acquire == VK_ERROR_OUT_OF_DATE_KHR) {
         recreateSwapchain();
-        return; // skip this frame; the next one renders at the new size
+        return true; // this frame was skipped; the caller must schedule one at the new size
     }
     if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR) {
         VK_CHECK(acquire);
@@ -280,15 +285,18 @@ void VulkanRenderer::drawFrame() {
     present.pSwapchains = &swapchain;
     present.pImageIndices = &imageIndex;
 
+    bool needsRedraw = false;
     VkResult presentResult = vkQueuePresentKHR(m_context.presentQueue(), &present);
     if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR ||
         m_framebufferResized) {
         recreateSwapchain();
+        needsRedraw = true; // the presented frame predates the rebuild — draw once at the new size
     } else if (presentResult != VK_SUCCESS) {
         VK_CHECK(presentResult);
     }
 
     m_currentFrame = (m_currentFrame + 1) % kMaxFramesInFlight;
+    return needsRedraw;
 }
 
 void VulkanRenderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex) {

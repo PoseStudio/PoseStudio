@@ -283,6 +283,7 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
     m_boneEuler.assign(m_bones.size(), glm::vec3(0.0f));
     m_boneWorldPos.assign(m_bones.size(), glm::vec3(0.0f));
     m_boneGizmoFrame.assign(m_bones.size(), glm::mat4(1.0f));
+    m_poseGlobal.assign(m_bones.size(), glm::mat4(1.0f));
     m_jointCount = static_cast<uint32_t>(m_bones.empty() ? 1 : m_bones.size());
 
     // Host-mapped storage buffer of skin matrices (updated in-place when the pose changes).
@@ -325,8 +326,9 @@ void Model::computeSkinMatrices() {
         return;
     }
     // Accumulate each bone's posed global transform down the hierarchy (parents precede children),
-    // then skinMatrix = poseGlobal · inverseBind.
-    std::vector<glm::mat4> poseGlobal(m_bones.size());
+    // then skinMatrix = poseGlobal · inverseBind. m_poseGlobal is a member scratch buffer — this
+    // runs on every drag-move while posing, so it mustn't allocate per call.
+    std::vector<glm::mat4>& poseGlobal = m_poseGlobal;
     for (std::size_t i = 0; i < m_bones.size(); ++i) {
         const GpuBone& bone = m_bones[i];
         poseGlobal[i] =

@@ -219,6 +219,7 @@ private:
     std::vector<std::string>             m_boneNames;  // parallel to m_bones (for the posing UI)
     std::vector<glm::vec3>               m_boneWorldPos; // current world position per bone (overlay/pick)
     std::vector<glm::mat4>               m_boneGizmoFrame; // per bone: parentGlobal·localBind·orient (gizmo axes)
+    std::vector<glm::mat4>               m_poseGlobal;  // scratch for computeSkinMatrices (it runs per drag-move; no per-call allocation)
     std::vector<glm::vec3>               m_boneEuler;  // accumulated pose rotation per bone (degrees)
     int                                  m_selectedBone = -1;
     VulkanBuffer                         m_jointBuffer;

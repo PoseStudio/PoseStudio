@@ -160,11 +160,14 @@ Scene::Scene(VulkanContext& context, VkRenderPass renderPass, const std::vector<
     m_skeletonPipeline = std::make_unique<VulkanPipeline>(m_context, renderPass, skeletonVertSpirv,
                                                           skeletonFragSpirv, lineConfig);
 
-    m_skeletonVertexBuffer =
-        VulkanBuffer(m_context, kMaxSkeletonVerts * sizeof(LineVertex),
-                     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO,
-                     VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                         VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    // One overlay vertex buffer per frame-in-flight (see the member comment in scene.h).
+    m_skeletonVertexBuffers.reserve(kMaxFramesInFlight);
+    for (int i = 0; i < kMaxFramesInFlight; ++i) {
+        m_skeletonVertexBuffers.emplace_back(m_context, kMaxSkeletonVerts * sizeof(LineVertex),
+                                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO,
+                                             VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                                                 VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    }
 }
 
 Scene::~Scene() {
@@ -179,6 +182,7 @@ Scene::~Scene() {
     m_fallbackNormal.reset();
     m_iblMaps.reset();         // frees the specular cubemap + BRDF LUT images
     m_cameraBuffers.clear();   // VulkanBuffers free themselves
+    m_skeletonVertexBuffers.clear();
 
     VkDevice device = m_context.device();
     if (m_iblPool != VK_NULL_HANDLE) {
@@ -428,7 +432,8 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
     // line list. The skeleton is hidden by default — the gizmo is the visual affordance — but joints
     // stay clickable regardless, because picking (selectBoneAt) is independent of what's drawn here.
     if (Model* fig = figureModel(); fig && fig->boneCount() > 0) {
-        auto* verts = static_cast<LineVertex*>(m_skeletonVertexBuffer.mappedData());
+        VulkanBuffer& skeletonBuffer = m_skeletonVertexBuffers[frameIndex];
+        auto* verts = static_cast<LineVertex*>(skeletonBuffer.mappedData());
         uint32_t count = 0;
         const int selected = fig->selectedBone();
 
@@ -476,7 +481,7 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                     m_skeletonPipeline->layout(), 0, 1, &m_cameraSets[frameIndex], 0,
                                     nullptr);
-            const VkBuffer vb = m_skeletonVertexBuffer.handle();
+            const VkBuffer vb = skeletonBuffer.handle();
             const VkDeviceSize offset = 0;
             vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &offset);
             vkCmdDraw(cmd, count, 1, 0, 0);

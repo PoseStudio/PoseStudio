@@ -42,9 +42,15 @@ int rotationAxisOf(const std::string& id) {
     return -1;
 }
 
-// Reads each rotation channel's [min,max] range and `clamped` flag into the bone's per-axis limits.
-// An axis is enforced only when the channel is `clamped` and carries a valid range — matching the
-// format's per-channel "use limits" (free axes, e.g. twist bones, stay unconstrained).
+// Reads each rotation channel's [min,max] range and `clamped`/`locked` flags into the bone's
+// per-axis limits. Two distinct constraints in the format:
+//  - `locked` — the channel cannot be posed at all. This is how figures forbid anatomically
+//    impossible motion: a mid-limb twist bone (which exists only to spread axial twist across the
+//    skin) has its two bend axes locked so the limb can never fold where there is no joint — e.g.
+//    the mid-forearm bone ("lWrist" in some generations, "l_forearmtwist1" in others) locks y/z
+//    and leaves only the twist axis free. Honoured here as a hard [0,0] clamp on that axis.
+//  - `clamped` — the channel moves within [min,max] (the joint's anatomical range of motion).
+// Axes with neither flag stay unconstrained.
 void readRotationLimits(const nlohmann::json& rotationArr, FigureBone& bone) {
     if (!rotationArr.is_array()) {
         return;
@@ -52,6 +58,12 @@ void readRotationLimits(const nlohmann::json& rotationArr, FigureBone& bone) {
     for (const auto& ch : rotationArr) {
         const int a = rotationAxisOf(ch.value("id", std::string()));
         if (a < 0) {
+            continue;
+        }
+        if (ch.value("locked", false)) {
+            bone.rotationMin[a] = 0.0f; // locked = pinned at rest (our pose Eulers are rest-relative)
+            bone.rotationMax[a] = 0.0f;
+            bone.rotationLimited[a] = true;
             continue;
         }
         const auto mn = ch.find("min");

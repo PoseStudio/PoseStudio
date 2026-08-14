@@ -59,6 +59,13 @@ IblMaps::IblMaps(VulkanContext& context, const PrefilteredSpecular& specular, co
     // --- Pack the cubemap face/mip data into one staging buffer, recording a copy region per face+mip.
     std::vector<uint32_t> cubeStaging; // two uints per RGBA16F texel
     std::vector<VkBufferImageCopy> cubeCopies;
+    std::size_t totalTexels = 0;
+    for (uint32_t mip = 0; mip < mips; ++mip) {
+        const uint32_t size = std::max(1u, base >> mip);
+        totalTexels += static_cast<std::size_t>(size) * size;
+    }
+    cubeStaging.reserve(totalTexels * 6 * 2);
+    cubeCopies.reserve(6 * mips);
     for (int face = 0; face < 6; ++face) {
         for (uint32_t mip = 0; mip < mips; ++mip) {
             const uint32_t size = std::max(1u, base >> mip);

@@ -275,10 +275,15 @@ void VulkanWindow::renderFrame() {
     if (!m_renderer || !isExposed()) {
         return;
     }
-    m_renderer->drawFrame();
-    // Continuous redraw for now. Once the viewport is event-driven, gate this on "the
-    // scene/camera actually changed".
-    requestUpdate();
+    // Event-driven rendering: a frame is drawn only when something requested one (input, imports,
+    // pose edits, shade-mode/lighting changes, expose/resize — every state change already calls
+    // requestUpdate()). The old continuous requestUpdate() here redrew at full swap rate even when
+    // idle, keeping the GPU busy and (with FIFO/vsync present) throttling the whole GUI thread.
+    // drawFrame() returns true only when the swapchain was just rebuilt (or the frame skipped
+    // mid-rebuild) and one follow-up frame is needed to reflect the new size.
+    if (m_renderer->drawFrame()) {
+        requestUpdate();
+    }
 }
 
 void VulkanWindow::mousePressEvent(QMouseEvent* event) {
