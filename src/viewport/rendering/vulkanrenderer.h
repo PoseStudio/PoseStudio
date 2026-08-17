@@ -28,6 +28,8 @@ namespace pose {
 
 class VulkanContext;
 class VulkanSwapchain;
+class HdrTarget;
+class PostProcess;
 class Grid;
 class Scene;
 struct ModelData;
@@ -129,6 +131,8 @@ private:
     std::string    m_shaderDir;
 
     std::unique_ptr<VulkanSwapchain> m_swapchain;
+    std::unique_ptr<HdrTarget>       m_hdrTarget;   // offscreen HDR scene target (see hdrtarget.h)
+    std::unique_ptr<PostProcess>     m_postProcess; // bloom + the tonemapping composite
     std::unique_ptr<Scene>           m_scene; // imported meshes (opaque)
     std::unique_ptr<Grid>            m_grid;  // floor grid overlay
 

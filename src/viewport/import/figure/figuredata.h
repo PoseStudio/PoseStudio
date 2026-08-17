@@ -33,7 +33,22 @@ struct FigureMaterial {
     std::string normalMapPath;     ///< Tangent-space normal map (resolved), or empty.
     std::string bumpMapPath;       ///< Grayscale bump/height map (resolved), or empty.
     std::string opacityMapPath;    ///< Cutout/opacity mask (lash/brow cards, legacy eye shells), or empty.
-    float       roughness = 0.7f;  ///< Scalar roughness fallback when no roughness map is present.
+    std::string roughnessMapPath;  ///< The active lobe's roughness map (× the scalar), or empty.
+    std::string specMaskMapPath;   ///< The active lobe's weight/reflectivity mask map, or empty.
+    std::string translucencyMapPath; ///< Translucency color/weight map (see materialparser.h), or empty.
+    std::string detailNormalMapPath; ///< Tiled micro-detail (pore) normal map, or empty.
+    float       roughness = 0.7f;  ///< Scalar roughness (× the roughness map when present).
+    float       specularWeight = 1.0f; ///< F0 multiplier (1 = 4% dielectric; skin ~0.5 → ~2%).
+    float       specularWeightWithMap = 1.0f; ///< Undiscounted fold — used when specMaskMapPath decodes.
+    float       metallic  = 0.0f;  ///< Metallic Weight (0 dielectric … 1 metal).
+    float       lobe1Roughness = 0.7f; ///< Dual-lobe specular (ratio 1 = single-lobe material).
+    float       lobe2Roughness = 0.7f;
+    float       lobeRatio      = 1.0f;
+    float       topCoatWeight    = 0.0f; ///< Thin clear-coat layer (reflectivity folded in).
+    float       topCoatRoughness = 0.65f;
+    float       translucencyWeight = 0.5f; ///< Per-region subsurface/transmission strength.
+    float       detailWeight = 0.0f; ///< Micro-detail normal strength (0 = none).
+    float       detailTiles  = 0.0f; ///< Micro-detail UV tiling (repeats across the mesh's UVs).
     float       opacity   = 1.0f;  ///< < 1 => transparent (eye moisture/cornea, later hair/lashes).
 };
 

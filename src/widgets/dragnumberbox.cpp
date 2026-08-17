@@ -126,7 +126,10 @@ void DragNumberBox::mouseMoveEvent(QMouseEvent* event) {
     if (!m_dragging && std::abs(dx) < kDragThresholdPx) {
         return; // still within click territory
     }
-    m_dragging = true;
+    if (!m_dragging) {
+        m_dragging = true;
+        emit editingStarted(); // before the first scrub value lands, so listeners see pre-edit state
+    }
 
     // Anchored scrub: a full-widget-width sweep covers the whole range, snapped to the step
     // so the readout lands on the same values the old slider/spin pair produced.
@@ -147,6 +150,8 @@ void DragNumberBox::mouseReleaseEvent(QMouseEvent* event) {
     m_dragging = false;
     if (wasClick) {
         beginEdit(); // press + release with no scrub = type-in editing
+    } else {
+        emit editingFinished(); // scrub gesture committed
     }
     event->accept();
 }
@@ -187,6 +192,7 @@ void DragNumberBox::beginEdit() {
         connect(m_editor, &QLineEdit::editingFinished, this, &DragNumberBox::commitEdit);
     }
     m_editing = true;
+    emit editingStarted(); // balanced by editingFinished in commitEdit/cancelEdit
     m_editor->setGeometry(rect());
     m_editor->setText(formattedValue());
     m_editor->selectAll();
@@ -212,13 +218,15 @@ void DragNumberBox::commitEdit() {
         setValue(typed); // clamps to range; unparseable input just keeps the old value
     }
     update();
+    emit editingFinished();
 }
 
 void DragNumberBox::cancelEdit() {
-    m_editing = false; // must clear BEFORE hide(): hiding focuses away -> editingFinished
+    m_editing = false; // must clear BEFORE hide(): hiding focuses away -> commitEdit re-entry
     m_editor->hide();
     setFocus(Qt::OtherFocusReason);
     update();
+    emit editingFinished(); // balances beginEdit's editingStarted; no value change happened
 }
 
 bool DragNumberBox::eventFilter(QObject* watched, QEvent* event) {

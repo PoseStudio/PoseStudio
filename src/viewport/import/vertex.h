@@ -32,6 +32,16 @@ struct Vertex {
     glm::uvec4 joints{0, 0, 0, 0};
     glm::vec4  weights{1.0f, 0.0f, 0.0f, 0.0f};
 
+    /// Baked per-vertex ambient occlusion (1 = fully open, 0 = fully occluded) — filled by
+    /// bakeVertexAO() at import; the PBR shader scales the environment terms by it. The default
+    /// leaves un-baked geometry fully lit.
+    float      ao = 1.0f;
+
+    /// UV-aligned tangent (xyz) + bitangent handedness (w = ±1) — filled by computeTangents() at
+    /// import. w = 0 marks "no tangents" and makes the shader fall back to its screen-space
+    /// cotangent frame, so geometry that skips the util still normal-maps.
+    glm::vec4  tangent{0.0f};
+
     /// Single interleaved binding at slot 0.
     static VkVertexInputBindingDescription bindingDescription() {
         VkVertexInputBindingDescription binding{};
@@ -42,9 +52,9 @@ struct Vertex {
     }
 
     /// loc0 = pos (vec3), loc1 = normal (vec3), loc2 = uv (vec2), loc3 = joints (uvec4),
-    /// loc4 = weights (vec4) — matches mesh.vert.
-    static std::array<VkVertexInputAttributeDescription, 5> attributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 5> attrs{};
+    /// loc4 = weights (vec4), loc5 = ao (float), loc6 = tangent (vec4) — matches mesh.vert.
+    static std::array<VkVertexInputAttributeDescription, 7> attributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 7> attrs{};
         attrs[0].location = 0;
         attrs[0].binding = 0;
         attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -65,6 +75,14 @@ struct Vertex {
         attrs[4].binding = 0;
         attrs[4].format = VK_FORMAT_R32G32B32A32_SFLOAT;
         attrs[4].offset = offsetof(Vertex, weights);
+        attrs[5].location = 5;
+        attrs[5].binding = 0;
+        attrs[5].format = VK_FORMAT_R32_SFLOAT;
+        attrs[5].offset = offsetof(Vertex, ao);
+        attrs[6].location = 6;
+        attrs[6].binding = 0;
+        attrs[6].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attrs[6].offset = offsetof(Vertex, tangent);
         return attrs;
     }
 };

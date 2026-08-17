@@ -82,8 +82,26 @@ public:
     void setEnvironmentFile(const QString& hdrPath);
 
     /// Applies the live lighting/exposure dials (Environment panel). Remembered and applied once the
-    /// renderer exists if it isn't built yet.
+    /// renderer exists if it isn't built yet. Never registers undo itself — committed gestures do,
+    /// via registerLightingUndo (live scrubbing pushes many intermediate states through here).
     void setLightingSettings(const LightingSettings& settings);
+
+    /// Undoes / redoes the most recent committed edit. Pose changes and Environment-panel lighting
+    /// edits share ONE chronological stack, so Ctrl+Z steps back through both kinds in the order
+    /// they were made. Reachable via Edit → Undo/Redo (any focus) and Ctrl+Z/Ctrl+Y in the
+    /// viewport; no-op while that stack side is empty or the renderer doesn't exist yet.
+    void undo();
+    void redo();
+
+    /// Pushes a lighting undo entry: @p preEdit is the dial state before a committed Environment-
+    /// panel gesture (scrub, type-in, restore button, restore-all). The panel calls this once per
+    /// gesture; undoing the entry emits lightingRestored so the panel's widgets follow.
+    void registerLightingUndo(const LightingSettings& preEdit);
+
+signals:
+    /// Emitted when undo/redo restores a lighting state. The settings are already applied to the
+    /// renderer; the Environment panel listens (via ViewportWidget) to sync its widgets.
+    void lightingRestored(const LightingSettings& settings);
 
 protected:
     void exposeEvent(QExposeEvent* event) override;
@@ -98,12 +116,19 @@ protected:
 
 private:
     using PoseSnapshot = std::vector<std::pair<std::string, glm::vec3>>;
-    void undoPose(); // Ctrl+Z: revert the last committed pose edit
-    void redoPose(); // Ctrl+Y: reapply an undone edit
+
+    // One committed, undoable edit. A single stack holds both kinds so undo walks pose and
+    // lighting changes together, in the order the user made them.
+    struct UndoEntry {
+        enum class Kind { Pose, Lighting };
+        Kind kind = Kind::Pose;
+        PoseSnapshot pose;         // the pre-edit pose  (kind == Pose)
+        LightingSettings lighting; // the pre-edit dials (kind == Lighting)
+    };
 
     void initializeVulkan();   // safe to call repeatedly; no-ops once initialised
     void beginEnvironmentBake(const QString& hdrPath); // decode + bake off-thread, then swap in on the GUI thread
-    QString defaultEnvironmentPath() const;            // <appDir>/environment.hdr override, else the user library's hdri/
+    QString defaultEnvironmentPath() const;            // <appDir>/environment.{hdr,exr} override, else the user library's hdri/
     void releaseVulkan();      // tears down renderer + context (surface still valid)
     void renderFrame();        // one frame, then schedules the next while exposed
     VkExtent2D pixelExtent() const; // window size in physical pixels
@@ -140,11 +165,11 @@ private:
     // Which rotate-gizmo ring the current left-drag grabbed (0=X,1=Y,2=Z), or -1 if not a gizmo drag.
     int              m_gizmoAxis = -1;
 
-    // Pose undo/redo: each committed pose edit (gizmo or free-drag) pushes the pre-edit pose. m_preEdit
-    // snapshots that pose at drag start.
-    PoseSnapshot              m_preEditPose;
-    std::vector<PoseSnapshot> m_undoStack;
-    std::vector<PoseSnapshot> m_redoStack;
+    // Undo/redo: each committed edit (a pose drag, or a registered lighting gesture) pushes its
+    // pre-edit state. m_preEditPose snapshots the pose at drag start (committed on release).
+    PoseSnapshot           m_preEditPose;
+    std::vector<UndoEntry> m_undoStack;
+    std::vector<UndoEntry> m_redoStack;
 };
 
 } // namespace pose

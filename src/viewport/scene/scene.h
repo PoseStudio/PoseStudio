@@ -33,6 +33,7 @@ class VulkanTexture;
 class Camera;
 class Model;
 class IblMaps;
+class ShadowMap;
 struct ModelData;
 struct Ray;
 
@@ -44,7 +45,9 @@ class Scene {
 public:
     Scene(VulkanContext& context, VkRenderPass renderPass, const std::vector<char>& vertSpirv,
           const std::vector<char>& fragSpirv, const std::vector<char>& skeletonVertSpirv,
-          const std::vector<char>& skeletonFragSpirv);
+          const std::vector<char>& skeletonFragSpirv, const std::vector<char>& shadowVertSpirv,
+          const std::vector<char>& shadowFragSpirv, const std::vector<char>& backgroundVertSpirv,
+          const std::vector<char>& backgroundFragSpirv);
     ~Scene();
 
     Scene(const Scene&) = delete;
@@ -76,9 +79,22 @@ public:
     /// VulkanRenderer::deleteModel() does this.
     void removeModel(std::size_t index);
 
+    /// Records the key light's depth-only shadow pass (its own render pass on the shadow map).
+    /// Call BEFORE the main render pass each frame: it also (re)fits the light's ortho frustum
+    /// around the scene + its floor projections, which record() then feeds to the shaders via the
+    /// UBO. Skipped (leaving the map fully lit) while the scene has no casters.
+    void recordShadowPass(VkCommandBuffer cmd);
+
     /// Updates this frame's camera UBO, binds the pipeline + camera set, and records every model.
     /// The caller has begun the render pass and set the dynamic viewport/scissor.
     void record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex);
+
+    // The grid's ground shadow samples the scene's shadow map through the scene-wide set 3 (the
+    // IBL set — binding 2 is the shadow map). Grid's pipeline is built against this layout and
+    // binds this set at record time, with the matching light matrix from lightViewProj().
+    VkDescriptorSetLayout iblSetLayout() const { return m_iblSetLayout; }
+    VkDescriptorSet       iblSet() const { return m_iblSet; }
+    const glm::mat4&      lightViewProj() const { return m_lightViewProj; }
 
     // --- Posing UI ---
     /// Whether the scene holds a posable figure (a model with a skeleton).
@@ -123,12 +139,14 @@ public:
 
 private:
     void createDescriptorResources();
-    Model* figureModel() const; // first model with a skeleton, or nullptr
+    Model*    figureModel() const; // first model with a skeleton, or nullptr
+    glm::vec3 keyLightDir() const; // normalized world dir TO the key light (azimuth/elevation dials)
 
     VulkanContext&                  m_context;
     std::unique_ptr<VulkanPipeline> m_pipeline;            // opaque pass (depth write on)
     std::unique_ptr<VulkanPipeline> m_transparentPipeline; // alpha-blended pass (depth write off)
     std::unique_ptr<VulkanPipeline> m_skeletonPipeline;    // line overlay for the posing skeleton
+    std::unique_ptr<VulkanPipeline> m_backgroundPipeline;  // HDRI backdrop (PBR mode; drawn first)
     // Host-mapped line vertices (pos+color), one buffer per frame-in-flight: record() rewrites the
     // overlay every frame, so a single shared buffer would be CPU-written while the previous
     // frame's GPU read of it is still in flight.
@@ -169,6 +187,13 @@ private:
     VkDescriptorPool         m_iblPool = VK_NULL_HANDLE;
     VkDescriptorSet          m_iblSet = VK_NULL_HANDLE;
     std::unique_ptr<IblMaps> m_iblMaps;
+
+    // Key-light shadows: the depth-only map + its skinned depth pipeline, re-rendered each frame
+    // before the main pass (recordShadowPass). The map is bound scene-wide as set 3 binding 2; the
+    // fitted light matrix rides in the camera UBO (and to the grid via lightViewProj()).
+    std::unique_ptr<ShadowMap>      m_shadowMap;
+    std::unique_ptr<VulkanPipeline> m_shadowPipeline;
+    glm::mat4                       m_lightViewProj{1.0f};
 
     std::vector<std::unique_ptr<Model>> m_models;
 };

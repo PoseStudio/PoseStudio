@@ -59,7 +59,10 @@
     right: 6px;
 }
 
-/* The thumbnail list inside the HDRI menu: tight rows, menu-style hover/selection, dark scroll bar. */
+/* The thumbnail list inside the HDRI menu: tight rows, menu-style hover/selection, dark scroll bar.
+ * Category headings (one per hdri/ subfolder) are disabled QListWidgetItems painted by a delegate in
+ * code (environmentpanel.cpp HdriHeadingDelegate: a top gap, bold #e0e0e0 text, a #4a4b4d rule under
+ * it) — QSS can't address individual items, so no rule here. */
 #HdriList {
     background-color: #252627;
     color: #e0e0e0;
@@ -104,6 +107,17 @@
 /* Numeric rows are DragNumberBoxes (src/widgets/dragnumberbox.*) — the app-standard scrub field.
  * It paints itself in C++ with the palette above as defaults; re-theme via its color Q_PROPERTYs
  * (qproperty-fillColor etc.) if a container ever needs a different look. No rules needed here. */
+
+/* Per-row restore-default button (the small icon right of each DragNumberBox): quiet until
+ * hovered, then the app-wide menu-hover blue. */
+#EnvironmentRowRestore {
+    border: none;
+    background: transparent;
+    padding: 2px;
+    border-radius: 3px;
+}
+#EnvironmentRowRestore:hover   { background-color: #314D7A; }
+#EnvironmentRowRestore:pressed { background-color: #2f3f5c; }
 
 /* Tonemap checkbox. Checked = an accent check glyph in the dark well (not a solid fill — the
  * filled square read as a button); hover echoes the DragNumberBox hover border. */

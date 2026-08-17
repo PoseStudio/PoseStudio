@@ -72,7 +72,45 @@ struct MeshData {
     TextureSource         opacityMask;
     bool                  hasOpacityMask = false; // set by the decode layer once the bake succeeds
 
+    // Specular parameter maps (both LINEAR, sampled .r): the roughness map multiplies the scalar
+    // roughness per texel; the spec-mask map multiplies specularWeight per texel (the decode layer
+    // switches specularWeight to the material's undiscounted fold when the mask decodes — see
+    // MaterialRefs::specularWeightWithMap). Empty => 1x1 white fallback (scalar behaviour).
+    TextureSource         roughnessMap;
+    std::vector<uint8_t>  roughnessPixels;
+    uint32_t              roughnessWidth  = 0;
+    uint32_t              roughnessHeight = 0;
+    TextureSource         specMask;
+    std::vector<uint8_t>  specMaskPixels;
+    uint32_t              specMaskWidth  = 0;
+    uint32_t              specMaskHeight = 0;
+
+    // Translucency map (sRGB colour: the flesh-red transmitted tint, or a grayscale weight map —
+    // luminance = per-region strength). White fallback = uniform.
+    TextureSource         translucencyMap;
+    std::vector<uint8_t>  translucencyPixels;
+    uint32_t              translucencyWidth  = 0;
+    uint32_t              translucencyHeight = 0;
+
+    // Micro-detail (pore) normal map: LINEAR tangent-space normals tiled detailTiles× across the
+    // UVs at detailWeight strength. No gutter fill (it wraps, and tiled UVs leave no gutters).
+    TextureSource         detailNormalMap;
+    std::vector<uint8_t>  detailNormalPixels;
+    uint32_t              detailNormalWidth  = 0;
+    uint32_t              detailNormalHeight = 0;
+    float                 detailWeight = 0.0f;
+    float                 detailTiles  = 0.0f;
+
     float                 roughness = 0.7f; // 0 = mirror-smooth, 1 = fully rough (matte).
+    float                 specularWeight = 1.0f; // F0 multiplier (1 = 4% dielectric; skin ~0.5).
+    float                 specularWeightWithMap = 1.0f; // see the map comment above
+    float                 metalness = 0.0f; // 0 dielectric … 1 metal (F0 = albedo).
+    float                 lobe1Roughness = 0.7f; // dual-lobe specular; lobeRatio 1 = single lobe
+    float                 lobe2Roughness = 0.7f; //   (the shader then uses `roughness` as before)
+    float                 lobeRatio      = 1.0f; // lobe 1's fraction of the specular
+    float                 topCoatWeight    = 0.0f;  // thin clear-coat layer (0 = none)
+    float                 topCoatRoughness = 0.65f;
+    float                 translucencyWeight = 0.5f; // × the translucency map's luminance
     float                 opacity   = 1.0f; // < 1 => drawn in the transparent pass, alpha-blended.
 
     // For pose correctives: the source *base* (pre-de-index) vertex index each render vertex

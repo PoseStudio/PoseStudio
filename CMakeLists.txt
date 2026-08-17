@@ -10,7 +10,7 @@ cmake_minimum_required(VERSION 3.21)
 # C is enabled alongside C++ because a couple of third-party dependencies ship C implementation
 # files we compile directly into the target (e.g. miniz's inflate sources for the figure importer).
 # Without C in the language list, CMake classifies .c files as non-buildable and silently skips them.
-project(PoseStudio VERSION 0.4.0 LANGUAGES C CXX)
+project(PoseStudio VERSION 0.5.0 LANGUAGES C CXX)
 
 # ==============================================================================
 # [ COMPILER CONFIGURATION ]
@@ -121,7 +121,17 @@ FetchContent_Declare(stb
     GIT_TAG        013ac3beddff3dbffafd5177e7972067cd2b5083
     SOURCE_SUBDIR  headers-only-do-not-configure
 )
-FetchContent_MakeAvailable(glm vma tinyobjloader nlohmann_json miniz stb)
+# tinyexr: OpenEXR (.exr) decoder for environment panoramas — the float-image companion to
+# stb_image's .hdr path (environmentsource.cpp dispatches on file extension). Header-only for us,
+# implementation compiled in one TU (tinyexr_impl.cpp). Its ZIP inflate goes through the same miniz
+# sources the figure importer already compiles into the target (TINYEXR_USE_MINIZ, the default) —
+# no zlib dependency.
+FetchContent_Declare(tinyexr
+    GIT_REPOSITORY https://github.com/syoyo/tinyexr.git
+    GIT_TAG        v1.0.13
+    SOURCE_SUBDIR  headers-only-do-not-configure
+)
+FetchContent_MakeAvailable(glm vma tinyobjloader nlohmann_json miniz stb tinyexr)
 
 # ==============================================================================
 # [ TARGET DEFINITION & SOURCE FILES ]
@@ -168,7 +178,12 @@ add_executable(
     src/viewport/environmentsource.h
     src/viewport/import/texturegutters.cpp # UV-island gutter dilation (kills mip-bleed seam lines)
     src/viewport/import/texturegutters.h
+    src/viewport/import/aobaker.cpp        # per-vertex ambient-occlusion bake (BVH hemisphere rays)
+    src/viewport/import/aobaker.h
+    src/viewport/import/tangentgen.cpp     # per-vertex UV tangent generation (Lengyel)
+    src/viewport/import/tangentgen.h
     src/viewport/stb_impl.cpp             # single TU that compiles stb_image's implementation
+    src/viewport/tinyexr_impl.cpp         # single TU that compiles tinyexr's implementation
     # Rendering core (pure Vulkan + std + GLM, no Qt):
     src/viewport/rendering/vulkancommon.h
     src/viewport/rendering/parallelfor.h  # index-parallel loop for CPU bakes (IBL prefilter, corrective subdivision)
@@ -184,6 +199,12 @@ add_executable(
     src/viewport/rendering/vulkanimage.h
     src/viewport/rendering/iblmaps.cpp    # GPU prefiltered-specular cubemap + BRDF LUT (IBL set 3)
     src/viewport/rendering/iblmaps.h
+    src/viewport/rendering/shadowmap.cpp  # key-light depth-only shadow map (set 3 binding 2)
+    src/viewport/rendering/shadowmap.h
+    src/viewport/rendering/hdrtarget.cpp  # offscreen HDR scene target (linear RGBA16F + MSAA)
+    src/viewport/rendering/hdrtarget.h
+    src/viewport/rendering/postprocess.cpp # bloom chain + the tonemapping composite
+    src/viewport/rendering/postprocess.h
     src/viewport/rendering/vulkancommands.cpp
     src/viewport/rendering/vulkancommands.h
     src/viewport/rendering/vulkanrenderer.cpp
@@ -305,6 +326,7 @@ target_include_directories(PoseStudio PRIVATE
     ${miniz_SOURCE_DIR}                      # so <miniz.h> resolves
     ${CMAKE_SOURCE_DIR}/cmake/miniz-shim     # supplies miniz_export.h (miniz's CMake is skipped)
     ${stb_SOURCE_DIR}                        # so <stb_image.h> resolves
+    ${tinyexr_SOURCE_DIR}                    # so <tinyexr.h> resolves
 )
 
 # miniz's C implementation, compiled directly into the target (its split source layout: core +
@@ -382,6 +404,15 @@ set(SHADER_SOURCES
     mesh.frag
     skeleton.vert
     skeleton.frag
+    shadow.vert
+    shadow.frag
+    background.vert
+    background.frag
+    fullscreen.vert
+    bloombright.frag
+    bloomblur.frag
+    composite.frag
+    sssblur.frag
 )
 
 set(COMPILED_SPV_FILES "")

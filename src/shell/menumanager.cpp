@@ -108,8 +108,21 @@ void MenuManager::setupMenus() {
     // =========================================================================
     QMenu *editMenu = mainWindow->menuBar()->addMenu("Edit");
 
-    editMenu->addAction(loadDualStateIcon("undo"), "Undo")->setEnabled(false);
-    editMenu->addAction(loadDualStateIcon("redo"), "Redo")->setEnabled(false);
+    // Undo/Redo drive the viewport's shared edit stack (pose changes + Environment-panel lighting
+    // gestures). The QAction shortcuts are what make Ctrl+Z/Ctrl+Y work app-wide — the panel's
+    // controls take keyboard focus, so the viewport's own keyPressEvent alone wouldn't see the
+    // keys after a dial edit. Text fields still keep their own Ctrl+Z: a focused QLineEdit accepts
+    // the ShortcutOverride for its editing keys, which parks these window-level shortcuts.
+    QAction *undoAction = editMenu->addAction(loadDualStateIcon("undo"), "Undo");
+    undoAction->setShortcut(QKeySequence::Undo);
+    QObject::connect(undoAction, &QAction::triggered, mainWindow, [this]() {
+        if (viewportWidget) viewportWidget->undo();
+    });
+    QAction *redoAction = editMenu->addAction(loadDualStateIcon("redo"), "Redo");
+    redoAction->setShortcut(QKeySequence::Redo);
+    QObject::connect(redoAction, &QAction::triggered, mainWindow, [this]() {
+        if (viewportWidget) viewportWidget->redo();
+    });
     editMenu->addAction("Undo History...")->setEnabled(false);
     editMenu->addSeparator();
 

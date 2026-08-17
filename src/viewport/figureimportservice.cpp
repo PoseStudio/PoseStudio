@@ -5,7 +5,9 @@
 
 #include "figureimportservice.h"
 
+#include "aobaker.h"
 #include "modeldata.h"
+#include "tangentgen.h"
 #include "modelimportservice.h" // decodeMeshTexture (shared with the model path)
 #include "import/figure/figuredata.h"
 #include "import/figure/figureimporter.h"
@@ -83,6 +85,21 @@ ModelData toModelData(FigureData&& fig) {
         mesh.diffuse.path = zone.material.diffuseMapPath;
         mesh.opacityMask.path = zone.material.opacityMapPath;
         mesh.roughness = zone.material.roughness;
+        mesh.specularWeight = zone.material.specularWeight;
+        mesh.specularWeightWithMap = zone.material.specularWeightWithMap;
+        mesh.metalness = zone.material.metallic;
+        mesh.lobe1Roughness = zone.material.lobe1Roughness;
+        mesh.lobe2Roughness = zone.material.lobe2Roughness;
+        mesh.lobeRatio = zone.material.lobeRatio;
+        mesh.topCoatWeight = zone.material.topCoatWeight;
+        mesh.topCoatRoughness = zone.material.topCoatRoughness;
+        mesh.translucencyWeight = zone.material.translucencyWeight;
+        mesh.roughnessMap.path = zone.material.roughnessMapPath;
+        mesh.specMask.path = zone.material.specMaskMapPath;
+        mesh.translucencyMap.path = zone.material.translucencyMapPath;
+        mesh.detailNormalMap.path = zone.material.detailNormalMapPath;
+        mesh.detailWeight = zone.material.detailWeight;
+        mesh.detailTiles = zone.material.detailTiles;
         mesh.opacity = zone.material.opacity;
         // Detail map: prefer a true tangent-space normal map (mode 1); else the grayscale bump/height
         // map (mode 2, applied via a texture-space central difference in the shader). The base figure
@@ -291,6 +308,15 @@ void runFigureImport(VulkanRenderer& renderer, const QString& path,
         ModelImportService::decodeMeshTexture(mesh);
     }
     const qint64 msDecode = timer.elapsed();
+
+    // Bake per-vertex ambient occlusion + UV tangents on the final render mesh (post-morph,
+    // post-subdivision, all zones together — the AO parallel across cores). See aobaker.h /
+    // tangentgen.h.
+    if (progress) {
+        progress->setLabelText(QStringLiteral("Baking ambient occlusion…"));
+    }
+    bakeVertexAO(data);
+    computeTangents(data);
 
     if (progress) {
         progress->setLabelText(QStringLiteral("Uploading to GPU…"));

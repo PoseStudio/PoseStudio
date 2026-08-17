@@ -97,8 +97,22 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
            VkDescriptorPool materialPool, const VulkanTexture& fallbackDiffuse,
            const VulkanTexture& fallbackNormal, ImmediateBatch& batch)
     : m_indexCount(static_cast<uint32_t>(data.indices.size())), m_baseColor(data.baseColor),
-      m_roughness(data.roughness), m_opacity(data.opacity),
+      m_roughness(data.roughness), m_specularWeight(data.specularWeight),
+      m_metalness(data.metalness), m_lobe1Roughness(data.lobe1Roughness),
+      m_lobe2Roughness(data.lobe2Roughness), m_lobeRatio(data.lobeRatio),
+      m_topCoatWeight(data.topCoatWeight), m_topCoatRoughness(data.topCoatRoughness),
+      m_translucencyWeight(data.translucencyWeight), m_detailWeight(data.detailWeight),
+      m_detailTiles(data.detailTiles), m_opacity(data.opacity),
       m_hasOpacityMask(data.hasOpacityMask) {
+    // Bind-pose centroid: the transparent pass's back-to-front sort key.
+    if (!data.vertices.empty()) {
+        glm::vec3 sum(0.0f);
+        for (const Vertex& v : data.vertices) {
+            sum += v.pos;
+        }
+        m_centroid = sum / static_cast<float>(data.vertices.size());
+    }
+
     const VkDeviceSize vertexBytes = sizeof(Vertex) * data.vertices.size();
     const VkDeviceSize indexBytes = sizeof(uint32_t) * data.indices.size();
     // Record all uploads into the shared batch instead of submitting per buffer/texture.
@@ -120,11 +134,47 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
                                                           /*srgb=*/false);
         m_normalMode = data.normalMode;
     }
+    // Specular parameter maps (linear ×-multiplier data; see modeldata.h). Absent => the shared
+    // white fallback, so the shader's per-texel multiplies are no-ops for scalar-only materials.
+    if (data.roughnessWidth > 0 && data.roughnessHeight > 0 && !data.roughnessPixels.empty()) {
+        m_roughnessTexture =
+            std::make_unique<VulkanTexture>(context, data.roughnessPixels.data(),
+                                            data.roughnessWidth, data.roughnessHeight, batch,
+                                            /*srgb=*/false);
+    }
+    if (data.specMaskWidth > 0 && data.specMaskHeight > 0 && !data.specMaskPixels.empty()) {
+        m_specMaskTexture =
+            std::make_unique<VulkanTexture>(context, data.specMaskPixels.data(), data.specMaskWidth,
+                                            data.specMaskHeight, batch, /*srgb=*/false);
+    }
+    // Translucency map (sRGB — it's the transmitted-tint colour; grayscale weight maps read the
+    // same either way through their luminance).
+    if (data.translucencyWidth > 0 && data.translucencyHeight > 0 &&
+        !data.translucencyPixels.empty()) {
+        m_translucencyTexture = std::make_unique<VulkanTexture>(
+            context, data.translucencyPixels.data(), data.translucencyWidth,
+            data.translucencyHeight, batch);
+    }
+    // Micro-detail (pore) normal map — linear, tiled (the sampler wraps).
+    if (data.detailNormalWidth > 0 && data.detailNormalHeight > 0 &&
+        !data.detailNormalPixels.empty()) {
+        m_microNormalTexture = std::make_unique<VulkanTexture>(
+            context, data.detailNormalPixels.data(), data.detailNormalWidth,
+            data.detailNormalHeight, batch, /*srgb=*/false);
+    }
+
     const VulkanTexture& diffuse = m_texture ? *m_texture : fallbackDiffuse;
     const VulkanTexture& detail = m_normalTexture ? *m_normalTexture : fallbackNormal;
+    // The white fallback is numerically identical sampled as sRGB or linear (1.0 either way), so
+    // the diffuse fallback doubles for the parameter maps.
+    const VulkanTexture& roughMap = m_roughnessTexture ? *m_roughnessTexture : fallbackDiffuse;
+    const VulkanTexture& specMask = m_specMaskTexture ? *m_specMaskTexture : fallbackDiffuse;
+    const VulkanTexture& transMap = m_translucencyTexture ? *m_translucencyTexture : fallbackDiffuse;
+    const VulkanTexture& microNormal = m_microNormalTexture ? *m_microNormalTexture : fallbackNormal;
 
     // Allocate this mesh's set-1 descriptor from the owning Model's pool: binding 0 = diffuse,
-    // binding 1 = detail map.
+    // binding 1 = detail map, binding 2 = roughness map, binding 3 = spec-mask map,
+    // binding 4 = translucency map, binding 5 = micro-detail (pore) normal map.
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = materialPool;
@@ -132,15 +182,27 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
     allocInfo.pSetLayouts = &materialSetLayout;
     VK_CHECK(vkAllocateDescriptorSets(context.device(), &allocInfo, &m_materialSet));
 
-    std::array<VkDescriptorImageInfo, 2> imageInfos{};
+    std::array<VkDescriptorImageInfo, 6> imageInfos{};
     imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     imageInfos[0].imageView = diffuse.imageView();
     imageInfos[0].sampler = diffuse.sampler();
     imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     imageInfos[1].imageView = detail.imageView();
     imageInfos[1].sampler = detail.sampler();
+    imageInfos[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfos[2].imageView = roughMap.imageView();
+    imageInfos[2].sampler = roughMap.sampler();
+    imageInfos[3].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfos[3].imageView = specMask.imageView();
+    imageInfos[3].sampler = specMask.sampler();
+    imageInfos[4].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfos[4].imageView = transMap.imageView();
+    imageInfos[4].sampler = transMap.sampler();
+    imageInfos[5].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfos[5].imageView = microNormal.imageView();
+    imageInfos[5].sampler = microNormal.sampler();
 
-    std::array<VkWriteDescriptorSet, 2> writes{};
+    std::array<VkWriteDescriptorSet, 6> writes{};
     for (uint32_t i = 0; i < writes.size(); ++i) {
         writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet = m_materialSet;
@@ -153,19 +215,40 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
                            nullptr);
 }
 
-void Mesh::record(VkCommandBuffer cmd, VkPipelineLayout layout, const glm::mat4& model) const {
+void Mesh::record(VkCommandBuffer cmd, VkPipelineLayout layout, const glm::mat4& model,
+                  bool transparentPass) const {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 1, 1, &m_materialSet, 0,
                             nullptr); // set 1 = this mesh's diffuse texture
 
     MeshPushConstants push{};
     push.model = model;
     push.baseColor = glm::vec4(m_baseColor, m_opacity);
-    // material.z = metalness: always 0 for now (the OBJ/figure sources carry no metalness map), but the
-    // PBR shader reads it, so a metal-map slot drops in here without a shader change.
-    push.material = glm::vec4(m_roughness, static_cast<float>(m_normalMode), 0.0f, 0.0f);
+    // z = metalness ("Metallic Weight" — scalar only, no map yet); w = the per-material specular
+    // (F0) weight the material parser derived from the active specular lobe's reflectivity
+    // (1 = standard 4% dielectric; skin ~0.5 → ~2%; OBJ meshes default to 1).
+    push.material = glm::vec4(m_roughness, static_cast<float>(m_normalMode), m_metalness,
+                              m_specularWeight);
+    push.material2 = glm::vec4(m_lobe1Roughness, m_lobe2Roughness, m_lobeRatio,
+                               m_translucencyWeight);
+    // material3.w packs the micro-detail layer (the block sits at the 128-byte push limit):
+    // integer part = UV tiling, fraction = weight; 0 = no detail layer.
+    const float detailPacked =
+        (m_microNormalTexture && m_detailTiles >= 1.0f && m_detailWeight > 0.0f)
+            ? std::floor(m_detailTiles) + std::min(m_detailWeight, 0.99f)
+            : 0.0f;
+    push.material3 = glm::vec4(m_topCoatWeight, m_topCoatRoughness,
+                               transparentPass ? 1.0f : 0.0f, detailPacked);
     vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                        sizeof(push), &push);
 
+    const VkBuffer vertexBuffer = m_vertexBuffer.handle();
+    const VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
+    vkCmdBindIndexBuffer(cmd, m_indexBuffer.handle(), 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(cmd, m_indexCount, 1, 0, 0, 0);
+}
+
+void Mesh::recordDepth(VkCommandBuffer cmd) const {
     const VkBuffer vertexBuffer = m_vertexBuffer.handle();
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
@@ -214,11 +297,12 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
         m_hasBounds = true;
     }
 
-    // Descriptors from this model's pool: one set-1 per mesh (two samplers each) + one set-2 joint
-    // set for the whole model.
+    // Descriptors from this model's pool: one set-1 per mesh (six samplers each: diffuse, detail,
+    // roughness map, spec mask, translucency map, micro-detail normal) + one set-2 joint set for
+    // the whole model.
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = meshCount * 2;
+    poolSizes[0].descriptorCount = meshCount * 6;
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[1].descriptorCount = 1;
 
@@ -603,15 +687,76 @@ Model::~Model() {
     }
 }
 
-void Model::record(VkCommandBuffer cmd, VkPipelineLayout layout, bool transparentPass) const {
+void Model::record(VkCommandBuffer cmd, VkPipelineLayout layout, bool transparentPass,
+                   const glm::vec3& cameraPos) const {
     // Set 2 = this model's skin matrices (shared by all its meshes).
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 2, 1, &m_jointSet, 0,
                             nullptr);
+    if (!transparentPass) {
+        for (const Mesh& mesh : m_meshes) {
+            if (!mesh.isTransparent()) {
+                mesh.record(cmd, layout, m_transform, false);
+            }
+        }
+        return;
+    }
+    // Transparent pass: back-to-front by (bind-pose) centroid distance, so layered shells —
+    // lashes over cornea over sclera — blend in the right order from any viewing angle.
+    std::vector<std::pair<float, const Mesh*>> order;
     for (const Mesh& mesh : m_meshes) {
-        if (mesh.isTransparent() == transparentPass) {
-            mesh.record(cmd, layout, m_transform);
+        if (mesh.isTransparent()) {
+            const glm::vec3 c = glm::vec3(m_transform * glm::vec4(mesh.centroid(), 1.0f));
+            const glm::vec3 d = c - cameraPos;
+            order.emplace_back(glm::dot(d, d), &mesh);
         }
     }
+    std::sort(order.begin(), order.end(),
+              [](const std::pair<float, const Mesh*>& a, const std::pair<float, const Mesh*>& b) {
+                  return a.first > b.first; // farthest first
+              });
+    for (const auto& [distSq, mesh] : order) {
+        mesh->record(cmd, layout, m_transform, true);
+    }
+}
+
+void Model::recordShadow(VkCommandBuffer cmd, VkPipelineLayout layout,
+                         const glm::mat4& lightViewProj) const {
+    if (m_meshes.empty()) {
+        return;
+    }
+    // The shadow pipeline's only set (index 0) is the joint-matrix layout — bind the same set
+    // object the main pass binds at index 2 (set compatibility is by layout, not index), so a
+    // posed figure casts its posed shadow.
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &m_jointSet, 0,
+                            nullptr);
+    ShadowPushConstants push{};
+    push.lightViewProj = lightViewProj;
+    push.model = m_transform;
+    vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
+    for (const Mesh& mesh : m_meshes) {
+        if (!mesh.isTransparent()) { // no alpha in this pass — cards/shells would cast solid shadows
+            mesh.recordDepth(cmd);
+        }
+    }
+}
+
+bool Model::worldBounds(glm::vec3& outMin, glm::vec3& outMax) const {
+    if (!m_hasBounds) {
+        return false;
+    }
+    // Transform all 8 local AABB corners (the transform may rotate; min/max of the corners is the
+    // tight world AABB of the local box).
+    outMin = glm::vec3(std::numeric_limits<float>::max());
+    outMax = glm::vec3(std::numeric_limits<float>::lowest());
+    for (int i = 0; i < 8; ++i) {
+        const glm::vec3 corner((i & 1) ? m_boundsMax.x : m_boundsMin.x,
+                               (i & 2) ? m_boundsMax.y : m_boundsMin.y,
+                               (i & 4) ? m_boundsMax.z : m_boundsMin.z);
+        const glm::vec3 world = glm::vec3(m_transform * glm::vec4(corner, 1.0f));
+        outMin = glm::min(outMin, world);
+        outMax = glm::max(outMax, world);
+    }
+    return true;
 }
 
 bool Model::intersectRay(const Ray& ray, float& tOut) const {

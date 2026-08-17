@@ -14,6 +14,7 @@
 layout(set = 0, binding = 0) uniform CameraUbo {
     mat4 viewProj;
     mat4 view;
+    mat4 lightViewProj; // key light's ortho view-projection (shadow-map space)
     vec4 cameraPos;
     vec4 lightDir;    // key light (direction TO the light)
     vec4 lightColor;
@@ -31,26 +32,40 @@ layout(set = 0, binding = 0) uniform CameraUbo {
 layout(push_constant) uniform Push {
     mat4 model;
     vec4 baseColor; // rgb tint, a = opacity
-    vec4 material;  // x = roughness, y = normalMode (0 none / 1 normal / 2 bump), z = metalness
+    vec4 material;  // x = roughness (ratio-blended), y = normalMode (0 none / 1 normal / 2 bump),
+                    // z = metalness, w = specular (F0) weight (1 = 4% dielectric; skin ~0.5)
+    vec4 material2; // x = lobe1 rough, y = lobe2 rough, z = lobe ratio (1 = single-lobe),
+                    // w = translucency weight
+    vec4 material3; // x = top-coat weight (0 = none), y = top-coat roughness, z/w reserved
 } pc;
 
-layout(set = 1, binding = 0) uniform sampler2D uDiffuse; // sRGB colour map (white 1x1 fallback)
-layout(set = 1, binding = 1) uniform sampler2D uDetail;  // linear normal/bump map (flat fallback)
+layout(set = 1, binding = 0) uniform sampler2D uDiffuse;   // sRGB colour map (white 1x1 fallback)
+layout(set = 1, binding = 1) uniform sampler2D uDetail;    // linear normal/bump map (flat fallback)
+layout(set = 1, binding = 2) uniform sampler2D uRoughMap;  // linear roughness ×-map (white fallback)
+layout(set = 1, binding = 3) uniform sampler2D uSpecMask;  // linear spec-weight mask (white fallback)
+layout(set = 1, binding = 4) uniform sampler2D uTransMap;    // sRGB translucency tint/weight map (white)
+layout(set = 1, binding = 5) uniform sampler2D uMicroNormal; // linear tiled pore-normal map (flat)
 
 // IBL maps (set 3): the specular half of split-sum image-based lighting. The diffuse half is the SH
 // in the camera UBO. Prefiltered cube: mip = roughness. BRDF LUT: (NdotV, roughness) -> (scale, bias).
 layout(set = 3, binding = 0) uniform samplerCube uPrefilteredSpec;
 layout(set = 3, binding = 1) uniform sampler2D  uBrdfLut;
+// The key light's shadow map (comparison sampler: each tap returns 1 = lit). Rendered by the
+// depth-only shadow pass each frame; the border is opaque white so outside-frustum reads are lit.
+layout(set = 3, binding = 2) uniform sampler2DShadow uShadowMap;
 
 layout(location = 0) in vec3 vWorldNormal;
 layout(location = 1) in vec2 vUv;
 layout(location = 2) in vec3 vWorldPos;
+layout(location = 3) in float vAo; // baked ambient occlusion (1 = open; import-time hemisphere bake)
+layout(location = 4) in vec4 vTangent; // baked UV tangent + handedness (w = 0 -> none)
 
 layout(location = 0) out vec4 outColor;
 
 const float PI = 3.14159265359;
 
 // Builds a tangent basis from screen-space derivatives of position + uv (Schüler's cotangent frame).
+// The fallback for geometry without baked tangents — see tangentFrame() below.
 mat3 cotangentFrame(vec3 N, vec3 p, vec2 uv) {
     vec3 dp1 = dFdx(p);
     vec3 dp2 = dFdy(p);
@@ -62,6 +77,17 @@ mat3 cotangentFrame(vec3 N, vec3 p, vec2 uv) {
     vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
     float invmax = inversesqrt(max(dot(T, T), dot(B, B)));
     return mat3(T * invmax, B * invmax, N);
+}
+
+// The surface tangent frame: the import-baked UV tangents when present (cleaner + stable across
+// UDIM seams — see tangentgen.h), else the screen-space cotangent fallback.
+mat3 tangentFrame(vec3 n, vec3 p, vec2 uv) {
+    if (abs(vTangent.w) > 0.5) {
+        vec3 t = normalize(vTangent.xyz - n * dot(n, vTangent.xyz));
+        vec3 b = cross(n, t) * vTangent.w;
+        return mat3(t, b, n);
+    }
+    return cotangentFrame(n, p, uv);
 }
 
 // ACES filmic tonemap — keeps the HDR ranges of the PBR/matcap modes from clipping harshly before the
@@ -112,6 +138,26 @@ vec3 fresnelSchlick(float cosTheta, vec3 f0) {
     return f0 + (1.0 - f0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
+// Key-light visibility from the shadow map: 3x3 PCF through the hardware comparison sampler
+// (1 = fully lit). Depth bias is applied at shadow-raster time (the pipeline's static bias);
+// z outside [0,1] or uv outside the map (white border) simply read lit.
+float keyShadow(vec3 worldPos) {
+    vec4 lp = cam.lightViewProj * vec4(worldPos, 1.0);
+    vec3 p = lp.xyz / lp.w;
+    if (p.z <= 0.0 || p.z >= 1.0) {
+        return 1.0;
+    }
+    vec2 uv = p.xy * 0.5 + 0.5;
+    vec2 texel = 1.0 / vec2(textureSize(uShadowMap, 0));
+    float sum = 0.0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            sum += texture(uShadowMap, vec3(uv + vec2(x, y) * texel, p.z));
+        }
+    }
+    return sum / 9.0;
+}
+
 // --- Procedural matcaps: shade a "material sphere" from the view-space normal (vn.z points at eye) ---
 vec3 matcapStudio(vec3 vn) {
     float t = smoothstep(-0.85, 1.0, vn.y);
@@ -149,7 +195,7 @@ void main() {
     int nm = int(pc.material.y + 0.5);
     if (nm == 1) {
         vec3 mapN = texture(uDetail, vUv).xyz * 2.0 - 1.0;
-        n = normalize(cotangentFrame(n, vWorldPos, vUv) * mapN);
+        n = normalize(tangentFrame(n, vWorldPos, vUv) * mapN);
     } else if (nm == 2) {
         vec2 texel = 1.0 / vec2(textureSize(uDetail, 0));
         float hL = texture(uDetail, vUv - vec2(texel.x, 0.0)).r;
@@ -157,7 +203,19 @@ void main() {
         float hD = texture(uDetail, vUv - vec2(0.0, texel.y)).r;
         float hU = texture(uDetail, vUv + vec2(0.0, texel.y)).r;
         vec2 dH = vec2(hR - hL, hU - hD) * 2.5;
-        n = normalize(cotangentFrame(n, vWorldPos, vUv) * vec3(-dH.x, -dH.y, 1.0));
+        n = normalize(tangentFrame(n, vWorldPos, vUv) * vec3(-dH.x, -dH.y, 1.0));
+    }
+
+    // Micro-detail (pore) normal: the newer skin shader's tiled grain layer, applied over the base
+    // perturbation. material3.w packs it (integer part = UV tiling, fraction = weight; 0 = none —
+    // the push block is at its 128-byte limit, so the pair shares one float).
+    float detailPacked = pc.material3.w;
+    if (detailPacked >= 1.0) {
+        float detailTiles = floor(detailPacked);
+        float detailWeight = fract(detailPacked);
+        vec3 dn = texture(uMicroNormal, vUv * detailTiles).xyz * 2.0 - 1.0;
+        dn.xy *= detailWeight;
+        n = normalize(tangentFrame(n, vWorldPos, vUv) * normalize(dn));
     }
 
     // Alpha = per-draw opacity × the diffuse texel's alpha. The decode layer bakes any opacity
@@ -176,7 +234,10 @@ void main() {
     float ndh = max(dot(n, hv), 0.0);
     float ndv = max(dot(n, v), 0.0);
     float vdh = max(dot(v, hv), 0.0);
-    float rough = clamp(pc.material.x, 0.04, 1.0);
+    // Scalar roughness × its per-texel map (white fallback = scalar-only): the source materials
+    // author per-region variation — T-zone oil, matte body, glossy lips — in these maps.
+    float roughTexel = texture(uRoughMap, vUv).r;
+    float rough = clamp(pc.material.x * roughTexel, 0.04, 1.0);
 
     // --- Data / unlit modes (return early; no lighting) ---
     if (mode == 9) {              // Normals: world-space normal as RGB
@@ -257,7 +318,14 @@ void main() {
         float rimInt      = cam.params3.y;   // photographic back-rim intensity (0 = off)
 
         float metallic = clamp(pc.material.z, 0.0, 1.0);
-        vec3  f0 = mix(vec3(0.04), albedo, metallic);   // dielectric 4% ramping to metal = albedo tint
+        // Dielectric F0 = 4% × the material's specular weight — the import layer derives the weight
+        // from the source material's active specular lobe (its reflectivity: skin authors ~0.3,
+        // i.e. ~2% F0 — the real thing) × the per-texel spec-mask map (white fallback = scalar
+        // only; when the real mask decoded, material.w carries the UNdiscounted fold and the mask
+        // texels do the regional scaling). Clamped to 1 = the dielectric ceiling either way, then
+        // ramping to metal = albedo tint.
+        float specWeight = min(pc.material.w * texture(uSpecMask, vUv).r, 1.0);
+        vec3  f0 = mix(vec3(0.04) * specWeight, albedo, metallic);
         vec3  diffuseAlbedo = albedo * (1.0 - metallic); // metals have no diffuse
         float a = rough * rough;
 
@@ -275,49 +343,147 @@ void main() {
         // tinted the figure's back red). The (1+w)² denominator keeps each channel energy-conserving,
         // which also slightly relaxes the lit side instead of stacking onto it. Subsurface = 0 reduces
         // to plain Lambert.
+        // Shadow the key light (diffuse + specular + top coat alike): self-shadowing under the
+        // chin/nose, arm-on-torso, etc. The environment terms stay unshadowed (that's AO's job).
+        float shadow = keyShadow(vWorldPos);
+
+        // Dual-lobe specular: skin authors a broad + a tighter GGX lobe blended by a ratio; a
+        // ratio of 1 marks a single-lobe material (OBJ, glossy-lobe surfaces) which uses the
+        // ratio-blended `rough` exactly as before. Both lobes share the roughness map.
+        float lobeRatio = clamp(pc.material2.z, 0.0, 1.0);
+        float rough1 = clamp(pc.material2.x * roughTexel, 0.04, 1.0);
+        float rough2 = clamp(pc.material2.y * roughTexel, 0.04, 1.0);
+        bool  dualLobe = lobeRatio < 0.999;
+
+        // Per-region translucency: authored weight × the map (a flesh-red colour map carries the
+        // transmitted tint; a grayscale weight map reads through its luminance; white fallback =
+        // uniform). Scales the skin wrap AND the backlit transmission — cloth/props authored at
+        // 0 stop wrapping like skin.
+        vec3  transTexel = texture(uTransMap, vUv).rgb;
+        float transAmount = clamp(pc.material2.w, 0.0, 1.0) *
+                            clamp(dot(transTexel, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+        // 2×: the neutral default (weight 0.5 × white map) reproduces the plain dial behaviour.
+        float sssLocal = clamp(sssAmount * 2.0 * transAmount, 0.0, 1.0);
+
         {
-            vec3 wrapW   = vec3(0.40, 0.16, 0.08) * sssAmount;
+            vec3 wrapW   = vec3(0.40, 0.16, 0.08) * sssLocal;
             vec3 onePlus = vec3(1.0) + wrapW;
             vec3 wrapped = clamp((vec3(rawNdl) + wrapW) / (onePlus * onePlus), 0.0, 1.0);
-            color += kD * diffuseAlbedo * (1.0 / PI) * wrapped * cam.lightColor.rgb * keyInt;
-            if (rawNdl > 0.0) {
-                // GGX specular, dialed to ~25%: full dielectric spec reads oily/plastic on skin and
-                // blows the eye catchlight into a white blob (skin scatters much of it subsurface).
-                float D = distGGX(ndh, a);
-                float G = geomSmith(ndv, rawNdl, a);
+            color += kD * diffuseAlbedo * (1.0 / PI) * wrapped * cam.lightColor.rgb * keyInt * shadow;
+            if (rawNdl > 0.0 && shadow > 0.0) {
+                // GGX at full strength (materials tame themselves via real roughness + F0); the
+                // dual-lobe path blends the two lobes' distributions.
+                float D;
+                float G;
+                if (dualLobe) {
+                    float a1 = rough1 * rough1;
+                    float a2 = rough2 * rough2;
+                    D = mix(distGGX(ndh, a2), distGGX(ndh, a1), lobeRatio);
+                    G = mix(geomSmith(ndv, rawNdl, a2), geomSmith(ndv, rawNdl, a1), lobeRatio);
+                } else {
+                    D = distGGX(ndh, a);
+                    G = geomSmith(ndv, rawNdl, a);
+                }
                 vec3  F = fresnelSchlick(vdh, f0);
                 vec3  spec = (D * G) * F / max(4.0 * ndv * rawNdl, 1e-4);
-                color += spec * 0.25 * cam.lightColor.rgb * keyInt * rawNdl;
+                color += spec * cam.lightColor.rgb * keyInt * rawNdl * shadow;
+            }
+            // Backlit transmission: key light entering from BEHIND glows through thin translucent
+            // regions (ears, nostrils, finger webbing). The through-vector is the light bent by
+            // the surface; blood makes transmitted light red, so the tint is the translucency
+            // map's colour × a warm absorption profile over the albedo. Deliberately NOT gated by
+            // the shadow map — this is exactly the light that passes through the occluder.
+            if (transAmount > 0.0) {
+                vec3  through = normalize(-l + n * 0.35);
+                float transDot = pow(clamp(dot(v, -through), 0.0, 1.0), 4.0);
+                vec3  transTint = transTexel * albedo * vec3(1.0, 0.42, 0.25);
+                color += transTint * transDot * transAmount * sssAmount * 1.2 *
+                         cam.lightColor.rgb * keyInt;
             }
         }
+
+        // Baked ambient occlusion gates the ENVIRONMENT terms only (the key light has real shadow
+        // mapping): cavities — eye sockets, nostrils, under the chin, between fingers — stop
+        // receiving full sky light. Specular occlusion uses the tighter ao² curve (reflections die
+        // in cavities faster than diffuse skylight does).
+        float ao = clamp(vAo, 0.0, 1.0);
+        float specAo = ao * ao;
 
         // Environment diffuse: per-normal irradiance from the SH bake (sampled through the environment
         // rotation), Fresnel-split so grazing angles hand energy to the specular.
         vec3 irradiance = shIrradiance(rotateY(n, envRot));
-        color += kD * diffuseAlbedo * irradiance * (1.0 / PI) * diffuseInt;
+        color += kD * diffuseAlbedo * irradiance * (1.0 / PI) * diffuseInt * ao;
 
         // Ambient fill: a small flat lift on the diffuse albedo so the shadow side of a directional
         // HDRI (the figure's back/far side) doesn't crush to near-black — reduces front-to-back contrast.
-        color += diffuseAlbedo * ambientFill;
+        color += diffuseAlbedo * ambientFill * ao;
 
         // Environment specular (split-sum): prefiltered environment radiance sampled along the (rotated)
-        // reflection at a mip chosen by roughness, scaled by the environment-BRDF LUT and by specScale —
-        // dialed well below physical for skin, a subsurface dielectric that reads as wet plastic at full
-        // dielectric specular.
+        // reflection at a mip chosen by roughness, scaled by the environment-BRDF LUT and the panel's
+        // Specular dial. The grazing (F90) bias term also scales with the material's specular weight,
+        // so a matte-authored surface stays matte at glancing angles instead of picking up a wet sheen.
         vec3 R = reflect(-v, n);
-        float specMip = rough * float(textureQueryLevels(uPrefilteredSpec) - 1);
-        vec3 prefiltered = textureLod(uPrefilteredSpec, rotateY(R, envRot), specMip).rgb;
-        vec2 brdf = texture(uBrdfLut, vec2(ndv, rough)).rg;
-        color += prefiltered * (f0 * brdf.x + brdf.y) * specScale;
+        float maxMip = float(textureQueryLevels(uPrefilteredSpec) - 1);
+        vec3 envDir = rotateY(R, envRot);
+        vec3 prefiltered;
+        vec2 brdf;
+        if (dualLobe) {
+            // Two prefiltered samples + two LUT fetches, blended by the lobe ratio — the broad
+            // lobe's soft sheen and the tight lobe's sharper reflection coexist like real skin.
+            prefiltered = mix(textureLod(uPrefilteredSpec, envDir, rough2 * maxMip).rgb,
+                              textureLod(uPrefilteredSpec, envDir, rough1 * maxMip).rgb, lobeRatio);
+            brdf = mix(texture(uBrdfLut, vec2(ndv, rough2)).rg,
+                       texture(uBrdfLut, vec2(ndv, rough1)).rg, lobeRatio);
+        } else {
+            prefiltered = textureLod(uPrefilteredSpec, envDir, rough * maxMip).rgb;
+            brdf = texture(uBrdfLut, vec2(ndv, rough)).rg;
+        }
+        // Horizon fade: a detail-map-perturbed normal can point the reflection vector below the
+        // real surface horizon — environment light from *under* the skin, which reads as an oily
+        // film sitting on every bump. Fade the environment specular as R sinks under the vertex
+        // (geometric) normal's hemisphere.
+        vec3 vertexN = normalize(vWorldNormal) * (gl_FrontFacing ? 1.0 : -1.0);
+        float horizon = clamp(1.0 + dot(R, vertexN), 0.0, 1.0);
+        horizon *= horizon;
+        color += prefiltered * (f0 * brdf.x + brdf.y * min(specWeight, 1.0)) * specScale * horizon *
+                 specAo;
+
+        // Top Coat: the thin clear/oily layer skins author over the base lobes (weight ~0.35-0.45,
+        // roughness ~0.6-0.7) — a second dielectric specular layer at the standard 4% F0, on both
+        // the key light and the environment. The subtle extra sheen that reads as living skin
+        // rather than dry clay. (Base-layer attenuation under the coat is skipped — at these
+        // weights it's below visibility.)
+        float tcWeight = clamp(pc.material3.x, 0.0, 1.0);
+        if (tcWeight > 0.0) {
+            float tcRough = clamp(pc.material3.y, 0.04, 1.0);
+            vec3  f0c = vec3(0.04);
+            if (rawNdl > 0.0 && shadow > 0.0) {
+                float aC = tcRough * tcRough;
+                float Dc = distGGX(ndh, aC);
+                float Gc = geomSmith(ndv, rawNdl, aC);
+                vec3  Fc = fresnelSchlick(vdh, f0c);
+                color += (Dc * Gc) * Fc / max(4.0 * ndv * rawNdl, 1e-4) * cam.lightColor.rgb *
+                         keyInt * rawNdl * shadow * tcWeight;
+            }
+            vec3 preC = textureLod(uPrefilteredSpec, envDir, tcRough * maxMip).rgb;
+            vec2 brdfC = texture(uBrdfLut, vec2(ndv, tcRough)).rg;
+            color += preC * (f0c * brdfC.x + brdfC.y) * specScale * horizon * specAo * tcWeight;
+        }
 
         // Photographic back-rim: a cool edge where the surface grazes the view while facing the fixed
         // back light — the portrait rim that lifts the dark side off the background (what a studio
         // photographer adds precisely because the unlit side of a subject otherwise goes flat/dark).
         float rimEdge = pow(1.0 - ndv, 3.0) * max(dot(n, normalize(cam.rimDir.xyz)), 0.0);
-        color += cam.rimColor.rgb * rimEdge * rimInt;
+        color += cam.rimColor.rgb * rimEdge * rimInt * ao; // no rim glow inside cavities
 
         color *= exposure;
-        outColor = vec4(tonemapOn > 0.5 ? tonemapACES(color) : clamp(color, 0.0, 1.0), alpha);
+        // LINEAR HDR out — the scene renders offscreen now and the composite pass applies ACES
+        // (post-bloom, so bloom thresholds see real radiance). ALPHA SEMANTICS: in the opaque pass
+        // alpha carries the per-pixel translucency as the SSS MASK (the screen-space subsurface
+        // blur's kernel scale — skin ~0.9, cloth/props 0, eyes ~0, backdrop 0); the transparent
+        // pass keeps real blend opacity (its pipeline doesn't write alpha, but the blend factors
+        // read it).
+        outColor = vec4(color, pc.material3.z > 0.5 ? alpha : sssLocal);
         return;
     }
 

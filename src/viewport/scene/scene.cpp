@@ -10,6 +10,7 @@
 #include "iblmaps.h"
 #include "mesh.h"
 #include "modeldata.h"
+#include "shadowmap.h"
 #include "vertex.h"
 #include "vulkancommon.h"
 #include "vulkancontext.h"
@@ -17,6 +18,7 @@
 #include "vulkanpipeline.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp> // lookAt / ortho for the shadow frustum
 
 #include <array>
 #include <cmath>
@@ -36,8 +38,9 @@ namespace {
 // `CameraUbo` block declared in mesh.vert / mesh.frag. Layout (std140) must match both shaders.
 struct CameraUbo {
     glm::mat4 viewProj;
-    glm::mat4 view;        // world -> view (fragment modes derive view-space normals for matcaps)
-    glm::vec4 cameraPos;   // xyz world-space eye
+    glm::mat4 view;          // world -> view (fragment modes derive view-space normals for matcaps)
+    glm::mat4 lightViewProj; // key light's ortho view-projection (shadow-map space; see recordShadowPass)
+    glm::vec4 cameraPos;     // xyz world-space eye
     glm::vec4 lightDir;    // xyz = normalized direction TO the key light
     glm::vec4 lightColor;  // rgb
     glm::vec4 fillDir;     // fill light (dir TO light)
@@ -48,7 +51,8 @@ struct CameraUbo {
     glm::vec4 params;      // x = shade mode, y = exposure, z = specularIntensity, w = ambientFill
     glm::vec4 sh[9];       // environment diffuse irradiance: 9 SH coefficients (rgb in .xyz)
     glm::vec4 params2;     // x = diffuseIntensity, y = keyIntensity, z = envRotation(rad), w = tonemap(0/1)
-    glm::vec4 params3;     // x = subsurface, y = rimIntensity, z/w reserved
+    glm::vec4 params3;     // x = subsurface, y = rimIntensity, z = backdropMode, w = backdropBlur
+    glm::vec4 params4;     // x = backdropBrightness, y = domeRadius, z/w reserved
 };
 
 
@@ -85,8 +89,13 @@ bool projectToPixels(const glm::mat4& viewProj, const glm::vec3& world, float vp
 
 Scene::Scene(VulkanContext& context, VkRenderPass renderPass, const std::vector<char>& vertSpirv,
              const std::vector<char>& fragSpirv, const std::vector<char>& skeletonVertSpirv,
-             const std::vector<char>& skeletonFragSpirv)
+             const std::vector<char>& skeletonFragSpirv, const std::vector<char>& shadowVertSpirv,
+             const std::vector<char>& shadowFragSpirv, const std::vector<char>& backgroundVertSpirv,
+             const std::vector<char>& backgroundFragSpirv)
     : m_context(context) {
+    // The shadow map must exist before createDescriptorResources() — it writes the map into the
+    // scene-wide set 3 (binding 2) right after allocating that set.
+    m_shadowMap = std::make_unique<ShadowMap>(m_context);
     createDescriptorResources();
 
     // Bake the default procedural studio environment synchronously so descriptor set 3 is valid before
@@ -131,8 +140,40 @@ Scene::Scene(VulkanContext& context, VkRenderPass renderPass, const std::vector<
     // pass. Same shaders/layout — only the blend + depth-write state differs.
     config.blendEnable = true;
     config.depthWriteEnable = false;
+    config.colorWriteAlpha = false; // don't clobber the SSS mask under blended shells/cards
     m_transparentPipeline =
         std::make_unique<VulkanPipeline>(m_context, renderPass, vertSpirv, fragSpirv, config);
+    config.colorWriteAlpha = true;
+
+    // Depth-only shadow pipeline: same skinned vertex layout, rendered into the shadow map's own
+    // single-sample pass with a static depth bias (acne) and no colour attachment. Its only
+    // descriptor set is the joint-matrix layout (bound at index 0 — see Model::recordShadow).
+    PipelineConfig shadowConfig;
+    shadowConfig.pushConstantSize = sizeof(ShadowPushConstants);
+    shadowConfig.pushConstantStages = VK_SHADER_STAGE_VERTEX_BIT;
+    shadowConfig.singleSample = true;
+    shadowConfig.hasColorAttachment = false;
+    shadowConfig.depthBiasConstant = 1.25f;
+    shadowConfig.depthBiasSlope = 1.9f;
+    shadowConfig.cullMode = VK_CULL_MODE_NONE; // imported winding is inconsistent (same as main pass)
+    shadowConfig.vertexBindings.assign(1, binding);
+    shadowConfig.vertexAttributes.assign(attrs.begin(), attrs.end());
+    shadowConfig.descriptorSetLayouts = {m_jointSetLayout};
+    m_shadowPipeline = std::make_unique<VulkanPipeline>(m_context, m_shadowMap->renderPass(),
+                                                        shadowVertSpirv, shadowFragSpirv,
+                                                        shadowConfig);
+
+    // HDRI backdrop: a fullscreen triangle sampling the environment cube along the eye ray, drawn
+    // FIRST in the main pass with depth test/write off so everything else renders over it. Its own
+    // two-set layout: 0 = camera UBO, 1 = the scene-wide IBL/shadow set (it samples binding 0).
+    PipelineConfig bgConfig;
+    bgConfig.depthTestEnable = false;
+    bgConfig.depthWriteEnable = false;
+    bgConfig.blendEnable = false;
+    bgConfig.descriptorSetLayouts = {m_setLayout, m_iblSetLayout};
+    m_backgroundPipeline = std::make_unique<VulkanPipeline>(m_context, renderPass,
+                                                            backgroundVertSpirv, backgroundFragSpirv,
+                                                            bgConfig);
 
     // Skeleton overlay: a coloured line list drawn over the figure (depth test OFF, so every joint is
     // visible and pickable through the body). Uses set 0 (camera) only; per-vertex colour.
@@ -141,6 +182,7 @@ Scene::Scene(VulkanContext& context, VkRenderPass renderPass, const std::vector<
     lineConfig.depthTestEnable = false;
     lineConfig.depthWriteEnable = false;
     lineConfig.blendEnable = false;
+    lineConfig.colorWriteAlpha = false; // overlay lines must not touch the SSS mask
     lineConfig.pushConstantSize = 0;
     VkVertexInputBindingDescription lineBinding{};
     lineBinding.binding = 0;
@@ -179,6 +221,9 @@ Scene::~Scene() {
     m_pipeline.reset();
     m_transparentPipeline.reset();
     m_skeletonPipeline.reset();
+    m_backgroundPipeline.reset();
+    m_shadowPipeline.reset();
+    m_shadowMap.reset();
     m_fallbackTexture.reset();
     m_fallbackNormal.reset();
     m_iblMaps.reset();         // frees the specular cubemap + BRDF LUT images
@@ -221,9 +266,12 @@ void Scene::createDescriptorResources() {
     layoutInfo.pBindings = &binding;
     VK_CHECK(vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &m_setLayout));
 
-    // Set 1: two combined image samplers read in the fragment stage — binding 0 = diffuse,
-    // binding 1 = detail (normal/bump) map.
-    std::array<VkDescriptorSetLayoutBinding, 2> samplerBindings{};
+    // Set 1: six combined image samplers read in the fragment stage — binding 0 = diffuse,
+    // binding 1 = detail (normal/bump) map, binding 2 = roughness map, binding 3 = spec-mask map,
+    // binding 4 = translucency map, binding 5 = micro-detail (pore) normal map (2/3 are per-texel
+    // multipliers on the material scalars, 4 the transmitted tint/strength, 5 a tiled linear
+    // normal; absent maps bind the white / flat-normal fallbacks).
+    std::array<VkDescriptorSetLayoutBinding, 6> samplerBindings{};
     for (uint32_t i = 0; i < samplerBindings.size(); ++i) {
         samplerBindings[i].binding = i;
         samplerBindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -250,9 +298,11 @@ void Scene::createDescriptorResources() {
     jointLayoutInfo.pBindings = &jointBinding;
     VK_CHECK(vkCreateDescriptorSetLayout(device, &jointLayoutInfo, nullptr, &m_jointSetLayout));
 
-    // Set 3: image-based-lighting maps — binding 0 = prefiltered specular cubemap, binding 1 = BRDF
-    // LUT, both fragment-stage. One static set for the whole scene; the images are filled by applyBakedEnvironment().
-    std::array<VkDescriptorSetLayoutBinding, 2> iblBindings{};
+    // Set 3: the scene-wide maps — binding 0 = prefiltered specular cubemap, binding 1 = BRDF LUT
+    // (both refilled by applyBakedEnvironment()), binding 2 = the key light's shadow map
+    // (comparison sampler; written once below — the image is stable, its contents re-render per
+    // frame). All fragment-stage; one static set for the whole scene.
+    std::array<VkDescriptorSetLayoutBinding, 3> iblBindings{};
     for (uint32_t i = 0; i < iblBindings.size(); ++i) {
         iblBindings[i].binding = i;
         iblBindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -267,7 +317,7 @@ void Scene::createDescriptorResources() {
 
     std::array<VkDescriptorPoolSize, 1> iblPoolSizes{};
     iblPoolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    iblPoolSizes[0].descriptorCount = 2;
+    iblPoolSizes[0].descriptorCount = 3;
     VkDescriptorPoolCreateInfo iblPoolInfo{};
     iblPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     iblPoolInfo.poolSizeCount = static_cast<uint32_t>(iblPoolSizes.size());
@@ -280,6 +330,17 @@ void Scene::createDescriptorResources() {
     iblAlloc.descriptorSetCount = 1;
     iblAlloc.pSetLayouts = &m_iblSetLayout;
     VK_CHECK(vkAllocateDescriptorSets(device, &iblAlloc, &m_iblSet));
+
+    // Binding 2 = the shadow map, written once (applyBakedEnvironment rewrites only 0/1).
+    const VkDescriptorImageInfo shadowInfo = m_shadowMap->descriptorInfo();
+    VkWriteDescriptorSet shadowWrite{};
+    shadowWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    shadowWrite.dstSet = m_iblSet;
+    shadowWrite.dstBinding = 2;
+    shadowWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    shadowWrite.descriptorCount = 1;
+    shadowWrite.pImageInfo = &shadowInfo;
+    vkUpdateDescriptorSets(device, 1, &shadowWrite, 0, nullptr);
 
     VkDescriptorPoolSize poolSize{};
     poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -374,11 +435,89 @@ void Scene::removeModel(std::size_t index) {
     }
 }
 
-void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex) {
-    if (m_models.empty()) {
-        return; // nothing to draw; the grid still renders on its own
+glm::vec3 Scene::keyLightDir() const {
+    const float az = glm::radians(m_lighting.keyAzimuthDeg);
+    const float el = glm::radians(m_lighting.keyElevationDeg);
+    return glm::vec3(std::cos(el) * std::sin(az), std::sin(el), std::cos(el) * std::cos(az));
+}
+
+void Scene::recordShadowPass(VkCommandBuffer cmd) {
+    // Fit the light's ortho frustum around every caster AND its shadow's landing spot on the floor
+    // (casting each AABB corner along the light onto y=0) — the ground shadow is only correct where
+    // the RECEIVER is inside the frustum, so the floor patch must be covered too.
+    glm::vec3 mn(std::numeric_limits<float>::max());
+    glm::vec3 mx(std::numeric_limits<float>::lowest());
+    bool any = false;
+    const glm::vec3 dir = keyLightDir(); // TO the light; a shadow ray travels along -dir
+    for (const std::unique_ptr<Model>& model : m_models) {
+        glm::vec3 a;
+        glm::vec3 b;
+        if (!model->worldBounds(a, b)) {
+            continue;
+        }
+        any = true;
+        mn = glm::min(mn, a);
+        mx = glm::max(mx, b);
+        if (dir.y > 0.05f) {
+            for (int i = 0; i < 8; ++i) {
+                const glm::vec3 c((i & 1) ? b.x : a.x, (i & 2) ? b.y : a.y, (i & 4) ? b.z : a.z);
+                const glm::vec3 onFloor = c - dir * (c.y / dir.y); // where c's shadow lands on y=0
+                mn = glm::min(mn, onFloor);
+                mx = glm::max(mx, onFloor);
+            }
+        }
+    }
+    if (!any) {
+        // No casters: skip the pass (the map was cleared fully-lit at creation) and park the light
+        // matrix on a projection that maps every receiver to depth 0 — the LESS_OR_EQUAL compare
+        // then always passes, i.e. everything reads unshadowed.
+        m_lightViewProj = glm::mat4(0.0f);
+        m_lightViewProj[3][3] = 1.0f;
+        return;
     }
 
+    // Ortho frustum around the fitted bounding sphere (padded ~10%: bind-pose bounds understate a
+    // posed figure's reach a little).
+    const glm::vec3 center = 0.5f * (mn + mx);
+    const float radius = 0.55f * glm::length(mx - mn) + 0.05f;
+    const glm::vec3 eye = center + dir * (radius + 0.25f);
+    const glm::vec3 up =
+        (std::abs(dir.y) > 0.95f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    const glm::mat4 view = glm::lookAt(eye, center, up);
+    // GLM_FORCE_DEPTH_ZERO_TO_ONE puts z in [0,1]. No Vulkan Y-negate here: the map is rendered
+    // and sampled through this same matrix, so the flip would cancel anyway.
+    const glm::mat4 proj = glm::ortho(-radius, radius, -radius, radius, 0.01f, 2.0f * radius + 0.5f);
+    m_lightViewProj = proj * view;
+
+    VkClearValue clear{};
+    clear.depthStencil = {1.0f, 0};
+    VkRenderPassBeginInfo rp{};
+    rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp.renderPass = m_shadowMap->renderPass();
+    rp.framebuffer = m_shadowMap->framebuffer();
+    rp.renderArea.extent = {m_shadowMap->size(), m_shadowMap->size()};
+    rp.clearValueCount = 1;
+    rp.pClearValues = &clear;
+    vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
+
+    VkViewport viewport{};
+    viewport.width = static_cast<float>(m_shadowMap->size());
+    viewport.height = static_cast<float>(m_shadowMap->size());
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    VkRect2D scissor{};
+    scissor.extent = {m_shadowMap->size(), m_shadowMap->size()};
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPipeline->handle());
+    for (const std::unique_ptr<Model>& model : m_models) {
+        model->recordShadow(cmd, m_shadowPipeline->layout(), m_lightViewProj);
+    }
+    vkCmdEndRenderPass(cmd);
+}
+
+void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex) {
     // Update this frame's camera + lighting UBO. The default (PBR) mode is image-based-lit — its diffuse
     // comes from the environment's SH irradiance (filled in below) and its specular from the prefiltered-
     // environment cubemap (set 3). The analytic lights below feed only the *non-IBL* shade modes: only
@@ -390,13 +529,11 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
     CameraUbo ubo{};
     ubo.viewProj = camera.viewProjection();
     ubo.view = camera.view();
+    ubo.lightViewProj = m_lightViewProj; // fitted by recordShadowPass earlier this frame
     ubo.cameraPos = glm::vec4(camera.position(), 1.0f);
     // Key direction from the Environment panel's azimuth/elevation dials (world-fixed relative to
     // the subject; defaults reproduce the old hardcoded front-right ~30° direction).
-    const float keyAz = glm::radians(m_lighting.keyAzimuthDeg);
-    const float keyEl = glm::radians(m_lighting.keyElevationDeg);
-    ubo.lightDir = glm::vec4(std::cos(keyEl) * std::sin(keyAz), std::sin(keyEl),
-                             std::cos(keyEl) * std::cos(keyAz), 0.0f);
+    ubo.lightDir = glm::vec4(keyLightDir(), 0.0f);
     ubo.lightColor = glm::vec4(1.0f, 0.96f, 0.9f, 0.0f);
     ubo.fillDir = glm::vec4(glm::normalize(glm::vec3(-0.6f, 0.28f, 0.5f)), 0.0f);    // fill: opposite, lower
     ubo.fillColor = glm::vec4(0.26f, 0.31f, 0.4f, 0.0f);                              // dim + cool (~1/4 key)
@@ -407,13 +544,32 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
                            m_lighting.specularIntensity, m_lighting.ambientFill);
     ubo.params2 = glm::vec4(m_lighting.diffuseIntensity, m_lighting.keyIntensity,
                             glm::radians(m_lighting.environmentRotationDeg), m_lighting.tonemap ? 1.0f : 0.0f);
-    ubo.params3 = glm::vec4(m_lighting.subsurface, m_lighting.rimIntensity, 0.0f, 0.0f);
+    ubo.params3 = glm::vec4(m_lighting.subsurface, m_lighting.rimIntensity,
+                            static_cast<float>(m_lighting.backdropMode), m_lighting.backdropBlur);
+    ubo.params4 = glm::vec4(m_lighting.backdropBrightness, m_lighting.domeRadius, 0.0f, 0.0f);
     // Environment diffuse irradiance (SH). The PBR mode reconstructs per-normal ambient from these
     // instead of the flat `ambient` constant, so shadow sides pick up the environment's colour.
     for (int i = 0; i < 9; ++i) {
         ubo.sh[i] = glm::vec4(m_environmentSH.c[i], 0.0f);
     }
     std::memcpy(m_cameraBuffers[frameIndex].mappedData(), &ubo, sizeof(ubo));
+
+    // HDRI backdrop first (PBR mode only — the stylized modes keep the flat viewport clear): the
+    // environment that lights the figure, visible behind it. Depth test/write are off in its
+    // pipeline, so everything after simply draws over it. Runs even with no models — an empty
+    // PBR viewport still shows the environment. Backdrop mode 0 ("Off", an Environment-panel
+    // dial) skips it, leaving the flat viewport grey.
+    if (m_shadeMode == 1 && m_lighting.backdropMode != 0) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_backgroundPipeline->handle());
+        const VkDescriptorSet bgSets[2] = {m_cameraSets[frameIndex], m_iblSet};
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                m_backgroundPipeline->layout(), 0, 2, bgSets, 0, nullptr);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+    }
+
+    if (m_models.empty()) {
+        return; // nothing else to draw; the grid still renders on its own
+    }
 
     // Opaque pass: bind the camera set (set 0) once — it stays bound for the transparent pass too,
     // since both pipelines share the same layout.
@@ -425,14 +581,16 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->layout(), 3, 1, &m_iblSet,
                             0, nullptr);
     for (const std::unique_ptr<Model>& model : m_models) {
-        model->record(cmd, m_pipeline->layout(), /*transparentPass=*/false);
+        model->record(cmd, m_pipeline->layout(), /*transparentPass=*/false, camera.position());
     }
 
     // Transparent pass: alpha-blended, depth-write off, drawn after all opaque geometry so it blends
-    // over what's behind it (e.g. the eye's moisture/cornea over the iris).
+    // over what's behind it (e.g. the eye's moisture/cornea over the iris); each model sorts its
+    // transparent meshes back-to-front from the camera.
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_transparentPipeline->handle());
     for (const std::unique_ptr<Model>& model : m_models) {
-        model->record(cmd, m_transparentPipeline->layout(), /*transparentPass=*/true);
+        model->record(cmd, m_transparentPipeline->layout(), /*transparentPass=*/true,
+                      camera.position());
     }
 
     // Posing overlay: the rotate gizmo for the selected joint, and (only when enabled) the skeleton

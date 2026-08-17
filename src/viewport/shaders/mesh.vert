@@ -29,10 +29,14 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inUv;
 layout(location = 3) in uvec4 inJoints;
 layout(location = 4) in vec4 inWeights;
+layout(location = 5) in float inAo; // baked per-vertex ambient occlusion (1 = open)
+layout(location = 6) in vec4 inTangent; // UV tangent + handedness (w = 0 -> none baked)
 
 layout(location = 0) out vec3 vWorldNormal;
 layout(location = 1) out vec2 vUv;
 layout(location = 2) out vec3 vWorldPos;
+layout(location = 3) out float vAo;
+layout(location = 4) out vec4 vTangent; // world-space tangent, w = handedness (0 = absent)
 
 void main() {
     // Blend the influencing joints' skin matrices by weight. Weights sum to 1, so at bind pose (all
@@ -49,5 +53,7 @@ void main() {
     vWorldNormal = mat3(pc.model) * mat3(skinMat) * inNormal;
     vUv = inUv;
     vWorldPos = worldPos.xyz;
+    vAo = inAo;
+    vTangent = vec4(mat3(pc.model) * mat3(skinMat) * inTangent.xyz, inTangent.w);
     gl_Position = cam.viewProj * worldPos;
 }

@@ -380,12 +380,53 @@ void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolve
         return;
     }
     static const nlohmann::json kNoLibrary = nlohmann::json::array();
-    const nlohmann::json& materialLibrary =
-        root.contains("material_library") ? root["material_library"] : kNoLibrary;
     const nlohmann::json& imageLibrary =
         root.contains("image_library") ? root["image_library"] : kNoLibrary;
+
+    // parseMaterials merges each scene material with the base it extends by url, but only within
+    // the same file ("#id"). Newer skin materials extend a CROSS-FILE base
+    // ("/data/.../#PBRSkin") whose channel defaults would otherwise be lost (the old
+    // "roughness falls back to default" limitation). Pre-resolve those here: load the referenced
+    // document (cached by the resolver), append its base material to an augmented library, and
+    // rewrite the scene material's url to the same-file "#fragment" form parseMaterials handles.
+    nlohmann::json sceneMaterials = root["scene"]["materials"]; // copy — urls are rewritten below
+    nlohmann::json library =
+        root.contains("material_library") ? root["material_library"] : nlohmann::json::array();
+    if (!library.is_array()) {
+        library = nlohmann::json::array();
+    }
+    std::unordered_set<std::string> importedBases; // fragments already appended
+    for (auto& mat : sceneMaterials) {
+        const std::string url = mat.value("url", std::string());
+        if (url.size() < 2 || url[0] == '#') {
+            continue; // same-file (or no) base — parseMaterials handles it directly
+        }
+        try {
+            const ResolvedUri ru = resolver.resolve(url, referringDir);
+            if (!ru.resolved() || ru.fragment.empty()) {
+                continue;
+            }
+            if (importedBases.insert(ru.fragment).second) {
+                const std::shared_ptr<const FigureDocument> baseDoc =
+                    resolver.loadDocument(url, referringDir);
+                if (const auto ml = baseDoc->root().find("material_library");
+                    ml != baseDoc->root().end() && ml->is_array()) {
+                    for (const auto& baseMat : *ml) {
+                        if (baseMat.value("id", std::string()) == ru.fragment) {
+                            library.push_back(baseMat);
+                            break;
+                        }
+                    }
+                }
+            }
+            mat["url"] = "#" + ru.fragment;
+        } catch (const std::exception&) {
+            // Unresolvable base: the scene material still parses from its own overrides alone.
+        }
+    }
+
     const std::unordered_map<std::string, MaterialRefs> refs =
-        parseMaterials(root["scene"]["materials"], materialLibrary, imageLibrary);
+        parseMaterials(sceneMaterials, library, imageLibrary);
     for (FigureMesh& mesh : fig.meshes) {
         const auto it = refs.find(mesh.materialZone);
         if (it == refs.end()) {
@@ -394,7 +435,32 @@ void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolve
         const MaterialRefs& ref = it->second;
         mesh.material.baseColor = ref.baseColor;
         mesh.material.roughness = ref.roughness;
+        mesh.material.specularWeight = ref.specularWeight;
+        mesh.material.specularWeightWithMap = ref.specularWeightWithMap;
+        mesh.material.metallic = ref.metallic;
+        mesh.material.lobe1Roughness = ref.lobe1Roughness;
+        mesh.material.lobe2Roughness = ref.lobe2Roughness;
+        mesh.material.lobeRatio = ref.lobeRatio;
+        mesh.material.topCoatWeight = ref.topCoatWeight;
+        mesh.material.topCoatRoughness = ref.topCoatRoughness;
+        mesh.material.translucencyWeight = ref.translucencyWeight;
         mesh.material.opacity = ref.opacity;
+        if (!ref.roughnessImageUri.empty()) {
+            mesh.material.roughnessMapPath = resolver.resolve(ref.roughnessImageUri, referringDir).path;
+        }
+        if (!ref.specWeightImageUri.empty()) {
+            mesh.material.specMaskMapPath = resolver.resolve(ref.specWeightImageUri, referringDir).path;
+        }
+        if (!ref.translucencyImageUri.empty()) {
+            mesh.material.translucencyMapPath =
+                resolver.resolve(ref.translucencyImageUri, referringDir).path;
+        }
+        if (!ref.detailNormalImageUri.empty()) {
+            mesh.material.detailNormalMapPath =
+                resolver.resolve(ref.detailNormalImageUri, referringDir).path;
+            mesh.material.detailWeight = ref.detailWeight;
+            mesh.material.detailTiles = ref.detailTiles;
+        }
         if (!ref.diffuseImageUri.empty()) {
             mesh.material.diffuseMapPath = resolver.resolve(ref.diffuseImageUri, referringDir).path;
         }

@@ -62,11 +62,18 @@ VulkanPipeline::VulkanPipeline(VulkanContext& context, VkRenderPass renderPass,
     raster.cullMode = config.cullMode; // default NONE; mesh/grid both opt out of culling
     raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     raster.lineWidth = config.lineWidth;
+    // Static depth bias (the shadow pass): pushes stored depth away from the light to kill acne.
+    raster.depthBiasEnable =
+        (config.depthBiasConstant != 0.0f || config.depthBiasSlope != 0.0f) ? VK_TRUE : VK_FALSE;
+    raster.depthBiasConstantFactor = config.depthBiasConstant;
+    raster.depthBiasSlopeFactor = config.depthBiasSlope;
 
-    // Must match the render pass's sample count (all pipelines share the one MSAA render pass).
+    // Must match the target render pass's sample count: the shared MSAA swapchain pass for the
+    // scene pipelines, single-sample for offscreen depth-only passes (the shadow map).
     VkPipelineMultisampleStateCreateInfo multisample{};
     multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisample.rasterizationSamples = m_context.sampleCount();
+    multisample.rasterizationSamples =
+        config.singleSample ? VK_SAMPLE_COUNT_1_BIT : m_context.sampleCount();
 
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -76,7 +83,8 @@ VulkanPipeline::VulkanPipeline(VulkanContext& context, VkRenderPass renderPass,
 
     VkPipelineColorBlendAttachmentState blendAttachment{};
     blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                     VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+                                     VK_COLOR_COMPONENT_B_BIT |
+                                     (config.colorWriteAlpha ? VK_COLOR_COMPONENT_A_BIT : 0u);
     blendAttachment.blendEnable = config.blendEnable ? VK_TRUE : VK_FALSE;
     // Standard straight-alpha blending: out = src.rgb*src.a + dst.rgb*(1-src.a).
     blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
@@ -88,8 +96,8 @@ VulkanPipeline::VulkanPipeline(VulkanContext& context, VkRenderPass renderPass,
 
     VkPipelineColorBlendStateCreateInfo colorBlend{};
     colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlend.attachmentCount = 1;
-    colorBlend.pAttachments = &blendAttachment;
+    colorBlend.attachmentCount = config.hasColorAttachment ? 1 : 0; // 0 = depth-only pass
+    colorBlend.pAttachments = config.hasColorAttachment ? &blendAttachment : nullptr;
 
     const std::array<VkDynamicState, 2> dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};

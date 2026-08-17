@@ -46,6 +46,20 @@ struct PipelineConfig {
     VkPrimitiveTopology topology          = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; // e.g. LINE_LIST for overlays
     float              lineWidth          = 1.0f;                        // only meaningful for line topology
 
+    // Offscreen depth-only passes (the shadow map): single-sample rasterization instead of the
+    // context's MSAA count (must match the target render pass), no colour attachment, and a static
+    // rasterizer depth bias (enabled when either factor is non-zero) to keep shadow acne down.
+    bool  singleSample       = false; // false = the swapchain pass's MSAA count
+    bool  hasColorAttachment = true;  // false = depth-only render pass (no blend state)
+    float depthBiasConstant  = 0.0f;
+    float depthBiasSlope     = 0.0f;
+
+    // The HDR target's ALPHA channel carries the SSS mask (written by the opaque mesh pass).
+    // Overlays that draw after it (grid, skeleton, the transparent mesh variant) set this false so
+    // their blending can't contaminate the mask — blend factors still use the shader's src alpha,
+    // only the framebuffer alpha WRITE is masked off.
+    bool  colorWriteAlpha    = true;
+
     // Vertex input. Empty (the default) means "no vertex buffers" — vertices come from
     // gl_VertexIndex (the grid). The mesh pipeline supplies an interleaved binding + attributes.
     std::vector<VkVertexInputBindingDescription>   vertexBindings;

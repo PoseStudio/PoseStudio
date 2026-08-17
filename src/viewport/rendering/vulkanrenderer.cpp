@@ -5,6 +5,8 @@
 
 #include "vulkanrenderer.h"
 
+#include "hdrtarget.h"
+#include "postprocess.h"
 #include "vulkancontext.h"
 #include "vulkanswapchain.h"
 
@@ -22,12 +24,29 @@ VulkanRenderer::VulkanRenderer(VulkanContext& context, VkExtent2D initialExtent,
     : m_context(context), m_shaderDir(std::move(shaderDir)), m_windowExtent(initialExtent) {
     m_swapchain = std::make_unique<VulkanSwapchain>(m_context, m_windowExtent);
 
-    m_scene = std::make_unique<Scene>(m_context, m_swapchain->renderPass(),
-                                      loadSpirv("mesh.vert.spv"), loadSpirv("mesh.frag.spv"),
-                                      loadSpirv("skeleton.vert.spv"), loadSpirv("skeleton.frag.spv"));
+    // The scene renders offscreen into the HDR target (linear RGBA16F, same MSAA structure as the
+    // swapchain pass); scene pipelines are built against ITS render pass. The swapchain pass then
+    // only ever runs the tonemapping composite.
+    m_hdrTarget = std::make_unique<HdrTarget>(m_context, m_swapchain->extent());
 
-    m_grid = std::make_unique<Grid>(m_context, m_swapchain->renderPass(),
-                                    loadSpirv("grid.vert.spv"), loadSpirv("grid.frag.spv"));
+    m_scene = std::make_unique<Scene>(m_context, m_hdrTarget->renderPass(),
+                                      loadSpirv("mesh.vert.spv"), loadSpirv("mesh.frag.spv"),
+                                      loadSpirv("skeleton.vert.spv"), loadSpirv("skeleton.frag.spv"),
+                                      loadSpirv("shadow.vert.spv"), loadSpirv("shadow.frag.spv"),
+                                      loadSpirv("background.vert.spv"),
+                                      loadSpirv("background.frag.spv"));
+
+    // The grid samples the scene's shadow map (ground/contact shadow) through the scene-wide
+    // set 3, so its pipeline is built against that layout — Scene must exist first.
+    m_grid = std::make_unique<Grid>(m_context, m_hdrTarget->renderPass(),
+                                    loadSpirv("grid.vert.spv"), loadSpirv("grid.frag.spv"),
+                                    m_scene->iblSetLayout());
+
+    m_postProcess = std::make_unique<PostProcess>(
+        m_context, m_swapchain->renderPass(), m_hdrTarget->resolveInfo(), m_swapchain->extent(),
+        loadSpirv("fullscreen.vert.spv"), loadSpirv("bloombright.frag.spv"),
+        loadSpirv("bloomblur.frag.spv"), loadSpirv("composite.frag.spv"),
+        loadSpirv("sssblur.frag.spv"));
 
     createCommandPool();
     createCommandBuffers();
@@ -45,8 +64,10 @@ VulkanRenderer::~VulkanRenderer() {
     if (m_commandPool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(m_context.device(), m_commandPool, nullptr);
     }
+    m_postProcess.reset();
     m_grid.reset();
     m_scene.reset();
+    m_hdrTarget.reset();
     m_swapchain.reset();
 }
 
@@ -232,6 +253,9 @@ void VulkanRenderer::recreateSwapchain() {
     }
 
     const VkExtent2D extent = m_swapchain->extent();
+    // The offscreen HDR target + bloom targets track the swapchain size (the device is idle here).
+    m_hdrTarget->resize(extent);
+    m_postProcess->resize(extent, m_hdrTarget->resolveInfo());
     m_camera.setViewportSize(static_cast<float>(extent.width), static_cast<float>(extent.height));
     m_framebufferResized = false;
 }
@@ -304,44 +328,69 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageInde
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     VK_CHECK(vkBeginCommandBuffer(cmd, &begin));
 
+    // Key-light shadow pass first (its own depth-only render pass on the shadow map), so the
+    // scene pass below can sample the fresh map. Also fits this frame's light matrix, which
+    // Scene::record() writes into the camera UBO.
+    m_scene->recordShadowPass(cmd);
+
     const VkExtent2D extent = m_swapchain->extent();
-
-    std::array<VkClearValue, 2> clears{};
-    // Viewport background #3E4042 = (62, 64, 66). The swapchain is an sRGB format, so the
-    // clear value is interpreted as LINEAR and hardware-encoded to sRGB on store — these
-    // are the linear equivalents (sRGB->linear of each channel), not the raw 8-bit/255
-    // fractions, so the displayed pixel comes back out as exactly #3E4042.
-    clears[0].color = {{0.04816f, 0.05125f, 0.05447f, 1.0f}};
-    clears[1].depthStencil = {1.0f, 0};
-
-    VkRenderPassBeginInfo rp{};
-    rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rp.renderPass = m_swapchain->renderPass();
-    rp.framebuffer = m_swapchain->framebuffer(imageIndex);
-    rp.renderArea.extent = extent;
-    rp.clearValueCount = static_cast<uint32_t>(clears.size());
-    rp.pClearValues = clears.data();
-    vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
 
     VkViewport viewport{};
     viewport.width = static_cast<float>(extent.width);
     viewport.height = static_cast<float>(extent.height);
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-
     VkRect2D scissor{};
     scissor.extent = extent;
+
+    // --- Offscreen HDR scene pass: backdrop + meshes + grid, in LINEAR HDR. --------------------
+    std::array<VkClearValue, 2> clears{};
+    // Viewport background #3E4042 = (62, 64, 66) as LINEAR values (sRGB->linear of each channel).
+    // The HDR target is a linear format and the composite's sRGB swapchain store does the final
+    // encode, so the displayed pixel comes back out as exactly #3E4042. Alpha clears to 0: the
+    // HDR target's alpha is the SSS mask, and empty pixels are not skin.
+    clears[0].color = {{0.04816f, 0.05125f, 0.05447f, 0.0f}};
+    clears[1].depthStencil = {1.0f, 0};
+
+    VkRenderPassBeginInfo scenePass{};
+    scenePass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    scenePass.renderPass = m_hdrTarget->renderPass();
+    scenePass.framebuffer = m_hdrTarget->framebuffer();
+    scenePass.renderArea.extent = extent;
+    scenePass.clearValueCount = static_cast<uint32_t>(clears.size());
+    scenePass.pClearValues = clears.data();
+    vkCmdBeginRenderPass(cmd, &scenePass, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // Imported meshes first (opaque, depth test+write), within the viewport/scissor set above.
+    // Imported meshes first (opaque, depth test+write), then the grid — a transparent overlay
+    // that depth-tests against scene geometry and blends; the scene's set 3 + light matrix feed
+    // its ground/contact shadow.
     m_scene->record(cmd, m_camera, m_currentFrame);
-
-    // Floor grid last: a transparent overlay that depth-tests against scene geometry and blends.
-    // It binds its own pipeline and reuses the viewport/scissor above.
-    m_grid->record(cmd, m_camera);
-
+    m_grid->record(cmd, m_camera, m_scene->iblSet(), m_scene->lightViewProj());
     vkCmdEndRenderPass(cmd);
+
+    // --- SSSSS then bloom (PBR mode only — the stylized modes author display-ready values). ----
+    const bool pbr = m_scene->shadeMode() == 1;
+    if (pbr) {
+        m_postProcess->recordSss(cmd);   // diffuses skin in place (HDR alpha = the SSS mask)
+        m_postProcess->recordBloom(cmd); // then blooms the diffused image
+    }
+
+    // --- Swapchain pass: the fullscreen composite (tonemap + bloom add). -----------------------
+    VkRenderPassBeginInfo presentPass{};
+    presentPass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    presentPass.renderPass = m_swapchain->renderPass();
+    presentPass.framebuffer = m_swapchain->framebuffer(imageIndex);
+    presentPass.renderArea.extent = extent;
+    presentPass.clearValueCount = static_cast<uint32_t>(clears.size());
+    presentPass.pClearValues = clears.data(); // the composite overwrites every pixel anyway
+    vkCmdBeginRenderPass(cmd, &presentPass, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    m_postProcess->recordComposite(cmd, pbr && m_scene->lightingSettings().tonemap, pbr);
+    vkCmdEndRenderPass(cmd);
+
     VK_CHECK(vkEndCommandBuffer(cmd));
 }
 

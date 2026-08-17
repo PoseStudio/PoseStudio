@@ -5,6 +5,9 @@
 
 #include "modelimportservice.h"
 
+#include "aobaker.h"
+#include "tangentgen.h"
+
 #include "import/importerregistry.h"
 #include "import/meshimporter.h"
 #include "import/modeldata.h"
@@ -103,6 +106,22 @@ void ModelImportService::decodeMeshTexture(MeshData& mesh) {
     if (!decodeTexture(mesh.normal, mesh.normalPixels, mesh.normalWidth, mesh.normalHeight)) {
         mesh.normalMode = 0;
     }
+    // Specular parameter maps (both linear, sampled .r in the shader). Roughness: pure per-texel
+    // multiplier on the scalar (an absent map = white fallback = scalar behaviour). Spec mask:
+    // when it decodes, the material's UNdiscounted specular weight takes over — the sampled mask
+    // texels now do the scaling that the parser's assumed-average discount only guessed at.
+    decodeTexture(mesh.roughnessMap, mesh.roughnessPixels, mesh.roughnessWidth, mesh.roughnessHeight);
+    if (decodeTexture(mesh.specMask, mesh.specMaskPixels, mesh.specMaskWidth, mesh.specMaskHeight)) {
+        mesh.specularWeight = mesh.specularWeightWithMap;
+    }
+    // Translucency (sRGB colour / grayscale weight map — the shader takes tint + luminance).
+    decodeTexture(mesh.translucencyMap, mesh.translucencyPixels, mesh.translucencyWidth,
+                  mesh.translucencyHeight);
+    // Micro-detail (pore) normal — linear, tiled; skipped by the gutter fill (it wraps).
+    if (!decodeTexture(mesh.detailNormalMap, mesh.detailNormalPixels, mesh.detailNormalWidth,
+                       mesh.detailNormalHeight)) {
+        mesh.detailWeight = 0.0f; // undecodable map: no detail layer
+    }
     // Opacity (cutout) mask -> the diffuse map's alpha channel (see bakeOpacityMask). Before the
     // gutter fill so the baked alpha shares the seam treatment.
     if (!mesh.opacityMask.empty()) {
@@ -173,6 +192,13 @@ bool ModelImportService::importInto(VulkanRenderer& renderer, const QString& pat
         }
 
         const qint64 msDecode = timer.elapsed();
+
+        // Bake per-vertex ambient occlusion (skipped internally for very large meshes) + tangents.
+        if (progress) {
+            progress->setLabelText(QStringLiteral("Baking ambient occlusion…"));
+        }
+        bakeVertexAO(data);
+        computeTangents(data);
 
         // Show "Uploading…" at total-1 (still below the max) so the dialog stays up during the
         // blocking GPU upload, then jump to the max afterwards to auto-close it.

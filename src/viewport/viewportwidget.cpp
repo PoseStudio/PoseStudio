@@ -69,6 +69,9 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
     const QString shaderDir = QCoreApplication::applicationDirPath() + QStringLiteral("/shaders");
 
     m_window = new VulkanWindow(m_instance.get(), kVulkanApiVersion, shaderDir);
+    // Signal-to-signal forward: undo/redo restoring a lighting state surfaces on the facade,
+    // where the Environment panel listens.
+    connect(m_window, &VulkanWindow::lightingRestored, this, &ViewportWidget::lightingRestored);
     m_container = QWidget::createWindowContainer(m_window, this);
     m_container->setFocusPolicy(Qt::StrongFocus); // so the viewport can receive wheel/keys
     layout->addWidget(m_container);
@@ -121,6 +124,24 @@ void ViewportWidget::setEnvironment(const QString& hdrPath) {
 void ViewportWidget::setLightingSettings(const LightingSettings& settings) {
     if (m_window) {
         m_window->setLightingSettings(settings);
+    }
+}
+
+void ViewportWidget::undo() {
+    if (m_window) {
+        m_window->undo();
+    }
+}
+
+void ViewportWidget::redo() {
+    if (m_window) {
+        m_window->redo();
+    }
+}
+
+void ViewportWidget::registerLightingUndo(const LightingSettings& preEdit) {
+    if (m_window) {
+        m_window->registerLightingUndo(preEdit);
     }
 }
 

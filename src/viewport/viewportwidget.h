@@ -67,9 +67,24 @@ public:
     /// Applies the live lighting/exposure dials (Environment panel). No-op if the viewport degraded.
     void setLightingSettings(const LightingSettings& settings);
 
+    /// Undo/redo the last committed viewport edit — pose changes and Environment-panel lighting
+    /// gestures share one chronological stack. Driven by Edit → Undo/Redo (whose shortcuts make
+    /// Ctrl+Z/Ctrl+Y work app-wide) and the viewport's own key handling. No-op if degraded.
+    void undo();
+    void redo();
+
+    /// Registers the pre-edit dial state of a committed Environment-panel gesture on the undo
+    /// stack (see VulkanWindow::registerLightingUndo). No-op if the viewport degraded.
+    void registerLightingUndo(const LightingSettings& preEdit);
+
     /// The user-facing shade-mode names, in the shader's mode order (index == shade mode). The single
     /// source of truth the floating shader dropdown is populated from.
     static QStringList shaderModeNames();
+
+signals:
+    /// Re-emitted from the viewport when undo/redo restores a lighting state, so the Environment
+    /// panel can sync its widgets. The settings are already applied renderer-side.
+    void lightingRestored(const LightingSettings& settings);
 
 protected:
     // The shader dropdown floats as a *top-level* window over the native viewport (a child widget would

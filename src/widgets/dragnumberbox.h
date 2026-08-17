@@ -67,6 +67,14 @@ public slots:
 signals:
     void valueChanged(double value);
 
+    /// Gesture brackets, for undo systems: editingStarted fires when a scrub crosses the drag
+    /// threshold or the type-in editor opens; editingFinished when that scrub releases or the
+    /// editor closes (commit and cancel alike). Always a balanced pair around any user-driven
+    /// change — snapshot state on started, commit one undo entry on finished. Programmatic
+    /// setValue() emits neither.
+    void editingStarted();
+    void editingFinished();
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;

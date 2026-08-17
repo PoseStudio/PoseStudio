@@ -15,6 +15,7 @@
 #define LIBRARYPATHS_H
 
 #include <QString>
+#include <QStringList>
 
 namespace LibraryPaths {
 
@@ -25,9 +26,24 @@ namespace LibraryPaths {
 QString userLibraryRoot();
 
 /// The HDRI environments folder inside the user library, created on demand so "drop files here"
-/// always has a target. An .hdr in this folder appears in the Environment panel's HDRI menu; a
-/// same-basename image file (any common format, e.g. .webp) becomes its menu thumbnail.
+/// always has a target. A panorama (.hdr or .exr) in this folder appears in the Environment
+/// panel's HDRI menu; a same-basename image file (any common format, e.g. .webp) becomes its menu
+/// thumbnail. Users may categorize panoramas into subfolders — each subfolder becomes a heading in
+/// the HDRI menu.
 QString hdriDirectory();
+
+/// Every panorama (.hdr/.exr) under hdriDirectory(), searched recursively so subfolder-categorized
+/// collections are found. Absolute paths in display order: uncategorized root files first, then each subfolder
+/// (= category) alphabetically, files alphabetical within — the exact order the Environment panel's
+/// HDRI menu renders, with a heading per subfolder. A file's category is its folder path relative
+/// to the hdri root (nested subfolders read "Outdoor/Sunset").
+QStringList hdriFiles();
+
+/// The startup/default panorama: the stock one by name wherever the user filed it, else the first
+/// of hdriFiles(); empty when there are no panoramas at all (the viewport then keeps its procedural
+/// studio environment). Shared by VulkanWindow::defaultEnvironmentPath() and the Environment
+/// panel's initial selection so the button text can't disagree with what the viewport loaded.
+QString defaultHdri();
 
 } // namespace LibraryPaths
 

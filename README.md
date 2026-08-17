@@ -148,7 +148,7 @@ This project is built using the following core technologies and design resources
 * **Math & Memory:** [GLM](https://github.com/g-truc/glm) and the [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) (fetched automatically by CMake)
 * **Model Import:** [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader) — the Wavefront `.obj`/`.mtl` parser (also fetched automatically by CMake)
 * **Figure Import:** [nlohmann/json](https://github.com/nlohmann/json) (JSON parsing) and [miniz](https://github.com/richgel999/miniz) (gzip inflate), used by the native rigged-figure importer (also fetched automatically by CMake)
-* **HDR Environments:** [stb_image](https://github.com/nothings/stb) — decodes the `.hdr` panoramas used for the viewport's image-based lighting (also fetched automatically by CMake)
+* **HDR Environments:** [stb_image](https://github.com/nothings/stb) (`.hdr`) and [tinyexr](https://github.com/syoyo/tinyexr) (`.exr`) — decode the panoramas used for the viewport's image-based lighting and backdrop (both fetched automatically by CMake)
 * **HDRI Panoramas:** The stock lighting environments are CC0 assets from **[Poly Haven](https://polyhaven.com/)** — a fantastic public-asset library; consider [supporting them](https://www.patreon.com/polyhaven)
 * Code generation and troubleshooting assistance provided by Anthropic's Claude.
 * **UI Iconography:** [Lucide Icons](https://lucide.dev/) (See `ATTRIBUTIONS.md` for full design credits)
@@ -161,7 +161,7 @@ This project is built using the following core technologies and design resources
 2. **CMake 3.21+**.
 3. **[LunarG Vulkan SDK](https://vulkan.lunarg.com)** — required for the 3D viewport. It provides the Vulkan headers, the loader, the validation layers, and `glslc` (the GLSL→SPIR-V shader compiler the build invokes). Without it, CMake configuration will stop with a clear message.
 
-GLM, the Vulkan Memory Allocator, tinyobjloader, nlohmann/json, miniz, and stb_image are downloaded automatically by CMake (`FetchContent`) at configure time — no manual setup needed.
+GLM, the Vulkan Memory Allocator, tinyobjloader, nlohmann/json, miniz, stb_image, and tinyexr are downloaded automatically by CMake (`FetchContent`) at configure time — no manual setup needed.
 
 **Build**
 

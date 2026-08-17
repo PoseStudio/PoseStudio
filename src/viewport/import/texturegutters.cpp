@@ -209,6 +209,19 @@ void fillTextureGutters(MeshData& mesh) {
         fillImage(mesh.normalPixels, mesh.normalWidth, mesh.normalHeight, mesh.vertices,
                   mesh.indices);
     }
+    // Same for the specular parameter maps (their bleed shows as glossy/matte seam lines).
+    if (!mesh.roughnessPixels.empty()) {
+        fillImage(mesh.roughnessPixels, mesh.roughnessWidth, mesh.roughnessHeight, mesh.vertices,
+                  mesh.indices);
+    }
+    if (!mesh.specMaskPixels.empty()) {
+        fillImage(mesh.specMaskPixels, mesh.specMaskWidth, mesh.specMaskHeight, mesh.vertices,
+                  mesh.indices);
+    }
+    if (!mesh.translucencyPixels.empty()) {
+        fillImage(mesh.translucencyPixels, mesh.translucencyWidth, mesh.translucencyHeight,
+                  mesh.vertices, mesh.indices);
+    }
 }
 
 } // namespace pose

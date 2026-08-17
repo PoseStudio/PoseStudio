@@ -34,11 +34,27 @@ class ImmediateBatch;
 struct Ray;
 
 /// Per-draw push-constant block for the mesh shaders. Must stay byte-identical to the
-/// `push_constant` block in mesh.vert / mesh.frag (mat4 + vec4 + vec4 = 96 bytes).
+/// `push_constant` block in mesh.frag (mat4 + 4×vec4 = 128 bytes — exactly the guaranteed
+/// push-constant minimum, so no further vec4 fits; mesh.vert declares the shorter prefix).
 struct MeshPushConstants {
     glm::mat4 model;
     glm::vec4 baseColor; // rgb tint; a = opacity (1 = opaque)
-    glm::vec4 material;  // x = roughness, y = normalMode (0 none / 1 normal / 2 bump), z = metalness, w reserved
+    glm::vec4 material;  // x = roughness (ratio-blended), y = normalMode (0/1/2), z = metalness,
+                         // w = specular (F0) weight (1 = 4% dielectric)
+    glm::vec4 material2; // x = lobe1 rough, y = lobe2 rough, z = lobe ratio (1 = single-lobe),
+                         // w = translucency weight
+    glm::vec4 material3; // x = top-coat weight (0 = none), y = top-coat roughness,
+                         // z = transparent-pass flag (0 = opaque: PBR writes the SSS mask into
+                         // alpha; 1 = transparent: alpha stays the blend opacity),
+                         // w = micro-detail packed as floor(tiles) + fract(weight) — the block is
+                         //     at the 128-byte push limit, so the pair shares one float (0 = none)
+};
+
+/// Push-constant block for the depth-only shadow pass. Must stay byte-identical to shadow.vert's
+/// `push_constant` block (two mat4s = 128 bytes, the guaranteed push-constant minimum).
+struct ShadowPushConstants {
+    glm::mat4 lightViewProj;
+    glm::mat4 model;
 };
 
 /// One material group of a model: device-local vertex/index buffers, material params (base color,
@@ -63,7 +79,13 @@ public:
 
     /// Binds set 1 (this mesh's texture), pushes (model, baseColor, material), binds buffers, and
     /// draws. The caller has already bound the mesh pipeline and the per-frame camera set (set 0).
-    void record(VkCommandBuffer cmd, VkPipelineLayout layout, const glm::mat4& model) const;
+    /// @p transparentPass tells the shader which alpha semantics apply (blend alpha vs SSS mask).
+    void record(VkCommandBuffer cmd, VkPipelineLayout layout, const glm::mat4& model,
+                bool transparentPass) const;
+
+    /// Depth-only draw for the shadow pass: just buffers + drawIndexed — no material set, no push
+    /// (the Model pushes the light matrices once for all its meshes).
+    void recordDepth(VkCommandBuffer cmd) const;
 
     /// Replaces the vertex buffer contents (same vertex count) — used to push a re-morphed mesh after
     /// pose correctives change. Records into @p batch; the caller submits it and must have made the
@@ -76,17 +98,35 @@ public:
     /// (a lash/brow card's shape exists only in the mask).
     bool isTransparent() const { return m_opacity < 0.999f || m_hasOpacityMask; }
 
+    /// Bind-pose centroid (local space) — the transparent pass's back-to-front sort key.
+    const glm::vec3& centroid() const { return m_centroid; }
+
 private:
     VulkanBuffer                   m_vertexBuffer;
     VulkanBuffer                   m_indexBuffer;
     uint32_t                       m_indexCount = 0;
+    glm::vec3                      m_centroid{0.0f}; // bind-pose local centroid (transparency sort)
     glm::vec3                      m_baseColor{0.8f};
     float                          m_roughness = 0.7f;
+    float                          m_specularWeight = 1.0f; // F0 multiplier (1 = 4% dielectric)
+    float                          m_metalness = 0.0f;
+    float                          m_lobe1Roughness = 0.7f; // dual-lobe spec (ratio 1 = single lobe)
+    float                          m_lobe2Roughness = 0.7f;
+    float                          m_lobeRatio = 1.0f;
+    float                          m_topCoatWeight = 0.0f;
+    float                          m_topCoatRoughness = 0.65f;
+    float                          m_translucencyWeight = 0.5f;
+    float                          m_detailWeight = 0.0f; // micro-detail normal strength (0 = none)
+    float                          m_detailTiles = 0.0f;  // micro-detail UV tiling
     float                          m_opacity = 1.0f;
     bool                           m_hasOpacityMask = false;
     int                            m_normalMode = 0;              // 0 none / 1 normal map / 2 bump map
     std::unique_ptr<VulkanTexture> m_texture;                     // diffuse; null => white fallback
     std::unique_ptr<VulkanTexture> m_normalTexture;               // detail; null => flat-normal fallback
+    std::unique_ptr<VulkanTexture> m_roughnessTexture;            // linear ×-multiplier map; null => white
+    std::unique_ptr<VulkanTexture> m_specMaskTexture;             // linear spec mask; null => white
+    std::unique_ptr<VulkanTexture> m_translucencyTexture;         // sRGB translucency map; null => white
+    std::unique_ptr<VulkanTexture> m_microNormalTexture;          // linear tiled pore normals; null => flat
     VkDescriptorSet                m_materialSet = VK_NULL_HANDLE; // set 1; owned by the Model's pool
 };
 
@@ -103,9 +143,22 @@ public:
     Model& operator=(const Model&) = delete;
 
     /// Records the model's sub-meshes at its current transform. @p transparentPass selects which
-    /// meshes are drawn: false = only opaque meshes, true = only transparent ones. The caller draws
-    /// the whole scene's opaque pass first, then binds the blend pipeline for the transparent pass.
-    void record(VkCommandBuffer cmd, VkPipelineLayout layout, bool transparentPass) const;
+    /// meshes are drawn: false = only opaque meshes, true = only transparent ones (sorted
+    /// back-to-front by centroid distance to @p cameraPos, so layered shells — lashes over cornea
+    /// over sclera — blend correctly from any angle). The caller draws the whole scene's opaque
+    /// pass first, then binds the blend pipeline for the transparent pass.
+    void record(VkCommandBuffer cmd, VkPipelineLayout layout, bool transparentPass,
+                const glm::vec3& cameraPos) const;
+
+    /// Records the model's opaque meshes into the depth-only shadow pass (the caller has bound the
+    /// shadow pipeline and begun its render pass). Transparent meshes (clear eye shells, cutout
+    /// lash/brow cards) are skipped — the pass has no alpha, so they'd cast solid-card shadows.
+    void recordShadow(VkCommandBuffer cmd, VkPipelineLayout layout,
+                      const glm::mat4& lightViewProj) const;
+
+    /// The model's world-space AABB (local bounds through the model transform). Returns false when
+    /// the model has no geometry bounds. Used to fit the key light's shadow frustum.
+    bool worldBounds(glm::vec3& outMin, glm::vec3& outMax) const;
 
     void             setTransform(const glm::mat4& transform) { m_transform = transform; }
     const glm::mat4& transform() const { return m_transform; }

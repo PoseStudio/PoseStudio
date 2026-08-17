@@ -64,6 +64,7 @@
         <file>icons/add-col.png</file>
         <file>icons/sub-collection.png</file>
         <file>icons/open-item.png</file>
+        <file>icons/default.png</file>
 
     </qresource>
 </RCC>

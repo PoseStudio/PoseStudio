@@ -119,23 +119,19 @@ void VulkanWindow::initializeVulkan() {
 }
 
 QString VulkanWindow::defaultEnvironmentPath() const {
-    // An explicit <appDir>/environment.hdr override wins; otherwise the panoramas live in the user
-    // library's hdri/ folder (see librarypaths.h — the same folder the Environment panel lists).
-    // Prefer the stock default by name, else the first .hdr alphabetically; an empty return leaves
-    // the procedural studio environment (beginEnvironmentBake no-ops on it).
-    const QString override =
-        QCoreApplication::applicationDirPath() + QStringLiteral("/environment.hdr");
-    if (QFileInfo::exists(override)) {
-        return override;
+    // An explicit <appDir>/environment.hdr (or .exr) override wins; otherwise the stock/first
+    // panorama from the user library's hdri/ tree via LibraryPaths::defaultHdri() — the same
+    // recursive scan backing the Environment panel's menu, so a collection categorized into
+    // subfolders resolves identically here. An empty return leaves the procedural studio
+    // environment (beginEnvironmentBake no-ops on it).
+    for (const char* name : {"environment.hdr", "environment.exr"}) {
+        const QString override =
+            QCoreApplication::applicationDirPath() + QLatin1Char('/') + QLatin1String(name);
+        if (QFileInfo::exists(override)) {
+            return override;
+        }
     }
-    const QDir hdriDir(LibraryPaths::hdriDirectory());
-    const QString preferred = hdriDir.filePath(QStringLiteral("Golden Gate Hills.hdr"));
-    if (QFileInfo::exists(preferred)) {
-        return preferred;
-    }
-    const QStringList hdrs =
-        hdriDir.entryList(QStringList{QStringLiteral("*.hdr")}, QDir::Files, QDir::Name);
-    return hdrs.isEmpty() ? QString() : hdriDir.filePath(hdrs.first());
+    return LibraryPaths::defaultHdri();
 }
 
 void VulkanWindow::beginEnvironmentBake(const QString& hdrPath) {
@@ -160,9 +156,9 @@ void VulkanWindow::beginEnvironmentBake(const QString& hdrPath) {
     // The task captures only the path (by value); it touches no window/renderer state, so it stays safe
     // even if the window is torn down before it finishes (the watcher, a child of `this`, won't fire).
     watcher->setFuture(QtConcurrent::run([hdrPath]() -> std::shared_ptr<BakedEnvironment> {
-        std::optional<EnvironmentImage> env = loadHdrEnvironment(hdrPath.toStdString());
+        std::optional<EnvironmentImage> env = loadEnvironmentImage(hdrPath.toStdString());
         if (!env) {
-            qWarning() << "[viewport] Failed to decode HDR environment:" << hdrPath;
+            qWarning() << "[viewport] Failed to decode environment panorama:" << hdrPath;
             return nullptr;
         }
         return std::make_shared<BakedEnvironment>(bakeEnvironment(std::move(*env)));
@@ -339,7 +335,10 @@ void VulkanWindow::mouseReleaseEvent(QMouseEvent* event) {
             // re-upload geometry) and commit an undo entry if the pose actually changed.
             m_renderer->finalizePose();
             if (m_renderer->capturePose() != m_preEditPose) {
-                m_undoStack.push_back(m_preEditPose);
+                UndoEntry entry;
+                entry.kind = UndoEntry::Kind::Pose;
+                entry.pose = m_preEditPose;
+                m_undoStack.push_back(std::move(entry));
                 m_redoStack.clear();
             }
             requestUpdate();
@@ -420,14 +419,17 @@ void VulkanWindow::wheelEvent(QWheelEvent* event) {
 }
 
 void VulkanWindow::keyPressEvent(QKeyEvent* event) {
+    // Fallback path: the Edit-menu actions carry the app-wide Ctrl+Z/Ctrl+Y shortcuts, but keep
+    // handling the raw keys here too in case a platform delivers them to the native window
+    // without the shortcut map consuming them first.
     if (m_renderer && event->modifiers().testFlag(Qt::ControlModifier)) {
         if (event->key() == Qt::Key_Z) {
-            undoPose();
+            undo();
             event->accept();
             return;
         }
         if (event->key() == Qt::Key_Y) {
-            redoPose();
+            redo();
             event->accept();
             return;
         }
@@ -435,25 +437,53 @@ void VulkanWindow::keyPressEvent(QKeyEvent* event) {
     QWindow::keyPressEvent(event);
 }
 
-void VulkanWindow::undoPose() {
+void VulkanWindow::registerLightingUndo(const LightingSettings& preEdit) {
+    UndoEntry entry;
+    entry.kind = UndoEntry::Kind::Lighting;
+    entry.lighting = preEdit;
+    m_undoStack.push_back(std::move(entry));
+    m_redoStack.clear(); // a fresh edit invalidates the redo branch, same as a pose edit
+}
+
+void VulkanWindow::undo() {
     if (!m_renderer || m_undoStack.empty()) {
         return;
     }
-    m_redoStack.push_back(m_renderer->capturePose()); // current pose becomes redoable
-    m_renderer->applyPose(m_undoStack.back());
+    UndoEntry entry = std::move(m_undoStack.back());
     m_undoStack.pop_back();
-    m_renderer->finalizePose();
+    UndoEntry redo;
+    redo.kind = entry.kind;
+    if (entry.kind == UndoEntry::Kind::Pose) {
+        redo.pose = m_renderer->capturePose(); // current pose becomes redoable
+        m_renderer->applyPose(entry.pose);
+        m_renderer->finalizePose(); // re-runs correctives, like any pose change
+    } else {
+        redo.lighting = m_lighting; // current dials become redoable
+        setLightingSettings(entry.lighting);
+        emit lightingRestored(entry.lighting); // the Environment panel syncs its widgets
+    }
+    m_redoStack.push_back(std::move(redo));
     requestUpdate();
 }
 
-void VulkanWindow::redoPose() {
+void VulkanWindow::redo() {
     if (!m_renderer || m_redoStack.empty()) {
         return;
     }
-    m_undoStack.push_back(m_renderer->capturePose());
-    m_renderer->applyPose(m_redoStack.back());
+    UndoEntry entry = std::move(m_redoStack.back());
     m_redoStack.pop_back();
-    m_renderer->finalizePose();
+    UndoEntry undone;
+    undone.kind = entry.kind;
+    if (entry.kind == UndoEntry::Kind::Pose) {
+        undone.pose = m_renderer->capturePose();
+        m_renderer->applyPose(entry.pose);
+        m_renderer->finalizePose();
+    } else {
+        undone.lighting = m_lighting;
+        setLightingSettings(entry.lighting);
+        emit lightingRestored(entry.lighting);
+    }
+    m_undoStack.push_back(std::move(undone));
     requestUpdate();
 }
 
