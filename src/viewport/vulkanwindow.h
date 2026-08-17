@@ -73,6 +73,10 @@ public:
     /// Remembered and applied once the renderer exists if it isn't built yet.
     void setShadeMode(int mode);
 
+    /// Restores the camera's default framing (the viewport's Home button). No-op before the
+    /// renderer exists — the camera is created with that framing, so there'd be nothing to undo.
+    void resetView();
+
     /// Loads @p hdrPath as the lighting environment and re-bakes the IBL. Remembered and applied
     /// once the renderer exists if it isn't built yet. Decoding happens in this Qt layer.
     void setEnvironmentFile(const QString& hdrPath);

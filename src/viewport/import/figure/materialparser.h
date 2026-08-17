@@ -26,10 +26,12 @@ namespace pose {
 struct MaterialRefs {
     glm::vec3   baseColor{0.75f};
     std::string diffuseImageUri;
-    std::string normalImageUri; ///< "Normal Map" channel (tangent-space RGB), or empty.
-    std::string bumpImageUri;   ///< "Bump Strength" channel (grayscale height), or empty.
+    std::string normalImageUri;  ///< "Normal Map" channel (tangent-space RGB), or empty.
+    std::string bumpImageUri;    ///< "Bump Strength" channel (grayscale height), or empty.
+    std::string opacityImageUri; ///< Cutout/opacity mask (lash & brow cards, legacy eye shells), or empty.
     float       roughness = 0.7f;
-    float       opacity   = 1.0f; ///< From Cutout Opacity, lowered for refractive (glass) surfaces.
+    float       opacity   = 1.0f; ///< From Cutout Opacity (or the legacy "transparency" channel),
+                                  ///< lowered for refractive (glass) surfaces.
 };
 
 /// Parses a preset's `scene.materials` into a zone-name -> MaterialRefs map. Each scene material only

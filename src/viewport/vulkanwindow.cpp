@@ -233,6 +233,13 @@ void VulkanWindow::setShadeMode(int mode) {
     }
 }
 
+void VulkanWindow::resetView() {
+    if (m_renderer) {
+        m_renderer->camera().reset();
+        requestUpdate(); // rendering is on demand — nothing redraws unless we ask
+    }
+}
+
 bool VulkanWindow::savePose(const QString& path) {
     return m_renderer && m_renderer->savePose(path.toStdString());
 }

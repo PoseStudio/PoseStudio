@@ -24,6 +24,13 @@ void Camera::setViewportSize(float width, float height) {
     rebuildProjection();
 }
 
+void Camera::reset() {
+    m_target = glm::vec3(0.0f, kDefaultTargetHeight, 0.0f);
+    m_distance = kDefaultDistance;
+    m_yaw = glm::radians(kDefaultYawDegrees);
+    m_pitch = glm::radians(kDefaultPitchDegrees);
+}
+
 void Camera::orbit(float deltaYaw, float deltaPitch) {
     m_yaw += deltaYaw;
     m_pitch = std::clamp(m_pitch + deltaPitch, kMinPitch, kMaxPitch);

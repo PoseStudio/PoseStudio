@@ -5,31 +5,28 @@
 
 #include "environmentpanel.h"
 
+#include "dragnumberbox.h"
 #include "librarypaths.h"
 #include "viewportwidget.h"
 
 #include <QCheckBox>
 #include <QDesktopServices>
 #include <QDir>
-#include <QDoubleSpinBox>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
-#include <QHBoxLayout>
 #include <QImageReader>
 #include <QLabel>
 #include <QListWidget>
 #include <QMenu>
 #include <QPushButton>
 #include <QScrollArea>
-#include <QSlider>
 #include <QStyle>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWidgetAction>
 
 #include <algorithm>
-#include <cmath>
 
 namespace pose {
 
@@ -91,44 +88,15 @@ EnvironmentPanel::EnvironmentPanel(ViewportWidget* viewport, QWidget* parent)
     buildUi();
 }
 
-QDoubleSpinBox* EnvironmentPanel::addSliderRow(QFormLayout* form, const QString& label, double min,
-                                               double max, double step, double value) {
-    auto* row = new QWidget;
-    auto* h = new QHBoxLayout(row);
-    h->setContentsMargins(0, 0, 0, 0);
-    h->setSpacing(8);
-
-    auto* slider = new QSlider(Qt::Horizontal, row);
-    auto* spin = new QDoubleSpinBox(row);
-    const int steps = std::max(1, static_cast<int>(std::lround((max - min) / step)));
-    slider->setRange(0, steps);
-    spin->setRange(min, max);
-    spin->setSingleStep(step);
-    spin->setDecimals(step >= 1.0 ? 0 : 2);
-    spin->setValue(value);
-    spin->setFixedWidth(76);
-    slider->setValue(static_cast<int>(std::lround((value - min) / step)));
-
-    // Two-way sync. Slider drag -> set the spin (which fires its valueChanged, updating the field);
-    // spin edit -> move the slider with its own signal blocked so it can't loop back.
-    QObject::connect(slider, &QSlider::valueChanged, spin, [=](int v) {
-        const double d = min + v * step;
-        if (std::abs(spin->value() - d) >= step * 0.5) {
-            spin->setValue(d);
-        }
-    });
-    QObject::connect(spin, qOverload<double>(&QDoubleSpinBox::valueChanged), slider, [=](double d) {
-        const int v = static_cast<int>(std::lround((d - min) / step));
-        if (slider->value() != v) {
-            QSignalBlocker block(slider);
-            slider->setValue(v);
-        }
-    });
-
-    h->addWidget(slider, 1);
-    h->addWidget(spin, 0);
-    form->addRow(label, row);
-    return spin;
+DragNumberBox* EnvironmentPanel::addValueRow(QFormLayout* form, const QString& label, double min,
+                                             double max, double step, double value) {
+    auto* box = new DragNumberBox;
+    box->setRange(min, max);
+    box->setSingleStep(step);
+    box->setDecimals(step >= 1.0 ? 0 : 2);
+    box->setValue(value);
+    form->addRow(label, box);
+    return box;
 }
 
 void EnvironmentPanel::buildUi() {
@@ -149,31 +117,31 @@ void EnvironmentPanel::buildUi() {
     // --- Environment ---
     QFormLayout* env = addGroup(col, tr("Environment"));
     buildEnvironmentSelector(env);
-    m_rotation = addSliderRow(env, tr("Rotation°"), 0.0, 360.0, 1.0, m_settings.environmentRotationDeg);
+    m_rotation = addValueRow(env, tr("Rotation°"), 0.0, 360.0, 1.0, m_settings.environmentRotationDeg);
 
     // --- Exposure & Tone ---
-    QFormLayout* tone = addGroup(col, tr("Exposure & Tone"));
-    m_exposure = addSliderRow(tone, tr("Exposure"), 0.0, 3.0, 0.01, m_settings.exposure);
+    QFormLayout* tone = addGroup(col, tr("Exposure && Tone")); // && — a lone & becomes an accelerator underline
+    m_exposure = addValueRow(tone, tr("Exposure"), 0.0, 3.0, 0.01, m_settings.exposure);
     m_tonemap = new QCheckBox(tr("ACES filmic tonemap"));
     m_tonemap->setChecked(m_settings.tonemap);
     tone->addRow(QString(), m_tonemap);
 
     // --- Image-Based Lighting ---
     QFormLayout* ibl = addGroup(col, tr("Image-Based Lighting"));
-    m_diffuse = addSliderRow(ibl, tr("Diffuse"), 0.0, 3.0, 0.01, m_settings.diffuseIntensity);
-    m_specular = addSliderRow(ibl, tr("Specular"), 0.0, 2.0, 0.01, m_settings.specularIntensity);
-    m_ambientFill = addSliderRow(ibl, tr("Ambient fill"), 0.0, 1.0, 0.01, m_settings.ambientFill);
+    m_diffuse = addValueRow(ibl, tr("Diffuse"), 0.0, 3.0, 0.01, m_settings.diffuseIntensity);
+    m_specular = addValueRow(ibl, tr("Specular"), 0.0, 2.0, 0.01, m_settings.specularIntensity);
+    m_ambientFill = addValueRow(ibl, tr("Ambient fill"), 0.0, 1.0, 0.01, m_settings.ambientFill);
 
     // --- Key Light ---
     QFormLayout* key = addGroup(col, tr("Key Light"));
-    m_keyIntensity = addSliderRow(key, tr("Intensity"), 0.0, 5.0, 0.05, m_settings.keyIntensity);
-    m_keyAzimuth = addSliderRow(key, tr("Azimuth°"), -180.0, 180.0, 1.0, m_settings.keyAzimuthDeg);
-    m_keyElevation = addSliderRow(key, tr("Elevation°"), 0.0, 85.0, 1.0, m_settings.keyElevationDeg);
+    m_keyIntensity = addValueRow(key, tr("Intensity"), 0.0, 5.0, 0.05, m_settings.keyIntensity);
+    m_keyAzimuth = addValueRow(key, tr("Azimuth°"), -180.0, 180.0, 1.0, m_settings.keyAzimuthDeg);
+    m_keyElevation = addValueRow(key, tr("Elevation°"), 0.0, 85.0, 1.0, m_settings.keyElevationDeg);
 
     // --- Skin & Rim (PBR-mode accents) ---
     QFormLayout* accents = addGroup(col, tr("Skin && Rim"));
-    m_subsurface = addSliderRow(accents, tr("Subsurface"), 0.0, 1.0, 0.01, m_settings.subsurface);
-    m_rim = addSliderRow(accents, tr("Rim light"), 0.0, 1.5, 0.01, m_settings.rimIntensity);
+    m_subsurface = addValueRow(accents, tr("Subsurface"), 0.0, 1.0, 0.01, m_settings.subsurface);
+    m_rim = addValueRow(accents, tr("Rim light"), 0.0, 1.5, 0.01, m_settings.rimIntensity);
 
     // --- Reset ---
     auto* reset = new QPushButton(tr("Reset to defaults"));
@@ -184,11 +152,11 @@ void EnvironmentPanel::buildUi() {
     scroll->setWidget(content);
 
     // --- Wiring: every control updates m_settings and pushes it live to the viewport ---
-    connect(m_rotation, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double d) {
+    connect(m_rotation, &DragNumberBox::valueChanged, this, [this](double d) {
         m_settings.environmentRotationDeg = static_cast<float>(d);
         pushSettings();
     });
-    connect(m_exposure, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double d) {
+    connect(m_exposure, &DragNumberBox::valueChanged, this, [this](double d) {
         m_settings.exposure = static_cast<float>(d);
         pushSettings();
     });
@@ -196,35 +164,35 @@ void EnvironmentPanel::buildUi() {
         m_settings.tonemap = on;
         pushSettings();
     });
-    connect(m_diffuse, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double d) {
+    connect(m_diffuse, &DragNumberBox::valueChanged, this, [this](double d) {
         m_settings.diffuseIntensity = static_cast<float>(d);
         pushSettings();
     });
-    connect(m_specular, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double d) {
+    connect(m_specular, &DragNumberBox::valueChanged, this, [this](double d) {
         m_settings.specularIntensity = static_cast<float>(d);
         pushSettings();
     });
-    connect(m_ambientFill, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double d) {
+    connect(m_ambientFill, &DragNumberBox::valueChanged, this, [this](double d) {
         m_settings.ambientFill = static_cast<float>(d);
         pushSettings();
     });
-    connect(m_keyIntensity, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double d) {
+    connect(m_keyIntensity, &DragNumberBox::valueChanged, this, [this](double d) {
         m_settings.keyIntensity = static_cast<float>(d);
         pushSettings();
     });
-    connect(m_keyAzimuth, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double d) {
+    connect(m_keyAzimuth, &DragNumberBox::valueChanged, this, [this](double d) {
         m_settings.keyAzimuthDeg = static_cast<float>(d);
         pushSettings();
     });
-    connect(m_keyElevation, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double d) {
+    connect(m_keyElevation, &DragNumberBox::valueChanged, this, [this](double d) {
         m_settings.keyElevationDeg = static_cast<float>(d);
         pushSettings();
     });
-    connect(m_subsurface, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double d) {
+    connect(m_subsurface, &DragNumberBox::valueChanged, this, [this](double d) {
         m_settings.subsurface = static_cast<float>(d);
         pushSettings();
     });
-    connect(m_rim, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double d) {
+    connect(m_rim, &DragNumberBox::valueChanged, this, [this](double d) {
         m_settings.rimIntensity = static_cast<float>(d);
         pushSettings();
     });
@@ -368,7 +336,7 @@ void EnvironmentPanel::pushSettings() {
 void EnvironmentPanel::resetToDefaults() {
     const LightingSettings defaults;
     // Setting the widgets (unblocked) fires each control's handler, which rebuilds m_settings from the
-    // defaults, syncs the sliders, and pushes — so the viewport lands back on the default look.
+    // defaults and pushes — so the viewport lands back on the default look.
     m_rotation->setValue(defaults.environmentRotationDeg);
     m_exposure->setValue(defaults.exposure);
     m_tonemap->setChecked(defaults.tonemap);

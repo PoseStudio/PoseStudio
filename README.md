@@ -149,6 +149,7 @@ This project is built using the following core technologies and design resources
 * **Model Import:** [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader) — the Wavefront `.obj`/`.mtl` parser (also fetched automatically by CMake)
 * **Figure Import:** [nlohmann/json](https://github.com/nlohmann/json) (JSON parsing) and [miniz](https://github.com/richgel999/miniz) (gzip inflate), used by the native rigged-figure importer (also fetched automatically by CMake)
 * **HDR Environments:** [stb_image](https://github.com/nothings/stb) — decodes the `.hdr` panoramas used for the viewport's image-based lighting (also fetched automatically by CMake)
+* **HDRI Panoramas:** The stock lighting environments are CC0 assets from **[Poly Haven](https://polyhaven.com/)** — a fantastic public-asset library; consider [supporting them](https://www.patreon.com/polyhaven)
 * Code generation and troubleshooting assistance provided by Anthropic's Claude.
 * **UI Iconography:** [Lucide Icons](https://lucide.dev/) (See `ATTRIBUTIONS.md` for full design credits)
 

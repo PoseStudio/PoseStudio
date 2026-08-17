@@ -49,6 +49,7 @@
         <file>icons/clear.png</file>
         <file>icons/browse-folder.png</file>
         <file>icons/tree.png</file>
+        <file>icons/home.png</file>
         <file>icons/collapse.png</file>
         <file>icons/expand-branch.png</file>
         <file>icons/expand.png</file>
@@ -56,6 +57,7 @@
         <file>icons/rename.png</file>
         <file>icons/plus.png</file>
         <file>icons/minus.png</file>
+        <file>icons/check.png</file>
         <file>icons/unfavorite.png</file>
         <file>icons/collections.png</file>
         <file>icons/favorite.png</file>

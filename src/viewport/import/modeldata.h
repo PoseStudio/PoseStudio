@@ -63,6 +63,15 @@ struct MeshData {
     uint32_t              normalHeight = 0;
     int                   normalMode   = 0;
 
+    // Opacity (cutout) mask: a grayscale image whose texels modulate this mesh's opacity (lash and
+    // brow cards, older generations' eye shells). Not uploaded as its own texture: the decode layer
+    // bakes it into the diffuse map's ALPHA channel (the shader already samples the diffuse, so the
+    // mask rides along for free) and sets hasOpacityMask, which routes the mesh to the alpha-blended
+    // transparent pass even when the scalar opacity is 1 (a lash card's scalar is 1 — its shape
+    // exists only in the mask).
+    TextureSource         opacityMask;
+    bool                  hasOpacityMask = false; // set by the decode layer once the bake succeeds
+
     float                 roughness = 0.7f; // 0 = mirror-smooth, 1 = fully rough (matte).
     float                 opacity   = 1.0f; // < 1 => drawn in the transparent pass, alpha-blended.
 

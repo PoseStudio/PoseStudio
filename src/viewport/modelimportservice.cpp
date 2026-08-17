@@ -51,6 +51,49 @@ bool decodeTexture(const TextureSource& src, std::vector<uint8_t>& outPixels, ui
     return true;
 }
 
+// Bakes a mesh's opacity (cutout) mask into its diffuse map's ALPHA channel — the shader samples
+// the diffuse anyway, so the mask rides along without its own texture/binding. An untextured mesh
+// gets a white RGBA canvas at the mask's own resolution first. The mask is grayscale-converted and
+// rescaled to the diffuse dimensions, so mismatched map sizes are fine. On success the mesh is
+// flagged so it renders in the alpha-blended transparent pass (a lash card's scalar opacity is 1 —
+// its shape exists only in the mask). Runs BEFORE the gutter fill, whose pull-push dilation covers
+// all four channels, so the baked alpha gets the same seam treatment as the colours.
+void bakeOpacityMask(MeshData& mesh) {
+    QImage mask;
+    if (!mesh.opacityMask.encoded.empty()) {
+        mask.loadFromData(mesh.opacityMask.encoded.data(),
+                          static_cast<int>(mesh.opacityMask.encoded.size()));
+    } else {
+        mask.load(QString::fromStdString(mesh.opacityMask.path));
+    }
+    if (mask.isNull()) {
+        qWarning() << "[viewport] Opacity mask not found/decodable:"
+                   << QString::fromStdString(mesh.opacityMask.path);
+        return; // mesh keeps its scalar opacity
+    }
+    if (mesh.diffusePixels.empty()) {
+        mesh.diffuseWidth = static_cast<uint32_t>(mask.width());
+        mesh.diffuseHeight = static_cast<uint32_t>(mask.height());
+        mesh.diffusePixels.assign(
+            static_cast<std::size_t>(mesh.diffuseWidth) * mesh.diffuseHeight * 4, 255);
+    }
+    const QImage scaled =
+        mask.convertToFormat(QImage::Format_Grayscale8)
+            .scaled(static_cast<int>(mesh.diffuseWidth), static_cast<int>(mesh.diffuseHeight),
+                    Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    if (scaled.isNull()) {
+        return;
+    }
+    for (uint32_t y = 0; y < mesh.diffuseHeight; ++y) {
+        const uchar* row = scaled.constScanLine(static_cast<int>(y));
+        uint8_t* out = mesh.diffusePixels.data() + static_cast<std::size_t>(y) * mesh.diffuseWidth * 4;
+        for (uint32_t x = 0; x < mesh.diffuseWidth; ++x) {
+            out[x * 4 + 3] = row[x];
+        }
+    }
+    mesh.hasOpacityMask = true;
+}
+
 } // namespace
 
 void ModelImportService::decodeMeshTexture(MeshData& mesh) {
@@ -59,6 +102,11 @@ void ModelImportService::decodeMeshTexture(MeshData& mesh) {
     // Detail (normal/bump): if it can't be decoded, drop to flat shading (mode 0).
     if (!decodeTexture(mesh.normal, mesh.normalPixels, mesh.normalWidth, mesh.normalHeight)) {
         mesh.normalMode = 0;
+    }
+    // Opacity (cutout) mask -> the diffuse map's alpha channel (see bakeOpacityMask). Before the
+    // gutter fill so the baked alpha shares the seam treatment.
+    if (!mesh.opacityMask.empty()) {
+        bakeOpacityMask(mesh);
     }
     // Dilate each image's UV-island colours into its unused background so the GPU-built mip chain
     // never averages the atlas background through a seam (visible as bright seam lines when zoomed

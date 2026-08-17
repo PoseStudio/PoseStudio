@@ -18,13 +18,13 @@
 #include <QWidget>
 
 class QCheckBox;
-class QDoubleSpinBox;
 class QFormLayout;
 class QMenu;
 class QPushButton;
 
 namespace pose {
 
+class DragNumberBox;
 class ViewportWidget;
 
 class EnvironmentPanel : public QWidget {
@@ -42,10 +42,11 @@ private:
     void pushSettings();            // sends m_settings to the viewport
     void resetToDefaults();
 
-    // Builds a labelled row (slider + spin box, kept in sync) into @p form and returns the spin box,
-    // whose valueChanged the caller wires to the matching LightingSettings field.
-    QDoubleSpinBox* addSliderRow(QFormLayout* form, const QString& label, double min, double max,
-                                 double step, double value);
+    // Builds a labelled DragNumberBox row (the app-standard scrub field — drag to change, click to
+    // type) into @p form and returns the box, whose valueChanged the caller wires to the matching
+    // LightingSettings field.
+    DragNumberBox* addValueRow(QFormLayout* form, const QString& label, double min, double max,
+                               double step, double value);
 
     ViewportWidget*  m_viewport = nullptr;
     LightingSettings m_settings;   // current values; the source of truth pushed to the viewport
@@ -56,17 +57,17 @@ private:
     QPushButton*    m_envButton = nullptr;
     QMenu*          m_envMenu = nullptr;
     QString         m_currentEnvPath;
-    QDoubleSpinBox* m_rotation = nullptr;
-    QDoubleSpinBox* m_exposure = nullptr;
-    QCheckBox*      m_tonemap = nullptr;
-    QDoubleSpinBox* m_diffuse = nullptr;
-    QDoubleSpinBox* m_specular = nullptr;
-    QDoubleSpinBox* m_ambientFill = nullptr;
-    QDoubleSpinBox* m_keyIntensity = nullptr;
-    QDoubleSpinBox* m_keyAzimuth = nullptr;
-    QDoubleSpinBox* m_keyElevation = nullptr;
-    QDoubleSpinBox* m_subsurface = nullptr;
-    QDoubleSpinBox* m_rim = nullptr;
+    DragNumberBox* m_rotation = nullptr;
+    DragNumberBox* m_exposure = nullptr;
+    QCheckBox*     m_tonemap = nullptr;
+    DragNumberBox* m_diffuse = nullptr;
+    DragNumberBox* m_specular = nullptr;
+    DragNumberBox* m_ambientFill = nullptr;
+    DragNumberBox* m_keyIntensity = nullptr;
+    DragNumberBox* m_keyAzimuth = nullptr;
+    DragNumberBox* m_keyElevation = nullptr;
+    DragNumberBox* m_subsurface = nullptr;
+    DragNumberBox* m_rim = nullptr;
 };
 
 } // namespace pose

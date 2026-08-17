@@ -58,6 +58,10 @@ public:
     /// Sets the viewport shade mode by index (see shaderModeNames()). No-op if the viewport degraded.
     void setShadeMode(int mode);
 
+    /// Returns the camera to the default perspective framing (the overlay's Home button).
+    /// No-op if the viewport degraded.
+    void resetView();
+
     /// Loads @p hdrPath as the lighting environment (re-bakes the IBL). No-op if the viewport degraded.
     void setEnvironment(const QString& hdrPath);
     /// Applies the live lighting/exposure dials (Environment panel). No-op if the viewport degraded.
@@ -77,7 +81,7 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
-    void createShaderOverlay();   // builds the floating top-right shader dropdown
+    void createShaderOverlay();   // builds the floating top-right shader dropdown + home button
     void syncOverlayPosition();   // glues it to the viewport's top-right corner (global coords)
 
     std::unique_ptr<QVulkanInstance> m_instance;           // owns the VkInstance
@@ -85,6 +89,7 @@ private:
     QWidget*                         m_container = nullptr; // the createWindowContainer wrapper
     QWidget*                         m_overlay = nullptr;   // top-level frameless host for the dropdown
     QPushButton*                     m_shaderButton = nullptr;   // opens the shader-mode QMenu
+    QPushButton*                     m_homeButton = nullptr;     // resets the camera to default framing
     QWidget*                         m_filteredWindow = nullptr; // top-level we filter for move/resize
 };
 

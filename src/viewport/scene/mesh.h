@@ -71,8 +71,10 @@ public:
     void reuploadVertices(VulkanContext& context, const std::vector<Vertex>& vertices,
                           ImmediateBatch& batch);
 
-    /// True if this mesh is (partly) see-through and must be drawn in the transparent pass.
-    bool isTransparent() const { return m_opacity < 0.999f; }
+    /// True if this mesh is (partly) see-through and must be drawn in the transparent pass. An
+    /// opacity mask baked into the diffuse alpha makes a mesh transparent even at scalar opacity 1
+    /// (a lash/brow card's shape exists only in the mask).
+    bool isTransparent() const { return m_opacity < 0.999f || m_hasOpacityMask; }
 
 private:
     VulkanBuffer                   m_vertexBuffer;
@@ -81,6 +83,7 @@ private:
     glm::vec3                      m_baseColor{0.8f};
     float                          m_roughness = 0.7f;
     float                          m_opacity = 1.0f;
+    bool                           m_hasOpacityMask = false;
     int                            m_normalMode = 0;              // 0 none / 1 normal map / 2 bump map
     std::unique_ptr<VulkanTexture> m_texture;                     // diffuse; null => white fallback
     std::unique_ptr<VulkanTexture> m_normalTexture;               // detail; null => flat-normal fallback

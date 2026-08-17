@@ -160,8 +160,13 @@ void main() {
         n = normalize(cotangentFrame(n, vWorldPos, vUv) * vec3(-dH.x, -dH.y, 1.0));
     }
 
-    vec3  albedo = pc.baseColor.rgb * texture(uDiffuse, vUv).rgb;
-    float alpha  = pc.baseColor.a;
+    // Alpha = per-draw opacity × the diffuse texel's alpha. The decode layer bakes any opacity
+    // (cutout) mask into the diffuse map's alpha channel (lash/brow cards, legacy eye shells), so
+    // one sample covers both; unmasked textures carry alpha 1 and the multiply is a no-op. Only the
+    // transparent pass blends, so opaque-pass meshes are unaffected either way.
+    vec4  diffuseTexel = texture(uDiffuse, vUv);
+    vec3  albedo = pc.baseColor.rgb * diffuseTexel.rgb;
+    float alpha  = pc.baseColor.a * diffuseTexel.a;
 
     vec3  l  = normalize(cam.lightDir.xyz);
     vec3  v  = normalize(cam.cameraPos.xyz - vWorldPos);
@@ -335,5 +340,5 @@ void main() {
     vec3 lighting = cam.ambient.rgb + cam.lightColor.rgb * ndlWrap + cam.fillColor.rgb * fillNdl * 0.5;
     vec3 color = albedo * (lighting + cam.lightColor.rgb * sss) + specular
                  + cam.rimColor.rgb * rimEdge * 0.09;
-    outColor = vec4(color, pc.baseColor.a);
+    outColor = vec4(color, alpha);
 }

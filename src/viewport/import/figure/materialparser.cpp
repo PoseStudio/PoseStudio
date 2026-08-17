@@ -92,15 +92,23 @@ const nlohmann::json* effectiveChannel(const nlohmann::json& scene, const nlohma
     return base ? findChannelIn(*base, id) : nullptr;
 }
 
-// The "diffuse" channel of a material (scene override wins over base).
-const nlohmann::json* diffuseChannel(const nlohmann::json& scene, const nlohmann::json* base) {
-    if (scene.contains("diffuse") && scene["diffuse"].contains("channel")) {
-        return &scene["diffuse"]["channel"];
+// A top-level material property's channel ("diffuse", "transparency", …; scene override wins
+// over base). These are the format's CORE properties, predating the shader-specific channel
+// blocks findChannelIn walks.
+const nlohmann::json* topLevelChannel(const nlohmann::json& scene, const nlohmann::json* base,
+                                      const char* property) {
+    if (scene.contains(property) && scene[property].contains("channel")) {
+        return &scene[property]["channel"];
     }
-    if (base && base->contains("diffuse") && (*base)["diffuse"].contains("channel")) {
-        return &(*base)["diffuse"]["channel"];
+    if (base && base->contains(property) && (*base)[property].contains("channel")) {
+        return &(*base)[property]["channel"];
     }
     return nullptr;
+}
+
+// The "diffuse" channel of a material (scene override wins over base).
+const nlohmann::json* diffuseChannel(const nlohmann::json& scene, const nlohmann::json* base) {
+    return topLevelChannel(scene, base, "diffuse");
 }
 
 } // namespace
@@ -151,10 +159,21 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
         // Transparency: straight cutout opacity, plus two clear-surface cases that the eye's moisture
         // and cornea rely on — an explicit refraction weight, or a mirror-smooth glossy shell with no
         // diffuse map (a clear coat over the iris). Both read as "see the iris behind it".
+        // The scalar can be masked by an image (lash/brow cutout cards, older generations' eye
+        // shells); the mask URI is carried out for the decode layer to bake into the diffuse alpha.
         float cutout = 1.0f;
         float refraction = 0.0f;
         if (const nlohmann::json* c = effectiveChannel(mat, base, "Cutout Opacity")) {
             cutout = channelScalar(*c, 1.0f);
+            ref.opacityImageUri = channelImageUri(*c, imageLibrary);
+        } else if (const nlohmann::json* legacy = topLevelChannel(mat, base, "transparency")) {
+            // Older-generation (pre-Iray) materials have no "Cutout Opacity" shader channel; their
+            // opacity is the format's CORE "transparency" property (UI name "Opacity Strength" —
+            // the value IS the opacity: 0 = invisible). This is how those figures' eye shells go
+            // clear — without reading it, the cornea/moisture render as opaque white balls over
+            // the eyes.
+            cutout = channelScalar(*legacy, 1.0f);
+            ref.opacityImageUri = channelImageUri(*legacy, imageLibrary);
         }
         if (const nlohmann::json* c = effectiveChannel(mat, base, "Refraction Weight")) {
             refraction = channelScalar(*c, 0.0f);

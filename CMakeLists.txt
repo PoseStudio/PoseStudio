@@ -10,7 +10,7 @@ cmake_minimum_required(VERSION 3.21)
 # C is enabled alongside C++ because a couple of third-party dependencies ship C implementation
 # files we compile directly into the target (e.g. miniz's inflate sources for the figure importer).
 # Without C in the language list, CMake classifies .c files as non-buildable and silently skips them.
-project(PoseStudio VERSION 0.3.3 LANGUAGES C CXX)
+project(PoseStudio VERSION 0.4.0 LANGUAGES C CXX)
 
 # ==============================================================================
 # [ COMPILER CONFIGURATION ]
@@ -145,6 +145,10 @@ add_executable(
     # --- Asset Manager ---
     src/assets/assetmanagerwidget.cpp
     src/assets/assetmanagerwidget.h
+
+    # --- Shared custom widgets (app-standard controls, reusable across panels) ---
+    src/widgets/dragnumberbox.cpp         # scrub field: drag to change, click to type
+    src/widgets/dragnumberbox.h
 
     # --- Properties panels (right-docker tabs) ---
     src/properties/environmentpanel.cpp
@@ -285,6 +289,7 @@ target_include_directories(PoseStudio PRIVATE
     src/core
     src/shell
     src/assets
+    src/widgets
     src/properties
     src/preferences
     src/viewport

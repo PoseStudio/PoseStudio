@@ -130,6 +130,22 @@ std::vector<DialedMorph> resolveDialedMorphs(const nlohmann::json& presetRoot, U
         return result;
     }
 
+    // The figure's uniform scale only comes from formulas targeting the FIGURE node itself, so
+    // identify it up front: the scene node carrying the geometry (the same criterion the importer
+    // uses to locate the base mesh), keyed by its asset-url fragment — the id formula outputs
+    // reference. Bones' scale channels share the same "scale/general" property name, so without
+    // this the node check below has nothing to compare against.
+    std::string figureNodeKey;
+    if (const auto nodes = scene->find("nodes"); nodes != scene->end() && nodes->is_array()) {
+        for (const auto& node : *nodes) {
+            const auto geos = node.find("geometries");
+            if (geos != node.end() && geos->is_array() && !geos->empty()) {
+                figureNodeKey = parseChannelRef(node.value("url", std::string())).key;
+                break;
+            }
+        }
+    }
+
     std::unordered_map<std::string, double> values;      // channel key -> accumulated value
     std::unordered_map<std::string, std::string> urlOf;  // channel key -> loadable "/file.dsf#frag"
     std::deque<std::string> queue;
@@ -221,13 +237,21 @@ std::vector<DialedMorph> resolveDialedMorphs(const nlohmann::json& presetRoot, U
                 continue;
             }
 
-            values[out.key] += r;
-            // A formula driving the figure's uniform scale sets character height, e.g. a stylized
-            // figure dialed a bit shorter. Accumulate it separately (it drives no morph deltas).
+            // Scale outputs are routed out of channel propagation (like center_point above): a node's
+            // scale channel is not a morph channel. Only the FIGURE node's scale/general sets character
+            // height (e.g. a teen figure dialed shorter). A bone-targeted output is a propagating-scale
+            // rig instead — a head-scale control drives ~80 per-bone scale/general channels — and
+            // summing those into the figure scale imported one teen character at 3x size. Per-bone
+            // scale isn't modeled (the bind is translation-only), so those outputs are dropped here.
             if (out.property.find("scale/general") != std::string::npos ||
                 out.property.find("general_scale") != std::string::npos) {
-                scaleAccum += r;
+                if (out.key == figureNodeKey) {
+                    scaleAccum += r;
+                }
+                continue;
             }
+
+            values[out.key] += r;
             enqueue(out.key, out.url);
         }
     }

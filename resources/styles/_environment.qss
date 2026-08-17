@@ -101,57 +101,12 @@
 }
 #HdriEmptyLabel { color: #8b9096; }
 
-/* Numeric spin boxes. */
-#EnvironmentPanel QDoubleSpinBox {
-    background-color: #2a2b2d;
-    color: #e0e0e0;
-    border: 1px solid #4a4b4d;
-    border-radius: 4px;
-    padding: 2px 4px;
-    selection-background-color: #5b87cc;
-}
-#EnvironmentPanel QDoubleSpinBox:hover { border-color: #5b87cc; }
-#EnvironmentPanel QDoubleSpinBox::up-button,
-#EnvironmentPanel QDoubleSpinBox::down-button {
-    background-color: #333436;
-    width: 14px;
-    border: none;
-}
-#EnvironmentPanel QDoubleSpinBox::up-button:hover,
-#EnvironmentPanel QDoubleSpinBox::down-button:hover {
-    background-color: #3f4042;
-}
-/* +/- glyphs so the increment/decrement buttons read at a glance (up = +, down = -). */
-#EnvironmentPanel QDoubleSpinBox::up-arrow {
-    image: url(:/resources/icons/plus.png);
-    width: 7px;
-    height: 7px;
-}
-#EnvironmentPanel QDoubleSpinBox::down-arrow {
-    image: url(:/resources/icons/minus.png);
-    width: 7px;
-    height: 7px;
-}
+/* Numeric rows are DragNumberBoxes (src/widgets/dragnumberbox.*) — the app-standard scrub field.
+ * It paints itself in C++ with the palette above as defaults; re-theme via its color Q_PROPERTYs
+ * (qproperty-fillColor etc.) if a container ever needs a different look. No rules needed here. */
 
-/* Sliders: thin groove, accent fill, round handle. */
-#EnvironmentPanel QSlider::groove:horizontal {
-    height: 4px;
-    background: #3a3b3d;
-    border-radius: 2px;
-}
-#EnvironmentPanel QSlider::sub-page:horizontal {
-    background: #5b87cc;
-    border-radius: 2px;
-}
-#EnvironmentPanel QSlider::handle:horizontal {
-    background: #cfd3d8;
-    width: 12px;
-    margin: -5px 0;
-    border-radius: 6px;
-}
-#EnvironmentPanel QSlider::handle:horizontal:hover { background: #ffffff; }
-
-/* Tonemap checkbox. */
+/* Tonemap checkbox. Checked = an accent check glyph in the dark well (not a solid fill — the
+ * filled square read as a button); hover echoes the DragNumberBox hover border. */
 #EnvironmentPanel QCheckBox {
     color: #c7c8cb;
     font-size: 12px;
@@ -164,9 +119,12 @@
     border-radius: 3px;
     background: #2a2b2d;
 }
+#EnvironmentPanel QCheckBox::indicator:hover {
+    border-color: #5b87cc; /* same hover accent as the HDRI button and the DragNumberBoxes */
+}
 #EnvironmentPanel QCheckBox::indicator:checked {
-    background: #5b87cc;
-    border-color: #5b87cc;
+    background: #2a2b2d;
+    image: url(:/resources/icons/check.png);
 }
 
 /* Reset button: quiet, secondary. */

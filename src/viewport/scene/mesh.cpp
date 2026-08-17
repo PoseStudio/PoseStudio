@@ -97,7 +97,8 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
            VkDescriptorPool materialPool, const VulkanTexture& fallbackDiffuse,
            const VulkanTexture& fallbackNormal, ImmediateBatch& batch)
     : m_indexCount(static_cast<uint32_t>(data.indices.size())), m_baseColor(data.baseColor),
-      m_roughness(data.roughness), m_opacity(data.opacity) {
+      m_roughness(data.roughness), m_opacity(data.opacity),
+      m_hasOpacityMask(data.hasOpacityMask) {
     const VkDeviceSize vertexBytes = sizeof(Vertex) * data.vertices.size();
     const VkDeviceSize indexBytes = sizeof(uint32_t) * data.indices.size();
     // Record all uploads into the shared batch instead of submitting per buffer/texture.

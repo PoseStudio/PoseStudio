@@ -25,8 +25,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>
@@ -292,10 +294,428 @@ void lockTwistBoneBendAxes(std::vector<FigureBone>& bones) {
     }
 }
 
-} // namespace
+// Nested-object navigation for the addon settings tree (returns nullptr anywhere along a miss).
+const nlohmann::json* childOf(const nlohmann::json* node, const char* key) {
+    if (!node) {
+        return nullptr;
+    }
+    const auto it = node->find(key);
+    return it == node->end() ? nullptr : &(*it);
+}
 
-FigureData FigureImporter::load(const std::string& path,
-                                const std::vector<std::string>& contentRoots) const {
+// One follower addon a character preset asks to be loaded after it: the wearable figure file plus
+// any preset documents to apply onto it (usually one materials preset).
+struct AddonRef {
+    std::string              assetUri;
+    std::vector<std::string> presetUris;
+};
+
+// The character-addon declarations in a preset's post-load-script block — fitted follower figures
+// (e.g. a stylized character's separate anime eyeballs/lashes/brows, which replace standard surfaces
+// the preset deliberately hides). Structure, under scene.extra[]:
+//   { "type": "scene_post_load_script", "settings": { "PostLoadAddons": { "value": {
+//       "<slot>": { "value": { "AssetFile": "….duf", "Presets": { "value": {
+//           "<name>": { "value": { "PresetFile": "….duf" } } } } } } } } }
+// The preset key is NOT fixed ("Mat" usually, but e.g. "Brow Mat" for one vendor's brows), so every
+// entry carrying a PresetFile is collected; the appliers no-op on documents that aren't materials.
+std::vector<AddonRef> findPostLoadAddons(const nlohmann::json& root) {
+    std::vector<AddonRef> out;
+    const auto scene = root.find("scene");
+    if (scene == root.end()) {
+        return out;
+    }
+    const auto extra = scene->find("extra");
+    if (extra == scene->end() || !extra->is_array()) {
+        return out;
+    }
+    // Addon references are content-root-relative but inconsistently written with/without the leading
+    // '/' (both occur within a single shipping preset); normalize so the resolver treats them alike.
+    const auto rootRelative = [](std::string uri) {
+        if (!uri.empty() && uri[0] != '/') {
+            uri.insert(uri.begin(), '/');
+        }
+        return uri;
+    };
+    for (const auto& block : *extra) {
+        if (block.value("type", std::string()) != "scene_post_load_script") {
+            continue;
+        }
+        const nlohmann::json* addons =
+            childOf(childOf(childOf(&block, "settings"), "PostLoadAddons"), "value");
+        if (!addons || !addons->is_object()) {
+            continue;
+        }
+        for (const auto& item : addons->items()) {
+            const nlohmann::json* v = childOf(&item.value(), "value");
+            if (!v) {
+                continue;
+            }
+            AddonRef ref;
+            ref.assetUri = rootRelative(v->value("AssetFile", std::string()));
+            if (ref.assetUri.size() <= 1) {
+                continue;
+            }
+            if (const nlohmann::json* presets = childOf(childOf(v, "Presets"), "value");
+                presets && presets->is_object()) {
+                for (const auto& preset : presets->items()) {
+                    const nlohmann::json* file =
+                        childOf(childOf(&preset.value(), "value"), "PresetFile");
+                    if (file && file->is_string()) {
+                        ref.presetUris.push_back(rootRelative(file->get<std::string>()));
+                    }
+                }
+            }
+            out.push_back(std::move(ref));
+        }
+    }
+    return out;
+}
+
+// Applies a document's scene materials onto the assembled zone meshes: each zone the scene names
+// gets its resolved colors/maps/opacity, other zones keep what they have. Shared by the main figure
+// path (the preset's own materials) and the addon path (a follower's separate materials preset).
+void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolver& resolver,
+                         const std::string& referringDir) {
+    if (!root.contains("scene") || !root["scene"].contains("materials")) {
+        return;
+    }
+    static const nlohmann::json kNoLibrary = nlohmann::json::array();
+    const nlohmann::json& materialLibrary =
+        root.contains("material_library") ? root["material_library"] : kNoLibrary;
+    const nlohmann::json& imageLibrary =
+        root.contains("image_library") ? root["image_library"] : kNoLibrary;
+    const std::unordered_map<std::string, MaterialRefs> refs =
+        parseMaterials(root["scene"]["materials"], materialLibrary, imageLibrary);
+    for (FigureMesh& mesh : fig.meshes) {
+        const auto it = refs.find(mesh.materialZone);
+        if (it == refs.end()) {
+            continue;
+        }
+        const MaterialRefs& ref = it->second;
+        mesh.material.baseColor = ref.baseColor;
+        mesh.material.roughness = ref.roughness;
+        mesh.material.opacity = ref.opacity;
+        if (!ref.diffuseImageUri.empty()) {
+            mesh.material.diffuseMapPath = resolver.resolve(ref.diffuseImageUri, referringDir).path;
+        }
+        if (!ref.normalImageUri.empty()) {
+            mesh.material.normalMapPath = resolver.resolve(ref.normalImageUri, referringDir).path;
+        }
+        if (!ref.bumpImageUri.empty()) {
+            mesh.material.bumpMapPath = resolver.resolve(ref.bumpImageUri, referringDir).path;
+        }
+        if (!ref.opacityImageUri.empty()) {
+            mesh.material.opacityMapPath = resolver.resolve(ref.opacityImageUri, referringDir).path;
+        }
+    }
+}
+
+// Applies a hierarchical-materials preset (asset_info type "preset_hierarchical_material") onto the
+// assembled zone meshes. Unlike a scene-materials document, this preset form carries its values as
+// single-key animation tracks — each entry's url addresses one material property:
+//   "<node>#materials/<zone>:?diffuse/image_file"
+//   "<node>#materials/<zone>:?extra/studio_material_channels/channels/<Channel>/value"
+// with keys[0][1] holding the value. Only the properties the renderer consumes are read; the rest
+// (tiling, gloss layering, …) are skipped. Zones are matched by name alone (the node prefix is
+// ignored) — within one figure-plus-addons import, zone names don't collide in practice.
+void applyAnimationMaterials(FigureData& fig, const nlohmann::json& root, UriResolver& resolver,
+                             const std::string& referringDir) {
+    const nlohmann::json* animations = childOf(childOf(&root, "scene"), "animations");
+    if (!animations || !animations->is_array()) {
+        return;
+    }
+
+    struct ZoneOverride {
+        glm::vec3   baseColor{0.0f};
+        std::string diffuseUri, normalUri, bumpUri, opacityUri;
+        float       roughness = 0.0f;
+        float       cutout = 1.0f;
+        float       refraction = 0.0f;
+        bool        hasBaseColor = false, hasRoughness = false, hasCutout = false,
+                    hasRefraction = false;
+    };
+    std::unordered_map<std::string, ZoneOverride> zones;
+
+    for (const auto& entry : *animations) {
+        const std::string url = entry.value("url", std::string());
+        const auto keys = entry.find("keys");
+        if (keys == entry.end() || !keys->is_array() || keys->empty() || !(*keys)[0].is_array() ||
+            (*keys)[0].size() < 2) {
+            continue;
+        }
+        const nlohmann::json& value = (*keys)[0][1];
+
+        // "<node>#materials/<zone>:?<property>" -> zone + property (both URL-encoded).
+        const std::size_t hash = url.find('#');
+        if (hash == std::string::npos) {
+            continue;
+        }
+        std::string rest = url.substr(hash + 1);
+        constexpr const char* kMaterialsPrefix = "materials/";
+        if (rest.rfind(kMaterialsPrefix, 0) != 0) {
+            continue;
+        }
+        rest = rest.substr(std::string(kMaterialsPrefix).size());
+        const std::size_t sep = rest.find(":?");
+        if (sep == std::string::npos) {
+            continue;
+        }
+        const std::string zone = UriResolver::urlDecode(rest.substr(0, sep));
+        const std::string prop = UriResolver::urlDecode(rest.substr(sep + 2));
+        ZoneOverride& zo = zones[zone];
+
+        constexpr const char* kChannelsPrefix = "extra/studio_material_channels/channels/";
+        if (prop == "diffuse/value" && value.is_array() && value.size() >= 3) {
+            zo.baseColor = glm::vec3(value[0].get<float>(), value[1].get<float>(),
+                                     value[2].get<float>());
+            zo.hasBaseColor = true;
+        } else if (prop == "diffuse/image_file" && value.is_string()) {
+            zo.diffuseUri = value.get<std::string>();
+        } else if (prop == "transparency/value" && value.is_number()) {
+            zo.cutout = value.get<float>(); // legacy core opacity property (see parseMaterials)
+            zo.hasCutout = true;
+        } else if (prop == "transparency/image_file" && value.is_string()) {
+            zo.opacityUri = value.get<std::string>();
+        } else if (prop.rfind(kChannelsPrefix, 0) == 0) {
+            const std::string channel = prop.substr(std::string(kChannelsPrefix).size());
+            if (channel == "Cutout Opacity/value" && value.is_number()) {
+                zo.cutout = value.get<float>();
+                zo.hasCutout = true;
+            } else if (channel == "Cutout Opacity/image_file" && value.is_string()) {
+                zo.opacityUri = value.get<std::string>();
+            } else if (channel == "Refraction Weight/value" && value.is_number()) {
+                zo.refraction = value.get<float>();
+                zo.hasRefraction = true;
+            } else if (channel == "Glossy Roughness/value" && value.is_number()) {
+                zo.roughness = value.get<float>();
+                zo.hasRoughness = true;
+            } else if (channel == "Normal Map/image_file" && value.is_string()) {
+                zo.normalUri = value.get<std::string>();
+            } else if (channel == "Bump Strength/image_file" && value.is_string()) {
+                zo.bumpUri = value.get<std::string>();
+            }
+        }
+    }
+
+    for (FigureMesh& mesh : fig.meshes) {
+        const auto it = zones.find(mesh.materialZone);
+        if (it == zones.end()) {
+            continue;
+        }
+        const ZoneOverride& zo = it->second;
+        if (zo.hasBaseColor) {
+            mesh.material.baseColor = zo.baseColor;
+        }
+        if (zo.hasRoughness) {
+            mesh.material.roughness = zo.roughness;
+        }
+        // Same transparency rule as parseMaterials: cutout is the opacity, and a strong refraction
+        // weight marks a clear shell (here: the anime eye's lens over the iris card).
+        if (zo.hasCutout || zo.hasRefraction) {
+            mesh.material.opacity = zo.hasCutout ? zo.cutout : 1.0f;
+            if (zo.refraction > 0.5f) {
+                mesh.material.opacity = std::min(mesh.material.opacity, 0.05f);
+            }
+        }
+        if (!zo.diffuseUri.empty()) {
+            mesh.material.diffuseMapPath = resolver.resolve(zo.diffuseUri, referringDir).path;
+        }
+        if (!zo.normalUri.empty()) {
+            mesh.material.normalMapPath = resolver.resolve(zo.normalUri, referringDir).path;
+        }
+        if (!zo.bumpUri.empty()) {
+            mesh.material.bumpMapPath = resolver.resolve(zo.bumpUri, referringDir).path;
+        }
+        if (!zo.opacityUri.empty()) {
+            mesh.material.opacityMapPath = resolver.resolve(zo.opacityUri, referringDir).path;
+        }
+    }
+}
+
+// Auto-follow (shape projection) for follower addons: a follower is authored against the BASE
+// figure, but the character's morphs have moved that surface — a skin-tight follower must move
+// with it or it hangs where the base surface used to be (fibermesh eyebrows floating in front of
+// a morphed forehead). The format's host projects the parent's active morphs onto conformed
+// followers at load; this approximates that projection per render vertex with the morph delta of
+// the NEAREST PARENT BASE-CAGE VERTEX — the cage is dense (~16k vertices, sub-centimetre spacing
+// on the face), so the quantization is invisible for surface-hugging followers, and a follower's
+// off-surface parts (strand tips) inherit their root's delta, preserving strand shape.
+void followParentShape(FigureData& addon, const std::vector<glm::vec3>& baseCage,
+                       const std::vector<glm::vec3>& cageDeltas,
+                       const std::vector<uint8_t>& eligibleCageVerts) {
+    if (baseCage.empty() || addon.meshes.empty()) {
+        return;
+    }
+    // Uniform spatial hash over the base cage for nearest-vertex queries. Only ELIGIBLE vertices
+    // enter the grid: the caller excludes hidden zones, whose morph deltas are garbage for
+    // projection (a stylized preset stashes the stock surfaces it hides — e.g. shrinks the hidden
+    // standard eyeballs into the head — and a follower sampling those deltas is thrown off the
+    // face; observed, not hypothetical).
+    constexpr float kCell = 2.0f; // native cm; a face-region cell holds a handful of cage verts
+    glm::vec3 lo = baseCage[0];
+    for (const glm::vec3& p : baseCage) {
+        lo = glm::min(lo, p);
+    }
+    const auto cellKey = [&](const glm::vec3& p) {
+        const glm::ivec3 c = glm::ivec3(glm::floor((p - lo) / kCell));
+        return (static_cast<int64_t>(c.x) << 42) ^ (static_cast<int64_t>(c.y) << 21) ^
+               static_cast<int64_t>(c.z);
+    };
+    std::unordered_map<int64_t, std::vector<uint32_t>> grid;
+    for (uint32_t i = 0; i < baseCage.size(); ++i) {
+        if (eligibleCageVerts.empty() || eligibleCageVerts[i]) {
+            grid[cellKey(baseCage[i])].push_back(i);
+        }
+    }
+    if (grid.empty()) {
+        return;
+    }
+    const auto nearestDelta = [&](const glm::vec3& p) -> glm::vec3 {
+        const glm::ivec3 center = glm::ivec3(glm::floor((p - lo) / kCell));
+        float best = std::numeric_limits<float>::max();
+        uint32_t bestIndex = 0;
+        bool found = false;
+        // Expand the search ring until a candidate appears, then one ring further so a neighbour
+        // just across a cell boundary can't beat the first hit unseen.
+        for (int radius = 1; radius <= 64 && !found; ++radius) {
+            for (int dz = -radius; dz <= radius; ++dz) {
+                for (int dy = -radius; dy <= radius; ++dy) {
+                    for (int dx = -radius; dx <= radius; ++dx) {
+                        const glm::ivec3 c = center + glm::ivec3(dx, dy, dz);
+                        const auto it = grid.find((static_cast<int64_t>(c.x) << 42) ^
+                                                  (static_cast<int64_t>(c.y) << 21) ^
+                                                  static_cast<int64_t>(c.z));
+                        if (it == grid.end()) {
+                            continue;
+                        }
+                        for (const uint32_t i : it->second) {
+                            const glm::vec3 d = baseCage[i] - p;
+                            const float dist2 = glm::dot(d, d);
+                            if (dist2 < best) {
+                                best = dist2;
+                                bestIndex = i;
+                                found = true;
+                            }
+                        }
+                    }
+                }
+            }
+            if (found) {
+                // One safety ring: rescan at radius+1 happens naturally by letting the loop run
+                // once more with `found` already set — break out after that extra pass instead.
+                for (int dz = -(radius + 1); dz <= radius + 1; ++dz) {
+                    for (int dy = -(radius + 1); dy <= radius + 1; ++dy) {
+                        for (int dx = -(radius + 1); dx <= radius + 1; ++dx) {
+                            if (std::max({std::abs(dx), std::abs(dy), std::abs(dz)}) <= radius) {
+                                continue; // inner cells already scanned
+                            }
+                            const glm::ivec3 c = center + glm::ivec3(dx, dy, dz);
+                            const auto it = grid.find((static_cast<int64_t>(c.x) << 42) ^
+                                                      (static_cast<int64_t>(c.y) << 21) ^
+                                                      static_cast<int64_t>(c.z));
+                            if (it == grid.end()) {
+                                continue;
+                            }
+                            for (const uint32_t i : it->second) {
+                                const glm::vec3 d = baseCage[i] - p;
+                                const float dist2 = glm::dot(d, d);
+                                if (dist2 < best) {
+                                    best = dist2;
+                                    bestIndex = i;
+                                }
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        return found ? cageDeltas[bestIndex] : glm::vec3(0.0f);
+    };
+    for (FigureMesh& mesh : addon.meshes) {
+        parallelFor(static_cast<int>(mesh.vertices.size()), [&](int vi) {
+            Vertex& v = mesh.vertices[static_cast<std::size_t>(vi)];
+            v.pos += nearestDelta(v.pos);
+        });
+    }
+}
+
+// Merges a follower figure (an addon: anime eyeballs, lashes, …) into the parent's FigureData.
+//
+// The geometry is kept EXACTLY where the vendor authored it — no re-fitting. A post-load character
+// addon ships pre-fitted to the character its preset dials (the format's addon-loader script just
+// loads and parents it; there is no auto-fit step to replicate), so the authored rest positions ARE
+// the right ones. Do not "correct" them by snapping to the parent's joints: these rigs deliberately
+// place bones away from the base figure's (a flat anime eye pivots from deep inside the head so it
+// can slide across the face like a curved screen) — re-fitting by joint deltas shoved the eyes off
+// the face. At bind pose the skin matrices are identity, so authored positions render as authored.
+//
+// The skeleton is merged by NAME: shared bones resolve to the parent's (so the follower tracks the
+// figure's pose), and follower-only bones (e.g. extra lens joints) are appended as-is. Pose-time
+// caveat: a shared bone uses the PARENT's pivot, not the follower's own — fine at rest, and close
+// enough for a first pass at posed attachments.
+void mergeAddonFigure(FigureData& parent, FigureData&& addon) {
+    if (addon.meshes.empty()) {
+        return;
+    }
+    std::unordered_map<std::string, int> parentIndexByName;
+    for (int i = 0; i < static_cast<int>(parent.bones.size()); ++i) {
+        parentIndexByName.emplace(parent.bones[i].name, i);
+    }
+
+    const int addonBoneCount = static_cast<int>(addon.bones.size());
+    std::vector<int> mergedIndex(addonBoneCount, -1);
+    // First pass: bones the parent already has resolve to the parent's own.
+    for (int i = 0; i < addonBoneCount; ++i) {
+        const auto it = parentIndexByName.find(addon.bones[i].name);
+        if (it != parentIndexByName.end()) {
+            mergedIndex[i] = it->second;
+        }
+    }
+    // Second pass: append the follower-only bones (parseSkeleton emits parents before children, so a
+    // parent link to another appended bone is already resolved when its child asks for it).
+    for (int i = 0; i < addonBoneCount; ++i) {
+        if (mergedIndex[i] >= 0) {
+            continue;
+        }
+        FigureBone bone = addon.bones[i];
+        bone.parent = (bone.parent >= 0) ? mergedIndex[bone.parent] : -1;
+        mergedIndex[i] = static_cast<int>(parent.bones.size());
+        parent.bones.push_back(std::move(bone));
+    }
+
+    // Keep the follower's render vertices out of the parent correctives' base-vertex space (corrective
+    // deltas index base vertices; a colliding index would re-morph the follower's mesh on pose-settle).
+    uint32_t baseVertexOffset = 0;
+    for (const FigureMesh& mesh : parent.meshes) {
+        for (const uint32_t b : mesh.baseVertex) {
+            baseVertexOffset = std::max(baseVertexOffset, b + 1);
+        }
+    }
+
+    for (FigureMesh& mesh : addon.meshes) {
+        for (Vertex& v : mesh.vertices) {
+            for (int s = 0; s < 4; ++s) {
+                const int j = static_cast<int>(v.joints[s]);
+                if (j < addonBoneCount) {
+                    v.joints[s] = static_cast<uint32_t>(mergedIndex[j]); // remap into the merged skeleton
+                }
+            }
+        }
+        for (uint32_t& b : mesh.baseVertex) {
+            b += baseVertexOffset;
+        }
+        parent.meshes.push_back(std::move(mesh));
+    }
+    // The follower's own correctives (rare, and addressed to ITS base cage) are dropped with `addon`:
+    // their delta indices have no meaning in the merged base-vertex space.
+}
+
+// The full loader. `includeAddons` is true for the user-facing entry point and false for the
+// follower-addon recursion (an addon must not pull in further addons — one level is what the
+// format's addon loader does, and it also bounds the recursion).
+FigureData loadFigureFile(const std::string& path, const std::vector<std::string>& contentRoots,
+                          bool includeAddons) {
     UriResolver resolver(contentRoots);
     const std::string presetDir = directoryOf(path);
 
@@ -328,6 +748,26 @@ FigureData FigureImporter::load(const std::string& path,
     }
 
     GeometryData geo = parseGeometry(*geomEntry);
+
+    // A POPULATED graft declaration (it names parent polygons to hide / vertices to weld) marks a
+    // surface replacement authored in exact correspondence with a specific target shape — the signal
+    // the follower-addon path uses to skip shape-follow projection. Generic followers carry an
+    // EMPTY graft object, which does not count.
+    bool graftPopulated = false;
+    if (const auto graft = geomEntry->find("graft"); graft != geomEntry->end()) {
+        const auto populated = [](const nlohmann::json& g, const char* key) {
+            const auto it = g.find(key);
+            return it != g.end() && it->value("count", 0) > 0;
+        };
+        graftPopulated = populated(*graft, "hidden_polys") || populated(*graft, "vertex_pairs");
+    }
+
+    // Pre-morph copy of the base cage: follower addons are authored against THIS shape, so their
+    // shape-follow projection (followParentShape) needs base positions + the morph deltas below.
+    std::vector<glm::vec3> baseCagePositions;
+    if (includeAddons) {
+        baseCagePositions = geo.positions;
+    }
 
     // Apply the preset's dialed shape morphs to the base vertices — this is what turns the generic
     // base figure into the specific character. A character rarely dials the shape morphs directly; it
@@ -369,6 +809,7 @@ FigureData FigureImporter::load(const std::string& path,
 
     FigureData out;
     out.figureScale = figureScale;
+    out.graftPopulated = graftPopulated;
 
     // Skeleton + skin weights (from the base file's node_library + its SkinBinding modifier), parsed
     // *before* assembly so each de-indexed render vertex can carry its base vertex's joint weights.
@@ -460,37 +901,97 @@ FigureData FigureImporter::load(const std::string& path,
     }
 
     // Materials come from the preset's scene (a base .dsf on its own carries none -> zones keep the
-    // default base color). Resolve each zone's texture URIs to on-disk paths.
-    if (root.contains("scene") && root["scene"].contains("materials")) {
-        static const nlohmann::json kNoLibrary = nlohmann::json::array();
-        const nlohmann::json& materialLibrary =
-            root.contains("material_library") ? root["material_library"] : kNoLibrary;
-        const nlohmann::json& imageLibrary =
-            root.contains("image_library") ? root["image_library"] : kNoLibrary;
-        const std::unordered_map<std::string, MaterialRefs> refs =
-            parseMaterials(root["scene"]["materials"], materialLibrary, imageLibrary);
-        for (FigureMesh& mesh : out.meshes) {
-            const auto it = refs.find(mesh.materialZone);
-            if (it == refs.end()) {
+    // default base color). Texture URIs are resolved to on-disk paths inside.
+    applySceneMaterials(out, root, resolver, presetDir);
+
+    // Fitted follower addons (anime eyeballs, lashes, …) the preset declares in its post-load block.
+    // Characters built this way deliberately hide the standard surfaces the follower replaces (e.g.
+    // every stock eye surface dialed to cutout 0), so WITHOUT this step such a figure imports with
+    // empty eye sockets. Each addon is a self-describing wearable figure: load it through this same
+    // pipeline, apply its materials preset, and merge it into the figure. Failures skip just that
+    // addon — a missing follower must not sink the character import.
+    if (includeAddons) {
+        // The morph deltas the followers must track (morphed − base cage). All-zero for an
+        // unmorphed base figure, in which case the projection is skipped entirely.
+        std::vector<glm::vec3> cageDeltas(baseCagePositions.size(), glm::vec3(0.0f));
+        bool anyCageDelta = false;
+        for (std::size_t i = 0; i < baseCagePositions.size() && i < geo.positions.size(); ++i) {
+            cageDeltas[i] = geo.positions[i] - baseCagePositions[i];
+            anyCageDelta = anyCageDelta || glm::dot(cageDeltas[i], cageDeltas[i]) > 1e-8f;
+        }
+
+        // Only VISIBLE zones contribute projection deltas. A stylized preset hides the stock
+        // surfaces its addons replace (cutout 0) AND its morph typically stashes that hidden
+        // geometry (shrinks the stock eyeballs into the head) — followers near the eye region
+        // would sample those garbage deltas and land across the face. Clear shells (opacity
+        // ~0.05) are excluded with them; the surrounding visible skin supplies sane deltas.
+        std::vector<uint8_t> eligibleCageVerts(baseCagePositions.size(), 0);
+        {
+            std::unordered_map<std::string, float> zoneOpacity;
+            for (const FigureMesh& m : out.meshes) {
+                zoneOpacity[m.materialZone] = m.material.opacity;
+            }
+            for (const GeometryData::Face& f : geo.faces) {
+                float opacity = 1.0f; // zones without a parsed material default to visible
+                if (f.material >= 0 && f.material < static_cast<int>(geo.materialZones.size())) {
+                    const auto it = zoneOpacity.find(geo.materialZones[static_cast<std::size_t>(f.material)]);
+                    if (it != zoneOpacity.end()) {
+                        opacity = it->second;
+                    }
+                }
+                if (opacity <= 0.06f) {
+                    continue;
+                }
+                for (int c = 0; c < f.count; ++c) {
+                    if (f.v[static_cast<std::size_t>(c)] < eligibleCageVerts.size()) {
+                        eligibleCageVerts[f.v[static_cast<std::size_t>(c)]] = 1;
+                    }
+                }
+            }
+        }
+
+        for (const AddonRef& addonRef : findPostLoadAddons(root)) {
+            try {
+                const ResolvedUri location = resolver.resolve(addonRef.assetUri, presetDir);
+                if (!location.resolved()) {
+                    continue;
+                }
+                FigureData addon = loadFigureFile(location.path, contentRoots, false);
+                for (const std::string& presetUri : addonRef.presetUris) {
+                    try {
+                        const std::shared_ptr<const FigureDocument> presetDoc =
+                            resolver.loadDocument(presetUri, presetDir);
+                        // A materials preset comes in either form; each applier no-ops when its
+                        // section is absent (the anime-eye presets use the animation-track form),
+                        // so a non-material preset document just passes through harmlessly.
+                        applySceneMaterials(addon, presetDoc->root(), resolver, presetDir);
+                        applyAnimationMaterials(addon, presetDoc->root(), resolver, presetDir);
+                    } catch (const std::exception&) {
+                        // Unresolvable preset: the follower keeps its own materials.
+                    }
+                }
+                // Shape-follow only the followers authored against the BASE figure. A populated
+                // graft marks a vendor-fitted in-place replacement (e.g. an anime character's
+                // custom eyeballs) — projecting the morph onto those double-shifts them off the
+                // face, verified both ways on real content.
+                if (anyCageDelta && !addon.graftPopulated) {
+                    followParentShape(addon, baseCagePositions, cageDeltas, eligibleCageVerts);
+                }
+                mergeAddonFigure(out, std::move(addon));
+            } catch (const std::exception&) {
                 continue;
-            }
-            const MaterialRefs& ref = it->second;
-            mesh.material.baseColor = ref.baseColor;
-            mesh.material.roughness = ref.roughness;
-            mesh.material.opacity = ref.opacity;
-            if (!ref.diffuseImageUri.empty()) {
-                mesh.material.diffuseMapPath = resolver.resolve(ref.diffuseImageUri, presetDir).path;
-            }
-            if (!ref.normalImageUri.empty()) {
-                mesh.material.normalMapPath = resolver.resolve(ref.normalImageUri, presetDir).path;
-            }
-            if (!ref.bumpImageUri.empty()) {
-                mesh.material.bumpMapPath = resolver.resolve(ref.bumpImageUri, presetDir).path;
             }
         }
     }
 
     return out;
+}
+
+} // namespace
+
+FigureData FigureImporter::load(const std::string& path,
+                                const std::vector<std::string>& contentRoots) const {
+    return loadFigureFile(path, contentRoots, /*includeAddons=*/true);
 }
 
 } // namespace pose

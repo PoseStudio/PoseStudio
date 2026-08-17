@@ -32,6 +32,7 @@ struct FigureMaterial {
     std::string diffuseMapPath;    ///< Base-color / diffuse map, or empty.
     std::string normalMapPath;     ///< Tangent-space normal map (resolved), or empty.
     std::string bumpMapPath;       ///< Grayscale bump/height map (resolved), or empty.
+    std::string opacityMapPath;    ///< Cutout/opacity mask (lash/brow cards, legacy eye shells), or empty.
     float       roughness = 0.7f;  ///< Scalar roughness fallback when no roughness map is present.
     float       opacity   = 1.0f;  ///< < 1 => transparent (eye moisture/cornea, later hair/lashes).
 };
@@ -82,6 +83,11 @@ struct FigureData {
     std::vector<VertexSkin>     vertexSkins;
     std::vector<PoseCorrective> correctives;      ///< Pose-driven corrective morphs; base-vertex space.
     float                       figureScale = 1.0f; ///< Overall uniform scale (character height), from the driver formulas.
+    /// True when the geometry declares a POPULATED graft (non-empty hidden_polys/vertex_pairs) —
+    /// a surface replacement authored in exact correspondence with a specific target shape. Used by
+    /// the follower-addon path: populated-graft addons are vendor-fitted in place and must NOT be
+    /// shape-follow projected (a generic follower's graft block is present but empty).
+    bool                        graftPopulated = false;
 };
 
 } // namespace pose

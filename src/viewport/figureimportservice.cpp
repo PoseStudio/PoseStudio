@@ -81,6 +81,7 @@ ModelData toModelData(FigureData&& fig) {
         }
         mesh.baseColor = zone.material.baseColor;
         mesh.diffuse.path = zone.material.diffuseMapPath;
+        mesh.opacityMask.path = zone.material.opacityMapPath;
         mesh.roughness = zone.material.roughness;
         mesh.opacity = zone.material.opacity;
         // Detail map: prefer a true tangent-space normal map (mode 1); else the grayscale bump/height

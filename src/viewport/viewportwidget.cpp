@@ -14,6 +14,7 @@
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QHideEvent>
+#include <QIcon>
 #include <QLabel>
 #include <QMenu>
 #include <QMoveEvent>
@@ -21,6 +22,7 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QShowEvent>
+#include <QSize>
 #include <QVBoxLayout>
 #include <QVersionNumber>
 #include <QVulkanInstance>
@@ -104,6 +106,12 @@ void ViewportWidget::setShadeMode(int mode) {
     }
 }
 
+void ViewportWidget::resetView() {
+    if (m_window) {
+        m_window->resetView();
+    }
+}
+
 void ViewportWidget::setEnvironment(const QString& hdrPath) {
     if (m_window) {
         m_window->setEnvironmentFile(hdrPath);
@@ -145,6 +153,7 @@ void ViewportWidget::createShaderOverlay() {
 
     auto* lay = new QHBoxLayout(m_overlay);
     lay->setContentsMargins(0, 0, 0, 0);
+    lay->setSpacing(6);
 
     // The selector is a push-button that opens a *real QMenu*, rather than a QComboBox. This is the one
     // way to get the picker's dropdown to look and behave EXACTLY like the File/Edit/Help menus — colours,
@@ -153,7 +162,8 @@ void ViewportWidget::createShaderOverlay() {
     m_shaderButton = new QPushButton(m_overlay);
     m_shaderButton->setObjectName(QStringLiteral("ShaderModeButton"));
     m_shaderButton->setToolTip(tr("Viewport shading mode"));
-    m_shaderButton->setCursor(Qt::PointingHandCursor);
+    // No cursor override on the overlay controls: Windows apps keep the standard arrow over buttons
+    // (the hand cursor reads as a hyperlink there), so these follow the platform convention.
     // The button (the closed selector) matches the menu-bar surface + hover; the QMenu it opens is themed
     // globally. text-align:left so the mode name sits left of the drop arrow, like a combo field.
     m_shaderButton->setStyleSheet(QStringLiteral(
@@ -194,6 +204,27 @@ void ViewportWidget::createShaderOverlay() {
     m_shaderButton->setMenu(menu); // QPushButton drops the menu straight down from the button
     m_shaderButton->setText(fieldLabel(names.at(kDefaultShadeMode)));
     lay->addWidget(m_shaderButton);
+
+    // "Home": snap the camera back to the default perspective framing. Same surface/hover as the
+    // shader field so the two read as one control strip; squared off to the field's own height.
+    m_homeButton = new QPushButton(m_overlay);
+    m_homeButton->setObjectName(QStringLiteral("ViewportHomeButton"));
+    m_homeButton->setToolTip(tr("Reset to the default view"));
+    m_homeButton->setIcon(QIcon(QStringLiteral(":/resources/icons/home.png")));
+    m_homeButton->setIconSize(QSize(16, 16));
+    m_homeButton->setStyleSheet(QStringLiteral(
+        "#ViewportHomeButton {"
+        "  background-color: #252627;"
+        "  border: 1px solid #555555;"
+        "  border-radius: 4px;"
+        "}"
+        "#ViewportHomeButton:hover { background-color: #314D7A; }"));
+    // Match the field's height exactly (rather than guessing a size), so the strip aligns whatever
+    // the font metrics work out to.
+    const int fieldHeight = m_shaderButton->sizeHint().height();
+    m_homeButton->setFixedSize(fieldHeight, fieldHeight);
+    connect(m_homeButton, &QPushButton::clicked, this, &ViewportWidget::resetView);
+    lay->addWidget(m_homeButton);
 
     m_overlay->adjustSize();
 }
@@ -261,6 +292,7 @@ ViewportWidget::~ViewportWidget() {
     delete m_overlay;
     m_overlay = nullptr;
     m_shaderButton = nullptr;
+    m_homeButton = nullptr;
 
     // The QVulkanInstance (m_instance) owns the VkInstance, and the VulkanWindow's
     // device/renderer were created from it. Qt would otherwise destroy the window via the

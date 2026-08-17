@@ -31,6 +31,10 @@ public:
     /// Recomputes the projection for a new viewport aspect ratio (call on resize).
     void setViewportSize(float width, float height);
 
+    /// Restores the default framing (target/distance/yaw/pitch) — the "home" view the viewport
+    /// starts at. The projection is left alone: aspect/fov are viewport properties, not framing.
+    void reset();
+
     /// Orbit around the target by the given yaw/pitch deltas (radians).
     void orbit(float deltaYaw, float deltaPitch);
 
@@ -57,10 +61,16 @@ private:
     // Defaults framed for a standing figure imported at the origin (feet at y=0, ~1.8 units tall):
     // aim at mid-torso and sit close enough that the whole body loads centered in the view. Targeting
     // the floor/feet (y=0) at a larger distance is what left the figure high and pushed back in frame.
-    glm::vec3 m_target = glm::vec3(0.0f, 0.9f, 0.0f); // ~mid-torso of a standing figure
-    float m_distance = 2.6f;
-    float m_yaw = glm::radians(25.0f);   // around the world up axis; slight three-quarter view
-    float m_pitch = glm::radians(10.0f); // just above the horizon — a gentle look-down
+    // Named so the initial framing and reset() can't drift apart — reset() is the viewport's Home button.
+    static constexpr float kDefaultTargetHeight = 0.9f; // ~mid-torso of a standing figure
+    static constexpr float kDefaultDistance = 2.6f;
+    static constexpr float kDefaultYawDegrees = 25.0f;   // around the world up axis; slight three-quarter view
+    static constexpr float kDefaultPitchDegrees = 10.0f; // just above the horizon — a gentle look-down
+
+    glm::vec3 m_target = glm::vec3(0.0f, kDefaultTargetHeight, 0.0f);
+    float m_distance = kDefaultDistance;
+    float m_yaw = glm::radians(kDefaultYawDegrees);
+    float m_pitch = glm::radians(kDefaultPitchDegrees);
     float m_fovYRadians = glm::radians(50.0f);
     float m_aspect = 1.0f;
     float m_nearPlane = 0.05f;
