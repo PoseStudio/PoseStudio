@@ -28,7 +28,8 @@ struct PostPush {
 } // namespace
 
 PostProcess::PostProcess(VulkanContext& context, VkRenderPass swapchainRenderPass,
-                         const VkDescriptorImageInfo& hdrResolve, VkExtent2D extent,
+                         const VkDescriptorImageInfo& hdrResolve,
+                         const VkDescriptorImageInfo& hdrSpecResolve, VkExtent2D extent,
                          const std::vector<char>& fullscreenVertSpirv,
                          const std::vector<char>& brightFragSpirv,
                          const std::vector<char>& blurFragSpirv,
@@ -148,7 +149,7 @@ PostProcess::PostProcess(VulkanContext& context, VkRenderPass swapchainRenderPas
         m_context, swapchainRenderPass, fullscreenVertSpirv, compositeFragSpirv, postConfig);
 
     createTargets();
-    updateDescriptors(hdrResolve);
+    updateDescriptors(hdrResolve, hdrSpecResolve);
 }
 
 PostProcess::~PostProcess() {
@@ -172,12 +173,13 @@ PostProcess::~PostProcess() {
     }
 }
 
-void PostProcess::resize(VkExtent2D extent, const VkDescriptorImageInfo& hdrResolve) {
+void PostProcess::resize(VkExtent2D extent, const VkDescriptorImageInfo& hdrResolve,
+                         const VkDescriptorImageInfo& hdrSpecResolve) {
     m_extent = extent;
     m_hdrResolveView = hdrResolve.imageView;
     destroyTargets();
     createTargets();
-    updateDescriptors(hdrResolve);
+    updateDescriptors(hdrResolve, hdrSpecResolve);
 }
 
 void PostProcess::createTargets() {
@@ -264,7 +266,8 @@ void PostProcess::destroyTargets() {
     }
 }
 
-void PostProcess::updateDescriptors(const VkDescriptorImageInfo& hdrResolve) {
+void PostProcess::updateDescriptors(const VkDescriptorImageInfo& hdrResolve,
+                                    const VkDescriptorImageInfo& hdrSpecResolve) {
     const auto imageInfo = [&](const BloomTarget& target) {
         VkDescriptorImageInfo info{};
         info.sampler = m_sampler;
@@ -277,7 +280,8 @@ void PostProcess::updateDescriptors(const VkDescriptorImageInfo& hdrResolve) {
     const VkDescriptorImageInfo sssInfo = imageInfo(m_sssScratch);
 
     // (set, binding, image): bright reads HDR; blurH reads A; blurV reads B; composite reads
-    // HDR + A; sssH reads HDR; sssV reads the SSS scratch. Unused second bindings get a duplicate
+    // HDR + A; sssH reads HDR; sssV reads the SSS scratch + the SPECULAR resolve (added back
+    // after the blur — the blur must never smear glints). Unused second bindings get a duplicate
     // write so every declared binding is valid.
     struct Entry {
         VkDescriptorSet              set;
@@ -295,7 +299,7 @@ void PostProcess::updateDescriptors(const VkDescriptorImageInfo& hdrResolve) {
                                          {m_sssHSet, 0, &hdrResolve},
                                          {m_sssHSet, 1, &hdrResolve},
                                          {m_sssVSet, 0, &sssInfo},
-                                         {m_sssVSet, 1, &sssInfo}}};
+                                         {m_sssVSet, 1, &hdrSpecResolve}}};
     std::array<VkWriteDescriptorSet, 12> writes{};
     for (std::size_t i = 0; i < entries.size(); ++i) {
         writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;

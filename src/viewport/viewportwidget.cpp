@@ -115,6 +115,12 @@ void ViewportWidget::resetView() {
     }
 }
 
+void ViewportWidget::groundFigure() {
+    if (m_window) {
+        m_window->groundFigure();
+    }
+}
+
 void ViewportWidget::setEnvironment(const QString& hdrPath) {
     if (m_window) {
         m_window->setEnvironmentFile(hdrPath);
@@ -246,6 +252,25 @@ void ViewportWidget::createShaderOverlay() {
     m_homeButton->setFixedSize(fieldHeight, fieldHeight);
     connect(m_homeButton, &QPushButton::clicked, this, &ViewportWidget::resetView);
     lay->addWidget(m_homeButton);
+
+    // "Ground": drop the figure onto the floor plane — its CURRENT pose's lowest point lands on
+    // y = 0 (a knee bend lifts the feet off the floor; this puts them back). Same treatment as
+    // the Home button beside it.
+    m_groundButton = new QPushButton(m_overlay);
+    m_groundButton->setObjectName(QStringLiteral("ViewportGroundButton"));
+    m_groundButton->setToolTip(tr("Move the selected figure to the ground"));
+    m_groundButton->setIcon(QIcon(QStringLiteral(":/resources/icons/ground.png")));
+    m_groundButton->setIconSize(QSize(16, 16));
+    m_groundButton->setStyleSheet(QStringLiteral(
+        "#ViewportGroundButton {"
+        "  background-color: #252627;"
+        "  border: 1px solid #555555;"
+        "  border-radius: 4px;"
+        "}"
+        "#ViewportGroundButton:hover { background-color: #314D7A; }"));
+    m_groundButton->setFixedSize(fieldHeight, fieldHeight);
+    connect(m_groundButton, &QPushButton::clicked, this, &ViewportWidget::groundFigure);
+    lay->addWidget(m_groundButton);
 
     m_overlay->adjustSize();
 }

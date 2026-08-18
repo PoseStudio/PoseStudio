@@ -32,6 +32,7 @@ namespace pose {
 class VulkanContext;
 class ImmediateBatch;
 struct Ray;
+struct TextureUploadCache; // per-model dedup of texture uploads (defined in mesh.cpp)
 
 /// Per-draw push-constant block for the mesh shaders. Must stay byte-identical to the
 /// `push_constant` block in mesh.frag (mat4 + 4×vec4 = 128 bytes — exactly the guaranteed
@@ -39,8 +40,10 @@ struct Ray;
 struct MeshPushConstants {
     glm::mat4 model;
     glm::vec4 baseColor; // rgb tint; a = opacity (1 = opaque)
-    glm::vec4 material;  // x = roughness (ratio-blended), y = normalMode (0/1/2), z = metalness,
-                         // w = specular (F0) weight (1 = 4% dielectric)
+    glm::vec4 material;  // x = roughness (ratio-blended), y = normalMode (0/1/2) packed with the
+                         // authored detail-map strength as mode + strength/8 (floor = mode,
+                         // fract×8 = strength — the block is at the 128-byte push limit),
+                         // z = metalness, w = specular (F0) weight (1 = 4% dielectric)
     glm::vec4 material2; // x = lobe1 rough, y = lobe2 rough, z = lobe ratio (1 = single-lobe),
                          // w = translucency weight
     glm::vec4 material3; // x = top-coat weight (0 = none), y = top-coat roughness,
@@ -66,11 +69,15 @@ public:
     /// @param materialPool       The owning Model's pool to allocate this mesh's set from.
     /// @param fallbackDiffuse    Shared 1x1 white texture, bound when the mesh has no diffuse map.
     /// @param fallbackNormal     Shared 1x1 flat-normal texture, bound when the mesh has no detail map.
+    /// @param uploads            The owning Model's texture-upload cache: meshes sharing a
+    ///                           DecodedImage share one VulkanTexture (figure zones commonly sample
+    ///                           the same atlas maps — uploading per mesh multiplied GPU memory and
+    ///                           import time by the sharing factor).
     /// @param batch              Upload batch the mesh's buffers/textures record into (the Model
     ///                           flushes it once for all its meshes — one submit per import).
     Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout materialSetLayout,
          VkDescriptorPool materialPool, const VulkanTexture& fallbackDiffuse,
-         const VulkanTexture& fallbackNormal, ImmediateBatch& batch);
+         const VulkanTexture& fallbackNormal, TextureUploadCache& uploads, ImmediateBatch& batch);
 
     Mesh(const Mesh&) = delete;
     Mesh& operator=(const Mesh&) = delete;
@@ -121,12 +128,15 @@ private:
     float                          m_opacity = 1.0f;
     bool                           m_hasOpacityMask = false;
     int                            m_normalMode = 0;              // 0 none / 1 normal map / 2 bump map
-    std::unique_ptr<VulkanTexture> m_texture;                     // diffuse; null => white fallback
-    std::unique_ptr<VulkanTexture> m_normalTexture;               // detail; null => flat-normal fallback
-    std::unique_ptr<VulkanTexture> m_roughnessTexture;            // linear ×-multiplier map; null => white
-    std::unique_ptr<VulkanTexture> m_specMaskTexture;             // linear spec mask; null => white
-    std::unique_ptr<VulkanTexture> m_translucencyTexture;         // sRGB translucency map; null => white
-    std::unique_ptr<VulkanTexture> m_microNormalTexture;          // linear tiled pore normals; null => flat
+    float                          m_normalStrength = 1.0f;       // authored detail-map strength
+    // Textures are shared_ptr: meshes sampling the same DecodedImage share one upload (see the
+    // TextureUploadCache note on the constructor).
+    std::shared_ptr<VulkanTexture> m_texture;                     // diffuse; null => white fallback
+    std::shared_ptr<VulkanTexture> m_normalTexture;               // detail; null => flat-normal fallback
+    std::shared_ptr<VulkanTexture> m_roughnessTexture;            // linear ×-multiplier map; null => white
+    std::shared_ptr<VulkanTexture> m_specMaskTexture;             // linear spec mask; null => white
+    std::shared_ptr<VulkanTexture> m_translucencyTexture;         // sRGB translucency map; null => white
+    std::shared_ptr<VulkanTexture> m_microNormalTexture;          // linear tiled pore normals; null => flat
     VkDescriptorSet                m_materialSet = VK_NULL_HANDLE; // set 1; owned by the Model's pool
 };
 
@@ -205,6 +215,13 @@ public:
     /// are comparable across models) to @p tOut and returns true. Box-level precision — enough to
     /// pick which imported object the cursor is over.
     bool intersectRay(const Ray& ray, float& tOut) const;
+
+    /// Translates the model vertically so its lowest point rests on the ground plane (y = 0). For a
+    /// skinned figure that is the CURRENT POSE's lowest point (CPU-skinned from the compact ground
+    /// samples kept at construction — a knee bend lifts the feet, so the bind AABB would ground
+    /// wrong); a static model uses its bind AABB through the transform (exact — it can't pose).
+    /// Returns true if the transform actually changed (false when already grounded / no geometry).
+    bool dropToGround();
 
 private:
     /// Recomputes each bone's skin matrix (poseGlobal · inverseBind) from the current pose, updates
@@ -290,6 +307,16 @@ private:
     std::vector<RuntimeCorrective>    m_correctives;
     std::vector<float>                m_correctiveWeight;  // last-applied weight per corrective
     std::vector<uint32_t>             m_correctiveMeshes;  // affected render-mesh indices (sorted, unique)
+
+    // Compact CPU copy of every render vertex's skinning inputs (position + joints + weights),
+    // kept only for skinned models, so dropToGround() can find the CURRENT pose's lowest point
+    // without reading back device-local buffers. ~44 bytes/vertex (~10 MB for a figure).
+    struct GroundSample {
+        glm::vec3  pos;
+        glm::uvec4 joints;
+        glm::vec4  weights;
+    };
+    std::vector<GroundSample> m_groundSamples;
 };
 
 } // namespace pose

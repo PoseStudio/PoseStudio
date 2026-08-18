@@ -60,6 +60,14 @@ struct PipelineConfig {
     // only the framebuffer alpha WRITE is masked off.
     bool  colorWriteAlpha    = true;
 
+    // Colour attachments in the target render pass. The HDR scene pass has TWO: attachment 0 is
+    // the (SSS-blurred) diffuse scene, attachment 1 the SPECULAR the blur must never smear
+    // (smeared glints read as a wet film on skin). Attachment 0 keeps this config's blend state;
+    // attachment 1 is written plainly by the opaque mesh pipeline (writeColorAttachment1) and
+    // masked off entirely for every other scene pipeline, whose shaders don't even declare it.
+    uint32_t colorAttachmentCount   = 1;
+    bool     writeColorAttachment1  = false;
+
     // Vertex input. Empty (the default) means "no vertex buffers" — vertices come from
     // gl_VertexIndex (the grid). The mesh pipeline supplies an interleaved binding + attributes.
     std::vector<VkVertexInputBindingDescription>   vertexBindings;

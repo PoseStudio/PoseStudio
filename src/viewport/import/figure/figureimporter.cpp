@@ -28,9 +28,12 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -166,8 +169,11 @@ std::vector<PoseCorrective> discoverCorrectives(UriResolver& resolver, const std
     std::sort(dirs.begin(), dirs.end());
     dirs.erase(std::unique(dirs.begin(), dirs.end()), dirs.end());
 
-    std::vector<PoseCorrective> correctives;
-    std::unordered_set<std::string> seenIds;
+    // Gather the candidate files first, so the expensive part — file read + gzip inflate + JSON
+    // parse, across hundreds of morph files — can run on all cores. The modifier walk stays serial:
+    // parseCorrective itself is cheap, and its gate resolution goes through the resolver/caches
+    // above, which aren't thread-safe.
+    std::vector<std::string> files;
     for (const std::string& dir : dirs) {
         for (fs::directory_iterator it(dir, ec), end; it != end; it.increment(ec)) {
             if (ec) {
@@ -176,20 +182,70 @@ std::vector<PoseCorrective> discoverCorrectives(UriResolver& resolver, const std
             if (!it->is_regular_file(ec) || it->path().extension() != ".dsf") {
                 continue;
             }
+            files.push_back(it->path().string());
+        }
+    }
+
+    std::vector<PoseCorrective> correctives;
+    std::unordered_set<std::string> seenIds;
+    // Bounded chunks keep peak memory at ~a couple of parsed documents per core rather than the
+    // whole candidate set at once (a corrective pack's parsed JSON is megabytes each).
+    const unsigned hw = std::thread::hardware_concurrency();
+    const std::size_t chunk = std::max<std::size_t>(1, static_cast<std::size_t>(hw > 1 ? hw : 1) * 2);
+    std::vector<std::unique_ptr<FigureDocument>> docs;
+    for (std::size_t base = 0; base < files.size(); base += chunk) {
+        const std::size_t n = std::min(chunk, files.size() - base);
+        docs.clear();
+        docs.resize(n);
+        parallelFor(static_cast<int>(n), [&](int i) {
             try {
-                const FigureDocument doc = FigureDocument::loadFromFile(it->path().string());
-                const auto ml = doc.root().find("modifier_library");
-                if (ml == doc.root().end() || !ml->is_array()) {
-                    continue;
+                const std::string& file = files[base + static_cast<std::size_t>(i)];
+                // Pre-filter before the (expensive) DOM parse: a corrective's driver formula always
+                // references a joint rotation channel as the literal text "?rotation/" (the format
+                // writes these urls unencoded — every parser here splits on the raw '?'). The
+                // candidate dirs include each dialed morph's own folder, which can hold hundreds of
+                // plain shape morphs; inflating is cheap, but DOM-parsing them all dominated the
+                // corrective scan, and none can ever pass parseCorrective.
+                std::ifstream in(file, std::ios::binary | std::ios::ate);
+                if (!in) {
+                    return;
                 }
-                for (const auto& mod : *ml) {
-                    PoseCorrective pc;
-                    if (parseCorrective(mod, ctx, pc) && seenIds.insert(pc.id).second) {
-                        correctives.push_back(std::move(pc));
-                    }
+                const std::streamoff size = in.tellg();
+                if (size <= 0) {
+                    return;
                 }
+                std::vector<uint8_t> bytes(static_cast<std::size_t>(size));
+                in.seekg(0, std::ios::beg);
+                if (!in.read(reinterpret_cast<char*>(bytes.data()), size)) {
+                    return;
+                }
+                if (isGzip(bytes)) {
+                    bytes = gunzip(bytes.data(), bytes.size());
+                }
+                const std::string_view text(reinterpret_cast<const char*>(bytes.data()),
+                                            bytes.size());
+                if (text.find("?rotation/") == std::string_view::npos) {
+                    return; // no joint-rotation driver anywhere — cannot be a corrective
+                }
+                docs[static_cast<std::size_t>(i)] = std::make_unique<FigureDocument>(
+                    FigureDocument::loadFromBytes(std::move(bytes), file));
             } catch (const std::exception&) {
-                continue; // unreadable/!gzip/!json — skip this file
+                // unreadable/!gzip/!json — left null, skipped below
+            }
+        });
+        for (const std::unique_ptr<FigureDocument>& doc : docs) {
+            if (!doc) {
+                continue;
+            }
+            const auto ml = doc->root().find("modifier_library");
+            if (ml == doc->root().end() || !ml->is_array()) {
+                continue;
+            }
+            for (const auto& mod : *ml) {
+                PoseCorrective pc;
+                if (parseCorrective(mod, ctx, pc) && seenIds.insert(pc.id).second) {
+                    correctives.push_back(std::move(pc));
+                }
             }
         }
     }
@@ -466,9 +522,11 @@ void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolve
         }
         if (!ref.normalImageUri.empty()) {
             mesh.material.normalMapPath = resolver.resolve(ref.normalImageUri, referringDir).path;
+            mesh.material.normalStrength = ref.normalStrength;
         }
         if (!ref.bumpImageUri.empty()) {
             mesh.material.bumpMapPath = resolver.resolve(ref.bumpImageUri, referringDir).path;
+            mesh.material.bumpStrength = ref.bumpStrength;
         }
         if (!ref.opacityImageUri.empty()) {
             mesh.material.opacityMapPath = resolver.resolve(ref.opacityImageUri, referringDir).path;
@@ -845,6 +903,17 @@ FigureData loadFigureFile(const std::string& path, const std::vector<std::string
     JointCenterOffsets jointCenterOffsets; // per-bone rest-origin shifts the same morphs drive
     const std::vector<DialedMorph> dialedMorphs =
         resolveDialedMorphs(root, resolver, presetDir, figureScale, jointCenterOffsets);
+    // Load every reached morph document up front, across cores — a character preset can reach
+    // hundreds of morph files, and their serial read+inflate+parse was a large slice of import
+    // time. The bake loop below then hits the resolver's cache.
+    {
+        std::vector<std::string> morphUris;
+        morphUris.reserve(dialedMorphs.size());
+        for (const DialedMorph& dialed : dialedMorphs) {
+            morphUris.push_back(dialed.url);
+        }
+        resolver.prefetchDocuments(morphUris, presetDir);
+    }
     for (const DialedMorph& dialed : dialedMorphs) {
         const ResolvedUri ru = resolver.resolve(dialed.url, presetDir);
         if (!ru.resolved()) {

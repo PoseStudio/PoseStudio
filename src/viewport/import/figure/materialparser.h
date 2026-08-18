@@ -28,6 +28,8 @@ struct MaterialRefs {
     std::string diffuseImageUri;
     std::string normalImageUri;  ///< "Normal Map" channel (tangent-space RGB), or empty.
     std::string bumpImageUri;    ///< "Bump Strength" channel (grayscale height), or empty.
+    float       normalStrength = 1.0f; ///< The "Normal Map" channel's dialed strength (scales its texels).
+    float       bumpStrength   = 1.0f; ///< The "Bump Strength" channel's dialed strength.
     std::string opacityImageUri; ///< Cutout/opacity mask (lash & brow cards, legacy eye shells), or empty.
     std::string roughnessImageUri;  ///< The active lobe's roughness MAP (multiplies `roughness`), or empty.
     std::string specWeightImageUri; ///< The active lobe's weight/reflectivity MASK map, or empty.

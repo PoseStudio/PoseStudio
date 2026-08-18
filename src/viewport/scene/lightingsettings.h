@@ -16,16 +16,20 @@
 namespace pose {
 
 struct LightingSettings {
-    float exposure              = 0.75f; ///< Overall brightness multiplier applied before tonemapping.
+    float exposure              = 0.65f; ///< Overall brightness multiplier applied before tonemapping.
     float diffuseIntensity      = 0.5f;  ///< Scales the environment (SH) diffuse contribution.
     float specularIntensity     = 1.0f;  ///< Scales the prefiltered-environment specular reflection.
     float ambientFill           = 0.15f; ///< Flat diffuse lift so a directional HDRI's shadow side isn't black.
     float keyIntensity          = 1.25f; ///< Intensity of the single analytic key light layered over the IBL.
-    float environmentRotationDeg = 30.0f; ///< Spins the environment about the vertical axis (degrees).
+    float environmentRotationDeg = 0.0f; ///< Spins the environment about the vertical axis (degrees).
     // Key-light direction (the environment already lights the form; this is the movable accent).
-    // Defaults: front-on (camera home side), high — a photographic butterfly-style key.
-    float keyAzimuthDeg         = 0.0f;  ///< Around the vertical axis: 0 = +Z (camera home side).
-    float keyElevationDeg       = 50.0f; ///< Above the horizon.
+    // Defaults: front-right, low — a raking key with a long legible shadow. Note these two are
+    // AUTO-AIMED at the environment's dominant light whenever an HDRI bake lands (see
+    // VulkanWindow::beginEnvironmentBake), so for a directional HDRI the startup values come from
+    // the environment; these defaults hold until then, for non-directional environments, and as
+    // the panel rows' restore-button targets.
+    float keyAzimuthDeg         = 45.0f; ///< Around the vertical axis: 0 = +Z (camera home side).
+    float keyElevationDeg       = 20.0f; ///< Above the horizon.
     // PBR-mode accents. Subsurface drives the per-channel wrapped diffuse (the warm terminator of
     // translucent skin); rim is the photographic back light lifting the dark side off the background.
     float subsurface            = 0.5f;  ///< 0 = opaque Lambert skin, 1 = strong translucent wrap.
@@ -41,6 +45,14 @@ struct LightingSettings {
     float backdropBrightness    = 1.0f;  ///< Backdrop-only exposure multiplier (the photographer's
                                          ///< "background a stop down" — subject lighting unchanged).
     float domeRadius            = 12.0f; ///< Dome mode: dome radius in world units (~metres).
+    // Key-light shadows (the figure's self-shadowing + the PCSS ground shadow on the grid).
+    bool  shadowsEnabled        = true;  ///< Off skips the shadow pass entirely (figure + ground).
+    float shadowIntensity       = 0.75f; ///< 0..1: scales both the ground shadow's opacity and how
+                                         ///< dark the figure's self-shadowing gets (0 ≈ off).
+    float shadowSoftness        = 0.25f; ///< 0 = crisp edges, 1 = very soft — scales the ground
+                                         ///< shadow's penumbra growth (the key light's area size).
+    float shadowReach           = 4.0f;  ///< World distance (caster→floor along the light) over
+                                         ///< which the ground shadow dissolves; bigger = longer trail.
 
     /// Field-wise equality, so callers can tell whether an edit actually changed anything (the
     /// Environment panel skips the undo entry for a no-op gesture). Exact float compares are right
@@ -54,7 +66,9 @@ struct LightingSettings {
                subsurface == o.subsurface && rimIntensity == o.rimIntensity &&
                tonemap == o.tonemap && backdropMode == o.backdropMode &&
                backdropBlur == o.backdropBlur && backdropBrightness == o.backdropBrightness &&
-               domeRadius == o.domeRadius;
+               domeRadius == o.domeRadius && shadowsEnabled == o.shadowsEnabled &&
+               shadowIntensity == o.shadowIntensity && shadowSoftness == o.shadowSoftness &&
+               shadowReach == o.shadowReach;
     }
     bool operator!=(const LightingSettings& o) const { return !(*this == o); }
 };

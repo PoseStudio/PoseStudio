@@ -5,6 +5,9 @@
 
 #include "uriresolver.h"
 
+#include "parallelfor.h"
+
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <stdexcept>
@@ -93,6 +96,41 @@ std::shared_ptr<const FigureDocument> UriResolver::loadDocument(const std::strin
     auto doc = std::make_shared<FigureDocument>(FigureDocument::loadFromFile(r.path));
     m_cache.emplace(r.path, doc);
     return doc;
+}
+
+void UriResolver::prefetchDocuments(const std::vector<std::string>& uris,
+                                    const std::string& referringFileDir) {
+    // Resolve serially (cheap), collecting the unique paths not yet cached.
+    std::vector<std::string> paths;
+    paths.reserve(uris.size());
+    for (const std::string& uri : uris) {
+        const ResolvedUri r = resolve(uri, referringFileDir);
+        if (r.resolved() && m_cache.find(r.path) == m_cache.end()) {
+            paths.push_back(r.path);
+        }
+    }
+    std::sort(paths.begin(), paths.end());
+    paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
+    if (paths.empty()) {
+        return;
+    }
+
+    // Load + inflate + parse across cores into a plain array (each index disjoint), then publish
+    // to the cache serially — the cache map itself is never touched from the workers.
+    std::vector<std::shared_ptr<const FigureDocument>> loaded(paths.size());
+    parallelFor(static_cast<int>(paths.size()), [&](int i) {
+        const std::size_t idx = static_cast<std::size_t>(i);
+        try {
+            loaded[idx] = std::make_shared<FigureDocument>(FigureDocument::loadFromFile(paths[idx]));
+        } catch (const std::exception&) {
+            // Unreadable/unparsable — left null; the caller's loadDocument reports it.
+        }
+    });
+    for (std::size_t i = 0; i < paths.size(); ++i) {
+        if (loaded[i]) {
+            m_cache.emplace(paths[i], std::move(loaded[i]));
+        }
+    }
 }
 
 } // namespace pose

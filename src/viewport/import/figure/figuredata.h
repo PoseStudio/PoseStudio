@@ -38,6 +38,8 @@ struct FigureMaterial {
     std::string translucencyMapPath; ///< Translucency color/weight map (see materialparser.h), or empty.
     std::string detailNormalMapPath; ///< Tiled micro-detail (pore) normal map, or empty.
     float       roughness = 0.7f;  ///< Scalar roughness (× the roughness map when present).
+    float       normalStrength = 1.0f; ///< Dialed "Normal Map" strength (scales the map's texels).
+    float       bumpStrength   = 1.0f; ///< Dialed "Bump Strength" (scales the height gradient).
     float       specularWeight = 1.0f; ///< F0 multiplier (1 = 4% dielectric; skin ~0.5 → ~2%).
     float       specularWeightWithMap = 1.0f; ///< Undiscounted fold — used when specMaskMapPath decodes.
     float       metallic  = 0.0f;  ///< Metallic Weight (0 dielectric … 1 metal).

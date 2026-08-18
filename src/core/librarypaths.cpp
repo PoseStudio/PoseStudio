@@ -21,7 +21,7 @@ namespace {
 // The stock panorama preferred as the startup default whenever it exists (wherever the user
 // filed it — root or any category subfolder). Matched by basename, extension-agnostic, so either
 // a .hdr or an .exr of the stock set satisfies it.
-constexpr const char* kStockHdri = "Brown Photostudio 01";
+constexpr const char* kStockHdri = "Studio Small 09";
 
 // A file's category: its folder path relative to the hdri root — "" for uncategorized root files,
 // which therefore sort ahead of every named category.

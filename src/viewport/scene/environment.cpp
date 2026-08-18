@@ -301,6 +301,20 @@ BakedEnvironment bakeEnvironment(EnvironmentImage env) {
     BakedEnvironment baked;
     baked.sh = projectIrradianceSH(env);
     baked.specular = prefilterSpecular(env);
+
+    // Dominant light direction from the linear SH band: the basis order is [.., Y1-1 ∝ y,
+    // Y10 ∝ z, Y11 ∝ x, ..] (see shBasis), so the luminance-weighted (c[3], c[1], c[2]) vector
+    // points at the radiance-weighted mean light direction — the environment's "sun". Its length
+    // relative to the DC term says how directional the environment is (≈0 for overcast).
+    const glm::vec3 kLum(0.2126f, 0.7152f, 0.0722f);
+    const glm::vec3 linear(glm::dot(baked.sh.c[3], kLum), glm::dot(baked.sh.c[1], kLum),
+                           glm::dot(baked.sh.c[2], kLum));
+    const float dc = glm::dot(baked.sh.c[0], kLum);
+    const float len = glm::length(linear);
+    if (len > 1e-6f && dc > 1e-6f) {
+        baked.dominantDir = linear / len;
+        baked.dominantStrength = len / dc;
+    }
     return baked;
 }
 

@@ -94,10 +94,21 @@ VulkanPipeline::VulkanPipeline(VulkanContext& context, VkRenderPass renderPass,
     blendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     blendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
+    // Attachment 1 (the HDR pass's specular target — see PipelineConfig): plainly written by the
+    // opaque mesh pipeline, fully masked off for every other pipeline in that pass.
+    VkPipelineColorBlendAttachmentState blendAttachments[2] = {blendAttachment, {}};
+    blendAttachments[1].colorWriteMask =
+        config.writeColorAttachment1
+            ? (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
+               VK_COLOR_COMPONENT_A_BIT)
+            : 0u;
+    blendAttachments[1].blendEnable = VK_FALSE;
+
     VkPipelineColorBlendStateCreateInfo colorBlend{};
     colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlend.attachmentCount = config.hasColorAttachment ? 1 : 0; // 0 = depth-only pass
-    colorBlend.pAttachments = config.hasColorAttachment ? &blendAttachment : nullptr;
+    colorBlend.attachmentCount =
+        config.hasColorAttachment ? config.colorAttachmentCount : 0; // 0 = depth-only pass
+    colorBlend.pAttachments = config.hasColorAttachment ? blendAttachments : nullptr;
 
     const std::array<VkDynamicState, 2> dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};

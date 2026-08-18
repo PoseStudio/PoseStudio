@@ -132,7 +132,15 @@ int main(int argc, char *argv[]) {
 
     // --- 3. Main window layout ---
     QMainWindow mainWindow;
+#ifdef NDEBUG
     mainWindow.setWindowTitle(QStringLiteral("%1 %2").arg(Constants::APP_NAME, Constants::APP_VERSION));
+#else
+    // Mark unoptimized builds in the title: a Debug build is ~5x slower at figure import (MSVC
+    // debug-STL overhead), which has been mistaken for a real performance regression when a Debug
+    // window was benchmarked against other applications' shipped binaries.
+    mainWindow.setWindowTitle(QStringLiteral("%1 %2 [Debug build — slow imports]")
+                                  .arg(Constants::APP_NAME, Constants::APP_VERSION));
+#endif
 
     // Size the window relative to the screen rather than using a fixed pixel size,
     // so it's usable on both small laptop displays and large monitors.

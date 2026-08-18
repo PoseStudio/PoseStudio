@@ -30,6 +30,7 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <optional>
@@ -82,7 +83,8 @@ void VulkanWindow::initializeVulkan() {
         // Image-based lighting: bake a real HDR panorama over the renderer's built-in procedural studio
         // (the environment the user picked before first expose, else the default). The bake runs off the
         // UI thread; the first frames render the procedural studio (from the Scene ctor) until it lands.
-        beginEnvironmentBake(m_environmentPath.isEmpty() ? defaultEnvironmentPath() : m_environmentPath);
+        beginEnvironmentBake(m_environmentPath.isEmpty() ? defaultEnvironmentPath() : m_environmentPath,
+                             /*autoAimKey=*/false); // startup: the authored default dials win
         m_initialized = true;
 
         // Drain any imports requested before the renderer existed (e.g. user hit Import while
@@ -134,7 +136,7 @@ QString VulkanWindow::defaultEnvironmentPath() const {
     return LibraryPaths::defaultHdri();
 }
 
-void VulkanWindow::beginEnvironmentBake(const QString& hdrPath) {
+void VulkanWindow::beginEnvironmentBake(const QString& hdrPath, bool autoAimKey) {
     if (!m_renderer || hdrPath.isEmpty() || !QFileInfo::exists(hdrPath)) {
         return; // no renderer yet, or nothing to load — the procedural default stays
     }
@@ -143,13 +145,38 @@ void VulkanWindow::beginEnvironmentBake(const QString& hdrPath) {
     // A per-request id discards a slower earlier bake whose selection a newer one has since superseded.
     const quint64 requestId = ++m_environmentRequestId;
     auto* watcher = new QFutureWatcher<std::shared_ptr<BakedEnvironment>>(this);
-    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, requestId]() {
+    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, requestId, autoAimKey]() {
         const std::shared_ptr<BakedEnvironment> baked = watcher->result();
         watcher->deleteLater();
         // The GPU upload runs here on the GUI thread; apply only the newest request that still has a
         // live renderer and a successful bake.
         if (requestId == m_environmentRequestId && m_renderer && baked) {
             m_renderer->applyBakedEnvironment(*baked);
+            // Auto-aim the key light at the environment's dominant light (its "sun"): in the PBR
+            // mode the figure is visibly lit by the HDRI, so a key/shadow pointing anywhere else
+            // reads as broken — the ground shadow must fall away from where the light comes from.
+            // Only for USER-initiated HDRI switches (the startup bake keeps the authored default
+            // dials — a fresh launch must show the LightingSettings defaults) and meaningfully
+            // directional environments (an overcast sky has no sun); the azimuth/elevation dials
+            // stay fully live for manual re-aiming afterwards, and the next HDRI switch re-aims
+            // again. Not an undo entry — HDRI selection itself isn't one.
+            if (autoAimKey && baked->dominantStrength >= 0.1f) {
+                constexpr float kRadToDeg = 57.29577951f;
+                const float elevation =
+                    std::asin(std::clamp(baked->dominantDir.y, -1.0f, 1.0f)) * kRadToDeg;
+                LightingSettings aimed = m_lighting;
+                aimed.keyAzimuthDeg = std::atan2(baked->dominantDir.x, baked->dominantDir.z) * kRadToDeg;
+                // Keep the key above the horizon (a below-horizon "sun" — window-lit interiors —
+                // can't cast a ground shadow) and below ~60°: a near-zenith light drops the shadow
+                // straight under the figure where it reads as a smudge, not a shadow. 60° keeps a
+                // legible cast direction while staying close to the environment's real sun.
+                aimed.keyElevationDeg = std::clamp(elevation, 15.0f, 60.0f);
+                setLightingSettings(aimed);
+                emit lightingRestored(aimed); // the Environment panel syncs its az/el rows
+                qDebug().nospace() << "[viewport] key light auto-aimed to environment sun (azimuth "
+                                   << aimed.keyAzimuthDeg << ", elevation " << aimed.keyElevationDeg
+                                   << ", directionality " << baked->dominantStrength << ")";
+            }
             requestUpdate();
         }
     });
@@ -167,7 +194,7 @@ void VulkanWindow::beginEnvironmentBake(const QString& hdrPath) {
 
 void VulkanWindow::setEnvironmentFile(const QString& hdrPath) {
     m_environmentPath = hdrPath; // remembered so it survives a device loss / applies before first expose
-    beginEnvironmentBake(hdrPath); // no-op until the renderer exists (init kicks off the first bake)
+    beginEnvironmentBake(hdrPath, /*autoAimKey=*/true); // no-op until the renderer exists (init kicks off the first bake)
 }
 
 void VulkanWindow::setLightingSettings(const LightingSettings& settings) {
@@ -233,6 +260,12 @@ void VulkanWindow::resetView() {
     if (m_renderer) {
         m_renderer->camera().reset();
         requestUpdate(); // rendering is on demand — nothing redraws unless we ask
+    }
+}
+
+void VulkanWindow::groundFigure() {
+    if (m_renderer && m_renderer->groundFigure()) {
+        requestUpdate(); // the figure moved — rendering is on demand
     }
 }
 

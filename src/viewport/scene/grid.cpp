@@ -24,6 +24,7 @@ Grid::Grid(VulkanContext& context, VkRenderPass renderPass,
     config.depthTestEnable = true;    // scene geometry in front occludes the grid
     config.depthWriteEnable = false;  // but the transparent ground plane must not occlude
     config.colorWriteAlpha = false;   // the HDR target's alpha is the SSS mask — leave it alone
+    config.colorAttachmentCount = 2;  // the pass's spec target is present but masked off for the grid
     // Set 0 = the scene's set-3 layout: the fragment shader samples only its binding 2 (the key
     // light's shadow map) for the ground/contact shadow under the figure.
     config.descriptorSetLayouts = {sceneSet3Layout};
@@ -33,11 +34,18 @@ Grid::Grid(VulkanContext& context, VkRenderPass renderPass,
 Grid::~Grid() = default;
 
 void Grid::record(VkCommandBuffer cmd, const Camera& camera, VkDescriptorSet sceneSet3,
-                  const glm::mat4& lightViewProj) {
+                  const glm::mat4& lightViewProj, const glm::vec4& shadowParams) {
     GridPushConstants push{};
     const glm::mat4 viewProj = camera.viewProjection();
     std::memcpy(push.viewProj, &viewProj[0][0], sizeof(push.viewProj));
-    std::memcpy(push.lightViewProj, &lightViewProj[0][0], sizeof(push.lightViewProj));
+    // The light matrix travels as its first three math rows (see GridPushConstants): glm stores
+    // column-major, so math-row i is (m[0][i], m[1][i], m[2][i], m[3][i]).
+    for (int c = 0; c < 4; ++c) {
+        push.lightRow0[c] = lightViewProj[c][0];
+        push.lightRow1[c] = lightViewProj[c][1];
+        push.lightRow2[c] = lightViewProj[c][2];
+    }
+    std::memcpy(push.shadowParams, &shadowParams[0], sizeof(push.shadowParams));
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->handle());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->layout(), 0, 1,

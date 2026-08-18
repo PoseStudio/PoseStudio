@@ -16,14 +16,27 @@
 #ifndef TEXTUREGUTTERS_H
 #define TEXTUREGUTTERS_H
 
+#include <cstdint>
+#include <vector>
+
 namespace pose {
 
-struct MeshData;
+struct Vertex;
 
-/// Gutter-fills the mesh's decoded diffuse and detail (normal/bump) images in place, using the
-/// mesh's own UV triangles as the coverage source. No-op for untextured meshes, meshes without
-/// geometry, or textures the UVs fully cover (e.g. tiled/wrapping materials).
-void fillTextureGutters(MeshData& mesh);
+/// One mesh's UV geometry contributing coverage to a (possibly shared) texture. The pointed-at
+/// containers must outlive the fill call.
+struct UvMeshRef {
+    const std::vector<Vertex>*   vertices = nullptr;
+    const std::vector<uint32_t>* indices  = nullptr;
+};
+
+/// Gutter-fills one decoded RGBA8 image in place, using the UNION of every user's UV triangles as
+/// the coverage source — an atlas shared by several meshes must keep all their islands intact, and
+/// filling once per image (instead of once per mesh) is what lets shared decodes stay shared.
+/// No-op when the coverage is empty (nothing to pull colour from) or complete (nothing to fill —
+/// e.g. tiled/wrapping materials).
+void fillImageGutters(std::vector<uint8_t>& pixels, uint32_t width, uint32_t height,
+                      const std::vector<UvMeshRef>& users);
 
 } // namespace pose
 

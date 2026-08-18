@@ -90,6 +90,13 @@ BrdfLut integrateBrdfLut(int size = 128, int samples = 512);
 struct BakedEnvironment {
     EnvironmentSH       sh;
     PrefilteredSpecular specular;
+    // The environment's dominant light direction (unit vector TO the light, in unrotated
+    // environment space), from the luminance-weighted linear SH band — the direction a single
+    // directional light best approximating the environment would shine from. `dominantStrength`
+    // is |L1|/L0 (0 = perfectly uniform sky, higher = more directional); consumers should ignore
+    // the direction below ~0.1 (an overcast/indoor environment has no meaningful "sun").
+    glm::vec3           dominantDir{0.0f, 1.0f, 0.0f};
+    float               dominantStrength = 0.0f;
 };
 
 /// Normalizes @p env's brightness (so any HDRI lights at a consistent exposure) and bakes its SH

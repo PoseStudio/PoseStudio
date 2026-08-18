@@ -8,7 +8,7 @@
 #include "aobaker.h"
 #include "modeldata.h"
 #include "tangentgen.h"
-#include "modelimportservice.h" // decodeMeshTexture (shared with the model path)
+#include "modelimportservice.h" // decodeModelTextures (shared with the model path)
 #include "import/figure/figuredata.h"
 #include "import/figure/figureimporter.h"
 #include "rendering/vulkanrenderer.h"
@@ -103,13 +103,17 @@ ModelData toModelData(FigureData&& fig) {
         mesh.opacity = zone.material.opacity;
         // Detail map: prefer a true tangent-space normal map (mode 1); else the grayscale bump/height
         // map (mode 2, applied via a texture-space central difference in the shader). The base figure
-        // ships bump maps, so this is what gives its skin surface grain.
+        // ships bump maps, so this is what gives its skin surface grain. Either way the AUTHORED
+        // strength rides along — heavily-detailed skins dial e.g. Normal Map 2.5 / Bump 4, and
+        // rendering them at 1x left the surface too coherent (broad sheen read as wet plastic).
         if (!zone.material.normalMapPath.empty()) {
             mesh.normal.path = zone.material.normalMapPath;
             mesh.normalMode = 1;
+            mesh.normalStrength = zone.material.normalStrength;
         } else if (!zone.material.bumpMapPath.empty()) {
             mesh.normal.path = zone.material.bumpMapPath;
             mesh.normalMode = 2;
+            mesh.normalStrength = zone.material.bumpStrength;
         }
         model.meshes.push_back(std::move(mesh));
     }
@@ -293,20 +297,20 @@ void runFigureImport(VulkanRenderer& renderer, const QString& path,
     ModelData data = toModelData(std::move(figure));
     const int meshCount = static_cast<int>(data.meshes.size());
     const int correctiveCount = static_cast<int>(data.correctives.size());
-    const int total = meshCount + 2;
+    const int total = 5; // parse, decode, bake, upload, done
     int step = 0;
     if (progress) {
         progress->setRange(0, total);
         progress->setValue(++step); // parse complete
     }
 
-    for (MeshData& mesh : data.meshes) {
-        if (progress) {
-            progress->setLabelText(QStringLiteral("Decoding textures…"));
-            progress->setValue(++step);
-        }
-        ModelImportService::decodeMeshTexture(mesh);
+    // Decode every unique texture once — figure zones share atlas files, so decodes are shared
+    // across meshes and run across cores (see ModelImportService::decodeModelTextures).
+    if (progress) {
+        progress->setLabelText(QStringLiteral("Decoding textures…"));
+        progress->setValue(++step);
     }
+    ModelImportService::decodeModelTextures(data);
     const qint64 msDecode = timer.elapsed();
 
     // Bake per-vertex ambient occlusion + UV tangents on the final render mesh (post-morph,
@@ -314,13 +318,14 @@ void runFigureImport(VulkanRenderer& renderer, const QString& path,
     // tangentgen.h.
     if (progress) {
         progress->setLabelText(QStringLiteral("Baking ambient occlusion…"));
+        progress->setValue(++step);
     }
     bakeVertexAO(data);
     computeTangents(data);
 
     if (progress) {
         progress->setLabelText(QStringLiteral("Uploading to GPU…"));
-        progress->setValue(total - 1);
+        progress->setValue(++step);
     }
     renderer.addModel(data);
     const qint64 msUpload = timer.elapsed();

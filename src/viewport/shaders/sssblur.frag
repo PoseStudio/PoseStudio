@@ -8,6 +8,7 @@
 // skin read as flesh (soft red shadow edges) instead of painted plastic.
 
 layout(set = 0, binding = 0) uniform sampler2D uSrc;
+layout(set = 0, binding = 1) uniform sampler2D uSpec; // scene SPECULAR (V pass only; H binds uSrc)
 
 layout(push_constant) uniform PC {
     vec4 params; // xy = texel size, zw = blur direction (1,0) or (0,1)
@@ -20,9 +21,13 @@ const float kRadiusPx = 6.0;                     // kernel half-width at full ma
 const vec3  kFalloff  = vec3(2.0, 6.0, 10.0);    // per-channel Gaussian falloff (R widest)
 
 void main() {
+    // Only DIFFUSE light diffuses through skin — the mesh pass routes specular to its own target,
+    // and the V (final) pass adds it back here, over the blurred result. Blurring specular smeared
+    // every glint into a wet-looking film, which no amount of material tuning could dry out.
+    vec3 specAdd = (pc.params.w > 0.5) ? texture(uSpec, vUv).rgb : vec3(0.0);
     vec4 center = texture(uSrc, vUv);
     if (center.a < 0.03) {
-        outColor = center; // not skin — untouched
+        outColor = vec4(center.rgb + specAdd, center.a); // not skin — untouched (plus its specular)
         return;
     }
     vec2 stepUv = pc.params.xy * pc.params.zw * kRadiusPx * center.a;
@@ -38,5 +43,5 @@ void main() {
         sum += s1.rgb * w1 + s2.rgb * w2;
         wsum += w1 + w2;
     }
-    outColor = vec4(sum / wsum, center.a); // mask rides through for the second axis
+    outColor = vec4(sum / wsum + specAdd, center.a); // mask rides through for the second axis
 }

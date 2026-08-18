@@ -17,6 +17,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -35,6 +36,19 @@ struct TextureSource {
     bool empty() const { return path.empty() && encoded.empty(); }
 };
 
+/// A decoded, tightly-packed RGBA8 image, shared between the meshes that sample it. Zones of one
+/// figure commonly reference the same atlas file (face/lips/ears share the face maps; torso/arms/
+/// legs the body maps), so the decode layer produces ONE DecodedImage per unique source (+
+/// processing combination — e.g. a baked opacity mask) and every mesh using it points at the same
+/// object; the GPU layer keys its texture uploads on the object's identity, so a shared image is
+/// also uploaded exactly once per model. Treat as immutable once assigned to a mesh.
+struct DecodedImage {
+    std::vector<uint8_t> pixels; ///< Tightly-packed RGBA8 (width × height × 4 bytes).
+    uint32_t             width  = 0;
+    uint32_t             height = 0;
+};
+using DecodedImagePtr = std::shared_ptr<const DecodedImage>;
+
 /// One material group of an imported model: a self-contained triangle mesh, its diffuse base color,
 /// and (optionally) its diffuse texture.
 struct MeshData {
@@ -47,21 +61,19 @@ struct MeshData {
     glm::vec3             baseColor{0.6376f, 0.6376f, 0.6376f};
 
     // Diffuse texture source (an external path or embedded bytes; see TextureSource). The Qt layer
-    // (ModelImportService) decodes it into diffusePixels (tightly-packed RGBA8) so the Qt-free
-    // renderer never needs an image codec. Empty source / zero size => untextured.
+    // (ModelImportService::decodeModelTextures) decodes each unique source ONCE into a shared
+    // DecodedImage so the Qt-free renderer never needs an image codec. Null image => untextured.
+    // When hasOpacityMask is set, the image's alpha channel carries the baked opacity mask.
     TextureSource         diffuse;
-    std::vector<uint8_t>  diffusePixels;
-    uint32_t              diffuseWidth  = 0;
-    uint32_t              diffuseHeight = 0;
+    DecodedImagePtr       diffuseImage;
 
     // Detail (surface) map: a tangent-space normal map or a grayscale bump/height map, selected by
     // normalMode. Decoded like the diffuse map, but uploaded as a LINEAR texture (it's data, not
-    // colour). Empty => flat shading. normalMode: 0 none, 1 tangent-space normal, 2 grayscale bump.
+    // colour). Null => flat shading. normalMode: 0 none, 1 tangent-space normal, 2 grayscale bump.
     TextureSource         normal;
-    std::vector<uint8_t>  normalPixels;
-    uint32_t              normalWidth  = 0;
-    uint32_t              normalHeight = 0;
+    DecodedImagePtr       normalImage;
     int                   normalMode   = 0;
+    float                 normalStrength = 1.0f; ///< Authored detail-map strength (scales the perturbation).
 
     // Opacity (cutout) mask: a grayscale image whose texels modulate this mesh's opacity (lash and
     // brow cards, older generations' eye shells). Not uploaded as its own texture: the decode layer
@@ -75,29 +87,21 @@ struct MeshData {
     // Specular parameter maps (both LINEAR, sampled .r): the roughness map multiplies the scalar
     // roughness per texel; the spec-mask map multiplies specularWeight per texel (the decode layer
     // switches specularWeight to the material's undiscounted fold when the mask decodes — see
-    // MaterialRefs::specularWeightWithMap). Empty => 1x1 white fallback (scalar behaviour).
+    // MaterialRefs::specularWeightWithMap). Null => 1x1 white fallback (scalar behaviour).
     TextureSource         roughnessMap;
-    std::vector<uint8_t>  roughnessPixels;
-    uint32_t              roughnessWidth  = 0;
-    uint32_t              roughnessHeight = 0;
+    DecodedImagePtr       roughnessImage;
     TextureSource         specMask;
-    std::vector<uint8_t>  specMaskPixels;
-    uint32_t              specMaskWidth  = 0;
-    uint32_t              specMaskHeight = 0;
+    DecodedImagePtr       specMaskImage;
 
     // Translucency map (sRGB colour: the flesh-red transmitted tint, or a grayscale weight map —
     // luminance = per-region strength). White fallback = uniform.
     TextureSource         translucencyMap;
-    std::vector<uint8_t>  translucencyPixels;
-    uint32_t              translucencyWidth  = 0;
-    uint32_t              translucencyHeight = 0;
+    DecodedImagePtr       translucencyImage;
 
     // Micro-detail (pore) normal map: LINEAR tangent-space normals tiled detailTiles× across the
     // UVs at detailWeight strength. No gutter fill (it wraps, and tiled UVs leave no gutters).
     TextureSource         detailNormalMap;
-    std::vector<uint8_t>  detailNormalPixels;
-    uint32_t              detailNormalWidth  = 0;
-    uint32_t              detailNormalHeight = 0;
+    DecodedImagePtr       detailNormalImage;
     float                 detailWeight = 0.0f;
     float                 detailTiles  = 0.0f;
 

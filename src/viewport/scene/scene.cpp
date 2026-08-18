@@ -52,7 +52,7 @@ struct CameraUbo {
     glm::vec4 sh[9];       // environment diffuse irradiance: 9 SH coefficients (rgb in .xyz)
     glm::vec4 params2;     // x = diffuseIntensity, y = keyIntensity, z = envRotation(rad), w = tonemap(0/1)
     glm::vec4 params3;     // x = subsurface, y = rimIntensity, z = backdropMode, w = backdropBlur
-    glm::vec4 params4;     // x = backdropBrightness, y = domeRadius, z/w reserved
+    glm::vec4 params4;     // x = backdropBrightness, y = domeRadius, z = shadowIntensity, w reserved
 };
 
 
@@ -118,6 +118,10 @@ Scene::Scene(VulkanContext& context, VkRenderPass renderPass, const std::vector<
     config.depthTestEnable = true;
     config.depthWriteEnable = true;
     config.blendEnable = false;
+    // The HDR pass has a second colour attachment: the SPECULAR target the SSS blur must not
+    // smear. Only this opaque pipeline writes it (mesh.frag routes the PBR specular there).
+    config.colorAttachmentCount = 2;
+    config.writeColorAttachment1 = true;
     // No back-face culling: imported OBJ winding is inconsistent in the wild, so we'd risk an
     // invisible/inside-out model. The fragment shader instead flips the normal per gl_FrontFacing
     // for correct two-sided lighting. Revisit once we normalize winding on import.
@@ -141,6 +145,7 @@ Scene::Scene(VulkanContext& context, VkRenderPass renderPass, const std::vector<
     config.blendEnable = true;
     config.depthWriteEnable = false;
     config.colorWriteAlpha = false; // don't clobber the SSS mask under blended shells/cards
+    config.writeColorAttachment1 = false; // blended shells keep their specular in-line (mask ≈ 0)
     m_transparentPipeline =
         std::make_unique<VulkanPipeline>(m_context, renderPass, vertSpirv, fragSpirv, config);
     config.colorWriteAlpha = true;
@@ -170,6 +175,7 @@ Scene::Scene(VulkanContext& context, VkRenderPass renderPass, const std::vector<
     bgConfig.depthTestEnable = false;
     bgConfig.depthWriteEnable = false;
     bgConfig.blendEnable = false;
+    bgConfig.colorAttachmentCount = 2; // spec target present but masked off (writeColorAttachment1 false)
     bgConfig.descriptorSetLayouts = {m_setLayout, m_iblSetLayout};
     m_backgroundPipeline = std::make_unique<VulkanPipeline>(m_context, renderPass,
                                                             backgroundVertSpirv, backgroundFragSpirv,
@@ -183,6 +189,7 @@ Scene::Scene(VulkanContext& context, VkRenderPass renderPass, const std::vector<
     lineConfig.depthWriteEnable = false;
     lineConfig.blendEnable = false;
     lineConfig.colorWriteAlpha = false; // overlay lines must not touch the SSS mask
+    lineConfig.colorAttachmentCount = 2; // spec target present but masked off
     lineConfig.pushConstantSize = 0;
     VkVertexInputBindingDescription lineBinding{};
     lineBinding.binding = 0;
@@ -300,9 +307,11 @@ void Scene::createDescriptorResources() {
 
     // Set 3: the scene-wide maps — binding 0 = prefiltered specular cubemap, binding 1 = BRDF LUT
     // (both refilled by applyBakedEnvironment()), binding 2 = the key light's shadow map
-    // (comparison sampler; written once below — the image is stable, its contents re-render per
-    // frame). All fragment-stage; one static set for the whole scene.
-    std::array<VkDescriptorSetLayoutBinding, 3> iblBindings{};
+    // (comparison sampler), binding 3 = the SAME shadow map through the non-comparison sampler
+    // (raw depths for the ground shadow's PCSS blocker search). 2 and 3 are written once below —
+    // the image is stable, its contents re-render per frame. All fragment-stage; one static set
+    // for the whole scene.
+    std::array<VkDescriptorSetLayoutBinding, 4> iblBindings{};
     for (uint32_t i = 0; i < iblBindings.size(); ++i) {
         iblBindings[i].binding = i;
         iblBindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -317,7 +326,7 @@ void Scene::createDescriptorResources() {
 
     std::array<VkDescriptorPoolSize, 1> iblPoolSizes{};
     iblPoolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    iblPoolSizes[0].descriptorCount = 3;
+    iblPoolSizes[0].descriptorCount = 4;
     VkDescriptorPoolCreateInfo iblPoolInfo{};
     iblPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     iblPoolInfo.poolSizeCount = static_cast<uint32_t>(iblPoolSizes.size());
@@ -331,16 +340,23 @@ void Scene::createDescriptorResources() {
     iblAlloc.pSetLayouts = &m_iblSetLayout;
     VK_CHECK(vkAllocateDescriptorSets(device, &iblAlloc, &m_iblSet));
 
-    // Binding 2 = the shadow map, written once (applyBakedEnvironment rewrites only 0/1).
+    // Bindings 2 + 3 = the shadow map (comparison + raw-depth samplers), written once
+    // (applyBakedEnvironment rewrites only 0/1).
     const VkDescriptorImageInfo shadowInfo = m_shadowMap->descriptorInfo();
-    VkWriteDescriptorSet shadowWrite{};
-    shadowWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    shadowWrite.dstSet = m_iblSet;
-    shadowWrite.dstBinding = 2;
-    shadowWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    shadowWrite.descriptorCount = 1;
-    shadowWrite.pImageInfo = &shadowInfo;
-    vkUpdateDescriptorSets(device, 1, &shadowWrite, 0, nullptr);
+    const VkDescriptorImageInfo shadowRawInfo = m_shadowMap->rawDescriptorInfo();
+    std::array<VkWriteDescriptorSet, 2> shadowWrites{};
+    for (auto& write : shadowWrites) {
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = m_iblSet;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.descriptorCount = 1;
+    }
+    shadowWrites[0].dstBinding = 2;
+    shadowWrites[0].pImageInfo = &shadowInfo;
+    shadowWrites[1].dstBinding = 3;
+    shadowWrites[1].pImageInfo = &shadowRawInfo;
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(shadowWrites.size()),
+                           shadowWrites.data(), 0, nullptr);
 
     VkDescriptorPoolSize poolSize{};
     poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -438,10 +454,32 @@ void Scene::removeModel(std::size_t index) {
 glm::vec3 Scene::keyLightDir() const {
     const float az = glm::radians(m_lighting.keyAzimuthDeg);
     const float el = glm::radians(m_lighting.keyElevationDeg);
-    return glm::vec3(std::cos(el) * std::sin(az), std::sin(el), std::cos(el) * std::cos(az));
+    glm::vec3 dir(std::cos(el) * std::sin(az), std::sin(el), std::cos(el) * std::cos(az));
+    // In the image-based (PBR) mode the key stands in for the environment's dominant light — the
+    // HDRI bake auto-aims the dials at it — so it must follow the panel's Rotation dial the way
+    // the visible environment does. The shader samples the environment at rotateY(worldDir, +rot)
+    // (mesh.frag), so the world direction matching a fixed environment-space direction is
+    // rotateY(dir, -rot) with the same rotation convention, replicated here. The analytic modes
+    // keep the dial as a plain world-space direction (their rig ignores the environment).
+    if (m_shadeMode == 1) {
+        const float a = -glm::radians(m_lighting.environmentRotationDeg);
+        const float c = std::cos(a);
+        const float s = std::sin(a);
+        dir = glm::vec3(c * dir.x + s * dir.z, dir.y, -s * dir.x + c * dir.z);
+    }
+    return dir;
 }
 
 void Scene::recordShadowPass(VkCommandBuffer cmd) {
+    // Shadows off: skip the whole pass (its cost included) and park the light matrix on the same
+    // degenerate projection the no-casters case uses — every receiver (figure + floor) reads
+    // fully lit through it.
+    if (!m_lighting.shadowsEnabled) {
+        m_lightViewProj = glm::mat4(0.0f);
+        m_lightViewProj[3][3] = 1.0f;
+        return;
+    }
+
     // Fit the light's ortho frustum around every caster AND its shadow's landing spot on the floor
     // (casting each AABB corner along the light onto y=0) — the ground shadow is only correct where
     // the RECEIVER is inside the frustum, so the floor patch must be covered too.
@@ -546,7 +584,8 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
                             glm::radians(m_lighting.environmentRotationDeg), m_lighting.tonemap ? 1.0f : 0.0f);
     ubo.params3 = glm::vec4(m_lighting.subsurface, m_lighting.rimIntensity,
                             static_cast<float>(m_lighting.backdropMode), m_lighting.backdropBlur);
-    ubo.params4 = glm::vec4(m_lighting.backdropBrightness, m_lighting.domeRadius, 0.0f, 0.0f);
+    ubo.params4 = glm::vec4(m_lighting.backdropBrightness, m_lighting.domeRadius,
+                            m_lighting.shadowIntensity, 0.0f);
     // Environment diffuse irradiance (SH). The PBR mode reconstructs per-normal ambient from these
     // instead of the flat `ambient` constant, so shadow sides pick up the environment's colour.
     for (int i = 0; i < 9; ++i) {
@@ -713,6 +752,13 @@ void Scene::finalizePose() {
     if (Model* fig = figureModel()) {
         fig->refreshCorrectives();
     }
+}
+
+bool Scene::groundFigure() {
+    if (Model* fig = figureModel()) {
+        return fig->dropToGround();
+    }
+    return false;
 }
 
 int Scene::gizmoAxisAt(float px, float py, float vpW, float vpH, const Camera& camera) const {

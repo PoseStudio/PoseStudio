@@ -62,6 +62,17 @@ ShadowMap::ShadowMap(VulkanContext& context, uint32_t size) : m_context(context)
     samplerInfo.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     VK_CHECK(vkCreateSampler(device, &samplerInfo, nullptr, &m_sampler));
 
+    // Non-comparison twin (same filtering/border, no compare): raw depth values for the ground
+    // shadow's PCSS blocker search. The white border again means "empty/far = no blocker" outside
+    // the fitted frustum. NEAREST filter — averaging depths across a caster's silhouette edge
+    // would invent phantom blocker distances between the caster and the background.
+    VkSamplerCreateInfo rawInfo = samplerInfo;
+    rawInfo.magFilter = VK_FILTER_NEAREST;
+    rawInfo.minFilter = VK_FILTER_NEAREST;
+    rawInfo.compareEnable = VK_FALSE;
+    rawInfo.compareOp = VK_COMPARE_OP_NEVER;
+    VK_CHECK(vkCreateSampler(device, &rawInfo, nullptr, &m_rawSampler));
+
     // --- Depth-only render pass: clear -> raster depth -> leave in shader-read layout ---
     VkAttachmentDescription depth{};
     depth.format = kDepthFormat;
@@ -164,6 +175,9 @@ ShadowMap::~ShadowMap() {
     if (m_sampler != VK_NULL_HANDLE) {
         vkDestroySampler(device, m_sampler, nullptr);
     }
+    if (m_rawSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(device, m_rawSampler, nullptr);
+    }
     if (m_view != VK_NULL_HANDLE) {
         vkDestroyImageView(device, m_view, nullptr);
     }
@@ -177,6 +191,12 @@ VkDescriptorImageInfo ShadowMap::descriptorInfo() const {
     info.sampler = m_sampler;
     info.imageView = m_view;
     info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    return info;
+}
+
+VkDescriptorImageInfo ShadowMap::rawDescriptorInfo() const {
+    VkDescriptorImageInfo info = descriptorInfo();
+    info.sampler = m_rawSampler;
     return info;
 }
 

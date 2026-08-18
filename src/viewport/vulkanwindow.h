@@ -77,6 +77,10 @@ public:
     /// renderer exists — the camera is created with that framing, so there'd be nothing to undo.
     void resetView();
 
+    /// Drops the posable figure onto the ground plane (the overlay's ground button): translates it
+    /// so the current pose's lowest point rests at y = 0. No-op before the renderer exists.
+    void groundFigure();
+
     /// Loads @p hdrPath as the lighting environment and re-bakes the IBL. Remembered and applied
     /// once the renderer exists if it isn't built yet. Decoding happens in this Qt layer.
     void setEnvironmentFile(const QString& hdrPath);
@@ -127,7 +131,12 @@ private:
     };
 
     void initializeVulkan();   // safe to call repeatedly; no-ops once initialised
-    void beginEnvironmentBake(const QString& hdrPath); // decode + bake off-thread, then swap in on the GUI thread
+    /// Decode + bake @p hdrPath off-thread, then swap it in on the GUI thread. @p autoAimKey:
+    /// re-aim the key-light dials at the baked environment's dominant light when it lands — true
+    /// for user-initiated HDRI switches (the shadow should follow the newly picked environment),
+    /// false for the STARTUP bake, so the authored LightingSettings defaults are what a fresh
+    /// launch actually shows.
+    void beginEnvironmentBake(const QString& hdrPath, bool autoAimKey);
     QString defaultEnvironmentPath() const;            // <appDir>/environment.{hdr,exr} override, else the user library's hdri/
     void releaseVulkan();      // tears down renderer + context (surface still valid)
     void renderFrame();        // one frame, then schedules the next while exposed

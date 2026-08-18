@@ -251,6 +251,15 @@ void EnvironmentPanel::buildUi() {
     m_keyAzimuth = addValueRow(key, tr("Azimuth°"), -180.0, 180.0, 1.0, m_settings.keyAzimuthDeg);
     m_keyElevation = addValueRow(key, tr("Elevation°"), 0.0, 85.0, 1.0, m_settings.keyElevationDeg);
 
+    // --- Shadow (the key light's shadows: figure self-shadowing + the PCSS ground shadow) ---
+    QFormLayout* shadow = addGroup(col, tr("Shadow"));
+    m_shadowsEnabled = new QCheckBox(tr("Enable shadows"));
+    m_shadowsEnabled->setChecked(m_settings.shadowsEnabled);
+    shadow->addRow(QString(), m_shadowsEnabled);
+    m_shadowIntensity = addValueRow(shadow, tr("Intensity"), 0.0, 1.0, 0.01, m_settings.shadowIntensity);
+    m_shadowSoftness = addValueRow(shadow, tr("Softness"), 0.0, 1.0, 0.01, m_settings.shadowSoftness);
+    m_shadowReach = addValueRow(shadow, tr("Reach"), 1.0, 25.0, 0.5, m_settings.shadowReach);
+
     // --- Skin & Rim (PBR-mode accents) ---
     QFormLayout* accents = addGroup(col, tr("Skin && Rim"));
     m_subsurface = addValueRow(accents, tr("Subsurface"), 0.0, 1.0, 0.01, m_settings.subsurface);
@@ -313,6 +322,24 @@ void EnvironmentPanel::buildUi() {
     });
     connect(m_keyElevation, &DragNumberBox::valueChanged, this, [this](double d) {
         m_settings.keyElevationDeg = static_cast<float>(d);
+        pushSettings();
+    });
+    connect(m_shadowsEnabled, &QCheckBox::toggled, this, [this](bool on) {
+        beginSettingsEdit(); // a toggle is a complete gesture in itself
+        m_settings.shadowsEnabled = on;
+        pushSettings();
+        commitSettingsEdit();
+    });
+    connect(m_shadowIntensity, &DragNumberBox::valueChanged, this, [this](double d) {
+        m_settings.shadowIntensity = static_cast<float>(d);
+        pushSettings();
+    });
+    connect(m_shadowSoftness, &DragNumberBox::valueChanged, this, [this](double d) {
+        m_settings.shadowSoftness = static_cast<float>(d);
+        pushSettings();
+    });
+    connect(m_shadowReach, &DragNumberBox::valueChanged, this, [this](double d) {
+        m_settings.shadowReach = static_cast<float>(d);
         pushSettings();
     });
     connect(m_subsurface, &DragNumberBox::valueChanged, this, [this](double d) {
@@ -583,6 +610,10 @@ void EnvironmentPanel::resetToDefaults() {
     m_keyIntensity->setValue(defaults.keyIntensity);
     m_keyAzimuth->setValue(defaults.keyAzimuthDeg);
     m_keyElevation->setValue(defaults.keyElevationDeg);
+    m_shadowsEnabled->setChecked(defaults.shadowsEnabled);
+    m_shadowIntensity->setValue(defaults.shadowIntensity);
+    m_shadowSoftness->setValue(defaults.shadowSoftness);
+    m_shadowReach->setValue(defaults.shadowReach);
     m_subsurface->setValue(defaults.subsurface);
     m_rim->setValue(defaults.rimIntensity);
     m_backdropBlur->setValue(defaults.backdropBlur);
@@ -618,7 +649,9 @@ void EnvironmentPanel::applyRestoredSettings(const LightingSettings& settings) {
         QSignalBlocker(m_keyIntensity), QSignalBlocker(m_keyAzimuth),
         QSignalBlocker(m_keyElevation), QSignalBlocker(m_subsurface), QSignalBlocker(m_rim),
         QSignalBlocker(m_backdropBlur), QSignalBlocker(m_backdropBrightness),
-        QSignalBlocker(m_domeRadius)};
+        QSignalBlocker(m_domeRadius),   QSignalBlocker(m_shadowsEnabled),
+        QSignalBlocker(m_shadowIntensity), QSignalBlocker(m_shadowSoftness),
+        QSignalBlocker(m_shadowReach)};
     m_rotation->setValue(settings.environmentRotationDeg);
     m_exposure->setValue(settings.exposure);
     m_tonemap->setChecked(settings.tonemap);
@@ -628,6 +661,10 @@ void EnvironmentPanel::applyRestoredSettings(const LightingSettings& settings) {
     m_keyIntensity->setValue(settings.keyIntensity);
     m_keyAzimuth->setValue(settings.keyAzimuthDeg);
     m_keyElevation->setValue(settings.keyElevationDeg);
+    m_shadowsEnabled->setChecked(settings.shadowsEnabled);
+    m_shadowIntensity->setValue(settings.shadowIntensity);
+    m_shadowSoftness->setValue(settings.shadowSoftness);
+    m_shadowReach->setValue(settings.shadowReach);
     m_subsurface->setValue(settings.subsurface);
     m_rim->setValue(settings.rimIntensity);
     m_backdropBlur->setValue(settings.backdropBlur);

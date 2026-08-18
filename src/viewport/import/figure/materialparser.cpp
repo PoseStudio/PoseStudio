@@ -294,8 +294,23 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
         if (tcPresent && tcWeightRaw > 0.0f && (!tcEnable || channelBool(*tcEnable, true))) {
             const float tcReflectivity =
                 std::clamp(scalarChannel("Top Coat Reflectivity", 0.5f), 0.0f, 1.0f);
+            // The coat's COLOUR scales it: a dark-grey Top Coat Color is how 2017-era skins tame a
+            // "top coat as the main specular" setup (weight dialed far above 1 riding a custom
+            // Fresnel curve) — ignoring it rendered those skins as a full-strength white glaze,
+            // i.e. wet plastic. The >1 weight itself is the curve trick, not a stronger coat: cap
+            // at the physical 0..1. A map on the weight is discounted by the same assumed
+            // dark-mask average as the spec-mask fold (maps aren't sampled at import).
+            glm::vec3 tcColor(1.0f);
+            if (const nlohmann::json* c = effectiveChannel(mat, base, "Top Coat Color")) {
+                readColorValue(*c, tcColor);
+            }
+            const float tcColorLum = glm::dot(tcColor, glm::vec3(0.2126f, 0.7152f, 0.0722f));
+            float tcW = std::min(tcWeightRaw, 1.0f);
+            if (channelHasMap("Top Coat Weight")) {
+                tcW *= 0.5f;
+            }
             ref.topCoatWeight =
-                std::clamp(tcWeightRaw, 0.0f, 1.0f) * (tcReflectivity / 0.5f);
+                std::clamp(tcW * (tcReflectivity / 0.5f) * tcColorLum, 0.0f, 1.0f);
             bool tcRoughPresent = false;
             float tcRough = scalarChannel("Top Coat Roughness", 0.0f, &tcRoughPresent);
             if (!tcRoughPresent || tcRough <= 0.0f) {
@@ -330,11 +345,18 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
             ref.detailTiles = std::clamp(ref.detailTiles, 1.0f, 512.0f);
         }
 
+        // Both detail-map channels carry a dialed STRENGTH alongside the map ("Normal Map" 2.5,
+        // "Bump Strength" 4 are typical for heavily-detailed skins) — the map's texels are scaled
+        // by it at render. Ignoring it flattened strongly-authored skins (the surface stayed near
+        // mirror-coherent, so the broad specular sheen read as wet plastic). Clamped to the
+        // push-constant packing range (mesh.record packs mode + strength/8 into one float).
         if (const nlohmann::json* c = effectiveChannel(mat, base, "Normal Map")) {
             ref.normalImageUri = channelImageUri(*c, imageLibrary);
+            ref.normalStrength = std::clamp(channelScalar(*c, 1.0f), 0.0f, 7.9f);
         }
         if (const nlohmann::json* c = effectiveChannel(mat, base, "Bump Strength")) {
             ref.bumpImageUri = channelImageUri(*c, imageLibrary);
+            ref.bumpStrength = std::clamp(channelScalar(*c, 1.0f), 0.0f, 7.9f);
         }
 
         // Transparency: straight cutout opacity, plus two clear-surface cases that the eye's moisture

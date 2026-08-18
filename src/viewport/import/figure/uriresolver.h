@@ -52,6 +52,15 @@ public:
     std::shared_ptr<const FigureDocument> loadDocument(const std::string& uri,
                                                      const std::string& referringFileDir = "");
 
+    /// Resolves every URI and loads the not-yet-cached documents in parallel across cores, filling
+    /// the cache so subsequent loadDocument calls are instant. The per-document work (file read +
+    /// gzip inflate + JSON parse) is independent and dominates figure import when a preset reaches
+    /// hundreds of morph files. Unresolvable/unparsable entries are skipped silently — the caller's
+    /// own loadDocument reports those. Not itself thread-safe: call from one thread; the
+    /// parallelism is internal.
+    void prefetchDocuments(const std::vector<std::string>& uris,
+                           const std::string& referringFileDir = "");
+
     /// Percent-decodes a URL-encoded string ("My%20Figures" -> "My Figures"). '+' is left literal (the
     /// figure format encodes spaces as %20, not '+').
     static std::string urlDecode(const std::string& s);

@@ -43,7 +43,8 @@ VulkanRenderer::VulkanRenderer(VulkanContext& context, VkExtent2D initialExtent,
                                     m_scene->iblSetLayout());
 
     m_postProcess = std::make_unique<PostProcess>(
-        m_context, m_swapchain->renderPass(), m_hdrTarget->resolveInfo(), m_swapchain->extent(),
+        m_context, m_swapchain->renderPass(), m_hdrTarget->resolveInfo(),
+        m_hdrTarget->specResolveInfo(), m_swapchain->extent(),
         loadSpirv("fullscreen.vert.spv"), loadSpirv("bloombright.frag.spv"),
         loadSpirv("bloomblur.frag.spv"), loadSpirv("composite.frag.spv"),
         loadSpirv("sssblur.frag.spv"));
@@ -142,6 +143,10 @@ void VulkanRenderer::finalizePose() {
     if (m_scene) {
         m_scene->finalizePose();
     }
+}
+
+bool VulkanRenderer::groundFigure() {
+    return m_scene ? m_scene->groundFigure() : false;
 }
 
 int VulkanRenderer::gizmoAxisAt(float px, float py, float vpW, float vpH) const {
@@ -255,7 +260,7 @@ void VulkanRenderer::recreateSwapchain() {
     const VkExtent2D extent = m_swapchain->extent();
     // The offscreen HDR target + bloom targets track the swapchain size (the device is idle here).
     m_hdrTarget->resize(extent);
-    m_postProcess->resize(extent, m_hdrTarget->resolveInfo());
+    m_postProcess->resize(extent, m_hdrTarget->resolveInfo(), m_hdrTarget->specResolveInfo());
     m_camera.setViewportSize(static_cast<float>(extent.width), static_cast<float>(extent.height));
     m_framebufferResized = false;
 }
@@ -344,30 +349,39 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageInde
     scissor.extent = extent;
 
     // --- Offscreen HDR scene pass: backdrop + meshes + grid, in LINEAR HDR. --------------------
-    std::array<VkClearValue, 2> clears{};
+    // Five clear slots cover every attachment layout the HDR target uses (MSAA:
+    // colourMS/depth/resolve/specMS/specResolve; single-sample: colour/depth/spec) — the
+    // SPECULAR attachments clear to zero (no specular where nothing draws).
+    std::array<VkClearValue, 5> clears{};
     // Viewport background #3E4042 = (62, 64, 66) as LINEAR values (sRGB->linear of each channel).
     // The HDR target is a linear format and the composite's sRGB swapchain store does the final
     // encode, so the displayed pixel comes back out as exactly #3E4042. Alpha clears to 0: the
     // HDR target's alpha is the SSS mask, and empty pixels are not skin.
     clears[0].color = {{0.04816f, 0.05125f, 0.05447f, 0.0f}};
     clears[1].depthStencil = {1.0f, 0};
+    clears[2].color = {{0.0f, 0.0f, 0.0f, 0.0f}}; // single-sample: the spec attachment
+    clears[3].color = {{0.0f, 0.0f, 0.0f, 0.0f}}; // MSAA: the spec MS attachment
+    clears[4].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
 
     VkRenderPassBeginInfo scenePass{};
     scenePass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     scenePass.renderPass = m_hdrTarget->renderPass();
     scenePass.framebuffer = m_hdrTarget->framebuffer();
     scenePass.renderArea.extent = extent;
-    scenePass.clearValueCount = static_cast<uint32_t>(clears.size());
+    scenePass.clearValueCount = m_hdrTarget->attachmentCount();
     scenePass.pClearValues = clears.data();
     vkCmdBeginRenderPass(cmd, &scenePass, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     // Imported meshes first (opaque, depth test+write), then the grid — a transparent overlay
-    // that depth-tests against scene geometry and blends; the scene's set 3 + light matrix feed
-    // its ground/contact shadow.
+    // that depth-tests against scene geometry and blends; the scene's set 3 + light matrix +
+    // shadow dials feed its PCSS ground shadow.
     m_scene->record(cmd, m_camera, m_currentFrame);
-    m_grid->record(cmd, m_camera, m_scene->iblSet(), m_scene->lightViewProj());
+    const LightingSettings& lighting = m_scene->lightingSettings();
+    m_grid->record(cmd, m_camera, m_scene->iblSet(), m_scene->lightViewProj(),
+                   glm::vec4(lighting.shadowIntensity, lighting.shadowSoftness,
+                             lighting.shadowReach, 0.0f));
     vkCmdEndRenderPass(cmd);
 
     // --- SSSSS then bloom (PBR mode only — the stylized modes author display-ready values). ----

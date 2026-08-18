@@ -93,9 +93,41 @@ float evalSpline(const std::vector<CorrectiveKnot>& knots, float x) {
 
 } // namespace
 
+/// Per-model dedup of texture uploads: one VulkanTexture per unique DecodedImage (+ colour space —
+/// the same image could in principle feed both an sRGB and a LINEAR slot, which need distinct
+/// VkImages). Lives only for the duration of the Model constructor; the meshes keep the textures
+/// alive through their shared_ptrs afterwards.
+struct TextureUploadCache {
+    std::unordered_map<const DecodedImage*, std::shared_ptr<VulkanTexture>> srgb;
+    std::unordered_map<const DecodedImage*, std::shared_ptr<VulkanTexture>> linear;
+};
+
+namespace {
+
+// Returns the (shared) texture for @p image, uploading it into @p batch only on first use. Null
+// image => null (the caller binds the appropriate 1x1 fallback).
+std::shared_ptr<VulkanTexture> uploadShared(VulkanContext& context, TextureUploadCache& cache,
+                                            const DecodedImagePtr& image, bool srgbFormat,
+                                            ImmediateBatch& batch) {
+    if (!image || image->width == 0 || image->height == 0 || image->pixels.empty()) {
+        return nullptr;
+    }
+    auto& map = srgbFormat ? cache.srgb : cache.linear;
+    const auto it = map.find(image.get());
+    if (it != map.end()) {
+        return it->second;
+    }
+    auto texture = std::make_shared<VulkanTexture>(context, image->pixels.data(), image->width,
+                                                   image->height, batch, srgbFormat);
+    map.emplace(image.get(), texture);
+    return texture;
+}
+
+} // namespace
+
 Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout materialSetLayout,
            VkDescriptorPool materialPool, const VulkanTexture& fallbackDiffuse,
-           const VulkanTexture& fallbackNormal, ImmediateBatch& batch)
+           const VulkanTexture& fallbackNormal, TextureUploadCache& uploads, ImmediateBatch& batch)
     : m_indexCount(static_cast<uint32_t>(data.indices.size())), m_baseColor(data.baseColor),
       m_roughness(data.roughness), m_specularWeight(data.specularWeight),
       m_metalness(data.metalness), m_lobe1Roughness(data.lobe1Roughness),
@@ -121,47 +153,27 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
     m_indexBuffer = createDeviceLocalBuffer(context, data.indices.data(), indexBytes,
                                             VK_BUFFER_USAGE_INDEX_BUFFER_BIT, batch);
 
-    // Upload the diffuse map if the Qt layer decoded one for this mesh; else use the white fallback.
-    if (data.diffuseWidth > 0 && data.diffuseHeight > 0 && !data.diffusePixels.empty()) {
-        m_texture = std::make_unique<VulkanTexture>(context, data.diffusePixels.data(),
-                                                    data.diffuseWidth, data.diffuseHeight, batch);
-    }
-    // Upload the detail (normal/bump) map if present — a LINEAR texture — and remember its mode. With
-    // no map we bind the flat-normal fallback and force mode 0 (no perturbation).
-    if (data.normalWidth > 0 && data.normalHeight > 0 && !data.normalPixels.empty()) {
-        m_normalTexture = std::make_unique<VulkanTexture>(context, data.normalPixels.data(),
-                                                          data.normalWidth, data.normalHeight, batch,
-                                                          /*srgb=*/false);
+    // Upload (or reuse — see TextureUploadCache) the diffuse map if the Qt layer decoded one for
+    // this mesh; else use the white fallback.
+    m_texture = uploadShared(context, uploads, data.diffuseImage, /*srgb=*/true, batch);
+    // The detail (normal/bump) map — a LINEAR texture — and its mode. With no map we bind the
+    // flat-normal fallback and force mode 0 (no perturbation).
+    m_normalTexture = uploadShared(context, uploads, data.normalImage, /*srgb=*/false, batch);
+    if (m_normalTexture) {
         m_normalMode = data.normalMode;
+        m_normalStrength = data.normalStrength;
     }
     // Specular parameter maps (linear ×-multiplier data; see modeldata.h). Absent => the shared
     // white fallback, so the shader's per-texel multiplies are no-ops for scalar-only materials.
-    if (data.roughnessWidth > 0 && data.roughnessHeight > 0 && !data.roughnessPixels.empty()) {
-        m_roughnessTexture =
-            std::make_unique<VulkanTexture>(context, data.roughnessPixels.data(),
-                                            data.roughnessWidth, data.roughnessHeight, batch,
-                                            /*srgb=*/false);
-    }
-    if (data.specMaskWidth > 0 && data.specMaskHeight > 0 && !data.specMaskPixels.empty()) {
-        m_specMaskTexture =
-            std::make_unique<VulkanTexture>(context, data.specMaskPixels.data(), data.specMaskWidth,
-                                            data.specMaskHeight, batch, /*srgb=*/false);
-    }
+    m_roughnessTexture = uploadShared(context, uploads, data.roughnessImage, /*srgb=*/false, batch);
+    m_specMaskTexture = uploadShared(context, uploads, data.specMaskImage, /*srgb=*/false, batch);
     // Translucency map (sRGB — it's the transmitted-tint colour; grayscale weight maps read the
     // same either way through their luminance).
-    if (data.translucencyWidth > 0 && data.translucencyHeight > 0 &&
-        !data.translucencyPixels.empty()) {
-        m_translucencyTexture = std::make_unique<VulkanTexture>(
-            context, data.translucencyPixels.data(), data.translucencyWidth,
-            data.translucencyHeight, batch);
-    }
+    m_translucencyTexture =
+        uploadShared(context, uploads, data.translucencyImage, /*srgb=*/true, batch);
     // Micro-detail (pore) normal map — linear, tiled (the sampler wraps).
-    if (data.detailNormalWidth > 0 && data.detailNormalHeight > 0 &&
-        !data.detailNormalPixels.empty()) {
-        m_microNormalTexture = std::make_unique<VulkanTexture>(
-            context, data.detailNormalPixels.data(), data.detailNormalWidth,
-            data.detailNormalHeight, batch, /*srgb=*/false);
-    }
+    m_microNormalTexture =
+        uploadShared(context, uploads, data.detailNormalImage, /*srgb=*/false, batch);
 
     const VulkanTexture& diffuse = m_texture ? *m_texture : fallbackDiffuse;
     const VulkanTexture& detail = m_normalTexture ? *m_normalTexture : fallbackNormal;
@@ -226,8 +238,12 @@ void Mesh::record(VkCommandBuffer cmd, VkPipelineLayout layout, const glm::mat4&
     // z = metalness ("Metallic Weight" — scalar only, no map yet); w = the per-material specular
     // (F0) weight the material parser derived from the active specular lobe's reflectivity
     // (1 = standard 4% dielectric; skin ~0.5 → ~2%; OBJ meshes default to 1).
-    push.material = glm::vec4(m_roughness, static_cast<float>(m_normalMode), m_metalness,
-                              m_specularWeight);
+    // material.y packs the detail mode + its authored strength (floor = mode, fract×8 = strength;
+    // the push block is at the 128-byte limit, so the pair shares one float).
+    const float modePacked =
+        static_cast<float>(m_normalMode) +
+        std::clamp(m_normalStrength, 0.0f, 7.9f) * 0.125f * (m_normalMode > 0 ? 1.0f : 0.0f);
+    push.material = glm::vec4(m_roughness, modePacked, m_metalness, m_specularWeight);
     push.material2 = glm::vec4(m_lobe1Roughness, m_lobe2Roughness, m_lobeRatio,
                                m_translucencyWeight);
     // material3.w packs the micro-detail layer (the block sits at the 128-byte push limit):
@@ -320,21 +336,33 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
     // so peak staging memory is the sum across meshes rather than one-at-a-time.
     const bool hasCorrectives = !data.correctives.empty();
     ImmediateBatch batch(m_context);
+    // Meshes sharing a DecodedImage (zones sampling the same atlas file) share one VulkanTexture
+    // through this cache — one staging upload + mip chain per unique image instead of per mesh.
+    TextureUploadCache uploads;
     m_meshes.reserve(meshCount);
     std::vector<std::vector<uint32_t>> perMeshBaseIndex; // parallel to m_meshes (for corrective mapping)
     if (hasCorrectives) {
         m_baseVertices.reserve(meshCount);
         perMeshBaseIndex.reserve(meshCount);
     }
+    const bool skinned = !data.bones.empty();
     for (const MeshData& meshData : data.meshes) {
         if (meshData.indices.empty()) {
             continue;
         }
         m_meshes.emplace_back(m_context, meshData, materialSetLayout, m_materialPool, fallbackDiffuse,
-                              fallbackNormal, batch);
+                              fallbackNormal, uploads, batch);
         if (hasCorrectives) {
             m_baseVertices.push_back(meshData.vertices);    // uncorrected base, for re-morphing
             perMeshBaseIndex.push_back(meshData.baseVertex); // source base index per render vertex
+        }
+        if (skinned) {
+            // Ground samples: the skinning inputs dropToGround() needs to find the posed lowest
+            // point (the GPU buffers are device-local and unreadable).
+            m_groundSamples.reserve(m_groundSamples.size() + meshData.vertices.size());
+            for (const Vertex& v : meshData.vertices) {
+                m_groundSamples.push_back({v.pos, v.joints, v.weights});
+            }
         }
     }
     batch.submitAndWait();
@@ -793,6 +821,47 @@ bool Model::intersectRay(const Ray& ray, float& tOut) const {
         }
     }
     tOut = tMin;
+    return true;
+}
+
+bool Model::dropToGround() {
+    float minY = std::numeric_limits<float>::max();
+    if (!m_bones.empty() && !m_groundSamples.empty()) {
+        // Posed lowest point: CPU-skin every ground sample with the CURRENT pose's skin matrices
+        // (poseGlobal · inverseBind — m_poseGlobal always holds the last computeSkinMatrices
+        // result) and track the world-space minimum. A one-shot ~few-ms walk; corrective deltas
+        // are ignored (they move contact regions by millimetres at most).
+        std::vector<glm::mat4> skin(m_bones.size());
+        for (std::size_t i = 0; i < m_bones.size(); ++i) {
+            skin[i] = m_poseGlobal[i] * m_bones[i].inverseBind;
+        }
+        for (const GroundSample& s : m_groundSamples) {
+            const glm::vec4 p(s.pos, 1.0f);
+            glm::vec3 posed(0.0f);
+            for (int j = 0; j < 4; ++j) {
+                const float w = s.weights[j];
+                if (w > 0.0f && s.joints[j] < skin.size()) {
+                    posed += w * glm::vec3(skin[s.joints[j]] * p);
+                }
+            }
+            minY = std::min(minY, (m_transform * glm::vec4(posed, 1.0f)).y);
+        }
+    } else if (m_hasBounds) {
+        // Static model: the bind AABB through the transform is exact (it can't pose).
+        for (int i = 0; i < 8; ++i) {
+            const glm::vec3 c((i & 1) ? m_boundsMax.x : m_boundsMin.x,
+                              (i & 2) ? m_boundsMax.y : m_boundsMin.y,
+                              (i & 4) ? m_boundsMax.z : m_boundsMin.z);
+            minY = std::min(minY, (m_transform * glm::vec4(c, 1.0f)).y);
+        }
+    } else {
+        return false; // no geometry to ground
+    }
+    if (!(minY < std::numeric_limits<float>::max()) || std::abs(minY) < 1e-4f) {
+        return false; // nothing sampled, or already resting on the floor
+    }
+    m_transform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -minY, 0.0f)) * m_transform;
+    computeSkinMatrices(); // refresh the transform-dependent bone world positions (picking/gizmo)
     return true;
 }
 

@@ -103,6 +103,9 @@ public:
     void nudgeSelectedBone(const glm::vec3& deltaEulerDegrees);
     /// Settles the figure after an interactive pose edit (applies pose correctives). Call on drag end.
     void finalizePose();
+    /// Drops the posable figure onto the ground plane (posed lowest point → y = 0). Returns true
+    /// if it actually moved (the caller then requests a frame).
+    bool groundFigure();
 
     // --- Rotate gizmo (forwarded to the Scene; use the renderer's own camera) ---
     int  gizmoAxisAt(float px, float py, float vpW, float vpH) const;

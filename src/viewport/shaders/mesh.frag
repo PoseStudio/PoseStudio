@@ -27,6 +27,7 @@ layout(set = 0, binding = 0) uniform CameraUbo {
     vec4 sh[9];   // environment diffuse irradiance: 9 SH coefficients (rgb in .xyz)
     vec4 params2; // x = diffuseIntensity, y = keyIntensity, z = envRotation(rad), w = tonemap(0/1)
     vec4 params3; // x = subsurface, y = rimIntensity, z/w reserved
+    vec4 params4; // x/y = backdrop dials (unused here), z = shadow intensity (0..1), w reserved
 } cam;
 
 layout(push_constant) uniform Push {
@@ -61,6 +62,10 @@ layout(location = 3) in float vAo; // baked ambient occlusion (1 = open; import-
 layout(location = 4) in vec4 vTangent; // baked UV tangent + handedness (w = 0 -> none)
 
 layout(location = 0) out vec4 outColor;
+// The HDR pass's second colour attachment: the PBR opaque pass's SPECULAR, kept out of the
+// screen-space SSS blur (blurred glints smear into a wet-looking film) and added back by the
+// blur's V pass. Only the opaque mesh pipeline writes this attachment (others mask it off).
+layout(location = 1) out vec4 outSpec;
 
 const float PI = 3.14159265359;
 
@@ -141,8 +146,20 @@ vec3 fresnelSchlick(float cosTheta, vec3 f0) {
 // Key-light visibility from the shadow map: 3x3 PCF through the hardware comparison sampler
 // (1 = fully lit). Depth bias is applied at shadow-raster time (the pipeline's static bias);
 // z outside [0,1] or uv outside the map (white border) simply read lit.
-float keyShadow(vec3 worldPos) {
-    vec4 lp = cam.lightViewProj * vec4(worldPos, 1.0);
+// @p geomN / @p ndlGeom: the GEOMETRIC surface normal and its N·L against the key — the sample
+// point is pushed off the surface along it (normal-offset shadows) before projecting. The static
+// raster-time depth bias alone under-compensates at grazing key angles (a low raking key across a
+// vertical thigh), where self-shadowing acne draws soft streak lines down every figure — the
+// offset grows as N·L falls, exactly where acne lives, while contact shadows stay put.
+float keyShadow(vec3 worldPos, vec3 geomN, float ndlGeom) {
+    // One shadow texel in world units, from the fitted ortho matrix's row scale (row0 length =
+    // 1 / frustum half-width; the map is square).
+    vec3  r0 = vec3(cam.lightViewProj[0][0], cam.lightViewProj[1][0], cam.lightViewProj[2][0]);
+    float mapSize = float(textureSize(uShadowMap, 0).x);
+    float texelWorld = 2.0 / (max(length(r0), 1e-6) * mapSize);
+    vec3  offsetPos = worldPos + geomN * texelWorld * (1.0 + 2.5 * (1.0 - ndlGeom));
+
+    vec4 lp = cam.lightViewProj * vec4(offsetPos, 1.0);
     vec3 p = lp.xyz / lp.w;
     if (p.z <= 0.0 || p.z >= 1.0) {
         return 1.0;
@@ -184,6 +201,7 @@ vec3 matcapMetal(vec3 vn) {
 }
 
 void main() {
+    outSpec = vec4(0.0); // only the PBR opaque path routes specular here
     int mode = int(cam.params.x + 0.5);
 
     vec3 n = normalize(vWorldNormal);
@@ -191,10 +209,15 @@ void main() {
         n = -n; // light back faces as if they faced us (no back-face culling; winding is inconsistent)
     }
 
-    // Detail-map normal perturbation (uniform branch on the per-draw normalMode).
-    int nm = int(pc.material.y + 0.5);
+    // Detail-map normal perturbation (uniform branch on the per-draw normalMode). material.y packs
+    // mode + authored strength (floor = mode, fract×8 = strength): heavily-detailed skins dial
+    // e.g. Normal Map 2.5 / Bump 4, and applying their maps at a fixed 1x left the surface so
+    // coherent that the broad specular sheen read as wet plastic on smooth body regions.
+    int nm = int(floor(pc.material.y));
+    float detailStrength = fract(pc.material.y) * 8.0;
     if (nm == 1) {
         vec3 mapN = texture(uDetail, vUv).xyz * 2.0 - 1.0;
+        mapN.xy *= detailStrength; // authored strength steepens/flattens the mapped slope
         n = normalize(tangentFrame(n, vWorldPos, vUv) * mapN);
     } else if (nm == 2) {
         vec2 texel = 1.0 / vec2(textureSize(uDetail, 0));
@@ -202,7 +225,20 @@ void main() {
         float hR = texture(uDetail, vUv + vec2(texel.x, 0.0)).r;
         float hD = texture(uDetail, vUv - vec2(0.0, texel.y)).r;
         float hU = texture(uDetail, vUv + vec2(0.0, texel.y)).r;
-        vec2 dH = vec2(hR - hL, hU - hD) * 2.5;
+        vec2 dFine = vec2(hR - hL, hU - hD);
+        // HIGH-PASS the bump: a second central difference with a 4-texel arm captures the broad,
+        // low-frequency slope (veins, stretch bands, large forms), which is subtracted out — for
+        // a feature wider than the arm the two gradients cancel exactly. The bump layer must read
+        // as pore-scale GRAIN only: the source renderer's tiny physical bump scale never shows
+        // its maps' vein content, but our slope-space bump did, drawing "weird stretch-mark
+        // lines" down every figure's thighs at any overall factor.
+        float bL = texture(uDetail, vUv - vec2(4.0 * texel.x, 0.0)).r;
+        float bR = texture(uDetail, vUv + vec2(4.0 * texel.x, 0.0)).r;
+        float bD = texture(uDetail, vUv - vec2(0.0, 4.0 * texel.y)).r;
+        float bU = texture(uDetail, vUv + vec2(0.0, 4.0 * texel.y)).r;
+        vec2 dBroad = vec2(bR - bL, bU - bD) * 0.25; // normalized to the fine gradient's units
+        // 1.5 = height→slope base for the remaining grain, scaled by the authored strength.
+        vec2 dH = (dFine - dBroad) * 1.5 * detailStrength;
         n = normalize(tangentFrame(n, vWorldPos, vUv) * vec3(-dH.x, -dH.y, 1.0));
     }
 
@@ -237,7 +273,24 @@ void main() {
     // Scalar roughness × its per-texel map (white fallback = scalar-only): the source materials
     // author per-region variation — T-zone oil, matte body, glossy lips — in these maps.
     float roughTexel = texture(uRoughMap, vUv).r;
-    float rough = clamp(pc.material.x * roughTexel, 0.04, 1.0);
+    // Geometric specular anti-aliasing (Kaplanyan/Tokuyoshi-style): where the SHADED normal turns
+    // fast across the screen — the ridges of a strong detail map (stretch marks, pores), silhouette
+    // curvature — a pixel really covers a whole fan of normals, and evaluating a narrow lobe at
+    // just one of them draws hot white streaks (the classic normal-map specular aliasing; Sahel's
+    // 2.5x stretch-mark ridges lit them up under the environment). Widen the lobes by the normal's
+    // screen-space variance so ridge highlights broaden and dim into a sheen instead.
+    vec3  dndx = dFdx(n);
+    vec3  dndy = dFdy(n);
+    // Screen-space variance fades as the camera closes in (the pixel footprint shrinks), so add a
+    // ZOOM-INDEPENDENT term: how far the detail map bent this pixel's normal off the geometric
+    // one. A strongly-authored ridge (stretch marks at 2.5x) is a steep micro-slope whose real
+    // reflection is spread by the ridge's own curvature — evaluating a narrow lobe on it draws a
+    // hot white streak at any viewing distance.
+    vec3  geomN = normalize(vWorldNormal) * (gl_FrontFacing ? 1.0 : -1.0);
+    float slopeDev = 1.0 - clamp(dot(n, geomN), 0.0, 1.0);
+    float normalVariance =
+        clamp(0.5 * (dot(dndx, dndx) + dot(dndy, dndy)) + 0.8 * slopeDev, 0.0, 0.35);
+    float rough = clamp(pc.material.x * roughTexel + normalVariance, 0.04, 1.0);
 
     // --- Data / unlit modes (return early; no lighting) ---
     if (mode == 9) {              // Normals: world-space normal as RGB
@@ -333,7 +386,8 @@ void main() {
         vec3  kS = fresnelSchlick(ndv, f0);
         vec3  kD = (1.0 - kS) * (1.0 - metallic);
 
-        vec3 color = vec3(0.0);
+        vec3 color = vec3(0.0);   // DIFFUSE light — diffuses through skin (the SSS blur's input)
+        vec3 specSum = vec3(0.0); // SPECULAR — surface reflection, must stay crisp (own attachment)
 
         // Key light — kept modest (the environment already lights the form; a strong key double-lights
         // the facing side and blows the skin out). Its diffuse is a per-channel *wrapped* Lambert, the
@@ -345,14 +399,18 @@ void main() {
         // to plain Lambert.
         // Shadow the key light (diffuse + specular + top coat alike): self-shadowing under the
         // chin/nose, arm-on-torso, etc. The environment terms stay unshadowed (that's AO's job).
-        float shadow = keyShadow(vWorldPos);
+        // The panel's shadow-intensity dial blends the occlusion toward lit (0 = shadowing off).
+        float ndlGeom = clamp(dot(geomN, l), 0.0, 1.0);
+        float shadow = mix(1.0, keyShadow(vWorldPos, geomN, ndlGeom), cam.params4.z);
 
         // Dual-lobe specular: skin authors a broad + a tighter GGX lobe blended by a ratio; a
         // ratio of 1 marks a single-lobe material (OBJ, glossy-lobe surfaces) which uses the
         // ratio-blended `rough` exactly as before. Both lobes share the roughness map.
         float lobeRatio = clamp(pc.material2.z, 0.0, 1.0);
-        float rough1 = clamp(pc.material2.x * roughTexel, 0.04, 1.0);
-        float rough2 = clamp(pc.material2.y * roughTexel, 0.04, 1.0);
+        // Both lobes get the same specular-AA variance widening as the single-lobe path — the
+        // TIGHT lobe is exactly where ridge aliasing shows.
+        float rough1 = clamp(pc.material2.x * roughTexel + normalVariance, 0.04, 1.0);
+        float rough2 = clamp(pc.material2.y * roughTexel + normalVariance, 0.04, 1.0);
         bool  dualLobe = lobeRatio < 0.999;
 
         // Per-region translucency: authored weight × the map (a flesh-red colour map carries the
@@ -385,8 +443,8 @@ void main() {
                     G = geomSmith(ndv, rawNdl, a);
                 }
                 vec3  F = fresnelSchlick(vdh, f0);
-                vec3  spec = (D * G) * F / max(4.0 * ndv * rawNdl, 1e-4);
-                color += spec * cam.lightColor.rgb * keyInt * rawNdl * shadow;
+                vec3  keySpec = (D * G) * F / max(4.0 * ndv * rawNdl, 1e-4);
+                specSum += keySpec * cam.lightColor.rgb * keyInt * rawNdl * shadow;
             }
             // Backlit transmission: key light entering from BEHIND glows through thin translucent
             // regions (ears, nostrils, finger webbing). The through-vector is the light bent by
@@ -424,17 +482,25 @@ void main() {
         // so a matte-authored surface stays matte at glancing angles instead of picking up a wet sheen.
         vec3 R = reflect(-v, n);
         float maxMip = float(textureQueryLevels(uPrefilteredSpec) - 1);
-        vec3 envDir = rotateY(R, envRot);
+        // Dominant-direction correction (Frostbite): a rough lobe is wide, but the split-sum
+        // prefilter is sampled along a single direction — strictly along R, a bumpy normal aiming
+        // R at a bright ceiling softbox draws a hot white streak even at near-max roughness (the
+        // "wet streak marks" on strongly normal-mapped skin). Bend the sample direction toward the
+        // normal as the lobe widens (α = rough²), so a broad lobe averages the hemisphere around
+        // the SURFACE rather than mirroring whatever R hits.
         vec3 prefiltered;
         vec2 brdf;
         if (dualLobe) {
             // Two prefiltered samples + two LUT fetches, blended by the lobe ratio — the broad
             // lobe's soft sheen and the tight lobe's sharper reflection coexist like real skin.
-            prefiltered = mix(textureLod(uPrefilteredSpec, envDir, rough2 * maxMip).rgb,
-                              textureLod(uPrefilteredSpec, envDir, rough1 * maxMip).rgb, lobeRatio);
+            vec3 dir1 = rotateY(normalize(mix(R, n, rough1 * rough1)), envRot);
+            vec3 dir2 = rotateY(normalize(mix(R, n, rough2 * rough2)), envRot);
+            prefiltered = mix(textureLod(uPrefilteredSpec, dir2, rough2 * maxMip).rgb,
+                              textureLod(uPrefilteredSpec, dir1, rough1 * maxMip).rgb, lobeRatio);
             brdf = mix(texture(uBrdfLut, vec2(ndv, rough2)).rg,
                        texture(uBrdfLut, vec2(ndv, rough1)).rg, lobeRatio);
         } else {
+            vec3 envDir = rotateY(normalize(mix(R, n, a)), envRot);
             prefiltered = textureLod(uPrefilteredSpec, envDir, rough * maxMip).rgb;
             brdf = texture(uBrdfLut, vec2(ndv, rough)).rg;
         }
@@ -442,11 +508,27 @@ void main() {
         // real surface horizon — environment light from *under* the skin, which reads as an oily
         // film sitting on every bump. Fade the environment specular as R sinks under the vertex
         // (geometric) normal's hemisphere.
-        vec3 vertexN = normalize(vWorldNormal) * (gl_FrontFacing ? 1.0 : -1.0);
+        vec3 vertexN = geomN; // the geometric normal computed for the specular-AA slope term
         float horizon = clamp(1.0 + dot(R, vertexN), 0.0, 1.0);
         horizon *= horizon;
-        color += prefiltered * (f0 * brdf.x + brdf.y * min(specWeight, 1.0)) * specScale * horizon *
-                 specAo;
+        // Grazing (F90) bias: the split-sum's white B-term models the coherent grazing sheen of a
+        // SMOOTH dielectric interface. A micro-rough surface (broad-lobe skin) loses that
+        // coherence to micro self-shadowing and multiple scattering — left undamped, the white
+        // term over a bright studio environment lays a milky "wet" veil across the environment-lit
+        // side of the figure (worst exactly on the roughness map's roughest blotches, and most
+        // visible from behind where no key light competes). Damp it by (1 − roughness): the
+        // smooth cornea keeps its grazing glint, rough skin dries out. specWeight already carries
+        // the per-texel spec mask (≤ 1 by construction).
+        float grazing = brdf.y * specWeight * (1.0 - rough);
+        // A rough lobe's gathered environment light is the same light the diffuse term already
+        // integrates — the split-sum overshoots it, and what remains reads as a milky veil pinned
+        // to the roughness map's brightest (roughest) blotches, worst on the environment-lit back
+        // where no key light competes. Fade the environment specular out DECISIVELY as roughness
+        // rises: gone by rough ≈ 0.95, at half strength ≈ 0.7 — broad-rough skin keeps only a
+        // whisper of sheen, while the smooth cornea/lips (rough ≲ 0.45) are untouched.
+        float envSpecFade = 1.0 - smoothstep(0.45, 0.95, rough);
+        specSum +=
+            prefiltered * (f0 * brdf.x + grazing) * specScale * horizon * specAo * envSpecFade;
 
         // Top Coat: the thin clear/oily layer skins author over the base lobes (weight ~0.35-0.45,
         // roughness ~0.6-0.7) — a second dielectric specular layer at the standard 4% F0, on both
@@ -462,28 +544,44 @@ void main() {
                 float Dc = distGGX(ndh, aC);
                 float Gc = geomSmith(ndv, rawNdl, aC);
                 vec3  Fc = fresnelSchlick(vdh, f0c);
-                color += (Dc * Gc) * Fc / max(4.0 * ndv * rawNdl, 1e-4) * cam.lightColor.rgb *
-                         keyInt * rawNdl * shadow * tcWeight;
+                specSum += (Dc * Gc) * Fc / max(4.0 * ndv * rawNdl, 1e-4) * cam.lightColor.rgb *
+                           keyInt * rawNdl * shadow * tcWeight;
             }
-            vec3 preC = textureLod(uPrefilteredSpec, envDir, tcRough * maxMip).rgb;
+            vec3 envDirC = rotateY(normalize(mix(R, n, tcRough * tcRough)), envRot);
+            vec3 preC = textureLod(uPrefilteredSpec, envDirC, tcRough * maxMip).rgb;
             vec2 brdfC = texture(uBrdfLut, vec2(ndv, tcRough)).rg;
-            color += preC * (f0c * brdfC.x + brdfC.y) * specScale * horizon * specAo * tcWeight;
+            // Same anti-veil treatment as the base lobes: damp the white grazing bias by the
+            // coat's roughness and fade the term as it saturates (an undamped 0.65-rough coat's
+            // grazing energy alone re-glazed figures whose coat IS their main specular).
+            float grazingC = brdfC.y * (1.0 - tcRough);
+            float coatFade = 1.0 - 0.75 * smoothstep(0.6, 1.0, tcRough);
+            specSum += preC * (f0c * brdfC.x + grazingC) * specScale * horizon * specAo *
+                       coatFade * tcWeight;
         }
 
         // Photographic back-rim: a cool edge where the surface grazes the view while facing the fixed
         // back light — the portrait rim that lifts the dark side off the background (what a studio
         // photographer adds precisely because the unlit side of a subject otherwise goes flat/dark).
         float rimEdge = pow(1.0 - ndv, 3.0) * max(dot(n, normalize(cam.rimDir.xyz)), 0.0);
-        color += cam.rimColor.rgb * rimEdge * rimInt * ao; // no rim glow inside cavities
+        specSum += cam.rimColor.rgb * rimEdge * rimInt * ao; // no rim glow inside cavities
 
         color *= exposure;
+        specSum *= exposure;
         // LINEAR HDR out — the scene renders offscreen now and the composite pass applies ACES
         // (post-bloom, so bloom thresholds see real radiance). ALPHA SEMANTICS: in the opaque pass
         // alpha carries the per-pixel translucency as the SSS MASK (the screen-space subsurface
         // blur's kernel scale — skin ~0.9, cloth/props 0, eyes ~0, backdrop 0); the transparent
         // pass keeps real blend opacity (its pipeline doesn't write alpha, but the blend factors
-        // read it).
-        outColor = vec4(color, pc.material3.z > 0.5 ? alpha : sssLocal);
+        // read it). SPECULAR routing: the opaque pass writes it to attachment 1 so the SSS blur
+        // can't smear it (the blur's V pass adds it back); the transparent pass can't write
+        // attachment 1 (masked) — its specular stays in-line, fine because its pixels aren't
+        // blurred (SSS mask ≈ 0 under the clear shells).
+        if (pc.material3.z > 0.5) {
+            outColor = vec4(color + specSum, alpha);
+        } else {
+            outColor = vec4(color, sssLocal);
+            outSpec = vec4(specSum, 0.0);
+        }
         return;
     }
 

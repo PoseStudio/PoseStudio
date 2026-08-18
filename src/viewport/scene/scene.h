@@ -118,6 +118,9 @@ public:
     /// Settles the figure after an interactive pose edit: applies pose correctives, which are
     /// deferred during a drag (they re-upload geometry) and applied here on release.
     void finalizePose();
+    /// Drops the posable figure onto the ground plane: translates it so the CURRENT pose's lowest
+    /// point rests at y = 0 (the viewport's "move to ground" button). Returns true if it moved.
+    bool groundFigure();
 
     // --- Rotate gizmo (three axis rings on the selected joint) ---
     /// Returns which gizmo ring (0=X,1=Y,2=Z) the pixel (@p px,@p py) is over, or -1. Only valid when

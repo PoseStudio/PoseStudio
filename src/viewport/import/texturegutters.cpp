@@ -1,12 +1,12 @@
 /**
  * @file texturegutters.cpp
- * @brief Implementation of fillTextureGutters. See texturegutters.h.
+ * @brief Implementation of fillImageGutters. See texturegutters.h.
  */
 
 #include "texturegutters.h"
 
-#include "modeldata.h"
 #include "parallelfor.h"
+#include "vertex.h"
 
 #include <glm/glm.hpp>
 
@@ -14,6 +14,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <unordered_set>
 #include <vector>
 
 namespace pose {
@@ -29,22 +31,52 @@ struct PyramidLevel {
     std::vector<uint8_t> has;  // 1 = carries a colour
 };
 
-// Rasterizes the mesh's UV triangles into a per-texel coverage mask. A texel (x, y) samples
+// Rasterizes one mesh's UV triangles into the shared per-texel coverage mask (accumulating — a
+// shared atlas collects coverage from every mesh that samples it). A texel (x, y) samples
 // uv = ((x+0.5)/w, (y+0.5)/h), so its centre (x+0.5, y+0.5) is tested against the triangles
 // scaled into texel space. The runtime sampler REPEATs, so out-of-range UVs wrap into the mask.
-std::vector<uint8_t> rasterizeCoverage(const std::vector<Vertex>& vertices,
-                                       const std::vector<uint32_t>& indices, int w, int h) {
-    std::vector<uint8_t> covered(static_cast<std::size_t>(w) * h, 0);
+void rasterizeCoverage(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices,
+                       int w, int h, std::vector<uint8_t>& covered) {
     const glm::vec2 scale(static_cast<float>(w), static_cast<float>(h));
     const int triCount = static_cast<int>(indices.size() / 3);
+
+    // Coverage is a set union, so triangles identical in (quarter-texel-quantized, wrap-folded) UV
+    // space contribute nothing after the first — and fibermesh-style meshes map THOUSANDS of
+    // strands onto the same tiny UV strip (a 150k-triangle brow follower re-marked the same texels
+    // ~3 s per map before this). Deduplicate first; ordinary atlas meshes pass through unchanged.
+    std::vector<int> uniqueTris;
+    uniqueTris.reserve(static_cast<std::size_t>(triCount));
+    {
+        std::unordered_set<uint64_t> seen;
+        seen.reserve(static_cast<std::size_t>(triCount));
+        const auto quantize = [&](const glm::vec2& uv) -> uint64_t {
+            // Quarter-texel grid, folded by the sampler's REPEAT wrap so tiled copies collide too.
+            const int qw = 4 * w, qh = 4 * h;
+            const int qx = ((static_cast<int>(std::lround(uv.x * scale.x * 4.0f)) % qw) + qw) % qw;
+            const int qy = ((static_cast<int>(std::lround(uv.y * scale.y * 4.0f)) % qh) + qh) % qh;
+            return (static_cast<uint64_t>(qx) << 32) | static_cast<uint64_t>(qy);
+        };
+        for (int t = 0; t < triCount; ++t) {
+            uint64_t key = 1469598103934665603ull; // FNV-1a over the three quantized corners
+            for (int c = 0; c < 3; ++c) {
+                key ^= quantize(vertices[indices[3 * t + c]].uv);
+                key *= 1099511628211ull;
+            }
+            if (seen.insert(key).second) {
+                uniqueTris.push_back(t);
+            }
+        }
+    }
+    const int uniqueCount = static_cast<int>(uniqueTris.size());
 
     // Parallel over triangle blocks: concurrent writes only ever store the same value (1), so the
     // races are benign.
     constexpr int kBlock = 256;
-    const int blocks = (triCount + kBlock - 1) / kBlock;
+    const int blocks = (uniqueCount + kBlock - 1) / kBlock;
     parallelFor(blocks, [&](int block) {
-        const int tEnd = std::min(triCount, (block + 1) * kBlock);
-        for (int t = block * kBlock; t < tEnd; ++t) {
+        const int tEnd = std::min(uniqueCount, (block + 1) * kBlock);
+        for (int u = block * kBlock; u < tEnd; ++u) {
+            const int t = uniqueTris[static_cast<std::size_t>(u)];
             const glm::vec2 a = vertices[indices[3 * t + 0]].uv * scale;
             const glm::vec2 b = vertices[indices[3 * t + 1]].uv * scale;
             const glm::vec2 c = vertices[indices[3 * t + 2]].uv * scale;
@@ -66,23 +98,78 @@ std::vector<uint8_t> rasterizeCoverage(const std::vector<Vertex>& vertices,
             if (y1 - y0 >= h) { y0 = 0; y1 = h - 1; }
 
             constexpr float kEps = 1e-3f; // texel-space tolerance so shared-edge centres are kept
-            for (int y = y0; y <= y1; ++y) {
+            // Scanline walk: per row the covered texels form one contiguous interval, and each
+            // edge's interval bound is LINEAR in the row coordinate — precomputed here so a row
+            // costs one multiply-add per edge. Cost tracks the triangle's actual area plus its
+            // bbox HEIGHT, never its bbox area. (The previous per-texel bbox test made a long thin
+            // strip triangle — a lash card spanning the atlas — walk millions of background
+            // texels, and a 150k-strand fibermesh brow took seconds per map.)
+            // Edge (p, q): e(px, py) = ((q.x−p.x)(py−p.y) − (q.y−p.y)(px−p.x)) · sign ≥ −kEps,
+            // i.e. m·px + kA + kB·py ≥ −kEps with
+            //   m = −sign·(q.y−p.y),  kB = sign·(q.x−p.x),  kA = sign·((q.y−p.y)p.x − (q.x−p.x)p.y)
+            // m > 0 ⇒ a lower bound px ≥ (−kEps−kA−kB·py)/m; m < 0 ⇒ an upper bound (flip);
+            // m ≈ 0 (horizontal edge) ⇒ an all-or-nothing y-constraint folded into the y-range.
+            float loA[3], loB[3], hiA[3], hiB[3];
+            int   nLo = 0, nHi = 0;
+            float yMin = static_cast<float>(y0) + 0.5f;
+            float yMax = static_cast<float>(y1) + 0.5f;
+            bool  degenerate = false;
+            const glm::vec2 edges[3][2] = {{b, c}, {c, a}, {a, b}};
+            for (const auto& e : edges) {
+                const glm::vec2& p = e[0];
+                const glm::vec2& q = e[1];
+                const float m = -sign * (q.y - p.y);
+                const float kB = sign * (q.x - p.x);
+                const float kA = sign * ((q.y - p.y) * p.x - (q.x - p.x) * p.y);
+                if (std::abs(m) > 1e-12f) {
+                    const float A = (-kEps - kA) / m;
+                    const float B = -kB / m;
+                    if (m > 0.0f) {
+                        loA[nLo] = A; loB[nLo] = B; ++nLo;
+                    } else {
+                        hiA[nHi] = A; hiB[nHi] = B; ++nHi;
+                    }
+                } else if (std::abs(kB) > 1e-12f) {
+                    // kB·py ≥ −kEps−kA: clip the y-range instead.
+                    const float yBound = (-kEps - kA) / kB;
+                    if (kB > 0.0f) {
+                        yMin = std::max(yMin, yBound);
+                    } else {
+                        yMax = std::min(yMax, yBound);
+                    }
+                } else if (kA < -kEps) {
+                    degenerate = true; // constraint never holds
+                    break;
+                }
+            }
+            if (degenerate) {
+                continue;
+            }
+            const int ys = std::max(y0, static_cast<int>(std::ceil(yMin - 0.5f)));
+            const int ye = std::min(y1, static_cast<int>(std::floor(yMax - 0.5f)));
+            for (int y = ys; y <= ye; ++y) {
                 const float py = static_cast<float>(y) + 0.5f;
                 const int wy = ((y % h) + h) % h;
-                for (int x = x0; x <= x1; ++x) {
-                    const float px = static_cast<float>(x) + 0.5f;
-                    const float e0 = ((c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x)) * sign;
-                    const float e1 = ((a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x)) * sign;
-                    const float e2 = ((b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x)) * sign;
-                    if (e0 >= -kEps && e1 >= -kEps && e2 >= -kEps) {
-                        const int wx = ((x % w) + w) % w;
-                        covered[static_cast<std::size_t>(wy) * w + wx] = 1;
-                    }
+                float xLo = static_cast<float>(x0) + 0.5f;
+                float xHi = static_cast<float>(x1) + 0.5f;
+                for (int e = 0; e < nLo; ++e) {
+                    xLo = std::max(xLo, loA[e] + loB[e] * py);
+                }
+                for (int e = 0; e < nHi; ++e) {
+                    xHi = std::min(xHi, hiA[e] + hiB[e] * py);
+                }
+                if (xLo > xHi) {
+                    continue;
+                }
+                const int xs = std::max(x0, static_cast<int>(std::ceil(xLo - 0.5f)));
+                const int xe = std::min(x1, static_cast<int>(std::floor(xHi - 0.5f)));
+                for (int x = xs; x <= xe; ++x) {
+                    const int wx = ((x % w) + w) % w;
+                    covered[static_cast<std::size_t>(wy) * w + wx] = 1;
                 }
             }
         }
     });
-    return covered;
 }
 
 // Fills every uncovered texel of `pixels` (tightly-packed RGBA8, w×h) with colour dilated from the
@@ -175,53 +262,51 @@ void fillFromCoverage(std::vector<uint8_t>& pixels, int w, int h,
     });
 }
 
-// Gutter-fills one decoded image against the mesh's UV coverage. Skips work when the coverage is
-// empty (nothing to pull colour from) or complete (nothing to fill — e.g. tiled materials).
-void fillImage(std::vector<uint8_t>& pixels, uint32_t width, uint32_t height,
-               const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices) {
+// True if the mesh's referenced UVs span more than kMaxTileSpan tiles on either axis — a tiled/
+// wrapping material (lash strips, tileable detail maps), not an atlas. Such a mesh effectively
+// samples its whole texture (the sampler REPEATs), so there is no unused background to fill — and
+// rasterizing it is pathological: every tile-spanning triangle's raster bbox clamps to the FULL
+// image, which turned one figure's tiled lash strip into ~15 s of coverage rasterization for a
+// mask that came out fully covered anyway.
+bool spansMultipleTiles(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices) {
+    constexpr float kMaxTileSpan = 2.0f; // an atlas mesh sits in [0,1] (+epsilon); tiled UVs span many
+    glm::vec2 lo(std::numeric_limits<float>::max());
+    glm::vec2 hi(std::numeric_limits<float>::lowest());
+    for (const uint32_t i : indices) {
+        const glm::vec2& uv = vertices[i].uv;
+        lo = glm::min(lo, uv);
+        hi = glm::max(hi, uv);
+    }
+    return (hi.x - lo.x) > kMaxTileSpan || (hi.y - lo.y) > kMaxTileSpan;
+}
+
+} // namespace
+
+void fillImageGutters(std::vector<uint8_t>& pixels, uint32_t width, uint32_t height,
+                      const std::vector<UvMeshRef>& users) {
     const int w = static_cast<int>(width);
     const int h = static_cast<int>(height);
     if (w <= 0 || h <= 0 || pixels.size() < static_cast<std::size_t>(w) * h * 4) {
         return;
     }
-    const std::vector<uint8_t> covered = rasterizeCoverage(vertices, indices, w, h);
+    for (const UvMeshRef& user : users) {
+        if (user.vertices && user.indices && spansMultipleTiles(*user.vertices, *user.indices)) {
+            return; // a tiled user leaves no fillable background (and rasterizing it is pathological)
+        }
+    }
+    std::vector<uint8_t> covered(static_cast<std::size_t>(w) * h, 0);
+    for (const UvMeshRef& user : users) {
+        if (!user.vertices || !user.indices || user.indices->size() < 3 || user.vertices->empty()) {
+            continue;
+        }
+        rasterizeCoverage(*user.vertices, *user.indices, w, h, covered);
+    }
     const std::size_t coveredCount =
         static_cast<std::size_t>(std::count(covered.begin(), covered.end(), uint8_t(1)));
     if (coveredCount == 0 || coveredCount == covered.size()) {
         return;
     }
     fillFromCoverage(pixels, w, h, covered);
-}
-
-} // namespace
-
-void fillTextureGutters(MeshData& mesh) {
-    if (mesh.indices.size() < 3 || mesh.vertices.empty()) {
-        return;
-    }
-    if (!mesh.diffusePixels.empty()) {
-        fillImage(mesh.diffusePixels, mesh.diffuseWidth, mesh.diffuseHeight, mesh.vertices,
-                  mesh.indices);
-    }
-    // The detail (normal/bump) map bleeds the same way — it shows as lighting seams rather than
-    // white lines — and dilating its bytes is equally valid (the fill only touches unused texels).
-    if (!mesh.normalPixels.empty()) {
-        fillImage(mesh.normalPixels, mesh.normalWidth, mesh.normalHeight, mesh.vertices,
-                  mesh.indices);
-    }
-    // Same for the specular parameter maps (their bleed shows as glossy/matte seam lines).
-    if (!mesh.roughnessPixels.empty()) {
-        fillImage(mesh.roughnessPixels, mesh.roughnessWidth, mesh.roughnessHeight, mesh.vertices,
-                  mesh.indices);
-    }
-    if (!mesh.specMaskPixels.empty()) {
-        fillImage(mesh.specMaskPixels, mesh.specMaskWidth, mesh.specMaskHeight, mesh.vertices,
-                  mesh.indices);
-    }
-    if (!mesh.translucencyPixels.empty()) {
-        fillImage(mesh.translucencyPixels, mesh.translucencyWidth, mesh.translucencyHeight,
-                  mesh.vertices, mesh.indices);
-    }
 }
 
 } // namespace pose

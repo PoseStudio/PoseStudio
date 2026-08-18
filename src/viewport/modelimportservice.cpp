@@ -12,125 +12,317 @@
 #include "import/meshimporter.h"
 #include "import/modeldata.h"
 #include "import/texturegutters.h"
+#include "parallelfor.h"
 #include "rendering/vulkanrenderer.h"
 
 #include <QApplication>
+#include <QBuffer>
 #include <QDebug>
 #include <QElapsedTimer>
 #include <QImage>
+#include <QImageReader>
 #include <QProgressDialog>
 
+#include <cstdint>
 #include <exception>
 #include <memory>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace pose {
 
 namespace {
 
-// Decodes a TextureSource (external path OR embedded bytes) into tightly-packed RGBA8 via QImage.
-// Returns false (leaving the outputs untouched) for an empty source or an undecodable image.
-bool decodeTexture(const TextureSource& src, std::vector<uint8_t>& outPixels, uint32_t& outWidth,
-                   uint32_t& outHeight) {
-    if (src.empty()) {
-        return false;
+// Identity key for a texture source: external files share by path — the point of the whole decode
+// cache, since figure zones commonly reference the same atlas files (face/lips/ears share the face
+// maps, torso/arms/legs the body maps). Embedded bytes are keyed by their address, i.e. unique to
+// their own mesh. Empty key = no source.
+std::string sourceKey(const TextureSource& src) {
+    if (!src.path.empty()) {
+        return src.path;
     }
-    QImage image;
     if (!src.encoded.empty()) {
-        image.loadFromData(src.encoded.data(), static_cast<int>(src.encoded.size()));
-    } else {
-        image.load(QString::fromStdString(src.path));
+        return "embedded:" + std::to_string(reinterpret_cast<std::uintptr_t>(&src));
     }
+    return {};
+}
+
+// Viewport texture-resolution cap. Characters commonly ship 8192² bump/roughness maps; at 8K each
+// costs 4× a 4K map at EVERY stage — decode, gutter fill, staging copy, GPU mip build, and ~341 MB
+// of VRAM per map — for pore-level detail the viewport camera can't resolve at working distances.
+// Downscaling at decode keeps import fast and VRAM sane (mainstream DCC viewports cap/compress the
+// same way); JPEG sources even decode directly at the reduced size (libjpeg DCT scaling). Promote
+// to a Preference if a full-res close-up use case appears.
+constexpr int kMaxTextureSize = 4096;
+
+// Reads a TextureSource (external path OR embedded bytes) into a QImage, downscaling anything over
+// kMaxTextureSize as part of the decode. Returns a null QImage on failure (the caller logs).
+// Safe to call from worker threads — QImageReader and the built-in plugins are reentrant.
+QImage readCapped(const TextureSource& src) {
+    QBuffer buffer;
+    QImageReader reader;
+    if (!src.encoded.empty()) {
+        buffer.setData(reinterpret_cast<const char*>(src.encoded.data()),
+                       static_cast<int>(src.encoded.size()));
+        buffer.open(QIODevice::ReadOnly);
+        reader.setDevice(&buffer);
+    } else {
+        reader.setFileName(QString::fromStdString(src.path));
+    }
+    // size() is a header-only peek for PNG/JPEG; setScaledSize folds the downscale into the decode
+    // (a fast DCT-scaled decode for JPEG, decode+smooth-scale for the rest).
+    const QSize size = reader.size();
+    if (size.isValid() && (size.width() > kMaxTextureSize || size.height() > kMaxTextureSize)) {
+        reader.setScaledSize(size.scaled(kMaxTextureSize, kMaxTextureSize, Qt::KeepAspectRatio));
+    }
+    QImage image = reader.read();
+    // Formats whose header size wasn't available still get capped, just less efficiently.
+    if (!image.isNull() &&
+        (image.width() > kMaxTextureSize || image.height() > kMaxTextureSize)) {
+        image = image.scaled(kMaxTextureSize, kMaxTextureSize, Qt::KeepAspectRatio,
+                             Qt::SmoothTransformation);
+    }
+    return image;
+}
+
+// Decodes a TextureSource into a tightly-packed RGBA8 image (capped — see kMaxTextureSize).
+// Returns null (logged) for an undecodable image.
+std::shared_ptr<DecodedImage> decodeSource(const TextureSource& src) {
+    QImage image = readCapped(src);
     if (image.isNull()) {
         const QString name = src.path.empty() ? QStringLiteral("<embedded texture>")
                                               : QString::fromStdString(src.path);
         qWarning() << "[viewport] Texture not found/decodable:" << name;
-        return false;
+        return nullptr;
     }
     image = image.convertToFormat(QImage::Format_RGBA8888);
-    outWidth = static_cast<uint32_t>(image.width());
-    outHeight = static_cast<uint32_t>(image.height());
+    auto out = std::make_shared<DecodedImage>();
+    out->width = static_cast<uint32_t>(image.width());
+    out->height = static_cast<uint32_t>(image.height());
     const uchar* bits = image.constBits();
-    outPixels.assign(bits, bits + image.sizeInBytes());
-    return true;
+    out->pixels.assign(bits, bits + image.sizeInBytes());
+    return out;
 }
 
-// Bakes a mesh's opacity (cutout) mask into its diffuse map's ALPHA channel — the shader samples
-// the diffuse anyway, so the mask rides along without its own texture/binding. An untextured mesh
-// gets a white RGBA canvas at the mask's own resolution first. The mask is grayscale-converted and
-// rescaled to the diffuse dimensions, so mismatched map sizes are fine. On success the mesh is
-// flagged so it renders in the alpha-blended transparent pass (a lash card's scalar opacity is 1 —
-// its shape exists only in the mask). Runs BEFORE the gutter fill, whose pull-push dilation covers
-// all four channels, so the baked alpha gets the same seam treatment as the colours.
-void bakeOpacityMask(MeshData& mesh) {
-    QImage mask;
-    if (!mesh.opacityMask.encoded.empty()) {
-        mask.loadFromData(mesh.opacityMask.encoded.data(),
-                          static_cast<int>(mesh.opacityMask.encoded.size()));
-    } else {
-        mask.load(QString::fromStdString(mesh.opacityMask.path));
-    }
+// Decodes an opacity (cutout) mask to grayscale (capped like every other map — it's rescaled to
+// the diffuse dimensions at bake anyway). Returns a null QImage (logged) on failure — the mesh
+// then keeps its scalar opacity.
+QImage decodeMask(const TextureSource& src) {
+    QImage mask = readCapped(src);
     if (mask.isNull()) {
         qWarning() << "[viewport] Opacity mask not found/decodable:"
-                   << QString::fromStdString(mesh.opacityMask.path);
-        return; // mesh keeps its scalar opacity
+                   << QString::fromStdString(src.path);
+        return mask;
     }
-    if (mesh.diffusePixels.empty()) {
-        mesh.diffuseWidth = static_cast<uint32_t>(mask.width());
-        mesh.diffuseHeight = static_cast<uint32_t>(mask.height());
-        mesh.diffusePixels.assign(
-            static_cast<std::size_t>(mesh.diffuseWidth) * mesh.diffuseHeight * 4, 255);
-    }
-    const QImage scaled =
-        mask.convertToFormat(QImage::Format_Grayscale8)
-            .scaled(static_cast<int>(mesh.diffuseWidth), static_cast<int>(mesh.diffuseHeight),
-                    Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    if (scaled.isNull()) {
-        return;
-    }
-    for (uint32_t y = 0; y < mesh.diffuseHeight; ++y) {
-        const uchar* row = scaled.constScanLine(static_cast<int>(y));
-        uint8_t* out = mesh.diffusePixels.data() + static_cast<std::size_t>(y) * mesh.diffuseWidth * 4;
-        for (uint32_t x = 0; x < mesh.diffuseWidth; ++x) {
-            out[x * 4 + 3] = row[x];
-        }
-    }
-    mesh.hasOpacityMask = true;
+    return mask.convertToFormat(QImage::Format_Grayscale8);
 }
 
 } // namespace
 
-void ModelImportService::decodeMeshTexture(MeshData& mesh) {
-    // Diffuse: an undecodable/absent map just leaves the mesh on its base color (white fallback).
-    decodeTexture(mesh.diffuse, mesh.diffusePixels, mesh.diffuseWidth, mesh.diffuseHeight);
-    // Detail (normal/bump): if it can't be decoded, drop to flat shading (mode 0).
-    if (!decodeTexture(mesh.normal, mesh.normalPixels, mesh.normalWidth, mesh.normalHeight)) {
-        mesh.normalMode = 0;
+void ModelImportService::decodeModelTextures(ModelData& data) {
+    constexpr std::size_t kNoCombo = static_cast<std::size_t>(-1);
+
+    // ---- 1. Collect every unique image source (and opacity mask) across the model's meshes. ----
+    struct SourceJob {
+        std::string          key;
+        const TextureSource* src = nullptr;
+    };
+    std::unordered_map<std::string, std::shared_ptr<DecodedImage>> images;
+    std::vector<SourceJob>                                         imageJobs;
+    auto addImageSource = [&](const TextureSource& src) -> std::string {
+        std::string key = sourceKey(src);
+        if (!key.empty() && images.emplace(key, nullptr).second) {
+            imageJobs.push_back({key, &src});
+        }
+        return key;
+    };
+    std::unordered_map<std::string, QImage> masks;
+    std::vector<SourceJob>                  maskJobs;
+    auto addMaskSource = [&](const TextureSource& src) -> std::string {
+        std::string key = sourceKey(src);
+        if (!key.empty() && masks.emplace(key, QImage()).second) {
+            maskJobs.push_back({key, &src});
+        }
+        return key;
+    };
+
+    struct MeshKeys {
+        std::string diffuse, mask, normal, roughness, specMask, translucency, detailNormal;
+    };
+    std::vector<MeshKeys> keys(data.meshes.size());
+    for (std::size_t m = 0; m < data.meshes.size(); ++m) {
+        MeshData& mesh = data.meshes[m];
+        keys[m].diffuse = addImageSource(mesh.diffuse);
+        keys[m].mask = addMaskSource(mesh.opacityMask);
+        keys[m].normal = addImageSource(mesh.normal);
+        keys[m].roughness = addImageSource(mesh.roughnessMap);
+        keys[m].specMask = addImageSource(mesh.specMask);
+        keys[m].translucency = addImageSource(mesh.translucencyMap);
+        keys[m].detailNormal = addImageSource(mesh.detailNormalMap);
     }
-    // Specular parameter maps (both linear, sampled .r in the shader). Roughness: pure per-texel
-    // multiplier on the scalar (an absent map = white fallback = scalar behaviour). Spec mask:
-    // when it decodes, the material's UNdiscounted specular weight takes over — the sampled mask
-    // texels now do the scaling that the parser's assumed-average discount only guessed at.
-    decodeTexture(mesh.roughnessMap, mesh.roughnessPixels, mesh.roughnessWidth, mesh.roughnessHeight);
-    if (decodeTexture(mesh.specMask, mesh.specMaskPixels, mesh.specMaskWidth, mesh.specMaskHeight)) {
-        mesh.specularWeight = mesh.specularWeightWithMap;
+
+    // ---- 2. Decode each unique source exactly once, across cores. The serial per-mesh decode of
+    // shared 4K atlas maps used to dominate figure import time.
+    {
+        std::vector<std::shared_ptr<DecodedImage>> imageResults(imageJobs.size());
+        std::vector<QImage>                        maskResults(maskJobs.size());
+        const int imageCount = static_cast<int>(imageJobs.size());
+        parallelFor(imageCount + static_cast<int>(maskJobs.size()), [&](int i) {
+            if (i < imageCount) {
+                imageResults[static_cast<std::size_t>(i)] =
+                    decodeSource(*imageJobs[static_cast<std::size_t>(i)].src);
+            } else {
+                const std::size_t mi = static_cast<std::size_t>(i - imageCount);
+                maskResults[mi] = decodeMask(*maskJobs[mi].src);
+            }
+        });
+        for (std::size_t i = 0; i < imageJobs.size(); ++i) {
+            images[imageJobs[i].key] = std::move(imageResults[i]);
+        }
+        for (std::size_t i = 0; i < maskJobs.size(); ++i) {
+            masks[maskJobs[i].key] = std::move(maskResults[i]);
+        }
     }
-    // Translucency (sRGB colour / grayscale weight map — the shader takes tint + luminance).
-    decodeTexture(mesh.translucencyMap, mesh.translucencyPixels, mesh.translucencyWidth,
-                  mesh.translucencyHeight);
-    // Micro-detail (pore) normal — linear, tiled; skipped by the gutter fill (it wraps).
-    if (!decodeTexture(mesh.detailNormalMap, mesh.detailNormalPixels, mesh.detailNormalWidth,
-                       mesh.detailNormalHeight)) {
-        mesh.detailWeight = 0.0f; // undecodable map: no detail layer
+
+    // ---- 3. Bake each unique (diffuse, mask) pair into its own shared image: the mask (a lash/
+    // brow card's shape, an older figure's eye-shell fade) rides in the diffuse map's ALPHA channel,
+    // so the shader needs no extra texture/binding. The bake COPIES the diffuse first — the plain
+    // shared decode must stay pristine for meshes using it unmasked. Runs before the gutter fill so
+    // the baked alpha gets the same seam treatment as the colours.
+    struct Combo {
+        std::string                   diffuseKey, maskKey;
+        std::shared_ptr<DecodedImage> image;
+        bool                          masked = false;
+    };
+    std::vector<Combo>                           combos;
+    std::unordered_map<std::string, std::size_t> comboIndex; // "diffuse\x1fmask" -> index
+    std::vector<std::size_t>                     comboOfMesh(data.meshes.size(), kNoCombo);
+    for (std::size_t m = 0; m < data.meshes.size(); ++m) {
+        if (keys[m].mask.empty()) {
+            continue; // no opacity mask — the plain shared diffuse serves as-is
+        }
+        const std::string ck = keys[m].diffuse + '\x1f' + keys[m].mask;
+        const auto [it, inserted] = comboIndex.emplace(ck, combos.size());
+        if (inserted) {
+            combos.push_back({keys[m].diffuse, keys[m].mask, nullptr, false});
+        }
+        comboOfMesh[m] = it->second;
     }
-    // Opacity (cutout) mask -> the diffuse map's alpha channel (see bakeOpacityMask). Before the
-    // gutter fill so the baked alpha shares the seam treatment.
-    if (!mesh.opacityMask.empty()) {
-        bakeOpacityMask(mesh);
+    parallelFor(static_cast<int>(combos.size()), [&](int ci) {
+        Combo&        combo = combos[static_cast<std::size_t>(ci)];
+        const QImage& mask = masks.find(combo.maskKey)->second;
+        const std::shared_ptr<DecodedImage> base =
+            combo.diffuseKey.empty() ? nullptr : images.find(combo.diffuseKey)->second;
+        if (mask.isNull()) {
+            combo.image = base; // undecodable mask: the mesh keeps its scalar opacity
+            return;
+        }
+        auto img = std::make_shared<DecodedImage>();
+        if (base) {
+            *img = *base;
+        } else {
+            // Untextured mesh: a white RGBA canvas at the mask's own resolution.
+            img->width = static_cast<uint32_t>(mask.width());
+            img->height = static_cast<uint32_t>(mask.height());
+            img->pixels.assign(static_cast<std::size_t>(img->width) * img->height * 4, 255);
+        }
+        // Rescaled to the diffuse dimensions, so mismatched map sizes are fine.
+        const QImage scaled =
+            mask.scaled(static_cast<int>(img->width), static_cast<int>(img->height),
+                        Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        if (scaled.isNull()) {
+            combo.image = base;
+            return;
+        }
+        for (uint32_t y = 0; y < img->height; ++y) {
+            const uchar* row = scaled.constScanLine(static_cast<int>(y));
+            uint8_t* out = img->pixels.data() + static_cast<std::size_t>(y) * img->width * 4;
+            for (uint32_t x = 0; x < img->width; ++x) {
+                out[x * 4 + 3] = row[x];
+            }
+        }
+        combo.image = std::move(img);
+        combo.masked = true;
+    });
+
+    // ---- 4. Assign the shared images + per-slot flags to each mesh. ----------------------------
+    for (std::size_t m = 0; m < data.meshes.size(); ++m) {
+        MeshData&       mesh = data.meshes[m];
+        const MeshKeys& k = keys[m];
+        if (comboOfMesh[m] != kNoCombo) {
+            const Combo& combo = combos[comboOfMesh[m]];
+            mesh.diffuseImage = combo.image;
+            mesh.hasOpacityMask = combo.masked;
+        } else if (!k.diffuse.empty()) {
+            mesh.diffuseImage = images[k.diffuse];
+        }
+        if (!k.normal.empty()) {
+            mesh.normalImage = images[k.normal];
+        }
+        if (!mesh.normalImage) {
+            mesh.normalMode = 0; // undecodable/absent detail map: drop to flat shading
+        }
+        if (!k.roughness.empty()) {
+            mesh.roughnessImage = images[k.roughness];
+        }
+        if (!k.specMask.empty()) {
+            mesh.specMaskImage = images[k.specMask];
+        }
+        if (mesh.specMaskImage) {
+            // The sampled mask texels now do the scaling the parser's assumed-average discount only
+            // guessed at — switch to the material's UNdiscounted specular weight.
+            mesh.specularWeight = mesh.specularWeightWithMap;
+        }
+        if (!k.translucency.empty()) {
+            mesh.translucencyImage = images[k.translucency];
+        }
+        if (!k.detailNormal.empty()) {
+            mesh.detailNormalImage = images[k.detailNormal];
+        }
+        if (!mesh.detailNormalImage) {
+            mesh.detailWeight = 0.0f; // undecodable map: no detail layer
+        }
     }
-    // Dilate each image's UV-island colours into its unused background so the GPU-built mip chain
-    // never averages the atlas background through a seam (visible as bright seam lines when zoomed
-    // out; see texturegutters.h). Runs after decode, before upload — covered texels are untouched.
-    fillTextureGutters(mesh);
+
+    // ---- 5. Gutter-fill each unique image ONCE, against the union of its users' UV islands, so
+    // the GPU-built mip chain never averages the atlas background through a seam (see
+    // texturegutters.h). A shared atlas must keep every user's islands intact, which is exactly
+    // what the union coverage provides. The micro-detail (pore) normal is excluded — it tiles/
+    // wraps, leaving no gutters. Serial over images; the fill itself is parallel inside.
+    {
+        std::unordered_map<DecodedImage*, std::vector<UvMeshRef>> usersOf;
+        auto noteUser = [&](const std::shared_ptr<DecodedImage>& img, const MeshData& mesh) {
+            if (img && mesh.indices.size() >= 3 && !mesh.vertices.empty()) {
+                usersOf[img.get()].push_back({&mesh.vertices, &mesh.indices});
+            }
+        };
+        for (std::size_t m = 0; m < data.meshes.size(); ++m) {
+            const MeshData& mesh = data.meshes[m];
+            const MeshKeys& k = keys[m];
+            if (comboOfMesh[m] != kNoCombo) {
+                noteUser(combos[comboOfMesh[m]].image, mesh);
+            } else if (!k.diffuse.empty()) {
+                noteUser(images[k.diffuse], mesh);
+            }
+            if (!k.normal.empty()) {
+                noteUser(images[k.normal], mesh);
+            }
+            if (!k.roughness.empty()) {
+                noteUser(images[k.roughness], mesh);
+            }
+            if (!k.specMask.empty()) {
+                noteUser(images[k.specMask], mesh);
+            }
+            if (!k.translucency.empty()) {
+                noteUser(images[k.translucency], mesh);
+            }
+        }
+        for (auto& [image, users] : usersOf) {
+            fillImageGutters(image->pixels, image->width, image->height, users);
+        }
+    }
 }
 
 bool ModelImportService::importInto(VulkanRenderer& renderer, const QString& path,
@@ -171,40 +363,37 @@ bool ModelImportService::importInto(VulkanRenderer& renderer, const QString& pat
         ModelData data = importer->load(path.toStdString()); // geometry + resolved texture sources
         const qint64 msParse = timer.elapsed();
 
-        // Now the mesh count is known: 1 read tick + one decode tick per mesh + 1 upload tick.
-        const int meshCount = static_cast<int>(data.meshes.size());
-        const int total = meshCount + 2;
+        const int total = 5; // parse, decode, bake, upload, done
         int step = 0;
         if (progress) {
             progress->setRange(0, total); // switch the busy indicator to a determinate bar
             progress->setValue(++step);   // parse complete
         }
 
-        // Decode each diffuse texture here (Qt layer) so the importers/renderer stay codec-free. The
-        // source may be an external file path (OBJ map_Kd) or bytes embedded in the model file (e.g.
-        // a texture packed into a .glb) — QImage handles both.
-        for (MeshData& mesh : data.meshes) {
-            if (progress) {
-                progress->setLabelText(QStringLiteral("Decoding textures…"));
-                progress->setValue(++step);
-            }
-            decodeMeshTexture(mesh);
+        // Decode every unique texture once — shared across the meshes that sample it — with the
+        // decodes running across cores (see decodeModelTextures). Qt layer, so the importers and
+        // the renderer stay codec-free.
+        if (progress) {
+            progress->setLabelText(QStringLiteral("Decoding textures…"));
+            progress->setValue(++step);
         }
+        decodeModelTextures(data);
 
         const qint64 msDecode = timer.elapsed();
 
         // Bake per-vertex ambient occlusion (skipped internally for very large meshes) + tangents.
         if (progress) {
             progress->setLabelText(QStringLiteral("Baking ambient occlusion…"));
+            progress->setValue(++step);
         }
         bakeVertexAO(data);
         computeTangents(data);
 
-        // Show "Uploading…" at total-1 (still below the max) so the dialog stays up during the
-        // blocking GPU upload, then jump to the max afterwards to auto-close it.
+        // Show "Uploading…" below the max so the dialog stays up during the blocking GPU upload,
+        // then jump to the max afterwards to auto-close it.
         if (progress) {
             progress->setLabelText(QStringLiteral("Uploading to GPU…"));
-            progress->setValue(total - 1);
+            progress->setValue(++step);
         }
         renderer.addModel(data);
         const qint64 msUpload = timer.elapsed();

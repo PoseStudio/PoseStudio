@@ -22,10 +22,13 @@ HdrTarget::HdrTarget(VulkanContext& context, VkExtent2D extent)
     const VkSampleCountFlagBits samples = m_context.sampleCount();
     const bool msaa = samples != VK_SAMPLE_COUNT_1_BIT;
 
-    // Render pass: mirrors the swapchain's (colour(0)/depth(1)/resolve(2) when MSAA; clean
-    // single-sample fallback without the resolve), but in RGBA16F and ending SHADER_READ_ONLY so
-    // the post-processing passes can sample the result.
-    std::array<VkAttachmentDescription, 3> attachments{};
+    // Render pass: mirrors the swapchain's MSAA structure but with TWO colour attachments in
+    // RGBA16F, both ending SHADER_READ_ONLY for the post passes. Colour 0 = the scene (diffuse for
+    // the PBR mode — the SSS blur diffuses it in place); colour 1 = the PBR mode's SPECULAR,
+    // which the blur must never smear (smeared glints read as a wet film on skin) — the SSS
+    // V-pass adds it back after diffusing. MSAA layout: colourMS(0)/depth(1)/resolve(2)/
+    // specMS(3)/specResolve(4); single-sample fallback: colour(0)/depth(1)/spec(2).
+    std::array<VkAttachmentDescription, 5> attachments{};
     attachments[0].format = kColorFormat;
     attachments[0].samples = samples;
     attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -43,25 +46,48 @@ HdrTarget::HdrTarget(VulkanContext& context, VkExtent2D extent)
     attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    attachments[2].format = kColorFormat; // resolve (single-sample), only used when MSAA
-    attachments[2].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    // MSAA: [2] = colour resolve, [3] = spec MS, [4] = spec resolve. Single-sample: [2] = spec.
+    attachments[2].format = kColorFormat;
+    attachments[2].samples = msaa ? VK_SAMPLE_COUNT_1_BIT : samples;
+    attachments[2].loadOp = msaa ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_CLEAR;
     attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     attachments[2].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     attachments[2].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    attachments[3].format = kColorFormat; // spec MS (MSAA only)
+    attachments[3].samples = samples;
+    attachments[3].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachments[3].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[3].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[3].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[3].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[3].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    attachments[4].format = kColorFormat; // spec resolve (MSAA only)
+    attachments[4].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[4].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[4].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[4].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[4].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[4].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    m_attachmentCount = msaa ? 5u : 3u;
+
     VkAttachmentReference depthRef{1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
-    VkAttachmentReference resolveRef{2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    const VkAttachmentReference colorRefs[2] = {
+        {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
+        {msaa ? 3u : 2u, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}};
+    const VkAttachmentReference resolveRefs[2] = {
+        {2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
+        {4, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}};
 
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorRef;
+    subpass.colorAttachmentCount = 2;
+    subpass.pColorAttachments = colorRefs;
     subpass.pDepthStencilAttachment = &depthRef;
-    subpass.pResolveAttachments = msaa ? &resolveRef : nullptr;
+    subpass.pResolveAttachments = msaa ? resolveRefs : nullptr;
 
     // The resolved image is sampled by the post passes: order this pass's writes before later
     // fragment reads (and after any earlier ones — the previous frame's composite).
@@ -83,7 +109,7 @@ HdrTarget::HdrTarget(VulkanContext& context, VkExtent2D extent)
 
     VkRenderPassCreateInfo rpInfo{};
     rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    rpInfo.attachmentCount = msaa ? 3u : 2u;
+    rpInfo.attachmentCount = m_attachmentCount;
     rpInfo.pAttachments = attachments.data();
     rpInfo.subpassCount = 1;
     rpInfo.pSubpasses = &subpass;
@@ -155,24 +181,36 @@ void HdrTarget::createImages() {
     };
 
     // MSAA colour: transient when possible (tile-local on many GPUs); when single-sample it IS the
-    // sampleable result.
+    // sampleable result. The specular target mirrors the colour target exactly.
     makeImage(kColorFormat, samples,
               msaa ? (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT)
                    : (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT),
               m_colorImage, m_colorAlloc, m_colorView, VK_IMAGE_ASPECT_COLOR_BIT);
     makeImage(kDepthFormat, samples, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, m_depthImage,
               m_depthAlloc, m_depthView, VK_IMAGE_ASPECT_DEPTH_BIT);
+    makeImage(kColorFormat, samples,
+              msaa ? (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT)
+                   : (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT),
+              m_specImage, m_specAlloc, m_specView, VK_IMAGE_ASPECT_COLOR_BIT);
     if (msaa) {
         makeImage(kColorFormat, VK_SAMPLE_COUNT_1_BIT,
                   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, m_resolveImage,
                   m_resolveAlloc, m_resolveView, VK_IMAGE_ASPECT_COLOR_BIT);
+        makeImage(kColorFormat, VK_SAMPLE_COUNT_1_BIT,
+                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                  m_specResolveImage, m_specResolveAlloc, m_specResolveView,
+                  VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
-    const VkImageView views[3] = {m_colorView, m_depthView, m_resolveView};
+    // Attachment order matches the render pass: MSAA = colourMS/depth/resolve/specMS/specResolve;
+    // single-sample = colour/depth/spec.
+    const VkImageView views[5] = {m_colorView, m_depthView,
+                                  msaa ? m_resolveView : m_specView, m_specView,
+                                  m_specResolveView};
     VkFramebufferCreateInfo fbInfo{};
     fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     fbInfo.renderPass = m_renderPass;
-    fbInfo.attachmentCount = msaa ? 3u : 2u;
+    fbInfo.attachmentCount = m_attachmentCount;
     fbInfo.pAttachments = views;
     fbInfo.width = m_extent.width;
     fbInfo.height = m_extent.height;
@@ -197,6 +235,8 @@ void HdrTarget::destroyImages() {
             alloc = VK_NULL_HANDLE;
         }
     };
+    destroy(m_specResolveImage, m_specResolveAlloc, m_specResolveView);
+    destroy(m_specImage, m_specAlloc, m_specView);
     destroy(m_resolveImage, m_resolveAlloc, m_resolveView);
     destroy(m_depthImage, m_depthAlloc, m_depthView);
     destroy(m_colorImage, m_colorAlloc, m_colorView);
@@ -207,6 +247,14 @@ VkDescriptorImageInfo HdrTarget::resolveInfo() const {
     info.sampler = m_sampler;
     // Single-sample fallback: the colour image itself is the sampleable result.
     info.imageView = (m_resolveView != VK_NULL_HANDLE) ? m_resolveView : m_colorView;
+    info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    return info;
+}
+
+VkDescriptorImageInfo HdrTarget::specResolveInfo() const {
+    VkDescriptorImageInfo info{};
+    info.sampler = m_sampler;
+    info.imageView = (m_specResolveView != VK_NULL_HANDLE) ? m_specResolveView : m_specView;
     info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     return info;
 }

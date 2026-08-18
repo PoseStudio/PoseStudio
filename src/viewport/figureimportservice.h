@@ -5,7 +5,7 @@
  * The figure analogue of ModelImportService. It locates the content root for the file,
  * runs the Qt-free FigureImporter (import/figure/) to assemble a FigureData, converts it to the
  * renderer's ModelData (applying the cm->world unit scale), decodes its textures via QImage (reusing
- * ModelImportService::decodeMeshTexture), and uploads it — driving a modal progress dialog. As with
+ * ModelImportService::decodeModelTextures), and uploads it — driving a modal progress dialog. As with
  * the model path, all Qt lives here so the importer core stays Qt-free.
  *
  * Phase 1c renders the figure through the existing lit mesh pipeline (diffuse + base color). The

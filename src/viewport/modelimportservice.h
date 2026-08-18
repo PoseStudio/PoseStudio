@@ -22,7 +22,7 @@
 namespace pose {
 
 class VulkanRenderer;
-struct MeshData;
+struct ModelData;
 
 /**
  * @class ModelImportService
@@ -40,11 +40,14 @@ public:
      */
     static bool importInto(VulkanRenderer& renderer, const QString& path, bool showProgress);
 
-    /// Decodes @p mesh's diffuse TextureSource (external path OR embedded bytes) into its
-    /// diffusePixels (tightly-packed RGBA8) via QImage. No-op for an untextured mesh; logs and
-    /// leaves the mesh untextured if the image can't be decoded. Shared by the model and figure
-    /// import paths so both decode textures identically.
-    static void decodeMeshTexture(MeshData& mesh);
+    /// Decodes every mesh's TextureSources (external paths OR embedded bytes) into shared
+    /// DecodedImages via QImage, bakes opacity masks into the diffuse alpha, and gutter-fills each
+    /// image against the union of its users' UVs. Each unique source is decoded ONCE (figure zones
+    /// commonly share atlas files) and the decodes run across cores. Logs and leaves a mesh slot
+    /// untextured if its image can't be decoded. Shared by the model and figure import paths so
+    /// both decode textures identically — keep every import path behind this choke point, or the
+    /// mip-bleed seams the gutter fill prevents come back.
+    static void decodeModelTextures(ModelData& data);
 };
 
 } // namespace pose

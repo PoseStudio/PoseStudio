@@ -62,6 +62,10 @@ public:
     /// No-op if the viewport degraded.
     void resetView();
 
+    /// Drops the posable figure onto the ground plane (the overlay's ground button): moves it so
+    /// the current pose's lowest point rests at y = 0. No-op if the viewport degraded.
+    void groundFigure();
+
     /// Loads @p hdrPath as the lighting environment (re-bakes the IBL). No-op if the viewport degraded.
     void setEnvironment(const QString& hdrPath);
     /// Applies the live lighting/exposure dials (Environment panel). No-op if the viewport degraded.
@@ -105,6 +109,7 @@ private:
     QWidget*                         m_overlay = nullptr;   // top-level frameless host for the dropdown
     QPushButton*                     m_shaderButton = nullptr;   // opens the shader-mode QMenu
     QPushButton*                     m_homeButton = nullptr;     // resets the camera to default framing
+    QPushButton*                     m_groundButton = nullptr;   // drops the figure onto the floor plane
     QWidget*                         m_filteredWindow = nullptr; // top-level we filter for move/resize
 };
 

@@ -41,6 +41,14 @@ public:
     /// The resolved (single-sample) HDR texture, in SHADER_READ_ONLY layout after the pass.
     VkDescriptorImageInfo resolveInfo() const;
 
+    /// The resolved SPECULAR texture (colour attachment 1) — the opaque mesh pass routes its
+    /// specular here so the screen-space SSS blur (which runs on the main resolve) can never
+    /// smear glints into a wet-looking film; the blur's V pass adds it back after diffusing.
+    VkDescriptorImageInfo specResolveInfo() const;
+
+    /// Number of attachments in the pass — the render-pass-begin clear array must cover them.
+    uint32_t attachmentCount() const { return m_attachmentCount; }
+
     static constexpr VkFormat kColorFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
 private:
@@ -51,8 +59,9 @@ private:
     VkExtent2D     m_extent{};
     VkRenderPass   m_renderPass = VK_NULL_HANDLE;
     VkSampler      m_sampler = VK_NULL_HANDLE;
+    uint32_t       m_attachmentCount = 0;
 
-    // MSAA colour (transient) + MSAA depth + single-sample resolve target.
+    // MSAA colour + specular (transient) + MSAA depth + their single-sample resolve targets.
     VkImage       m_colorImage = VK_NULL_HANDLE;
     VmaAllocation m_colorAlloc = VK_NULL_HANDLE;
     VkImageView   m_colorView = VK_NULL_HANDLE;
@@ -62,6 +71,12 @@ private:
     VkImage       m_resolveImage = VK_NULL_HANDLE;
     VmaAllocation m_resolveAlloc = VK_NULL_HANDLE;
     VkImageView   m_resolveView = VK_NULL_HANDLE;
+    VkImage       m_specImage = VK_NULL_HANDLE;
+    VmaAllocation m_specAlloc = VK_NULL_HANDLE;
+    VkImageView   m_specView = VK_NULL_HANDLE;
+    VkImage       m_specResolveImage = VK_NULL_HANDLE;
+    VmaAllocation m_specResolveAlloc = VK_NULL_HANDLE;
+    VkImageView   m_specResolveView = VK_NULL_HANDLE;
     VkFramebuffer m_framebuffer = VK_NULL_HANDLE;
 };
 

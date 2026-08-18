@@ -92,6 +92,11 @@ private:
     DragNumberBox* m_keyIntensity = nullptr;
     DragNumberBox* m_keyAzimuth = nullptr;
     DragNumberBox* m_keyElevation = nullptr;
+    // Shadow group (the key light's shadows: figure self-shadowing + the PCSS ground shadow).
+    QCheckBox*     m_shadowsEnabled = nullptr;
+    DragNumberBox* m_shadowIntensity = nullptr;
+    DragNumberBox* m_shadowSoftness = nullptr;
+    DragNumberBox* m_shadowReach = nullptr;
     DragNumberBox* m_subsurface = nullptr;
     DragNumberBox* m_rim = nullptr;
 

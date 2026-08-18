@@ -158,7 +158,14 @@ void VulkanContext::createLogicalDevice() {
         queueInfos.push_back(qi);
     }
 
-    VkPhysicalDeviceFeatures features{}; // none required yet; enable explicitly as needed
+    VkPhysicalDeviceFeatures features{};
+    // Per-attachment blend/write-mask states: the HDR scene pass has two colour attachments
+    // (diffuse + the specular the SSS blur must not smear) with different write masks per
+    // pipeline. Universally supported on desktop hardware (and by MoltenVK); guard anyway so an
+    // exotic device fails gracefully at pipeline creation rather than device creation.
+    VkPhysicalDeviceFeatures supported{};
+    vkGetPhysicalDeviceFeatures(m_physicalDevice, &supported);
+    features.independentBlend = supported.independentBlend;
 
     // Start from the hard requirements, then append VK_KHR_portability_subset if the chosen
     // device exposes it (mandatory on MoltenVK — see the constant's note above).

@@ -8,7 +8,6 @@
 #include <miniz.h>
 
 #include <fstream>
-#include <iterator>
 #include <stdexcept>
 
 namespace pose {
@@ -90,14 +89,20 @@ FigureDocument FigureDocument::loadFromBytes(std::vector<uint8_t> bytes, const s
 }
 
 FigureDocument FigureDocument::loadFromFile(const std::string& path) {
-    std::ifstream file(path, std::ios::binary);
+    // One sized read, not an istreambuf_iterator: the iterator pulls a character at a time through
+    // virtual calls, which was measurable across the hundreds of files a figure import touches.
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file) {
         throw std::runtime_error("Cannot open figure file: " + path);
     }
-    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)),
-                               std::istreambuf_iterator<char>());
-    if (bytes.empty()) {
+    const std::streamoff size = file.tellg();
+    if (size <= 0) {
         throw std::runtime_error("Figure file is empty: " + path);
+    }
+    std::vector<uint8_t> bytes(static_cast<std::size_t>(size));
+    file.seekg(0, std::ios::beg);
+    if (!file.read(reinterpret_cast<char*>(bytes.data()), size)) {
+        throw std::runtime_error("Cannot read figure file: " + path);
     }
     return loadFromBytes(std::move(bytes), path);
 }

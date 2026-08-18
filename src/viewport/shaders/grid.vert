@@ -8,8 +8,11 @@
 // then intersects that eye ray with the ground plane. See grid.frag.
 
 layout(push_constant) uniform PC {
-    mat4 viewProj;      // camera view-projection; inverted here to unproject
-    mat4 lightViewProj; // used by the fragment stage (ground shadow); declared for block parity
+    mat4 viewProj;     // camera view-projection; inverted here to unproject
+    vec4 lightRow0;    // key-light matrix rows + shadow dials — fragment-stage only (ground
+    vec4 lightRow1;    // shadow); declared for block parity with grid.frag
+    vec4 lightRow2;
+    vec4 shadowParams;
 } pc;
 
 layout(location = 0) out vec3 vNearPoint; // world-space point on the near plane for this pixel

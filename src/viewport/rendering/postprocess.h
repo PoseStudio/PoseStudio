@@ -32,8 +32,12 @@ class PostProcess {
 public:
     /// @param swapchainRenderPass The pass the composite draws through (the swapchain's MSAA pass).
     /// @param hdrResolve          The HDR target's resolved-texture descriptor (re-fed on resize).
+    /// @param hdrSpecResolve      The HDR target's resolved SPECULAR descriptor — sampled by the
+    ///                            SSS V-pass, which adds it back after diffusing (the blur must
+    ///                            never smear glints; smeared specular reads as wet skin).
     PostProcess(VulkanContext& context, VkRenderPass swapchainRenderPass,
-                const VkDescriptorImageInfo& hdrResolve, VkExtent2D extent,
+                const VkDescriptorImageInfo& hdrResolve,
+                const VkDescriptorImageInfo& hdrSpecResolve, VkExtent2D extent,
                 const std::vector<char>& fullscreenVertSpirv,
                 const std::vector<char>& brightFragSpirv, const std::vector<char>& blurFragSpirv,
                 const std::vector<char>& compositeFragSpirv,
@@ -45,7 +49,8 @@ public:
 
     /// Rebuilds the half-res bloom targets + all descriptor sets for a new size / recreated HDR
     /// target. Caller must have made the device idle.
-    void resize(VkExtent2D extent, const VkDescriptorImageInfo& hdrResolve);
+    void resize(VkExtent2D extent, const VkDescriptorImageInfo& hdrResolve,
+                const VkDescriptorImageInfo& hdrSpecResolve);
 
     /// Records the screen-space subsurface scattering blur: two full-res masked passes, HDR
     /// resolve -> scratch -> back into the HDR resolve (so everything downstream — bloom, the
@@ -71,7 +76,8 @@ private:
 
     void createTargets();
     void destroyTargets();
-    void updateDescriptors(const VkDescriptorImageInfo& hdrResolve);
+    void updateDescriptors(const VkDescriptorImageInfo& hdrResolve,
+                           const VkDescriptorImageInfo& hdrSpecResolve);
     void runFullscreenPass(VkCommandBuffer cmd, VkFramebuffer framebuffer, VkExtent2D extent,
                            const VulkanPipeline& pipeline, VkDescriptorSet set,
                            const float params[4]);

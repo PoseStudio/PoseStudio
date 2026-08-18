@@ -43,6 +43,11 @@ public:
     /// shaders' `sampler2DShadow` binding (set 3 binding 2 in the mesh path; the grid shares it).
     VkDescriptorImageInfo descriptorInfo() const;
 
+    /// Same image through the NON-comparison sampler (set 3 binding 3): raw depth values, for the
+    /// ground shadow's PCSS blocker search (a comparison sampler can only answer lit/unlit, not
+    /// "how far above the floor is the caster"). Border reads 1.0 = empty/far, i.e. no blocker.
+    VkDescriptorImageInfo rawDescriptorInfo() const;
+
 private:
     VulkanContext& m_context;
     uint32_t       m_size = 0;
@@ -50,6 +55,7 @@ private:
     VmaAllocation  m_allocation = VK_NULL_HANDLE;
     VkImageView    m_view = VK_NULL_HANDLE;
     VkSampler      m_sampler = VK_NULL_HANDLE;
+    VkSampler      m_rawSampler = VK_NULL_HANDLE; // no compare: raw depths for the blocker search
     VkRenderPass   m_renderPass = VK_NULL_HANDLE;
     VkFramebuffer  m_framebuffer = VK_NULL_HANDLE;
 };
