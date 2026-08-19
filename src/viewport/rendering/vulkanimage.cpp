@@ -211,7 +211,7 @@ void VulkanTexture::destroy() {
 VulkanTexture::VulkanTexture(VulkanTexture&& other) noexcept
     : m_context(other.m_context), m_allocator(other.m_allocator), m_image(other.m_image),
       m_allocation(other.m_allocation), m_view(other.m_view), m_sampler(other.m_sampler),
-      m_mipLevels(other.m_mipLevels) {
+      m_mipLevels(other.m_mipLevels), m_format(other.m_format) {
     other.m_context = nullptr;
     other.m_allocator = VK_NULL_HANDLE;
     other.m_image = VK_NULL_HANDLE;
@@ -230,6 +230,7 @@ VulkanTexture& VulkanTexture::operator=(VulkanTexture&& other) noexcept {
         m_view = other.m_view;
         m_sampler = other.m_sampler;
         m_mipLevels = other.m_mipLevels;
+        m_format = other.m_format; // without this a moved linear (_UNORM) texture reports sRGB
         other.m_context = nullptr;
         other.m_allocator = VK_NULL_HANDLE;
         other.m_image = VK_NULL_HANDLE;

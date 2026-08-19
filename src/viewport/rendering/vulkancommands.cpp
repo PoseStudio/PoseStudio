@@ -72,8 +72,18 @@ void ImmediateBatch::submitAndWait() {
     VkFence fence = VK_NULL_HANDLE;
     VK_CHECK(vkCreateFence(device, &fenceInfo, nullptr, &fence));
 
-    VK_CHECK(vkQueueSubmit(m_context->graphicsQueue(), 1, &submit, fence));
-    VK_CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
+    try {
+        VK_CHECK(vkQueueSubmit(m_context->graphicsQueue(), 1, &submit, fence));
+        VK_CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
+    } catch (...) {
+        // Don't leak the fence on the throw path — and since the submit may have reached the
+        // queue, drain the whole device before rethrowing: the destructor is about to free
+        // m_retained, and a failed wait says nothing about whether the GPU is done reading the
+        // staging buffers. (Ignore the wait-idle result; on device-lost there's nothing better.)
+        vkDeviceWaitIdle(device);
+        vkDestroyFence(device, fence, nullptr);
+        throw;
+    }
 
     vkDestroyFence(device, fence, nullptr);
     vkDestroyCommandPool(device, m_pool, nullptr); // also frees the command buffer

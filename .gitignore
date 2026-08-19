@@ -5,10 +5,12 @@
 # ------------------------------------------
 # C++ / Compiled Object Files & Libraries
 # ------------------------------------------
+# NOTE: no `*.obj` rule here on purpose — Wavefront OBJ models share that extension and are
+# legitimate content in a 3D app's repo (e.g. sample assets). MSVC object files only ever land
+# in build directories, which are already ignored below.
 *.slo
 *.lo
 *.o
-*.obj
 *.gch
 *.pch
 *.so
@@ -23,28 +25,13 @@
 *.app
 
 # ------------------------------------------
-# Python (Plugins & Scripting)
+# Python (future plugins & scripting)
 # ------------------------------------------
+# Kept deliberately minimal: unanchored packaging rules like `lib/`, `dist/`, or `var/` would
+# silently hide a future real source or asset directory anywhere in the tree.
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-env/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
 venv/
 .venv/
 .env
@@ -70,8 +57,6 @@ build/
 CMakeCache.txt
 CMakeFiles
 CMakeScripts
-Testing
-Makefile
 cmake_install.cmake
 install_manifest.txt
 compile_commands.json

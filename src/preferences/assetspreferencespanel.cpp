@@ -20,6 +20,7 @@
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlError>
+#include <QMessageBox>
 
 // QListWidgetItem data roles used in m_libraryList:
 //   Qt::UserRole     — AssetLibraryID (int)
@@ -67,9 +68,13 @@ void AssetsPreferencesPanel::reloadLibraries() {
     m_libraryList->clear();
 
     QSqlQuery q(QSqlDatabase::database(QStringLiteral("db_conn")));
-    q.exec(QStringLiteral(
-        "SELECT AssetLibraryID, AssetLibraryPath FROM AssetLibraries "
-        "WHERE AssetLibraryIsBuiltIn = 0 ORDER BY AssetLibraryPath COLLATE NOCASE"));
+    if (!q.exec(QStringLiteral(
+            "SELECT AssetLibraryID, AssetLibraryPath FROM AssetLibraries "
+            "WHERE AssetLibraryIsBuiltIn = 0 ORDER BY AssetLibraryPath COLLATE NOCASE"))) {
+        // Surface the failure — an empty list from a silent error reads as "my libraries are gone".
+        qWarning() << "[!] Failed to load asset libraries:" << q.lastError().text();
+        return;
+    }
     while (q.next()) {
         const QString path = q.value(1).toString();
 
@@ -102,6 +107,16 @@ void AssetsPreferencesPanel::promptAddLibrary() {
     q.bindValue(":path", folderPath);
     if (!q.exec()) {
         qWarning() << "[!] Failed to add asset library:" << q.lastError().text();
+        return;
+    }
+
+    // INSERT OR IGNORE swallows the UNIQUE(AssetLibraryPath) conflict, so a duplicate add
+    // "succeeds" with zero rows. Tell the user instead of silently doing nothing — without
+    // feedback a re-add of an existing folder looks like the add simply failed.
+    if (q.numRowsAffected() == 0) {
+        QMessageBox::information(this, QStringLiteral("Already Added"),
+                                 QStringLiteral("That folder is already registered as an asset "
+                                                "library:\n%1").arg(folderPath));
         return;
     }
 

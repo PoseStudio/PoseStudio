@@ -126,6 +126,10 @@ void translateFormula(const nlohmann::json& formula, const CorrectiveContext& ct
 
 // Evaluates a mult-stage gate formula (constants after translation) to a scalar. Rotation drivers, if
 // any slipped into a gate, are treated as rest (angle 0); splines clamp to their last knot's value.
+// NB: the Spline case here is a deliberate STEP lookup (first knot with x >= d wins, no
+// interpolation, ascending-knot order assumed) — not the Catmull-Rom the runtime corrective
+// evaluator uses. That's sound because gates are folded to constants at import and evaluated at
+// rest (d = 0), where a knot always sits exactly; don't "upgrade" it to interpolation.
 float evalGate(const CorrectiveFormula& f) {
     std::vector<float> st;
     for (const CorrectiveOp& o : f.ops) {

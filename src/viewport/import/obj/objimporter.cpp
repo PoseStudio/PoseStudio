@@ -90,6 +90,40 @@ void generateSmoothNormals(MeshData& mesh) {
     }
 }
 
+// Fills normals ONLY for vertices that didn't get one from the file, keeping authored normals
+// untouched. A legal OBJ can mix `f v//n` and plain `f v` faces (common when exports are
+// concatenated); the plain faces' vertices would otherwise stay zero-initialized, and
+// normalize(0) is NaN in the shader.
+void fillMissingNormals(MeshData& mesh) {
+    std::vector<bool> missing(mesh.vertices.size());
+    bool any = false;
+    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
+        missing[i] = glm::dot(mesh.vertices[i].normal, mesh.vertices[i].normal) < 1e-12f;
+        any = any || missing[i];
+    }
+    if (!any) {
+        return;
+    }
+    std::vector<glm::vec3> accum(mesh.vertices.size(), glm::vec3(0.0f));
+    for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+        const uint32_t i0 = mesh.indices[i];
+        const uint32_t i1 = mesh.indices[i + 1];
+        const uint32_t i2 = mesh.indices[i + 2];
+        const glm::vec3 faceNormal = glm::cross(mesh.vertices[i1].pos - mesh.vertices[i0].pos,
+                                                mesh.vertices[i2].pos - mesh.vertices[i0].pos);
+        accum[i0] += faceNormal;
+        accum[i1] += faceNormal;
+        accum[i2] += faceNormal;
+    }
+    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
+        if (!missing[i]) {
+            continue;
+        }
+        const float len = glm::length(accum[i]);
+        mesh.vertices[i].normal = (len > 1e-8f) ? accum[i] / len : glm::vec3(0.0f, 1.0f, 0.0f);
+    }
+}
+
 } // namespace
 
 ModelData ObjImporter::load(const std::string& path) const {
@@ -137,11 +171,33 @@ ModelData ObjImporter::load(const std::string& path) const {
         return meshIndex;
     };
 
+    // Pool sizes for index validation: tinyobjloader reports out-of-range indices only as a
+    // *warning* (ParseFromFile still succeeds), so `f 999999 ...` over an 8-vertex pool would
+    // otherwise read far out of bounds below. Faces with a bad position index are skipped;
+    // bad normal/texcoord indices degrade to "absent".
+    const int vertexPool = static_cast<int>(attrib.vertices.size() / 3);
+    const int normalPool = static_cast<int>(attrib.normals.size() / 3);
+    const int texcoordPool = static_cast<int>(attrib.texcoords.size() / 2);
+
     for (const tinyobj::shape_t& shape : shapes) {
         std::size_t indexOffset = 0;
         for (std::size_t f = 0; f < shape.mesh.num_face_vertices.size(); ++f) {
             const int faceVertices = shape.mesh.num_face_vertices[f]; // 3 after triangulation
             const int materialId = shape.mesh.material_ids.empty() ? -1 : shape.mesh.material_ids[f];
+
+            bool faceValid = true;
+            for (int v = 0; v < faceVertices; ++v) {
+                const int vi = shape.mesh.indices[indexOffset + v].vertex_index;
+                if (vi < 0 || vi >= vertexPool) {
+                    faceValid = false;
+                    break;
+                }
+            }
+            if (!faceValid) {
+                indexOffset += faceVertices;
+                continue;
+            }
+
             const std::size_t meshIndex = meshForMaterial(materialId);
             MeshData& mesh = result.meshes[meshIndex];
             auto& cache = vertexCaches[meshIndex];
@@ -160,12 +216,12 @@ ModelData ObjImporter::load(const std::string& path) const {
                 vertex.pos = glm::vec3(attrib.vertices[3 * idx.vertex_index + 0],
                                        attrib.vertices[3 * idx.vertex_index + 1],
                                        attrib.vertices[3 * idx.vertex_index + 2]);
-                if (fileHasNormals && idx.normal_index >= 0) {
+                if (idx.normal_index >= 0 && idx.normal_index < normalPool) {
                     vertex.normal = glm::vec3(attrib.normals[3 * idx.normal_index + 0],
                                               attrib.normals[3 * idx.normal_index + 1],
                                               attrib.normals[3 * idx.normal_index + 2]);
                 }
-                if (idx.texcoord_index >= 0) {
+                if (idx.texcoord_index >= 0 && idx.texcoord_index < texcoordPool) {
                     // OBJ's V origin is bottom-left; flip to Vulkan's top-left UV convention.
                     vertex.uv = glm::vec2(attrib.texcoords[2 * idx.texcoord_index + 0],
                                           1.0f - attrib.texcoords[2 * idx.texcoord_index + 1]);
@@ -183,6 +239,12 @@ ModelData ObjImporter::load(const std::string& path) const {
     if (!fileHasNormals) {
         for (MeshData& mesh : result.meshes) {
             generateSmoothNormals(mesh);
+        }
+    } else {
+        // The file has SOME normals, but individual faces may still omit them (mixed `v//n` and
+        // plain `v` faces are legal) — fill in just the vertices that got none.
+        for (MeshData& mesh : result.meshes) {
+            fillMissingNormals(mesh);
         }
     }
 

@@ -51,10 +51,15 @@ void rasterizeCoverage(const std::vector<Vertex>& vertices, const std::vector<ui
         seen.reserve(static_cast<std::size_t>(triCount));
         const auto quantize = [&](const glm::vec2& uv) -> uint64_t {
             // Quarter-texel grid, folded by the sampler's REPEAT wrap so tiled copies collide too.
-            const int qw = 4 * w, qh = 4 * h;
-            const int qx = ((static_cast<int>(std::lround(uv.x * scale.x * 4.0f)) % qw) + qw) % qw;
-            const int qy = ((static_cast<int>(std::lround(uv.y * scale.y * 4.0f)) % qh) + qh) % qh;
-            return (static_cast<uint64_t>(qx) << 32) | static_cast<uint64_t>(qy);
+            // The rounding + fold run in 64-bit: the multi-tile gate tests UV *span*, not
+            // magnitude, so a mesh parked at |uv| ~ 1e6 reaches here and ×(4·4096) would
+            // overflow a 32-bit long (lround's return on Windows).
+            const long long qw = 4LL * w, qh = 4LL * h;
+            const long long lx = std::llround(static_cast<double>(uv.x) * scale.x * 4.0);
+            const long long ly = std::llround(static_cast<double>(uv.y) * scale.y * 4.0);
+            const uint64_t qx = static_cast<uint64_t>(((lx % qw) + qw) % qw);
+            const uint64_t qy = static_cast<uint64_t>(((ly % qh) + qh) % qh);
+            return (qx << 32) | qy;
         };
         for (int t = 0; t < triCount; ++t) {
             uint64_t key = 1469598103934665603ull; // FNV-1a over the three quantized corners
@@ -177,6 +182,19 @@ void rasterizeCoverage(const std::vector<Vertex>& vertices, const std::vector<ui
 // hands colours back down into the gaps. Covered texels are never modified.
 void fillFromCoverage(std::vector<uint8_t>& pixels, int w, int h,
                       const std::vector<uint8_t>& covered) {
+    // Row-loop dispatcher for the pyramid passes: parallelFor spawns real threads per call, and
+    // the coarse levels (a few rows of a few texels) cost more in thread spawn than their work —
+    // a 4K map's ~24 per-level calls otherwise pay hundreds of pointless spawns per import.
+    const auto forEachRow = [](int rows, int texels, auto&& fn) {
+        if (texels < 65536) {
+            for (int y = 0; y < rows; ++y) {
+                fn(y);
+            }
+        } else {
+            parallelFor(rows, fn);
+        }
+    };
+
     // --- PULL: build the pyramid bottom-up. Level 0 is the image itself (implicit).
     std::vector<PyramidLevel> levels;
     int fineW = w, fineH = h;
@@ -189,7 +207,7 @@ void fillFromCoverage(std::vector<uint8_t>& pixels, int w, int h,
 
         const PyramidLevel* fine = levels.empty() ? nullptr : &levels.back();
         const int coarseW = level.w, coarseH = level.h;
-        parallelFor(coarseH, [&, fine, fineW, fineH](int y) {
+        forEachRow(coarseH, coarseW * coarseH, [&, fine, fineW, fineH](int y) {
             for (int x = 0; x < coarseW; ++x) {
                 uint32_t sum[4] = {0, 0, 0, 0};
                 uint32_t cnt = 0;
@@ -230,7 +248,7 @@ void fillFromCoverage(std::vector<uint8_t>& pixels, int w, int h,
         PyramidLevel& level = levels[static_cast<std::size_t>(li)];
         const PyramidLevel& parent = levels[static_cast<std::size_t>(li) + 1];
         const int lw = level.w;
-        parallelFor(level.h, [&](int y) {
+        forEachRow(level.h, lw * level.h, [&](int y) {
             for (int x = 0; x < lw; ++x) {
                 const std::size_t ti = static_cast<std::size_t>(y) * lw + x;
                 if (level.has[ti]) {

@@ -64,8 +64,9 @@ QImage readCapped(const TextureSource& src) {
     QBuffer buffer;
     QImageReader reader;
     if (!src.encoded.empty()) {
+        // qsizetype, not int — an int cast would truncate embedded buffers over 2 GB.
         buffer.setData(reinterpret_cast<const char*>(src.encoded.data()),
-                       static_cast<int>(src.encoded.size()));
+                       static_cast<qsizetype>(src.encoded.size()));
         buffer.open(QIODevice::ReadOnly);
         reader.setDevice(&buffer);
     } else {
@@ -98,6 +99,13 @@ std::shared_ptr<DecodedImage> decodeSource(const TextureSource& src) {
         return nullptr;
     }
     image = image.convertToFormat(QImage::Format_RGBA8888);
+    if (image.isNull()) {
+        // convertToFormat can itself fail (allocation failure on a 4K map under memory pressure)
+        // — a 0x0 DecodedImage with empty pixels must not reach the GPU upload path.
+        qWarning() << "[viewport] Texture conversion failed (out of memory?):"
+                   << QString::fromStdString(src.path);
+        return nullptr;
+    }
     auto out = std::make_shared<DecodedImage>();
     out->width = static_cast<uint32_t>(image.width());
     out->height = static_cast<uint32_t>(image.height());
@@ -228,10 +236,14 @@ void ModelImportService::decodeModelTextures(ModelData& data) {
             img->height = static_cast<uint32_t>(mask.height());
             img->pixels.assign(static_cast<std::size_t>(img->width) * img->height * 4, 255);
         }
-        // Rescaled to the diffuse dimensions, so mismatched map sizes are fine.
+        // Rescaled to the diffuse dimensions, so mismatched map sizes are fine. The re-convert
+        // after scaling is load-bearing: QImage::scaled() on a Grayscale8 source silently returns
+        // RGB32 whenever the size actually changes (Qt's smooth-scale passthrough list excludes
+        // no-alpha 8-bit formats), and reading 4-byte BGRX rows as 1-byte gray bakes garbage alpha.
         const QImage scaled =
             mask.scaled(static_cast<int>(img->width), static_cast<int>(img->height),
-                        Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+                        Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                .convertToFormat(QImage::Format_Grayscale8);
         if (scaled.isNull()) {
             combo.image = base;
             return;

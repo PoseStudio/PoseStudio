@@ -77,6 +77,9 @@ public:
                     }
                 }
             } else if (top + 2 <= static_cast<int>(sizeof(stack) / sizeof(stack[0]))) {
+                // A full stack silently drops both children (slight under-occlusion). Safe by
+                // construction: the median split bounds depth at ~2·log2(cap/leafSize) ≈ 35
+                // levels for the 600k-triangle cap — well under the 64-slot stack.
                 stack[top++] = node.left;
                 stack[top++] = node.right;
             }
@@ -182,7 +185,21 @@ std::vector<glm::vec3> cosineHemisphere(int count) {
 void bakeVertexAO(ModelData& data) {
     // Occluders: every OPAQUE triangle across the model (transparent shells/cards receive AO but
     // must never cast it — a clear cornea darkening the iris would be wrong).
+    //
+    // Check the cap BEFORE materializing anything: a 50M-triangle OBJ would otherwise push
+    // ~1.8 GB into `tris` only to throw it away at the cap check.
+    std::size_t opaqueTriangles = 0;
+    for (const MeshData& mesh : data.meshes) {
+        if (mesh.opacity < 0.999f || mesh.hasOpacityMask) {
+            continue;
+        }
+        opaqueTriangles += mesh.indices.size() / 3;
+    }
+    if (opaqueTriangles == 0 || opaqueTriangles > kMaxOccluderTriangles) {
+        return; // nothing to occlude, or huge model: leave every vertex fully lit vs stalling
+    }
     std::vector<Triangle> tris;
+    tris.reserve(opaqueTriangles);
     for (const MeshData& mesh : data.meshes) {
         if (mesh.opacity < 0.999f || mesh.hasOpacityMask) {
             continue;
@@ -192,12 +209,6 @@ void bakeVertexAO(ModelData& data) {
                             mesh.vertices[mesh.indices[i + 1]].pos,
                             mesh.vertices[mesh.indices[i + 2]].pos});
         }
-        if (tris.size() > kMaxOccluderTriangles) {
-            return; // huge model: leave every vertex fully lit rather than stall the import
-        }
-    }
-    if (tris.empty()) {
-        return;
     }
     const Bvh bvh(std::move(tris));
     const std::vector<glm::vec3> hemisphere = cosineHemisphere(kSamples);

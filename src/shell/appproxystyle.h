@@ -38,6 +38,8 @@ public:
     }
 
     int pixelMetric(PixelMetric metric, const QStyleOption *option = nullptr, const QWidget *widget = nullptr) const override {
+        // Negative = a 4px gap (not overlap) between a menu and its submenu, matching the
+        // rounded-corner menu styling in _menumanager.qss — overlapping rounded popups clip.
         if (metric == QStyle::PM_SubMenuOverlap) return -4;
         return QProxyStyle::pixelMetric(metric, option, widget);
     }
@@ -46,7 +48,10 @@ public:
     QPixmap generatedIconPixmap(QIcon::Mode iconMode, const QPixmap &pixmap, const QStyleOption *opt) const override {
         if (iconMode == QIcon::Disabled) {
             // Paint the original icon onto a blank, transparent canvas at exactly 30% opacity.
+            // The canvas must inherit the source's devicePixelRatio: pixmap.size() is in device
+            // pixels, so on a high-DPI screen a DPR-1.0 canvas would render the icon mis-scaled.
             QPixmap transparentPixmap(pixmap.size());
+            transparentPixmap.setDevicePixelRatio(pixmap.devicePixelRatio());
             transparentPixmap.fill(Qt::transparent);
 
             QPainter painter(&transparentPixmap);

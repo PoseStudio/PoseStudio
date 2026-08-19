@@ -23,9 +23,10 @@ public:
     /// Constructs the File/Edit/Help menus and attaches them to the main window.
     void setupMenus();
 
-    /// Lets the Preferences dialog refresh the live asset tree after library changes, and
-    /// wires up the Asset Manager's "Manage Asset Folders" action to open Preferences —
-    /// without MenuManager needing to know anything else about AssetManagerWidget.
+    /// Registers the live Asset Manager: wires its "Manage Asset Folders" action to open
+    /// Preferences, and lets openPreferencesDialog() connect the Assets panel's change/navigate
+    /// signals back to it each time the dialog opens — without MenuManager needing to know
+    /// anything else about AssetManagerWidget.
     void setAssetManagerWidget(AssetManagerWidget *widget);
 
     /// Gives the File → Import actions a viewport to load models into. Must be called before the

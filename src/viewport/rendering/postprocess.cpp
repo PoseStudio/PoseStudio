@@ -6,6 +6,7 @@
 #include "postprocess.h"
 
 #include "hdrtarget.h"
+#include "vulkancommands.h"
 #include "vulkancommon.h"
 #include "vulkancontext.h"
 #include "vulkanpipeline.h"
@@ -20,6 +21,7 @@ namespace {
 // Push-constant block shared by all post shaders (see fullscreen.vert consumers):
 //   bright:    x = threshold
 //   blur:      xy = texel size, zw = blur direction
+//   sss:       xy = texel size, zw = blur direction (H then V; V adds the spec attachment back)
 //   composite: x = tonemap (0/1), y = bloom strength, z = bloom on (0/1)
 struct PostPush {
     float params[4];
@@ -90,7 +92,7 @@ PostProcess::PostProcess(VulkanContext& context, VkRenderPass swapchainRenderPas
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     VK_CHECK(vkCreateSampler(device, &samplerInfo, nullptr, &m_sampler));
 
-    // --- Descriptors: one 2-sampler layout, four sets (bright/blurH/blurV/composite). ----------
+    // --- Descriptors: one 2-sampler layout, six sets (bright/blurH/blurV/sssH/sssV/composite). --
     std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
     for (uint32_t i = 0; i < bindings.size(); ++i) {
         bindings[i].binding = i;
@@ -226,6 +228,35 @@ void PostProcess::createTargets() {
     makeTarget(m_bloomA, m_bloomExtent);
     makeTarget(m_bloomB, m_bloomExtent);
     makeTarget(m_sssScratch, m_extent); // SSSSS works at full resolution
+
+    // Initialise every target to SHADER_READ_ONLY once. The composite pass samples the bloom
+    // chain unconditionally (its contribution is merely weighted to zero outside PBR mode), so a
+    // freshly created target that the skipped bloom/SSS passes never rendered would otherwise be
+    // sampled while still in UNDEFINED layout — a validation violation, and UB on hardware.
+    // Repro without this: resize the window while in a stylized shade mode. (Runs only at
+    // construction/resize, when the device is idle, so the blocking submit is fine.)
+    submitImmediate(m_context, [&](VkCommandBuffer cmd) {
+        const auto toReadOnly = [&](VkImage image) {
+            VkImageMemoryBarrier barrier{};
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image = image;
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            barrier.subresourceRange.levelCount = 1;
+            barrier.subresourceRange.layerCount = 1;
+            barrier.srcAccessMask = 0;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr,
+                                 1, &barrier);
+        };
+        toReadOnly(m_bloomA.image);
+        toReadOnly(m_bloomB.image);
+        toReadOnly(m_sssScratch.image);
+    });
 
     // The SSSSS V pass writes straight back into the HDR resolve image (same format/usage — the
     // bloom pass object is compatible and size-agnostic).

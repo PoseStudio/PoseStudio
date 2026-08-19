@@ -29,8 +29,6 @@ void PreferencesManager::loadFromDatabase() {
     while (query.next()) {
         m_preferences.insert(query.value("PreferenceName").toString(), query.value("PreferenceValue"));
     }
-
-    qDebug() << "Success: Loaded" << m_preferences.size() << "preferences into memory cache.";
 }
 
 QVariant PreferencesManager::getValue(const QString& key, const QVariant& defaultValue) const {

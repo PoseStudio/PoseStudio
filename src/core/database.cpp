@@ -94,6 +94,10 @@ QSqlDatabase initializeDatabase(DbInitMode mode) {
     // FactoryReset does — check this before FactoryReset deletes the file out from under us.
     const bool isFirstLaunch = !QFile::exists(dbPath);
 
+    // Whether the FactoryReset file delete failed (e.g. another process holds the file open on
+    // Windows) — if so, the reset falls back to dropping every table in place below.
+    bool resetNeedsInPlaceWipe = false;
+
     if (mode == DbInitMode::FactoryReset) {
         // Close any open handle first — SQLite can't delete a file Qt still has locked
         if (QSqlDatabase::contains(connectionName)) {
@@ -105,7 +109,9 @@ QSqlDatabase initializeDatabase(DbInitMode mode) {
             if (dbFile.remove()) {
                 qDebug() << "Success: Database reset. File removed at:" << dbPath;
             } else {
-                qCritical() << "Fatal Error: OS denied permission to delete database file.";
+                qWarning() << "[!] Could not delete database file (held open elsewhere?);"
+                           << "falling back to an in-place wipe:" << dbPath;
+                resetNeedsInPlaceWipe = true;
             }
         }
         // Clear any leftover legacy file too, so a reset is a true clean slate and a later
@@ -124,6 +130,26 @@ QSqlDatabase initializeDatabase(DbInitMode mode) {
         qCritical() << "Database Error [initializeDatabase]: Connection failed.";
         qCritical() << "Reason:" << db.lastError().text();
         return db;
+    }
+
+    // Fallback wipe for a reset whose file delete failed: drop every user table in place, then
+    // let the schema replay below rebuild them. SQLite permits this even while another process
+    // holds the file open — which is exactly the case that made the delete fail.
+    if (resetNeedsInPlaceWipe) {
+        QStringList tableNames;
+        QSqlQuery tables(db);
+        if (tables.exec(QStringLiteral(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"))) {
+            while (tables.next()) tableNames << tables.value(0).toString();
+        }
+        for (const QString& name : tableNames) {
+            QSqlQuery drop(db);
+            // Identifier, not user input — table names come from our own schema.
+            if (!drop.exec(QStringLiteral("DROP TABLE IF EXISTS \"%1\"").arg(name))) {
+                qWarning() << "[!] In-place wipe failed to drop table" << name << ":"
+                           << drop.lastError().text();
+            }
+        }
     }
 
     // Schema needs (re)building after we just deleted the file above, or on a first-ever launch

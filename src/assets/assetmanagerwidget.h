@@ -51,9 +51,9 @@ class QPaintEvent;
  * @brief Represents a successfully discovered 3D asset and its paired thumbnail imagery.
  */
 struct AssetHit {
-    QString folderPath;          ///< Absolute path to the directory containing the asset
-    QString assetFileName;       ///< Filename of the 3D asset (e.g., model.obj, .dsf)
-    QStringList matchingImages;  ///< List of filenames for matching thumbnails (e.g., render.png)
+    QString folderPath;    ///< Absolute path to the directory containing the asset
+    QString assetFileName; ///< Filename of the 3D asset (e.g., model.obj, .dsf)
+    QString bestImage;     ///< Filename of the paired thumbnail (largest same-basename image), or empty
 };
 
 enum FolderHitState { NoHit = 0, IndirectHit = 1, DirectHit = 2 };
@@ -249,14 +249,17 @@ private:
     QLabel *titleLabel;
     QListWidget *assetListWidget;
     QLabel *infoBarLabel;        ///< Footer below the grid: "Assets: X   Folders: X   Sortable"
-    QLabel *addLibraryHintLabel; ///< "Add Asset Folder" link shown over the grid when no library exists yet
+    QLabel *addLibraryHintLabel; ///< "Add Asset Folder" link shown over the directory tree when no library exists yet
 
     QLineEdit *searchInput;
     QPushButton *clearSearchButton;
     QPushButton *searchButton;       
 
     CustomToolTip *customToolTip;       ///< Our floating interactive tooltip
-    QListWidgetItem *activeToolTipItem;   ///< Tracks the active item
+    /// The grid item the visible tooltip belongs to. MUST be nulled wherever the grid is
+    /// cleared (displayFolder / refreshAssetManager / collection delete) — it is compared
+    /// against live item pointers in the grid's MouseMove handling.
+    QListWidgetItem *activeToolTipItem;
     
     QStandardItemModel *dirModel;       
     AssetFolderProxyModel *proxyModel;
@@ -268,7 +271,11 @@ private:
     QStandardItem *favoritesRootItem;
     QStandardItem *collectionsRootItem;
 
-    QList<QPair<int, QString>> m_pendingThumbs;
+    /// Queued thumbnail decodes: (grid item, image path). Item POINTERS, not row indices — a
+    /// drag-reorder while batches are still loading shifts rows, but takeItem/insertItem never
+    /// invalidates the pointers. MUST be cleared wherever the grid is cleared (same sites as
+    /// activeToolTipItem), or the pointers dangle.
+    QList<QPair<QListWidgetItem*, QString>> m_pendingThumbs;
 
     // Manual drag-reorder state for sortable grids (Favorites and Collections — see eventFilter).
     QListWidgetItem *m_dragItem = nullptr;

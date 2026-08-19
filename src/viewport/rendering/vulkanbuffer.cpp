@@ -26,6 +26,15 @@ VulkanBuffer::VulkanBuffer(VulkanContext& context, VkDeviceSize size, VkBufferUs
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = memoryUsage;
     allocInfo.flags = allocFlags;
+    // Host-written allocations (staging, mapped UBOs) must be HOST_COHERENT: nothing in the
+    // codebase calls vmaFlushAllocation after its memcpys, which is only spec-correct on coherent
+    // memory. Requiring the bit here makes that true by construction — the spec guarantees every
+    // device exposes at least one HOST_VISIBLE|HOST_COHERENT type, so this can never fail, but a
+    // VMA_MEMORY_USAGE_AUTO pick alone doesn't promise it.
+    if (allocFlags & (VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                      VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT)) {
+        allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    }
 
     VmaAllocationInfo info{};
     VK_CHECK(vmaCreateBuffer(m_allocator, &bufferInfo, &allocInfo, &m_buffer, &m_allocation, &info));

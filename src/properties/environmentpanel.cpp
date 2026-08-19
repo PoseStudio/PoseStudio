@@ -12,12 +12,14 @@
 #include <QActionGroup>
 #include <QCheckBox>
 #include <QColor>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
 #include <QFontMetrics>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QHash>
 #include <QImageReader>
 #include <QLabel>
 #include <QListWidget>
@@ -53,8 +55,9 @@ QFormLayout* addGroup(QVBoxLayout* parent, const QString& title) {
 }
 
 // Extensions a panorama's menu thumbnail may use: a same-basename image file next to the .hdr/.exr
-// (the bundled set ships .webp previews; users can pair any of these). Same pairing rule as the
-// Asset Manager's thumbnail matching, first hit wins.
+// (the stock set ships .jpg previews — never rely on .webp alone, which Qt only decodes with the
+// optional "Qt Image Formats" add-on installed; users can pair any of these). Same pairing rule as
+// the Asset Manager's thumbnail matching, first hit wins.
 constexpr const char* kIconExtensions[] = {"webp", "png", "jpg", "jpeg", "bmp", "gif", "tif", "tiff"};
 
 // Thumbnail size (2:1 like the equirect panoramas) and how many rows the drop-down shows before
@@ -136,11 +139,25 @@ QToolButton* makeRestoreButton() {
 // The menu thumbnail for @p baseName: the first same-basename image file found in @p dir, decoded
 // at thumbnail size (the codec does the reduction — same trick as the Asset Manager grid). A
 // panorama with no paired image simply gets no icon.
+//
+// Results are cached across menu opens, keyed on (path, mtime): the menu is rebuilt on every
+// aboutToShow (so files added while the app runs appear), and re-decoding every preview
+// synchronously on the GUI thread made each open visibly lag once a collection grew. A changed
+// mtime re-decodes; an unchanged file is a hash lookup.
 QIcon hdriIcon(const QDir& dir, const QString& baseName) {
+    static QHash<QString, QPair<QDateTime, QIcon>> cache;
     for (const char* ext : kIconExtensions) {
         const QString candidate = dir.filePath(baseName + QLatin1Char('.') + QLatin1String(ext));
-        if (!QFileInfo::exists(candidate)) {
+        const QFileInfo info(candidate);
+        if (!info.exists()) {
             continue;
+        }
+        const QDateTime mtime = info.lastModified();
+        if (const auto it = cache.constFind(candidate); it != cache.cend() && it->first == mtime) {
+            if (it->second.isNull()) {
+                continue; // known-undecodable at this mtime: try the next extension
+            }
+            return it->second;
         }
         QImageReader reader(candidate);
         reader.setAutoTransform(true);
@@ -150,10 +167,13 @@ QIcon hdriIcon(const QDir& dir, const QString& baseName) {
         }
         const QImage img = reader.read();
         if (!img.isNull()) {
-            return QIcon(QPixmap::fromImage(img));
+            const QIcon icon(QPixmap::fromImage(img));
+            cache.insert(candidate, {mtime, icon});
+            return icon;
         }
         // Undecodable (e.g. .webp on a Qt install without the optional Image Formats add-on):
-        // fall through and try the next extension rather than giving up on this panorama.
+        // remember that verdict too, then try the next extension rather than giving up.
+        cache.insert(candidate, {mtime, QIcon()});
     }
     return QIcon();
 }
@@ -530,6 +550,7 @@ void EnvironmentPanel::buildBackdropModeRow(QFormLayout* form) {
 
     auto* menu = new QMenu(m_backdropModeButton);
     menu->setObjectName(QStringLiteral("HdriMenu")); // the app-wide menu look
+    menu->setToolTipsVisible(true); // QMenu shows action tooltips only when opted in (Dome's below)
     auto* group = new QActionGroup(menu);
     group->setExclusive(true);
     const QString names[3] = {tr("Off"), tr("Environment"), tr("Dome")};

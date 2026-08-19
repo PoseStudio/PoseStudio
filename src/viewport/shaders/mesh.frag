@@ -25,19 +25,22 @@ layout(set = 0, binding = 0) uniform CameraUbo {
     vec4 ambient;
     vec4 params;  // x = shade mode, y = exposure, z = specularIntensity, w = ambientFill
     vec4 sh[9];   // environment diffuse irradiance: 9 SH coefficients (rgb in .xyz)
-    vec4 params2; // x = diffuseIntensity, y = keyIntensity, z = envRotation(rad), w = tonemap(0/1)
-    vec4 params3; // x = subsurface, y = rimIntensity, z/w reserved
+    vec4 params2; // x = diffuseIntensity, y = keyIntensity, z = envRotation(rad), w = free
+    vec4 params3; // x = subsurface, y = rimIntensity, z/w = backdrop mode/blur (unused here)
     vec4 params4; // x/y = backdrop dials (unused here), z = shadow intensity (0..1), w reserved
 } cam;
 
 layout(push_constant) uniform Push {
     mat4 model;
     vec4 baseColor; // rgb tint, a = opacity
-    vec4 material;  // x = roughness (ratio-blended), y = normalMode (0 none / 1 normal / 2 bump),
-                    // z = metalness, w = specular (F0) weight (1 = 4% dielectric; skin ~0.5)
+    vec4 material;  // x = roughness (ratio-blended), y = normalMode (0 none / 1 normal / 2 bump)
+                    //     packed with the authored detail-map strength (floor = mode, fract×8 =
+                    //     strength), z = metalness, w = specular (F0) weight (1 = 4% dielectric)
     vec4 material2; // x = lobe1 rough, y = lobe2 rough, z = lobe ratio (1 = single-lobe),
                     // w = translucency weight
-    vec4 material3; // x = top-coat weight (0 = none), y = top-coat roughness, z/w reserved
+    vec4 material3; // x = top-coat weight (0 = none), y = top-coat roughness,
+                    // z = transparent-pass flag (alpha semantics: 0 = SSS mask, 1 = blend opacity),
+                    // w = micro-detail packed as floor(tiles) + fract(weight) (0 = none)
 } pc;
 
 layout(set = 1, binding = 0) uniform sampler2D uDiffuse;   // sRGB colour map (white 1x1 fallback)
@@ -80,7 +83,16 @@ mat3 cotangentFrame(vec3 N, vec3 p, vec2 uv) {
     vec3 dp1perp = cross(N, dp1);
     vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
     vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
-    float invmax = inversesqrt(max(dot(T, T), dot(B, B)));
+    float m = max(dot(T, T), dot(B, B));
+    // Degenerate UVs (constant across the triangle) leave no tangent direction — inversesqrt(0)
+    // is inf, and one non-finite normal spreads through the SSS/bloom blurs as a blotch. Fall
+    // back to an arbitrary orthonormal frame; detail perturbation degrades to (finite) noise.
+    if (m < 1e-16) {
+        vec3 t = normalize(abs(N.y) < 0.99 ? cross(vec3(0.0, 1.0, 0.0), N)
+                                           : cross(vec3(1.0, 0.0, 0.0), N));
+        return mat3(t, cross(N, t), N);
+    }
+    float invmax = inversesqrt(m);
     return mat3(T * invmax, B * invmax, N);
 }
 
@@ -88,9 +100,16 @@ mat3 cotangentFrame(vec3 N, vec3 p, vec2 uv) {
 // UDIM seams — see tangentgen.h), else the screen-space cotangent fallback.
 mat3 tangentFrame(vec3 n, vec3 p, vec2 uv) {
     if (abs(vTangent.w) > 0.5) {
-        vec3 t = normalize(vTangent.xyz - n * dot(n, vTangent.xyz));
-        vec3 b = cross(n, t) * vTangent.w;
-        return mat3(t, b, n);
+        // Gram-Schmidt the interpolated tangent against the shaded normal — guarding the
+        // degenerate case where interpolation across a UV-seam split lands the tangent (near-)
+        // parallel to n: normalize(≈0) is NaN, and one NaN pixel spreads through the blurs.
+        vec3 tRaw = vTangent.xyz - n * dot(n, vTangent.xyz);
+        float len2 = dot(tRaw, tRaw);
+        if (len2 > 1e-12) {
+            vec3 t = tRaw * inversesqrt(len2);
+            vec3 b = cross(n, t) * vTangent.w;
+            return mat3(t, b, n);
+        }
     }
     return cotangentFrame(n, p, uv);
 }
@@ -276,9 +295,9 @@ void main() {
     // Geometric specular anti-aliasing (Kaplanyan/Tokuyoshi-style): where the SHADED normal turns
     // fast across the screen — the ridges of a strong detail map (stretch marks, pores), silhouette
     // curvature — a pixel really covers a whole fan of normals, and evaluating a narrow lobe at
-    // just one of them draws hot white streaks (the classic normal-map specular aliasing; Sahel's
-    // 2.5x stretch-mark ridges lit them up under the environment). Widen the lobes by the normal's
-    // screen-space variance so ridge highlights broaden and dim into a sheen instead.
+    // just one of them draws hot white streaks (the classic normal-map specular aliasing; one test
+    // character's 2.5x-strength stretch-mark ridges lit them up under the environment). Widen the
+    // lobes by the normal's screen-space variance so ridge highlights broaden into a sheen instead.
     vec3  dndx = dFdx(n);
     vec3  dndy = dFdy(n);
     // Screen-space variance fades as the camera closes in (the pixel footprint shrinks), so add a
@@ -366,7 +385,6 @@ void main() {
         float diffuseInt  = cam.params2.x;
         float keyInt      = cam.params2.y;
         float envRot      = cam.params2.z;   // environment Y-rotation (radians)
-        float tonemapOn   = cam.params2.w;
         float sssAmount   = cam.params3.x;   // 0 = opaque Lambert, 1 = strongly translucent skin
         float rimInt      = cam.params3.y;   // photographic back-rim intensity (0 = off)
 
@@ -401,7 +419,10 @@ void main() {
         // chin/nose, arm-on-torso, etc. The environment terms stay unshadowed (that's AO's job).
         // The panel's shadow-intensity dial blends the occlusion toward lit (0 = shadowing off).
         float ndlGeom = clamp(dot(geomN, l), 0.0, 1.0);
-        float shadow = mix(1.0, keyShadow(vWorldPos, geomN, ndlGeom), cam.params4.z);
+        float shadow = 1.0;
+        if (cam.params4.z > 0.0) { // dial at 0 = shadowing off: skip the 9-tap PCF entirely
+            shadow = mix(1.0, keyShadow(vWorldPos, geomN, ndlGeom), cam.params4.z);
+        }
 
         // Dual-lobe specular: skin authors a broad + a tighter GGX lobe blended by a ratio; a
         // ratio of 1 marks a single-lobe material (OBJ, glossy-lobe surfaces) which uses the

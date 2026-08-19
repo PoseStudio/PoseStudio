@@ -46,7 +46,14 @@ UvSet parseUvSet(const nlohmann::json& uvDoc, const std::string& fragmentId) {
         const nlohmann::json& values = valuesArray(*uvsIt);
         out.uvs.reserve(values.size());
         for (const auto& uv : values) {
-            out.uvs.emplace_back(uv[0].get<float>(), uv[1].get<float>());
+            // Guard before indexing (const operator[] past the end is UB in release builds).
+            // Substitute (0,0) rather than skip: uvs are addressed by index, so dropping an
+            // entry would shift every later index and scramble the whole mapping.
+            if (uv.is_array() && uv.size() >= 2) {
+                out.uvs.emplace_back(uv[0].get<float>(), uv[1].get<float>());
+            } else {
+                out.uvs.emplace_back(0.0f, 0.0f);
+            }
         }
     }
 
@@ -55,6 +62,9 @@ UvSet parseUvSet(const nlohmann::json& uvDoc, const std::string& fragmentId) {
         const nlohmann::json& values = valuesArray(*pviIt);
         out.overrides.reserve(values.size());
         for (const auto& e : values) {
+            if (!e.is_array() || e.size() < 3) {
+                continue; // overrides are a sparse map — a malformed entry is safely droppable
+            }
             const uint32_t poly = e[0].get<uint32_t>();
             const uint32_t vert = e[1].get<uint32_t>();
             const uint32_t uvIdx = e[2].get<uint32_t>();

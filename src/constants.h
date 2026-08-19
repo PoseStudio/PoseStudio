@@ -1,11 +1,13 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
+#include <QString>
+
 namespace Constants {
     // --- Application Info ---
     // const char* (not QString) avoids a heap allocation for strings that never change.
     inline constexpr const char* APP_NAME = "PoseStudio";
-    inline constexpr const char* APP_VERSION = "0.3.5";
+    inline constexpr const char* APP_VERSION = "0.3.6";
 
     // Folder name of the default per-user asset library ("My PoseStudio Library"). Created in the
     // user's Documents on first launch (unless a library by this name is already registered) and

@@ -271,7 +271,7 @@ std::string findGeometryUri(const nlohmann::json& root) {
 }
 
 // Builds a bone's rest-orientation matrix from its Euler orientation (degrees), composed X·Y·Z — the
-// same frame the poser rotates in (mesh.cpp's eulerMatrix(orientation, "XYZ")). Since the bind
+// same frame the posing runtime rotates in (mesh.cpp's eulerMatrix(orientation, "XYZ")). Since the bind
 // transform is translation-only, this matrix's columns are the bone's three world-space rotation-
 // channel axes (the axes its pose Euler angles rotate about).
 glm::mat3 orientationAxes(const glm::vec3& degrees) {
@@ -680,74 +680,74 @@ void followParentShape(FigureData& addon, const std::vector<glm::vec3>& baseCage
     for (const glm::vec3& p : baseCage) {
         lo = glm::min(lo, p);
     }
-    const auto cellKey = [&](const glm::vec3& p) {
-        const glm::ivec3 c = glm::ivec3(glm::floor((p - lo) / kCell));
-        return (static_cast<int64_t>(c.x) << 42) ^ (static_cast<int64_t>(c.y) << 21) ^
-               static_cast<int64_t>(c.z);
+    // Cell-coordinate hash. Shifted as UNSIGNED: query points (follower vertices) can lie below
+    // the cage's min corner, making cell coords negative, and left-shifting a negative signed
+    // value is undefined behavior in C++17. Unsigned conversion + shift is fully defined.
+    const auto cellKeyOf = [](const glm::ivec3& c) {
+        return (static_cast<uint64_t>(c.x) << 42) ^ (static_cast<uint64_t>(c.y) << 21) ^
+               static_cast<uint64_t>(c.z);
     };
-    std::unordered_map<int64_t, std::vector<uint32_t>> grid;
+    const auto cellOf = [&](const glm::vec3& p) {
+        return glm::ivec3(glm::floor((p - lo) / kCell));
+    };
+    std::unordered_map<uint64_t, std::vector<uint32_t>> grid;
     for (uint32_t i = 0; i < baseCage.size(); ++i) {
         if (eligibleCageVerts.empty() || eligibleCageVerts[i]) {
-            grid[cellKey(baseCage[i])].push_back(i);
+            grid[cellKeyOf(cellOf(baseCage[i]))].push_back(i);
         }
     }
     if (grid.empty()) {
         return;
     }
     const auto nearestDelta = [&](const glm::vec3& p) -> glm::vec3 {
-        const glm::ivec3 center = glm::ivec3(glm::floor((p - lo) / kCell));
+        const glm::ivec3 center = cellOf(p);
         float best = std::numeric_limits<float>::max();
         uint32_t bestIndex = 0;
         bool found = false;
-        // Expand the search ring until a candidate appears, then one ring further so a neighbour
-        // just across a cell boundary can't beat the first hit unseen.
+        // Scans one cell, keeping the closest eligible vertex seen so far.
+        const auto scanCell = [&](const glm::ivec3& c) {
+            const auto it = grid.find(cellKeyOf(c));
+            if (it == grid.end()) {
+                return;
+            }
+            for (const uint32_t i : it->second) {
+                const glm::vec3 d = baseCage[i] - p;
+                const float dist2 = glm::dot(d, d);
+                if (dist2 < best) {
+                    best = dist2;
+                    bestIndex = i;
+                    found = true;
+                }
+            }
+        };
+        // Expand the search shell-by-shell until a candidate appears. Radius 1 scans the full
+        // 3^3 cube (center included); each later radius scans only its new outer shell — the
+        // inner cells were covered by earlier radii, so rescanning them is pure waste (a query
+        // far from any eligible vertex would otherwise cost O(r^4) cell visits).
         for (int radius = 1; radius <= 64 && !found; ++radius) {
             for (int dz = -radius; dz <= radius; ++dz) {
                 for (int dy = -radius; dy <= radius; ++dy) {
                     for (int dx = -radius; dx <= radius; ++dx) {
-                        const glm::ivec3 c = center + glm::ivec3(dx, dy, dz);
-                        const auto it = grid.find((static_cast<int64_t>(c.x) << 42) ^
-                                                  (static_cast<int64_t>(c.y) << 21) ^
-                                                  static_cast<int64_t>(c.z));
-                        if (it == grid.end()) {
-                            continue;
+                        if (radius > 1 &&
+                            std::max({std::abs(dx), std::abs(dy), std::abs(dz)}) < radius) {
+                            continue; // shell only — inner radii already scanned
                         }
-                        for (const uint32_t i : it->second) {
-                            const glm::vec3 d = baseCage[i] - p;
-                            const float dist2 = glm::dot(d, d);
-                            if (dist2 < best) {
-                                best = dist2;
-                                bestIndex = i;
-                                found = true;
-                            }
-                        }
+                        scanCell(center + glm::ivec3(dx, dy, dz));
                     }
                 }
             }
             if (found) {
-                // One safety ring: rescan at radius+1 happens naturally by letting the loop run
-                // once more with `found` already set — break out after that extra pass instead.
-                for (int dz = -(radius + 1); dz <= radius + 1; ++dz) {
-                    for (int dy = -(radius + 1); dy <= radius + 1; ++dy) {
-                        for (int dx = -(radius + 1); dx <= radius + 1; ++dx) {
+                // One explicit safety shell at radius+1: the first hit may sit just inside its
+                // cell's far boundary, so a vertex one shell further out (but spatially nearer)
+                // could still beat it — scan that shell before accepting the result.
+                const int r1 = radius + 1;
+                for (int dz = -r1; dz <= r1; ++dz) {
+                    for (int dy = -r1; dy <= r1; ++dy) {
+                        for (int dx = -r1; dx <= r1; ++dx) {
                             if (std::max({std::abs(dx), std::abs(dy), std::abs(dz)}) <= radius) {
                                 continue; // inner cells already scanned
                             }
-                            const glm::ivec3 c = center + glm::ivec3(dx, dy, dz);
-                            const auto it = grid.find((static_cast<int64_t>(c.x) << 42) ^
-                                                      (static_cast<int64_t>(c.y) << 21) ^
-                                                      static_cast<int64_t>(c.z));
-                            if (it == grid.end()) {
-                                continue;
-                            }
-                            for (const uint32_t i : it->second) {
-                                const glm::vec3 d = baseCage[i] - p;
-                                const float dist2 = glm::dot(d, d);
-                                if (dist2 < best) {
-                                    best = dist2;
-                                    bestIndex = i;
-                                }
-                            }
+                            scanCell(center + glm::ivec3(dx, dy, dz));
                         }
                     }
                 }
@@ -796,16 +796,24 @@ void mergeAddonFigure(FigureData& parent, FigureData&& addon) {
             mergedIndex[i] = it->second;
         }
     }
-    // Second pass: append the follower-only bones (parseSkeleton emits parents before children, so a
-    // parent link to another appended bone is already resolved when its child asks for it).
+    // Second pass: append the follower-only bones, assigning every one its merged slot BEFORE any
+    // parent link is resolved — nothing guarantees an addon file lists parents before children,
+    // and resolving links while appending would silently reparent an out-of-order child to the
+    // figure root (its parent's mergedIndex would still be -1 at that point).
+    std::vector<int> appended; // merged indices of the appended bones (parents still addon-space)
     for (int i = 0; i < addonBoneCount; ++i) {
         if (mergedIndex[i] >= 0) {
             continue;
         }
-        FigureBone bone = addon.bones[i];
-        bone.parent = (bone.parent >= 0) ? mergedIndex[bone.parent] : -1;
         mergedIndex[i] = static_cast<int>(parent.bones.size());
-        parent.bones.push_back(std::move(bone));
+        appended.push_back(mergedIndex[i]);
+        parent.bones.push_back(addon.bones[i]);
+    }
+    // Third pass: with every slot known, remap the appended bones' parent links into the merged
+    // skeleton (-1 stays the root; an out-of-range index degrades to the root rather than UB).
+    for (const int mergedIdx : appended) {
+        const int p = parent.bones[mergedIdx].parent;
+        parent.bones[mergedIdx].parent = (p >= 0 && p < addonBoneCount) ? mergedIndex[p] : -1;
     }
 
     // Keep the follower's render vertices out of the parent correctives' base-vertex space (corrective
@@ -881,7 +889,14 @@ FigureData loadFigureFile(const std::string& path, const std::vector<std::string
     if (const auto graft = geomEntry->find("graft"); graft != geomEntry->end()) {
         const auto populated = [](const nlohmann::json& g, const char* key) {
             const auto it = g.find(key);
-            return it != g.end() && it->value("count", 0) > 0;
+            if (it == g.end()) {
+                return false;
+            }
+            // Tolerate both array forms (value("count", ...) on a bare array would throw):
+            if (it->is_array()) {
+                return !it->empty();
+            }
+            return it->is_object() && it->value("count", 0) > 0;
         };
         graftPopulated = populated(*graft, "hidden_polys") || populated(*graft, "vertex_pairs");
     }
@@ -1094,13 +1109,19 @@ FigureData loadFigureFile(const std::string& path, const std::vector<std::string
                 FigureData addon = loadFigureFile(location.path, contentRoots, false);
                 for (const std::string& presetUri : addonRef.presetUris) {
                     try {
+                        const ResolvedUri presetLoc = resolver.resolve(presetUri, presetDir);
                         const std::shared_ptr<const FigureDocument> presetDoc =
                             resolver.loadDocument(presetUri, presetDir);
+                        // Relative (non-root-relative) references inside the preset resolve against
+                        // the preset document's OWN directory — not the character preset's — or a
+                        // relative image_file path would silently miss and drop the map.
+                        const std::string addonPresetDir =
+                            presetLoc.resolved() ? directoryOf(presetLoc.path) : presetDir;
                         // A materials preset comes in either form; each applier no-ops when its
                         // section is absent (the anime-eye presets use the animation-track form),
                         // so a non-material preset document just passes through harmlessly.
-                        applySceneMaterials(addon, presetDoc->root(), resolver, presetDir);
-                        applyAnimationMaterials(addon, presetDoc->root(), resolver, presetDir);
+                        applySceneMaterials(addon, presetDoc->root(), resolver, addonPresetDir);
+                        applyAnimationMaterials(addon, presetDoc->root(), resolver, addonPresetDir);
                     } catch (const std::exception&) {
                         // Unresolvable preset: the follower keeps its own materials.
                     }

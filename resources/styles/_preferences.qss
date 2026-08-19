@@ -51,12 +51,6 @@
     font-size: 12px;
 }
 
-#PreferencesSectionHeading {
-    color: #ffffff;
-    font-size: 13px;
-    font-weight: bold;
-}
-
 /* =========================================================================
    [ ASSET LIBRARY LIST — "Assets" tab ]
    ========================================================================= */

@@ -42,7 +42,10 @@ FactoryResetPreferencesPanel::FactoryResetPreferencesPanel(QWidget* parent)
     // than reconciling all of it live we just restart the process after the reset.
     connect(resetButton, &QPushButton::clicked, this, []() {
         initializeDatabase(DbInitMode::FactoryReset);
-        QProcess::startDetached(QApplication::applicationFilePath(), QApplication::arguments());
+        // Relaunch with no arguments: passing QApplication::arguments() would hand the new
+        // process its own argv[0] as a file argument, and would also replay any original
+        // "open-with" paths — re-importing last session's file into a factory-fresh state.
+        QProcess::startDetached(QApplication::applicationFilePath(), QStringList());
         QApplication::quit();
     });
 }

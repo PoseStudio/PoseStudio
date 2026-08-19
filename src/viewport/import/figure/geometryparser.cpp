@@ -41,6 +41,11 @@ GeometryData parseGeometry(const nlohmann::json& g) {
     const nlohmann::json& verts = valuesArray(*vertsIt);
     out.positions.reserve(verts.size());
     for (const auto& v : verts) {
+        // Validate before indexing: nlohmann's const operator[] past the end (or on a non-array)
+        // is undefined behavior in release builds — a corrupt file must fail cleanly, not crash.
+        if (!v.is_array() || v.size() < 3) {
+            throw std::runtime_error("figure geometry: malformed vertex entry");
+        }
         out.positions.emplace_back(v[0].get<float>(), v[1].get<float>(), v[2].get<float>());
     }
 
@@ -51,19 +56,26 @@ GeometryData parseGeometry(const nlohmann::json& g) {
     }
 
     const nlohmann::json& polys = valuesArray(*polyIt);
+    const auto vertCount = static_cast<uint32_t>(out.positions.size());
     out.faces.reserve(polys.size());
     for (const auto& p : polys) {
         // p = [groupIndex, materialIndex, v0, v1, v2, (v3)] — 5 entries for a tri, 6 for a quad.
-        const int n = static_cast<int>(p.size()) - 2;
+        const int n = p.is_array() ? static_cast<int>(p.size()) - 2 : 0;
         if (n < 3 || n > 4) {
             continue; // skip degenerate/unsupported polygons
         }
         GeometryData::Face f{};
         f.material = p[1].get<int>();
         f.count = n;
+        bool valid = true;
         for (int i = 0; i < n; ++i) {
             f.v[i] = p[2 + i].get<uint32_t>();
+            // Reject out-of-range vertex indices HERE, not downstream: the subdivision cage
+            // builder indexes per-vertex adjacency vectors with these values, so a hostile or
+            // corrupt file would otherwise write out of bounds (the assembler merely clamps).
+            if (f.v[i] >= vertCount) valid = false;
         }
+        if (!valid) continue;
         out.faces.push_back(f);
     }
 

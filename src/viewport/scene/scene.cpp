@@ -580,8 +580,10 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
     ubo.ambient = glm::vec4(0.10f, 0.11f, 0.13f, 0.0f);
     ubo.params = glm::vec4(static_cast<float>(m_shadeMode), m_lighting.exposure,
                            m_lighting.specularIntensity, m_lighting.ambientFill);
+    // params2.w is free: the tonemap flag rides composite.frag's push constant now (tonemapping
+    // moved to the composite pass so bloom sees real radiance) — no scene shader reads it.
     ubo.params2 = glm::vec4(m_lighting.diffuseIntensity, m_lighting.keyIntensity,
-                            glm::radians(m_lighting.environmentRotationDeg), m_lighting.tonemap ? 1.0f : 0.0f);
+                            glm::radians(m_lighting.environmentRotationDeg), 0.0f);
     ubo.params3 = glm::vec4(m_lighting.subsurface, m_lighting.rimIntensity,
                             static_cast<float>(m_lighting.backdropMode), m_lighting.backdropBlur);
     ubo.params4 = glm::vec4(m_lighting.backdropBrightness, m_lighting.domeRadius,

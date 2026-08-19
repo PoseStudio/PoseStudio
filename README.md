@@ -20,17 +20,17 @@ We are calling on anyone who can help with the project. Your support ensures tha
 
 #### 1. Technical Roles
 * **Lead Software Architect (Code Lead):** Oversees the overall codebase, reviews critical Pull Requests, establishes coding standards, and defines the technical roadmap.
-* **Graphics / Engine Developer:** Focus entirely on the 3D viewport, rendering pipeline (WebGL, WebGPU, or desktop OpenGL/Vulkan depending on your stack), shaders, and real-time lighting performance.
+* **Graphics / Engine Developer:** Focus entirely on the 3D viewport and its Vulkan rendering pipeline — shaders, real-time lighting, and viewport performance.
 * **Animation Systems Engineer:** A highly specialized role focused on the mathematics and logic of 3D animation—specifically skeletal rigging, inverse kinematics (IK), forward kinematics (FK), blendshapes, and timeline interpolation.
 * **I/O & Pipeline Specialist:** Dedicated to maintaining robust import and export pipelines for critical 3D file formats ensuring flawless handling of object and animation data.
 * **UI/UX Developer:** This role focuses on making user friendly timeline, rigging, and posing controls that are intuitive, accessible, and responsive.
 * **Integrations / Plugin Developer:** Develop, build and maintain bridge plugins for major software (like Blender, Unreal Engine, Unity, or Maya).
-* **DevOps / CI-CD Engineer:** Manage repository automation, build release binaries for different operating systems (Windows, Mac, Linux), and configur automated testing suites in GitHub Actions.
+* **DevOps / CI-CD Engineer:** Manage repository automation, build release binaries for different operating systems (Windows, Mac, Linux), and configure automated testing suites in GitHub Actions.
 * **Web, SEO & Infrastructure Lead:** Handle technical SEO, overall site architecture, and web security for the official PoseStudio Website **[https://posestudio.org/](https://posestudio.org/)**.
 * **GitHub Administrator:** Manage the organization and repository settings, enforce security policies, and maintain smooth development workflows.
 
 #### 2. Non-Technical Roles
-* **GitHub Community Manager:** Manage our **[GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions)**, issue triaging, monotor overall community health.
+* **GitHub Community Manager:** Manage our **[GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions)**, issue triaging, and monitor overall community health.
 * **Discord Administrator:** Manage our **[Discord Channel](https://discord.gg/SaKvt9aYCM)**.
 * **Social Media Manager:** Engage with users on Reddit, Twitter, and other forums gathering community feedback.
 * **Devlog & Content Coordinator:** Manages the public project logs and updates.
@@ -41,9 +41,21 @@ We are calling on anyone who can help with the project. Your support ensures tha
 * **Public Relations:** Manage and grow the PR footprint for the project.
 
 #### 3. Becoming a Sponsor:
-* **Git Sponsorship:** Coming Soon!
+* **GitHub Sponsors:** Support the project by **[Becoming a Sponsor on GitHub](https://github.com/sponsors/PoseStudio)**
 * **Patreon:** Contribute as a **[Sponsor on Patreon](https://www.patreon.com/c/PoseStudio)**
-<!-- * **Git Sponsor:** You can help by **[Becoming a Sponsor on Git](https://github.com/sponsors/PoseStudio)** -->
+
+## What Works Today
+
+PoseStudio is early in development, but the foundations are real and usable now:
+
+* A **Vulkan-powered 3D viewport** with photoreal PBR shading, image-based lighting from HDR environments (`.hdr`/`.exr`), MSAA, HDR post-processing (bloom, ACES tonemapping, screen-space subsurface scattering), soft PCSS ground shadows, and twelve selectable shade modes (PBR, matcaps, toon, clay, and more).
+* **Rigged, morphable character figures** imported from their native scene format — per-zone physically-based materials, baked character-shape morphs, GPU skinning, joint-driven pose correctives, Catmull-Clark subdivision, and follower addons (lashes, brows, replacement anatomy).
+* **Interactive posing** — click a joint, rotate with the gizmo, anatomical joint limits, pose save/load, and unified undo/redo.
+* **Wavefront OBJ import** with materials and textures.
+* An **Asset Manager** for browsing library folders, plus virtual Collections and Favorites with drag-to-reorder, thumbnails, and search.
+* A live **Environment panel** — HDRI selection with thumbnails, exposure/key-light/shadow/backdrop dials, and a ground-projected dome mode.
+
+The animation/timeline systems and final-frame rendering described below are roadmap — they don't exist in code yet.
 
 ## <img src="/docs/assets/icons/features.png" width="28" alt="Key Features"> Key Features (Proposed)
 
@@ -92,10 +104,10 @@ PoseStudio is being designed as a complete end-to-end character creation and ren
 
 We are at the very beginning of an incredible journey, and **we need your help to build it**. PoseStudio is a massive undertaking, and we are actively looking for passionate C++/Python developers, 3D technical artists, and AI engineers to join our growing community. If you want to be part of the open-source project that disrupts the 3D character industry, there is a place for you here.
 
-Here is just some of skills we need to make this happen:
+Here are just some of the skills we need to make this happen:
 
 #### 1. Core Development
-* **Viewport & Graphics Rendering:** Help us build a smooth, real-time rendering viewport. Experience with OpenGL, Vulkan, or modern graphics APIs is highly desired.
+* **Viewport & Graphics Rendering:** Help us build a smooth, real-time rendering viewport. Experience with Vulkan or other modern graphics APIs is highly desired.
 * **Systems Architecture:** Work on the core scene graph, memory allocation, and undo/redo stacks.
 * **Math & Physics:** Develop the algorithms required for inverse kinematics (IK), dynamic cloth simulation, and real-time collision detection.
 
@@ -129,14 +141,13 @@ Building a powerful tool requires a powerful community.
 * **Git Discussions:** Share feature requests and technical proposals in our **[GitHub Discussions](https://github.com/PoseStudio/PoseStudio/discussions/)**
 * **Official Site:** Visit the Official **[PoseStudio Website](https://posestudio.org/)**
 * **Support:** You can reach community support at **[community@posestudio.org](mailto:community@posestudio.org)**
-* **Git Sponsorship:** Coming Soon!
+* **GitHub Sponsors:** Support the project by **[Becoming a Sponsor on GitHub](https://github.com/sponsors/PoseStudio)**
 * **Patreon:** Contribute as a **[Sponsor on Patreon](https://www.patreon.com/c/PoseStudio)**
-<!-- * **Git Sponsor:** You can help by **[Becoming a Sponsor on Git](https://github.com/sponsors/PoseStudio)** -->
 
 
 ## <img src="/docs/assets/icons/license.png" width="28" alt="License"> License
 
-PoseStudio is open-source software licensed under the **[GNU General Public License](https://github.com/PoseStudio/PoseStudio/blob/main/LICENSE)**.
+PoseStudio is open-source software licensed under the **[GNU General Public License v3.0](https://github.com/PoseStudio/PoseStudio/blob/main/LICENSE)**.
 
 ## Tech Stack & Resources
 
@@ -151,7 +162,7 @@ This project is built using the following core technologies and design resources
 * **HDR Environments:** [stb_image](https://github.com/nothings/stb) (`.hdr`) and [tinyexr](https://github.com/syoyo/tinyexr) (`.exr`) — decode the panoramas used for the viewport's image-based lighting and backdrop (both fetched automatically by CMake)
 * **HDRI Panoramas:** The stock lighting environments are CC0 assets from **[Poly Haven](https://polyhaven.com/)** — a fantastic public-asset library; consider [supporting them](https://www.patreon.com/polyhaven)
 * Code generation and troubleshooting assistance provided by Anthropic's Claude.
-* **UI Iconography:** [Lucide Icons](https://lucide.dev/) (See `ATTRIBUTIONS.md` for full design credits)
+* **UI Iconography:** [Lucide Icons](https://lucide.dev/) (see **[ATTRIBUTIONS.md](ATTRIBUTIONS.md)** for full design credits)
 
 ## Building from Source
 

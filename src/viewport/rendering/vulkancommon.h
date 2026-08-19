@@ -46,9 +46,10 @@ inline std::string vkResultString(VkResult result) {
     }
 }
 
-/// Thrown by VK_CHECK on any non-success VkResult. Caught at the VulkanWindow
-/// boundary, which tears the renderer down and reports the failure rather than
-/// letting a half-initialised device leak.
+/// Thrown by VK_CHECK on any non-success VkResult. Caught at the VulkanWindow boundaries —
+/// initializeVulkan() for setup failures, renderFrame() and the environment-bake apply for
+/// runtime failures (e.g. device lost) — each of which tears the renderer down and reports
+/// the failure rather than letting the exception escape Qt's event loop and abort the app.
 class VulkanError : public std::runtime_error {
 public:
     using std::runtime_error::runtime_error;

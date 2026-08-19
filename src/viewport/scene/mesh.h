@@ -3,10 +3,12 @@
  * @brief GPU-resident geometry: a Mesh (one material group) and a Model (one imported file).
  *
  * A Mesh owns device-local vertex + index buffers, its material parameters (base color, roughness,
- * opacity), and its two textures — a diffuse map and a detail (normal/bump) map, each falling back to
- * a shared 1x1 texture when absent — bound through its own descriptor set (set 1, two samplers). A
- * Model groups the meshes of one imported file under a shared transform, owns the descriptor pool
- * those sets are allocated from, and carries the runtime skeleton for skinned figures. Qt-free.
+ * dual-lobe specular, top coat, translucency, opacity), and its six texture maps — diffuse, detail
+ * normal/bump, roughness, spec mask, translucency, and micro-detail (pore) normal, each falling
+ * back to a shared 1x1 texture when absent — bound through its own descriptor set (set 1, six
+ * samplers). A Model groups the meshes of one imported file under a shared transform, owns the
+ * descriptor pool those sets are allocated from, and carries the runtime skeleton for skinned
+ * figures. Qt-free.
  */
 
 #ifndef MESH_H
@@ -61,8 +63,8 @@ struct ShadowPushConstants {
 };
 
 /// One material group of a model: device-local vertex/index buffers, material params (base color,
-/// roughness, opacity), and its diffuse + detail (normal/bump) textures bound through its own set-1
-/// descriptor (two samplers, each with a shared 1x1 fallback when the map is absent).
+/// roughness, opacity, dual-lobe specular, top coat, translucency), and its six texture maps bound
+/// through its own set-1 descriptor (six samplers, each with a shared 1x1 fallback when absent).
 class Mesh {
 public:
     /// @param materialSetLayout  The shared set-1 layout (Scene owns it).
@@ -140,8 +142,8 @@ private:
     VkDescriptorSet                m_materialSet = VK_NULL_HANDLE; // set 1; owned by the Model's pool
 };
 
-/// One imported OBJ: its meshes (each a material group) plus a shared model transform. Owns the
-/// descriptor pool the meshes' set-1 descriptors are allocated from.
+/// One imported model (OBJ mesh or rigged figure): its meshes (each a material group) plus a shared
+/// model transform. Owns the descriptor pool the meshes' set-1 descriptors are allocated from.
 class Model {
 public:
     Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayout materialSetLayout,
@@ -169,9 +171,6 @@ public:
     /// The model's world-space AABB (local bounds through the model transform). Returns false when
     /// the model has no geometry bounds. Used to fit the key light's shadow frustum.
     bool worldBounds(glm::vec3& outMin, glm::vec3& outMax) const;
-
-    void             setTransform(const glm::mat4& transform) { m_transform = transform; }
-    const glm::mat4& transform() const { return m_transform; }
 
     /// Poses the joint @p boneName by an Euler rotation (degrees) applied in its local frame, then
     /// recomputes the skin matrices. No-op if the model has no such bone. This is the primitive a

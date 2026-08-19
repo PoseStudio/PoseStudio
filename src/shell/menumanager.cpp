@@ -38,6 +38,19 @@ static QIcon loadDualStateIcon(const QString& baseName) {
     return icon;
 }
 
+/**
+ * @brief Resolves the folder an import file dialog should start in: the folder of the last
+ * import (persisted in Preferences), falling back to Documents when nothing is saved yet or
+ * the stored folder was moved/deleted. Shared by every File → Import entry point.
+ */
+static QString lastImportStartDir() {
+    const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    const QString startDir =
+        PreferencesManager::instance().getValue(Constants::PREF_LAST_IMPORT_DIR, documents).toString();
+    if (startDir.isEmpty() || !QDir(startDir).exists()) return documents;
+    return startDir;
+}
+
 MenuManager::MenuManager(QMainWindow *parent) : QObject(parent), mainWindow(parent) {}
 
 void MenuManager::setupMenus() {
@@ -174,17 +187,8 @@ void MenuManager::setViewportWidget(pose::ViewportWidget *viewport) {
 void MenuManager::importObjFile() {
     if (!viewportWidget) return;
 
-    // Start in the folder of the last import (persisted in Preferences), so importing several
-    // models from one folder doesn't mean re-navigating from Documents each time.
-    const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    QString startDir =
-        PreferencesManager::instance().getValue(Constants::PREF_LAST_IMPORT_DIR, documents).toString();
-    if (startDir.isEmpty() || !QDir(startDir).exists()) {
-        startDir = documents; // stored folder was moved/deleted, or nothing saved yet
-    }
-
     const QString path = QFileDialog::getOpenFileName(
-        mainWindow, QStringLiteral("Import OBJ"), startDir,
+        mainWindow, QStringLiteral("Import OBJ"), lastImportStartDir(),
         QStringLiteral("Wavefront OBJ (*.obj)"));
     if (path.isEmpty()) return; // user cancelled
 
@@ -197,15 +201,8 @@ void MenuManager::importObjFile() {
 void MenuManager::importFigureFile() {
     if (!viewportWidget) return;
 
-    const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    QString startDir =
-        PreferencesManager::instance().getValue(Constants::PREF_LAST_IMPORT_DIR, documents).toString();
-    if (startDir.isEmpty() || !QDir(startDir).exists()) {
-        startDir = documents;
-    }
-
     const QString path = QFileDialog::getOpenFileName(
-        mainWindow, QStringLiteral("Import Character Figure"), startDir,
+        mainWindow, QStringLiteral("Import Character Figure"), lastImportStartDir(),
         QStringLiteral("Figure Files (*.duf *.dsf)"));
     if (path.isEmpty()) return; // user cancelled
 

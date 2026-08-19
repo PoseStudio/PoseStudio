@@ -339,6 +339,7 @@ ViewportWidget::~ViewportWidget() {
     m_overlay = nullptr;
     m_shaderButton = nullptr;
     m_homeButton = nullptr;
+    m_groundButton = nullptr;
 
     // The QVulkanInstance (m_instance) owns the VkInstance, and the VulkanWindow's
     // device/renderer were created from it. Qt would otherwise destroy the window via the

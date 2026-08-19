@@ -18,8 +18,6 @@
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
 
-#include <glm/mat3x3.hpp>
-
 #include <memory>
 #include <string>
 #include <utility>
@@ -171,10 +169,12 @@ private:
     std::vector<VulkanBuffer>    m_cameraBuffers;
     std::vector<VkDescriptorSet> m_cameraSets;
 
-    // Per-material textures (set 1): binding 0 = diffuse (sRGB), binding 1 = detail normal/bump map
-    // (linear). The layout is shared; each Model owns the pool/sets for its meshes. Meshes without a
-    // given map point at a shared fallback (1x1 white diffuse / flat normal) so the shader always
-    // samples and one pipeline serves textured and untextured meshes alike.
+    // Per-material textures (set 1), six samplers: binding 0 = diffuse (sRGB), 1 = detail
+    // normal/bump (linear), 2 = roughness map (linear), 3 = spec-mask map (linear),
+    // 4 = translucency map (sRGB), 5 = micro-detail (pore) normal (linear). The layout is shared;
+    // each Model owns the pool/sets for its meshes. Meshes without a given map point at a shared
+    // 1x1 fallback (white / flat normal) so the shader always samples and one pipeline serves
+    // textured and untextured meshes alike.
     VkDescriptorSetLayout          m_materialSetLayout = VK_NULL_HANDLE;
     std::unique_ptr<VulkanTexture> m_fallbackTexture; // 1x1 opaque white
     std::unique_ptr<VulkanTexture> m_fallbackNormal;  // 1x1 flat normal (128,128,255), linear

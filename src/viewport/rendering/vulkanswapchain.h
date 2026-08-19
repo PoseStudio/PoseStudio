@@ -45,7 +45,6 @@ public:
     VkSwapchainKHR handle()        const { return m_swapchain; }
     VkRenderPass   renderPass()    const { return m_renderPass; }
     VkExtent2D     extent()        const { return m_extent; }
-    VkFormat       colorFormat()   const { return m_colorFormat; }
     uint32_t       imageCount()    const { return static_cast<uint32_t>(m_images.size()); }
     VkFramebuffer  framebuffer(uint32_t imageIndex) const { return m_framebuffers[imageIndex]; }
 

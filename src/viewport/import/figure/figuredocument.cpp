@@ -77,7 +77,14 @@ std::vector<uint8_t> gunzip(const uint8_t* data, std::size_t size) {
 
 FigureDocument FigureDocument::loadFromBytes(std::vector<uint8_t> bytes, const std::string& sourceName) {
     if (isGzip(bytes)) {
-        bytes = gunzip(bytes.data(), bytes.size());
+        try {
+            bytes = gunzip(bytes.data(), bytes.size());
+        } catch (const std::exception& e) {
+            // Name the file: a figure import touches hundreds of documents, and a bare
+            // "inflate failed" gives no clue which one was corrupt.
+            throw std::runtime_error("Failed to decompress figure file '" + sourceName +
+                                     "': " + e.what());
+        }
     }
     try {
         // The payload is UTF-8 JSON. Parse directly over the byte range.

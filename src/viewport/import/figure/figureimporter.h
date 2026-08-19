@@ -3,15 +3,14 @@
  * @brief Imports a native figure (a character preset .duf, or a base figure .dsf) into a FigureData.
  *
  * This is the top-level orchestrator of the import/figure/ subsystem. Given a file and the content-
- * library roots, it: loads the preset, locates and loads the referenced base figure geometry,
- * resolves and parses its UV set, assembles the per-zone meshes, and attaches each zone's material
- * (base color + resolved texture paths). Unlike the static MeshImporter (which returns ModelData and
- * needs no external context), a figure spans many files and needs the content roots to resolve its
- * cross-file URIs — so it is its own class, invoked directly by the Qt import service rather than
- * through ImporterRegistry. Pure std + GLM + nlohmann — no Qt, no Vulkan.
- *
- * Phase 1 fills geometry + UVs + materials. Later phases extend FigureData (and this loader) with
- * the skeleton, per-vertex skin weights, and dialed morphs.
+ * library roots, it: loads the preset, locates and loads the referenced base figure geometry, bakes
+ * the dialed character morphs (with joint-center adjustment), parses the skeleton + per-vertex skin
+ * weights, discovers the pose correctives, resolves and parses the UV set, subdivides the cage,
+ * assembles the per-zone meshes, attaches each zone's material, and merges any post-load follower
+ * addons. Unlike the static MeshImporter (which returns ModelData and needs no external context), a
+ * figure spans many files and needs the content roots to resolve its cross-file URIs — so it is its
+ * own class, invoked directly by the Qt import service rather than through ImporterRegistry.
+ * Pure std + GLM + nlohmann — no Qt, no Vulkan.
  */
 
 #ifndef FIGUREIMPORTER_H

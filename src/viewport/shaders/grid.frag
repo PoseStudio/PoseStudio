@@ -44,7 +44,8 @@ const float kSpreadPerSoft  = 0.35; // penumbra growth per world unit of caster 
 const float kBaseSoftWorld  = 0.005; // minimum penumbra so even the contact edge isn't hard-pixel aliased
 const float kBaseSoftPerSoft = 0.03; // extra base softness with the dial (softens the contact edge too)
 
-// 16-tap Poisson disk (unit radius) — shared by the blocker search (first 9) and the PCF.
+// 16-tap Poisson disk (unit radius) — shared by the blocker search (all 16 taps, plus the
+// always-sampled center) and the PCF.
 const vec2 kPoisson[16] = vec2[](
     vec2(-0.94201624, -0.39906216), vec2( 0.94558609, -0.76890725),
     vec2(-0.09418410, -0.92938870), vec2( 0.34495938,  0.29387760),

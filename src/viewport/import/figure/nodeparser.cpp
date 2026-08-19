@@ -16,7 +16,10 @@ namespace pose {
 namespace {
 
 // Reads an array of three channel_float objects ([{id:x,value:..},{id:y,..},{id:z,..}]) into a vec3,
-// taking each channel's "value" (its rest value), falling back to "current_value".
+// taking each channel's "value" (its rest value), falling back to "current_value". This is the
+// deliberate INVERSE of the project-wide "current_value wins" convention (see channelScalar in
+// materialparser.cpp): these are REST transforms — center/end points, rest orientation — where a
+// scene's dialed current_value is the posed state, and the bind must come from the rest state.
 glm::vec3 readVec3Channels(const nlohmann::json& arr) {
     glm::vec3 out(0.0f);
     if (!arr.is_array()) {

@@ -59,7 +59,7 @@ As the project grows and funding increases, funds will be allocated strictly acc
 4. **Community Bounties:** Funding specific community pull requests, bug fixes, or highly-requested features.
 
 ## Receipt Verification & Auditing
-To ensure absolute trust, redacted receipts (with personal banking and home address information removed) for all non-payroll expenses are stored locally in the `receipts/` directory of this repository.
+To ensure absolute trust, redacted receipts (with personal banking and home address information removed) for all non-payroll expenses are stored in the [`docs/receipts/`](docs/receipts/) directory of this repository.
 
 ---
 *This ledger is updated by the project maintainers on the 1st of every month. If you have any questions or concerns regarding our financial allocation, please open a thread in our GitHub Discussions.*

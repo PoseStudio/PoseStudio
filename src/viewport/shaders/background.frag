@@ -7,7 +7,7 @@
 // always agree.
 //
 // The sampled image is the prefiltered specular cubemap's lower mips (set 3 binding 0 — bound
-// here as set 1): mip 0 is the environment itself. One LOD of soften is applied — a hint of
+// here as set 1): mip 0 is the environment itself. The panel's Blur dial selects the LOD —
 // photographic background defocus, which also hides the cube's finite resolution.
 
 layout(set = 0, binding = 0) uniform CameraUbo {
@@ -24,7 +24,7 @@ layout(set = 0, binding = 0) uniform CameraUbo {
     vec4 ambient;
     vec4 params;  // y = exposure
     vec4 sh[9];
-    vec4 params2; // z = envRotation(rad), w = tonemap(0/1)
+    vec4 params2; // z = envRotation(rad)
     vec4 params3; // z = backdrop mode (1 = environment, 2 = ground-projected dome), w = blur (mips)
     vec4 params4; // x = backdrop brightness, y = dome radius (world units)
 } cam;
@@ -67,21 +67,27 @@ void main() {
         // environment's floor instead of a horizon floating at infinity.
         vec3 center = vec3(0.0, kTripodHeight, 0.0);
         vec3 ro = vNearPoint;
-        // Sphere hit (far intersection — the camera sits inside the dome).
+        // Sphere hit (far intersection — assumes the camera sits inside the dome). Dollied OUTSIDE
+        // the dome, edge-of-screen rays can miss the sphere (disc < 0) or "hit" behind the camera
+        // (ts <= 0); sampling those would mirror the panorama into warped streaks, so such pixels
+        // fall back to the infinite-environment direction instead.
         vec3 oc = ro - center;
         float b = dot(oc, dir);
         float cc = dot(oc, oc) - domeRadius * domeRadius;
-        float ts = -b + sqrt(max(b * b - cc, 0.0));
-        vec3 hit = ro + dir * ts;
-        // Ground hit wins when the ray strikes y=0 inside the dome footprint.
-        if (dir.y < -1e-4) {
-            float tg = -ro.y / dir.y;
-            vec3 g = ro + dir * tg;
-            if (tg > 0.0 && dot(g.xz, g.xz) < domeRadius * domeRadius) {
-                hit = g;
+        float disc = b * b - cc;
+        float ts = -b + sqrt(max(disc, 0.0));
+        if (disc >= 0.0 && ts > 0.0) {
+            vec3 hit = ro + dir * ts;
+            // Ground hit wins when the ray strikes y=0 inside the dome footprint.
+            if (dir.y < -1e-4) {
+                float tg = -ro.y / dir.y;
+                vec3 g = ro + dir * tg;
+                if (tg > 0.0 && dot(g.xz, g.xz) < domeRadius * domeRadius) {
+                    hit = g;
+                }
             }
+            sampleDir = normalize(hit - center);
         }
-        sampleDir = normalize(hit - center);
     }
 
     // LINEAR HDR out (like mesh.frag's PBR mode): the composite pass tonemaps — which also lets

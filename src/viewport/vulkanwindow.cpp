@@ -151,7 +151,18 @@ void VulkanWindow::beginEnvironmentBake(const QString& hdrPath, bool autoAimKey)
         // The GPU upload runs here on the GUI thread; apply only the newest request that still has a
         // live renderer and a successful bake.
         if (requestId == m_environmentRequestId && m_renderer && baked) {
-            m_renderer->applyBakedEnvironment(*baked);
+            try {
+                m_renderer->applyBakedEnvironment(*baked);
+            } catch (const VulkanError& e) {
+                // The upload allocates GPU objects, so its VK_CHECKs can throw inside this queued
+                // slot — the same no-boundary hole renderFrame() closes. Disable the viewport
+                // rather than aborting the app.
+                m_renderer.reset();
+                m_context.reset();
+                m_deviceFailed = true;
+                qCritical() << "[Vulkan] Environment upload failed; viewport disabled:" << e.what();
+                return;
+            }
             // Auto-aim the key light at the environment's dominant light (its "sun"): in the PBR
             // mode the figure is visibly lit by the HDRI, so a key/shadow pointing anywhere else
             // reads as broken — the ground shadow must fall away from where the light comes from.
@@ -331,8 +342,18 @@ void VulkanWindow::renderFrame() {
     // idle, keeping the GPU busy and (with FIFO/vsync present) throttling the whole GUI thread.
     // drawFrame() returns true only when the swapchain was just rebuilt (or the frame skipped
     // mid-rebuild) and one follow-up frame is needed to reflect the new size.
-    if (m_renderer->drawFrame()) {
-        requestUpdate();
+    try {
+        if (m_renderer->drawFrame()) {
+            requestUpdate();
+        }
+    } catch (const VulkanError& e) {
+        // Runtime VK_CHECK failure (e.g. VK_ERROR_DEVICE_LOST after a driver reset/TDR): tear the
+        // renderer down and stop scheduling frames, rather than letting the exception escape
+        // Qt's event loop and abort the whole app. Mirrors the initializeVulkan() catch.
+        m_renderer.reset();
+        m_context.reset();
+        m_deviceFailed = true;
+        qCritical() << "[Vulkan] Rendering failed; viewport disabled:" << e.what();
     }
 }
 
@@ -438,6 +459,11 @@ void VulkanWindow::mouseMoveEvent(QMouseEvent* event) {
     } else if (active & Qt::MiddleButton) {
         camera.pan(static_cast<float>(delta.x()) * kPanPerPixel,
                    static_cast<float>(delta.y()) * kPanPerPixel);
+    } else {
+        // Plain hover (QWindow gets move events with no buttons held): nothing changed, so don't
+        // schedule a frame — an unconditional requestUpdate() here redraws the whole scene at
+        // mouse-move rate, exactly the idle churn event-driven rendering exists to avoid.
+        return;
     }
     requestUpdate();
 }

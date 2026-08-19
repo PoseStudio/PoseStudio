@@ -27,13 +27,18 @@ Before creating bug reports, please check the existing issues list to see if the
 
 ### Pull Requests
 1. Fork the repo and create your branch from `main`.
-2. If you've added code that should be tested, add tests.
-3. If you've changed APIs or user-facing features, update the documentation.
-4. Ensure the test suite passes locally.
-5. Issue that pull request!
+2. Build the project and verify your change works in the running application (there is no
+   automated test suite yet — manual verification in the viewport/UI is the current bar).
+3. If you've changed APIs or user-facing features, update the documentation
+   (README.md, and CHANGELOG.md under an "Unreleased" heading if appropriate).
+4. Issue that pull request!
 
 ## Local Development Setup
-*TBD*
+
+See **[Building from Source](../README.md#building-from-source)** in the README for
+prerequisites (Qt 6, CMake 3.21+, the LunarG Vulkan SDK) and build commands. All other
+dependencies are fetched automatically by CMake at configure time. Only the Windows/MSVC
+build has been exercised so far — macOS/Linux build reports and fixes are very welcome.
 
 ## Styleguides
 ### Git Commit Messages

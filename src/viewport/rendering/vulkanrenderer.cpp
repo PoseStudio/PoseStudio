@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <fstream>
+#include <limits>
 
 namespace pose {
 
@@ -239,6 +240,17 @@ void VulkanRenderer::recreateSwapchain() {
     if (m_windowExtent.width == 0 || m_windowExtent.height == 0) {
         return;
     }
+    // The cached Qt extent can lag the surface: if the window was minimised between an update
+    // request and this rebuild (acquire/present returned OUT_OF_DATE while m_windowExtent is
+    // still the pre-minimise size), the SURFACE reports 0x0 — and creating a swapchain with a
+    // zero imageExtent is a spec violation. Check the authoritative source before rebuilding.
+    VkSurfaceCapabilitiesKHR caps{};
+    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_context.physicalDevice(), m_context.surface(),
+                                                  &caps) == VK_SUCCESS &&
+        caps.currentExtent.width != std::numeric_limits<uint32_t>::max() &&
+        (caps.currentExtent.width == 0 || caps.currentExtent.height == 0)) {
+        return; // surface currently has no area; the next real resize/expose rebuilds
+    }
     vkDeviceWaitIdle(m_context.device());
 
     const uint32_t oldImageCount = m_swapchain->imageCount();
@@ -285,13 +297,14 @@ bool VulkanRenderer::drawFrame() {
         VK_CHECK(acquire);
     }
 
-    // Only reset the fence once we're committing to submit work that will signal it,
-    // otherwise an early-out above would leave it unsignalled and deadlock next frame.
-    VK_CHECK(vkResetFences(device, 1, &m_inFlightFences[m_currentFrame]));
-
     VkCommandBuffer cmd = m_commandBuffers[m_currentFrame];
     VK_CHECK(vkResetCommandBuffer(cmd, 0));
     recordCommandBuffer(cmd, imageIndex);
+
+    // Reset the fence only once we're committing to a submit that will re-signal it: an early-out
+    // above — or a throw during recording — must leave it signalled, because an unsignalled fence
+    // with no pending submit deadlocks the next frame's infinite vkWaitForFences.
+    VK_CHECK(vkResetFences(device, 1, &m_inFlightFences[m_currentFrame]));
 
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submit{};

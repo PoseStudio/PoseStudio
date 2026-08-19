@@ -7,10 +7,11 @@
  * them), so that lives in VulkanRenderer. This class stays a pure Vulkan object and
  * could be reused outside the app.
  *
- * Today's pipelines are deliberately minimal — no vertex buffers (vertices are produced
- * in the shader from gl_VertexIndex) and at most a single push-constant block. As real
- * geometry arrives, add vertex input bindings/attributes and descriptor set layouts here,
- * or introduce a small PipelineBuilder if the permutations grow.
+ * The fixed-function state every pipeline shares (dynamic viewport/scissor — so pipelines
+ * survive resizes untouched) lives in the class; everything that differs between pipelines —
+ * push constants, blending, depth, culling, topology, vertex input, descriptor set layouts —
+ * arrives via PipelineConfig. Add a knob there only when a real use case needs it, or
+ * introduce a small PipelineBuilder if the permutations grow.
  */
 
 #ifndef VULKANPIPELINE_H

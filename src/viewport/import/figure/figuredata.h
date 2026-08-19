@@ -3,11 +3,9 @@
  * @brief The CPU-side result of importing a native figure — the rich analogue of ModelData.
  *
  * A figure is far more than static geometry: it is a set of per-material-zone meshes bound to a
- * skeleton by skin weights, shaped by morphs, and shaded by multi-map materials. This struct is the
- * format-neutral contract the figure importer (import/figure/) produces and the engine consumes;
- * it is grown one phase at a time. Phase 1 populates the per-zone meshes (geometry + UVs +
- * materials); later phases add the skeleton, per-vertex skin weights, and morph channels. Pure
- * std + GLM — no Qt, no Vulkan.
+ * skeleton by skin weights, shaped by morphs (baked at import), corrected by pose-driven morphs,
+ * and shaded by multi-map materials. This struct is the format-neutral contract the figure
+ * importer (import/figure/) produces and the engine consumes. Pure std + GLM — no Qt, no Vulkan.
  */
 
 #ifndef FIGUREDATA_H
@@ -91,9 +89,10 @@ struct VertexSkin {
     glm::vec4  weights{0.0f};
 };
 
-/// One imported figure: its per-zone meshes plus (Phase 3) the skeleton and per-base-vertex skin
-/// weights. `vertexSkins` is index-aligned with the geometry's base vertices; both are empty for an
-/// unrigged import. Morph channels and richer material data attach in later phases.
+/// One imported figure: its per-zone meshes plus the skeleton, per-base-vertex skin weights, and
+/// pose correctives. `vertexSkins` is index-aligned with the geometry's base vertices; both it and
+/// `bones` are empty for an unrigged import. Character-identity morphs don't appear here — they
+/// are baked into the mesh vertices at import.
 struct FigureData {
     std::vector<FigureMesh>     meshes;
     std::vector<FigureBone>     bones;

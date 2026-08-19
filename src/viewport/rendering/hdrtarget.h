@@ -36,7 +36,6 @@ public:
 
     VkRenderPass  renderPass() const { return m_renderPass; }
     VkFramebuffer framebuffer() const { return m_framebuffer; }
-    VkExtent2D    extent() const { return m_extent; }
 
     /// The resolved (single-sample) HDR texture, in SHADER_READ_ONLY layout after the pass.
     VkDescriptorImageInfo resolveInfo() const;

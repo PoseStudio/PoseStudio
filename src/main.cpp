@@ -143,11 +143,14 @@ int main(int argc, char *argv[]) {
 #endif
 
     // Size the window relative to the screen rather than using a fixed pixel size,
-    // so it's usable on both small laptop displays and large monitors.
+    // so it's usable on both small laptop displays and large monitors. The height-derived
+    // width must still be clamped to the screen: on portrait or 5:4 displays height × 1.4
+    // exceeds the available width and the window would open wider than the desktop.
     if (QScreen *screen = app.primaryScreen()) {
         const QRect screenGeometry = screen->availableGeometry();
-        mainWindow.resize(static_cast<int>(screenGeometry.height() * 1.4),
-                          static_cast<int>(screenGeometry.height() * 0.80));
+        const int width = qMin(static_cast<int>(screenGeometry.height() * 1.4),
+                               static_cast<int>(screenGeometry.width() * 0.95));
+        mainWindow.resize(width, static_cast<int>(screenGeometry.height() * 0.80));
     }
 
     MenuManager *menuManager = new MenuManager(&mainWindow);

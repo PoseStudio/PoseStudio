@@ -7,6 +7,7 @@
 
 #include "vulkancontext.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 
@@ -19,8 +20,37 @@ VulkanPipeline::VulkanPipeline(VulkanContext& context, VkRenderPass renderPass,
     : m_context(context) {
     VkDevice device = m_context.device();
 
-    VkShaderModule vertModule = createShaderModule(vertSpirv);
-    VkShaderModule fragModule = createShaderModule(fragSpirv);
+    VkShaderModule vertModule = VK_NULL_HANDLE;
+    VkShaderModule fragModule = VK_NULL_HANDLE;
+
+    // Failure guard: a throwing constructor never runs ~VulkanPipeline, so anything created
+    // before a mid-sequence VK_CHECK throw must be released here or it leaks until device
+    // destruction (and trips validation's object-leak check). Disarmed on success.
+    struct BuildGuard {
+        VkDevice device;
+        VkShaderModule* vert;
+        VkShaderModule* frag;
+        VkPipelineLayout* layout;
+        bool armed = true;
+        ~BuildGuard() {
+            if (!armed) {
+                return;
+            }
+            if (*frag != VK_NULL_HANDLE) {
+                vkDestroyShaderModule(device, *frag, nullptr);
+            }
+            if (*vert != VK_NULL_HANDLE) {
+                vkDestroyShaderModule(device, *vert, nullptr);
+            }
+            if (*layout != VK_NULL_HANDLE) {
+                vkDestroyPipelineLayout(device, *layout, nullptr);
+                *layout = VK_NULL_HANDLE;
+            }
+        }
+    } guard{device, &vertModule, &fragModule, &m_layout};
+
+    vertModule = createShaderModule(vertSpirv);
+    fragModule = createShaderModule(fragSpirv);
 
     std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -106,8 +136,10 @@ VulkanPipeline::VulkanPipeline(VulkanContext& context, VkRenderPass renderPass,
 
     VkPipelineColorBlendStateCreateInfo colorBlend{};
     colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    // Clamped to the blendAttachments array's 2 entries — a future config asking for more must
+    // grow that array, not silently read past it. 0 = depth-only pass.
     colorBlend.attachmentCount =
-        config.hasColorAttachment ? config.colorAttachmentCount : 0; // 0 = depth-only pass
+        config.hasColorAttachment ? std::min(config.colorAttachmentCount, 2u) : 0;
     colorBlend.pAttachments = config.hasColorAttachment ? blendAttachments : nullptr;
 
     const std::array<VkDynamicState, 2> dynamicStates = {
@@ -154,8 +186,11 @@ VulkanPipeline::VulkanPipeline(VulkanContext& context, VkRenderPass renderPass,
     // Shader modules can be destroyed as soon as the pipeline is built, regardless of outcome.
     vkDestroyShaderModule(device, fragModule, nullptr);
     vkDestroyShaderModule(device, vertModule, nullptr);
+    fragModule = VK_NULL_HANDLE; // so the guard can't double-destroy if VK_CHECK throws below
+    vertModule = VK_NULL_HANDLE;
 
     VK_CHECK(result);
+    guard.armed = false; // success: the destructor owns m_pipeline/m_layout from here
 }
 
 VulkanPipeline::~VulkanPipeline() {

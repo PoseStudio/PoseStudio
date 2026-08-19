@@ -126,11 +126,6 @@ QTreeView#AssetManagerTree {
     color: #ffffff;
 }
 
-#AssetManagerGrid::item:text {
-    padding-bottom: 4px;
-    text-align: center;
-}
-
 /* =========================================================================
    [ INFO BAR FOOTER ]
    ========================================================================= */
@@ -174,40 +169,6 @@ QScrollBar::sub-line:vertical {
 QScrollBar::add-page:vertical,
 QScrollBar::sub-page:vertical {
     background: none;
-}
-
-/* =========================================================================
-   [ CONTROLS ]
-   ========================================================================= */
-
-#AssetManagerSubfolderCheck {
-    padding-bottom: 10px;
-    padding-left: 10px;
-    color: #cccccc;
-}
-
-#AssetManagerSubfolderCheck::indicator {
-    width: 13px;
-    height: 13px;
-    background-color: #2a2b2c;
-    border: 1px solid #555555;
-    border-radius: 2px;
-}
-
-#AssetManagerSubfolderCheck::indicator:checked {
-    background-color: #5b87cc; 
-    border: 1px solid #5b87cc;
-}
-
-#AssetManagerRefreshBtn {
-    padding: 6px; 
-    background-color: #3a3b3c; 
-    border-radius: 3px;
-    color: white; 
-}
-
-#AssetManagerRefreshBtn:hover {
-    background-color: #4a4b4c; 
 }
 
 /* ========================================================================= */

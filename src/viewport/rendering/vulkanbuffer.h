@@ -36,7 +36,6 @@ public:
     VulkanBuffer& operator=(VulkanBuffer&& other) noexcept;
 
     VkBuffer     handle() const { return m_buffer; }
-    VkDeviceSize size()   const { return m_size; }
 
     /// Non-null only when the buffer was created with a HOST_ACCESS + MAPPED flag (e.g. a UBO).
     void* mappedData() const { return m_mappedData; }

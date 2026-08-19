@@ -346,6 +346,19 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
         perMeshBaseIndex.reserve(meshCount);
     }
     const bool skinned = !data.bones.empty();
+    if (skinned) {
+        // Reserve the ground-sample store ONCE, summed across meshes. An exact-fit reserve inside
+        // the per-mesh loop would reallocate-and-copy the whole vector every iteration (exact-fit
+        // defeats geometric growth), turning a figure's ~10 MB of samples into O(zones × total)
+        // redundant copying.
+        std::size_t totalVerts = 0;
+        for (const MeshData& meshData : data.meshes) {
+            if (!meshData.indices.empty()) {
+                totalVerts += meshData.vertices.size();
+            }
+        }
+        m_groundSamples.reserve(totalVerts);
+    }
     for (const MeshData& meshData : data.meshes) {
         if (meshData.indices.empty()) {
             continue;
@@ -359,7 +372,6 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
         if (skinned) {
             // Ground samples: the skinning inputs dropToGround() needs to find the posed lowest
             // point (the GPU buffers are device-local and unreadable).
-            m_groundSamples.reserve(m_groundSamples.size() + meshData.vertices.size());
             for (const Vertex& v : meshData.vertices) {
                 m_groundSamples.push_back({v.pos, v.joints, v.weights});
             }
@@ -717,6 +729,11 @@ Model::~Model() {
 
 void Model::record(VkCommandBuffer cmd, VkPipelineLayout layout, bool transparentPass,
                    const glm::vec3& cameraPos) const {
+    // A model whose meshes were all index-empty never created its pool/joint set (the constructor
+    // early-returns) — binding the VK_NULL_HANDLE set would be invalid Vulkan usage.
+    if (m_meshes.empty()) {
+        return;
+    }
     // Set 2 = this model's skin matrices (shared by all its meshes).
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 2, 1, &m_jointSet, 0,
                             nullptr);

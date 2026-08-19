@@ -370,7 +370,7 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
             cutout = channelScalar(*c, 1.0f);
             ref.opacityImageUri = channelImageUri(*c, imageLibrary);
         } else if (const nlohmann::json* legacy = topLevelChannel(mat, base, "transparency")) {
-            // Older-generation (pre-Iray) materials have no "Cutout Opacity" shader channel; their
+            // Older-generation (pre-PBR-era) materials have no "Cutout Opacity" shader channel; their
             // opacity is the format's CORE "transparency" property (UI name "Opacity Strength" —
             // the value IS the opacity: 0 = invisible). This is how those figures' eye shells go
             // clear — without reading it, the cornea/moisture render as opaque white balls over

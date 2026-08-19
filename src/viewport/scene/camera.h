@@ -45,7 +45,6 @@ public:
     void pan(float deltaX, float deltaY);
 
     glm::mat4 view() const;
-    glm::mat4 projection() const { return m_projection; }
     glm::mat4 viewProjection() const { return m_projection * view(); }
     glm::vec3 position() const;
 

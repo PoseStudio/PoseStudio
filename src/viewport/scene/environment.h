@@ -7,9 +7,9 @@
  * environment illuminates the subject, giving soft wrap light, a natural rim, and (with the
  * prefiltered maps) real glossy reflections that stay consistent as the camera orbits. The
  * default environment is generated procedurally (a neutral studio) so no HDR asset needs to
- * ship; a real `.hdr` panorama can replace it. This file owns the *CPU* side — the source
- * radiance image and the bakes computed from it (spherical-harmonic diffuse irradiance, and
- * later the prefiltered specular cubemap + BRDF LUT). Pure std + GLM: no Qt, no Vulkan.
+ * ship; a real `.hdr`/`.exr` panorama can replace it. This file owns the *CPU* side — the source
+ * radiance image and the bakes computed from it: spherical-harmonic diffuse irradiance, the
+ * GGX-prefiltered specular cubemap, and the BRDF LUT. Pure std + GLM: no Qt, no Vulkan.
  */
 
 #ifndef ENVIRONMENT_H

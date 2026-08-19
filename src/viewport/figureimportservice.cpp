@@ -119,9 +119,10 @@ ModelData toModelData(FigureData&& fig) {
     }
 
     // Skeleton: apply the same cm->world scale to bone origins as to the vertices, so skin matrices
-    // operate in the figure's rendered space. The bind transform is translation-only for now (bind
-    // pose reproduces the rest geometry regardless of orientation); bone orientation is folded in
-    // when posing lands, which is when it starts to matter.
+    // operate in the figure's rendered space. The bind transform is deliberately translation-only
+    // (bind pose reproduces the rest geometry regardless of orientation); the orientation and
+    // rotation order travel separately, and the posing runtime applies pose rotations in the
+    // joint's oriented frame (see Model::setBoneRotation).
     model.bones.reserve(fig.bones.size());
     for (const FigureBone& bone : fig.bones) {
         ModelBone modelBone;

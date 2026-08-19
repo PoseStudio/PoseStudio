@@ -15,7 +15,7 @@ layout(location = 0) out vec4 outColor;
 void main() {
     vec3 c = texture(uHdr, vUv).rgb;
     float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
-    // Soft knee: nothing below threshold, full contribution one stop above it.
+    // Soft knee: nothing below threshold, ramping to full contribution one luminance unit above it.
     float k = smoothstep(pc.params.x, pc.params.x + 1.0, lum);
     outColor = vec4(c * k, 1.0);
 }

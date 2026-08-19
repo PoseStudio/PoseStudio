@@ -11,16 +11,17 @@ should be deleted.
 
 **Labels:** `good first issue`, `testing`
 
-The Asset Manager (the left-side panel with the directory tree + asset grid) is the
-most feature-complete part of PoseStudio right now, but it hasn't had broad usage
-outside the core contributors. We need people to actually use it and break it.
+The Asset Manager (the left-side panel with the directory tree + asset grid) is one of the
+most feature-complete parts of PoseStudio, but it hasn't had broad usage outside the core
+contributors. We need people to actually use it and break it.
 
 **What to do**
 1. Build PoseStudio (see README) and point it at a real asset library (or any folder
    full of nested subfolders + images).
 2. Try the everyday flows: browsing folders, searching, creating Collections and
-   nested sub-Collections, adding folders/assets to a Collection, renaming/deleting
-   things, right-click context menus everywhere.
+   nested sub-Collections, adding assets to a Collection, favoriting assets,
+   drag-reordering Favorites/Collections, renaming/deleting things, right-click
+   context menus everywhere.
 3. Restart the app between sessions — anything that *looked* like it saved but
    didn't survive a restart is a bug worth its own issue.
 4. File one issue per bug you find, with repro steps and (if you can) a screenshot.
@@ -30,8 +31,9 @@ outside the core contributors. We need people to actually use it and break it.
 - Directory tree: expand/collapse, Browse Folder, Find In Library
 - Search Results
 - Collections: create, rename, delete, nested sub-Collections, Add/Move/Copy To
-  Collection, folder shortcuts inside a Collection
-- The asset grid: thumbnails, tooltips, double-click to open
+  Collection, drag an asset onto a Collection node
+- Favorites: add/remove, drag-to-reorder
+- The asset grid: thumbnails, tooltips, double-click to import into the viewport
 
 No code changes required for this issue — it's pure usage and bug reporting. Great
 first contribution if you're not ready to dive into the C++/Qt code yet.
@@ -61,31 +63,29 @@ data point. No code required.
 
 ---
 
-## 3. Build the Preferences UI on top of the existing PreferencesManager backend
+## 3. Add a View → Show Skeleton toggle for the posing overlay
 
 **Labels:** `enhancement`, `help wanted`, `good first issue`
 
-The data layer for preferences already exists (`src/preferencesmanager.h`/`.cpp`) —
-a singleton cache backed by the `Preferences` SQLite table, with
-`getValue(key, default)` / `setValue(key, value)` already implemented and loaded at
-startup (`src/main.cpp`). What's missing is the actual UI.
-
-The **Edit → Preferences** menu item already exists in `src/menumanager.cpp` but is
-currently a disabled placeholder (`->setEnabled(false)`).
+The viewport can draw a colored skeleton overlay (joint→parent line segments) over a
+posable figure, but it's currently hidden with no way to turn it on: the renderer-side
+plumbing (`Scene::setShowSkeleton` in `src/viewport/scene/scene.h`, forwarded through
+`VulkanRenderer`/`VulkanWindow`/`ViewportWidget`) already exists and is deliberately
+retained for exactly this feature — nothing in the UI sets it yet.
 
 **Scope for a first pass**
-1. A `PreferencesDialog` (QDialog) that reads/writes through the existing
-   `PreferencesManager::instance()` API — no new persistence code needed.
-2. Wire it up to the Edit → Preferences action and enable that menu item.
-3. Pick a small, real starting set of preferences rather than trying to cover
-   everything at once — e.g. theme/accent color, default asset library behavior, or
-   thumbnail size (`Constants::GRID_ICON_DISPLAY_SIZE` is currently a hardcoded
-   constant in `src/constants.h` and would be a good first candidate to make
-   user-configurable).
+1. Add a **View** menu to the menu bar (`src/shell/menumanager.cpp`) with a checkable
+   "Show Skeleton" action.
+2. Route it through `ViewportWidget` to the existing `setShowSkeleton` plumbing (see
+   how the shade-mode setter travels the same path), and make sure the viewport
+   repaints on toggle (`requestUpdate()` — see the event-driven-rendering note in
+   `src/viewport/vulkanwindow.cpp`).
+3. Optionally persist the choice via `PreferencesManager::instance()` so it survives
+   restarts.
 
-This is a good first *subsystem* issue if you want something more substantial than
-a bug fix but with a backend that already exists to lean on — you're building the
-UI layer, not inventing the storage model.
+A small, well-bounded feature where every layer you need already has a worked example
+to copy from — good if you want your first change to touch the real rendering path
+without writing any Vulkan.
 
 ---
 
@@ -93,7 +93,7 @@ UI layer, not inventing the storage model.
 
 **Labels:** `enhancement`, `help wanted`, `discussion`
 
-The Help menu (`src/menumanager.cpp`) currently has disabled placeholders for
+The Help menu (`src/shell/menumanager.cpp`) currently has disabled placeholders for
 "Release Notes", "Tutorials", and "Support" — there's no backend or design for this
 yet, so this issue is as much about deciding the approach as building it.
 
@@ -107,8 +107,8 @@ code):
   separately?
 
 **Once direction is picked, rough scope**
-1. Wire up the existing Help menu actions in `src/menumanager.cpp` (currently all
-   `setEnabled(false)`).
+1. Wire up the existing Help menu actions in `src/shell/menumanager.cpp` (currently
+   all `setEnabled(false)`).
 2. Whatever content/viewer mechanism is decided on above.
 
 This is a bigger, less-defined task than the other issues here — best suited for

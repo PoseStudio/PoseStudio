@@ -33,8 +33,14 @@ struct ChannelRef {
 
 ChannelRef parseChannelRef(const std::string& ref) {
     std::string rest = ref;
+    // Strip a leading "NodeName:" scope — but only when the colon precedes any '/', so a colon
+    // inside a path or fragment ("/data/x.dsf#Some:Channel") isn't mistaken for a scope
+    // separator (matching channelId in figureimporter.cpp, which learned the same rule).
     if (const std::size_t colon = rest.find(':'); colon != std::string::npos) {
-        rest = rest.substr(colon + 1); // strip a leading "NodeName:" scope
+        const std::size_t slash = rest.find('/');
+        if (slash == std::string::npos || colon < slash) {
+            rest = rest.substr(colon + 1);
+        }
     }
     const std::size_t q = rest.find('?');
     const std::string url = (q == std::string::npos) ? rest : rest.substr(0, q);
@@ -83,8 +89,9 @@ double evalOperations(const nlohmann::json& operations,
             const double b = pop();
             stack.push_back(b != 0.0 ? pop() / b : (pop(), 0.0));
         }
-        // Rarer ops (spline, etc.) are uncommon for identity morphs; approximating them as no-ops
-        // (leave the stack) is close enough until correctives (Phase 4).
+        // Rarer ops (spline, etc.) are uncommon for identity morphs and approximated as no-ops
+        // (leave the stack) — a known gap of this identity-morph path only. The pose-corrective
+        // evaluator (correctiveparser.cpp) implements the spline vocabulary for real.
     }
     return stack.empty() ? 0.0 : stack.back();
 }
@@ -181,8 +188,26 @@ std::vector<DialedMorph> resolveDialedMorphs(const nlohmann::json& presetRoot, U
         enqueue(parseChannelRef(url).key, url);
     }
 
-    // Propagate control values through the driver formulas. The visited set bounds the walk (the graph is a
-    // shallow DAG); values seed before a channel is processed, so parents drive children in order.
+    // A "routed" output is consumed outside channel propagation (joint centers, figure scale) or
+    // deliberately dropped (end_point/orientation, per-bone scale) — see the evaluation loop for
+    // the rationale on each. Routed outputs never extend the propagation graph.
+    auto isRoutedOutput = [](const std::string& property) {
+        return property.rfind("center_point/", 0) == 0 ||
+               property.rfind("end_point/", 0) == 0 ||
+               property.rfind("orientation/", 0) == 0 ||
+               property.find("scale/general") != std::string::npos ||
+               property.find("general_scale") != std::string::npos;
+    };
+
+    // --- Discovery: walk the driver graph from the seeds, loading each reachable file-backed
+    // channel's modifier once and keeping its formula list. Reachability is value-independent
+    // (a formula's outputs are enumerated whether or not it currently evaluates to zero), so
+    // this graph is fixed before any value is computed. The visited set bounds the walk.
+    struct LoadedChannel {
+        std::shared_ptr<const FigureDocument> doc; // keeps the formula JSON alive
+        const nlohmann::json* formulas;
+    };
+    std::vector<LoadedChannel> loaded;
     std::unordered_set<std::string> processed;
     while (!queue.empty()) {
         const std::string key = queue.front();
@@ -210,49 +235,93 @@ std::vector<DialedMorph> resolveDialedMorphs(const nlohmann::json& presetRoot, U
         if (formulas == mod->end() || !formulas->is_array()) {
             continue;
         }
+        loaded.push_back({doc, &*formulas});
         for (const auto& formula : *formulas) {
-            const auto ops = formula.find("operations");
-            if (ops == formula.end()) {
-                continue;
-            }
             const ChannelRef out = parseChannelRef(formula.value("output", std::string()));
-            if (out.key.empty()) {
+            if (out.key.empty() || isRoutedOutput(out.property)) {
                 continue;
             }
-            const double r = evalOperations(*ops, values); // the formula's default stage is additive
-
-            // Joint-center adjustment: a full-body/head morph also drives each bone's center_point (the
-            // joint's rest origin) so the skeleton follows the character's new proportions. Route these
-            // to the bone-offset map — a bone is not a morph channel to propagate — keyed by bone id.
-            if (out.property.rfind("center_point/", 0) == 0) {
-                if (const int a = axisIndexOf(out.property); a >= 0) {
-                    outJointCenterOffsets[out.key][a] += static_cast<float>(r);
-                }
-                continue;
-            }
-            // end_point/orientation don't affect our translation-only bind (orientation is read straight
-            // from the node), so skip them cleanly rather than letting them masquerade as channel values.
-            if (out.property.rfind("end_point/", 0) == 0 ||
-                out.property.rfind("orientation/", 0) == 0) {
-                continue;
-            }
-
-            // Scale outputs are routed out of channel propagation (like center_point above): a node's
-            // scale channel is not a morph channel. Only the FIGURE node's scale/general sets character
-            // height (e.g. a teen figure dialed shorter). A bone-targeted output is a propagating-scale
-            // rig instead — a head-scale control drives ~80 per-bone scale/general channels — and
-            // summing those into the figure scale imported one teen character at 3x size. Per-bone
-            // scale isn't modeled (the bind is translation-only), so those outputs are dropped here.
-            if (out.property.find("scale/general") != std::string::npos ||
-                out.property.find("general_scale") != std::string::npos) {
-                if (out.key == figureNodeKey) {
-                    scaleAccum += r;
-                }
-                continue;
-            }
-
-            values[out.key] += r;
             enqueue(out.key, out.url);
+        }
+    }
+
+    // --- Evaluation, iterated to a fixed point. Discovery order is a BFS, which is NOT a
+    // topological order: a channel can be reached before all of its own driver inputs have
+    // accumulated, and since formula contributions are additive, a single sweep could bake a
+    // partial input into a downstream morph. Each round therefore re-derives every driven value
+    // from the seeds plus the previous round's values; for a DAG this converges in at most
+    // graph-depth rounds (real driver graphs — character CTRL → head/body controls → component
+    // morphs — are 2-3 deep, so the cap is generous and cycles still terminate).
+    const std::unordered_map<std::string, double> seeds = values;
+    for (int round = 0; round < 8; ++round) {
+        std::unordered_map<std::string, double> next = seeds;
+        double roundScale = 0.0;
+        JointCenterOffsets roundOffsets;
+
+        for (const LoadedChannel& lc : loaded) {
+            for (const auto& formula : *lc.formulas) {
+                const auto ops = formula.find("operations");
+                if (ops == formula.end()) {
+                    continue;
+                }
+                const ChannelRef out = parseChannelRef(formula.value("output", std::string()));
+                if (out.key.empty()) {
+                    continue;
+                }
+                const double r = evalOperations(*ops, values); // the formula's default stage is additive
+
+                // Joint-center adjustment: a full-body/head morph also drives each bone's center_point
+                // (the joint's rest origin) so the skeleton follows the character's new proportions.
+                // Route these to the bone-offset map — a bone is not a morph channel to propagate.
+                if (out.property.rfind("center_point/", 0) == 0) {
+                    if (const int a = axisIndexOf(out.property); a >= 0) {
+                        roundOffsets[out.key][a] += static_cast<float>(r);
+                    }
+                    continue;
+                }
+                // end_point/orientation don't affect our translation-only bind (orientation is read
+                // straight from the node), so skip them rather than let them masquerade as channels.
+                if (out.property.rfind("end_point/", 0) == 0 ||
+                    out.property.rfind("orientation/", 0) == 0) {
+                    continue;
+                }
+
+                // Scale outputs are routed out of channel propagation (like center_point above): a
+                // node's scale channel is not a morph channel. Only the FIGURE node's scale/general
+                // sets character height (e.g. a teen figure dialed shorter). A bone-targeted output
+                // is a propagating-scale rig instead — a head-scale control drives ~80 per-bone
+                // scale/general channels — and summing those into the figure scale imported one teen
+                // character at 3x size. Per-bone scale isn't modeled (the bind is translation-only),
+                // so those outputs are dropped here.
+                if (out.property.find("scale/general") != std::string::npos ||
+                    out.property.find("general_scale") != std::string::npos) {
+                    if (out.key == figureNodeKey) {
+                        roundScale += r;
+                    }
+                    continue;
+                }
+
+                next[out.key] += r;
+            }
+        }
+
+        scaleAccum = roundScale;
+        outJointCenterOffsets = std::move(roundOffsets);
+
+        // Converged once no channel's value moved since the previous round.
+        bool stable = next.size() == values.size();
+        if (stable) {
+            for (const auto& [k, v] : next) {
+                const auto it = values.find(k);
+                if (it == values.end() || std::abs(it->second - v) > 1e-9) {
+                    stable = false;
+                    break;
+                }
+            }
+        }
+        values = std::move(next);
+        if (stable) {
+            break;
         }
     }
     outFigureScale = static_cast<float>(1.0 + scaleAccum);

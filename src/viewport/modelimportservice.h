@@ -5,8 +5,9 @@
  * This is the seam between the Qt-free import/ subsystem and the Qt-free renderer core. It:
  *   1. picks the right importer for the file (ImporterRegistry),
  *   2. parses it into a format-neutral ModelData (MeshImporter::load),
- *   3. decodes each mesh's diffuse texture via QImage — from an external path OR embedded bytes —
- *      into tightly-packed RGBA8, so the renderer never needs an image codec,
+ *   3. decodes each mesh's texture maps via QImage — from external paths OR embedded bytes — into
+ *      tightly-packed shared RGBA8 images (all six material slots), baking opacity masks into the
+ *      diffuse alpha and gutter-filling UV seams, so the renderer never needs an image codec,
  *   4. uploads it (VulkanRenderer::addModel),
  * optionally driving a modal staged progress dialog through those phases.
  *

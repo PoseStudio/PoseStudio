@@ -34,9 +34,6 @@ public:
     /// Importer for @p path, chosen by its file extension, or nullptr if the format is unsupported.
     const MeshImporter* forPath(const std::string& path) const;
 
-    /// All registered importers, in registration order.
-    const std::vector<std::unique_ptr<MeshImporter>>& all() const { return m_importers; }
-
 private:
     ImporterRegistry(); // registers the built-in importers
 

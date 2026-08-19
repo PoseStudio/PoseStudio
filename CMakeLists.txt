@@ -10,7 +10,7 @@ cmake_minimum_required(VERSION 3.21)
 # C is enabled alongside C++ because a couple of third-party dependencies ship C implementation
 # files we compile directly into the target (e.g. miniz's inflate sources for the figure importer).
 # Without C in the language list, CMake classifies .c files as non-buildable and silently skips them.
-project(PoseStudio VERSION 0.3.5 LANGUAGES C CXX)
+project(PoseStudio VERSION 0.3.6 LANGUAGES C CXX)
 
 # ==============================================================================
 # [ COMPILER CONFIGURATION ]
@@ -41,7 +41,9 @@ set(CMAKE_AUTOUIC ON) # User Interface Compiler (Handles .ui XML files)
 set(CMAKE_AUTORCC ON) # Resource Compiler (Handles .qrc binary embedding)
 
 # ==============================================================================
-# [ 3D VIEWPORT DEPENDENCIES (Vulkan, GLM, VMA) ]
+# [ 3D VIEWPORT & IMPORT DEPENDENCIES ]
+#   Vulkan SDK (required), plus header-only/FetchContent libs: GLM, VMA,
+#   tinyobjloader, nlohmann/json, miniz, stb_image, tinyexr
 # ==============================================================================
 
 # The viewport renders with Vulkan. This requires the LunarG Vulkan SDK to be
@@ -292,9 +294,15 @@ add_executable(
 
 # The Windows executable icon resource (.rc) is understood only by the Windows resource
 # compiler. On macOS/Linux (Clang/GCC) CMake has no RC language enabled, so listing it
-# unconditionally breaks configuration there — add it only on Windows.
+# unconditionally breaks configuration there — add it only on Windows. The .manifest forces
+# the process ANSI code page to UTF-8 (see the comment inside the file): without it, model/
+# figure/HDRI imports from folders with non-ASCII characters fail through every narrow-char
+# file API. CMake merges it into the executable via mt.exe automatically.
 if(WIN32)
-    target_sources(PoseStudio PRIVATE resources/PoseStudio.rc) # Injects the .exe icon
+    target_sources(PoseStudio PRIVATE
+        resources/PoseStudio.rc       # Injects the .exe icon
+        resources/PoseStudio.manifest # UTF-8 process code page (non-ASCII import paths)
+    )
 endif()
 
 # ==============================================================================
