@@ -12,12 +12,14 @@
 #include <QDesktopServices>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QItemSelectionModel>
 #include <QKeySequence>
 #include <QLineEdit>
 #include <QPointer>
 #include <QScreen>
 #include <QScrollBar>
 #include <QShortcut>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QTextBrowser>
 #include <QTextCursor>
@@ -248,7 +250,22 @@ void HelpWindow::syncContentsSelection(const Location& where) {
     if (item == nullptr) {
         return;
     }
-    m_syncingContents = true;
+    // Programmatic selection: the collapse / expand / scroll below re-lays-out the tree, and a
+    // QTreeWidget will then re-resolve its current index and selection to the row under a
+    // stationary mouse cursor - so the TOC ends up highlighting whatever happens to sit under
+    // the pointer instead of the page we just opened. Block the signals for the whole sync so
+    // that re-selection cannot re-enter onContentsSelectionChanged and open the page under the
+    // mouse, then re-assert the target as current + selected once the event loop has settled
+    // (the drift lands in a later iteration, after this function returns).
+    const QSignalBlocker blocker(m_contents);
+    m_syncingContents = true; // (belt and braces: also guards a same-event-loop re-entrancy)
+    auto pinTarget = [this, item]() {
+        m_contents->setCurrentItem(item);
+        m_contents->selectionModel()->select(
+            m_contents->indexFromItem(item),
+            QItemSelectionModel::Clear | QItemSelectionModel::Select | QItemSelectionModel::Rows
+            | QItemSelectionModel::NoUpdate);
+    };
     if (m_search->text().trimmed().isEmpty()) {
         m_contents->collapseAll(); // (only the page being read stays open; a search keeps its matches open)
     }
@@ -258,8 +275,15 @@ void HelpWindow::syncContentsSelection(const Location& where) {
     if (where.anchor.isEmpty()) {
         item->setExpanded(true);
     }
-    m_contents->setCurrentItem(item);
+    pinTarget();
     m_contents->scrollToItem(item);
+    QTimer::singleShot(0, this, [this, item, pinTarget]() {
+        // The relayout / scroll can re-resolve the selection to the row under a stationary
+        // cursor after we return; force it back onto the page we actually opened.
+        m_syncingContents = true;
+        pinTarget();
+        m_syncingContents = false;
+    });
     m_syncingContents = false;
 }
 
