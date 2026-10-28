@@ -256,6 +256,14 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
         r.error = "grab bone not found: " + sc.grab;
         return r;
     }
+    for (const std::string& name : sc.alsoGrab) { // (THE GROUP: after the selection, which clears it)
+        const int member = resolveBone(arm, name);
+        if (member < 0) {
+            r.error = "group bone not found: " + name;
+            return r;
+        }
+        arm.toggleGroupBone(member);
+    }
     const glm::vec3 grabPointStart = arm.ikGrabPointWorld();
     r.startEuler.resize(n);
     for (std::size_t i = 0; i < n; ++i) {

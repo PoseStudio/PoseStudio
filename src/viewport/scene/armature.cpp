@@ -99,7 +99,24 @@ void Armature::build(const std::vector<ArmatureBone>& bones) {
         bone.orient = eulerMatrix(src.orientation, kOrientXyz ? "XYZ" : "ZYX");
         bone.invOrient = glm::inverse(bone.orient);
         bone.orientationDeg = src.orientation;
-        bone.rotationOrder = src.rotationOrder;
+        // THE ROTATION ORDER IS THE ORDER THE CHANNELS ARE APPLIED IN (2026-10-27): the format's
+        // first letter — the twist, about the bone's own length — acts FIRST (innermost), the
+        // last — the wide bend — last: "YZX" is Rx · Rz · Ry. eulerMatrix composes its string
+        // leftmost OUTERMOST, so the engine keeps the order REVERSED ("XZY" for that bone) and
+        // every reader of the stored string — eulerMatrix, eulerFromMatrix, the solver's
+        // channel-axis prefix, the dials' sweep — composes the format's way; dump() writes the
+        // format's string back, and the length axis is the stored string's LAST letter
+        // (lengthAxisLetter). Composed the other way, as it was since the importer was written,
+        // one non-zero channel was the same and two were not: a thigh flexed and then moved
+        // Side-Side ROLLED about its own length where a hip abducts, and a bent forearm's twist
+        // on the one-bone generations swung it round the upper arm's line. The evidence: the
+        // orientation (the same convention, measured by the frames' length axes); the
+        // generations that cut a limb's twist out into a CHILD bone, which apply it innermost by
+        // construction and author the same ranges as the one-bone generations; and the format's
+        // reference importer, whose Euler type's order string is its application order.
+        // (POSESTUDIO_ORDER_AS_WRITTEN is the A/B: the composition as it was.)
+        bone.rotationOrder = kOrderAsWritten ? src.rotationOrder
+                                             : std::string(src.rotationOrder.rbegin(), src.rotationOrder.rend());
         bone.rotMin = src.rotationMin;
         bone.rotMax = src.rotationMax;
         bone.rotLimited = src.rotationLimited;
@@ -210,6 +227,21 @@ void Armature::build(const std::vector<ArmatureBone>& bones) {
     computeSkinMatrices(); // bind pose until a caller poses a bone
 }
 
+const bool Armature::kOrderAsWritten = std::getenv("POSESTUDIO_ORDER_AS_WRITTEN") != nullptr;
+
+std::string Armature::formatRotationOrder(const Bone& b) {
+    // (The format's own string: the stored one reversed, unless the A/B keeps it as written.)
+    return kOrderAsWritten ? b.rotationOrder : std::string(b.rotationOrder.rbegin(), b.rotationOrder.rend());
+}
+
+char Armature::lengthAxisLetter(const Bone& b) {
+    // The bone's length axis is the format's FIRST letter (the twist) — the stored string's last.
+    if (b.rotationOrder.empty()) {
+        return 'X';
+    }
+    return kOrderAsWritten ? b.rotationOrder.front() : b.rotationOrder.back();
+}
+
 bool Armature::dump(const std::string& path) const {
     std::ofstream out(path);
     if (!out) {
@@ -219,7 +251,7 @@ bool Armature::dump(const std::string& path) const {
         const Bone& b = m_bones[i];
         const glm::vec3 t(b.localBind[3]);
         const glm::vec3& o = b.orientationDeg;
-        out << m_boneNames[i] << ' ' << b.parent << ' ' << b.rotationOrder << ' ' << t.x << ' '
+        out << m_boneNames[i] << ' ' << b.parent << ' ' << formatRotationOrder(b) << ' ' << t.x << ' '
             << t.y << ' ' << t.z << ' ' << o.x << ' ' << o.y << ' ' << o.z << ' ' << b.rotMin.x
             << ' ' << b.rotMin.y << ' ' << b.rotMin.z << ' ' << b.rotMax.x << ' ' << b.rotMax.y
             << ' ' << b.rotMax.z << ' ' << (b.rotLimited.x ? 1 : 0) << ' '
@@ -475,6 +507,7 @@ std::vector<std::pair<std::string, glm::vec3>> Armature::capturePose() const {
 }
 
 void Armature::applyPose(const std::vector<std::pair<std::string, glm::vec3>>& pose) {
+    clearHangBases(); // (a pose from elsewhere: the arms' swing bases are re-read at the next press)
     for (glm::vec3& e : m_boneEuler) {
         e = glm::vec3(0.0f); // reset to bind pose first
     }
@@ -569,6 +602,7 @@ bool Armature::resetBone(int index, bool subtree) {
 }
 
 void Armature::resetPose() {
+    clearHangBases();
     for (glm::vec3& e : m_boneEuler) {
         e = glm::vec3(0.0f);
     }

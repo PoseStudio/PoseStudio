@@ -45,6 +45,7 @@ The scripts:
 | `gallery_limbs.txt` | Hand across the body, elbow, knee raise, foot slide, stride, lunge, foot lifted behind, lifted by the hand. |
 | `gallery_perspective.txt` | The Home and three-quarter views a user poses in: hips, chest, head, hand and foot drags where "down" on screen is down and toward the camera. |
 | `gallery_floor.txt` | Floor poses from several drags each: toward all fours, a kneel sat back on the heels, a sit reclined by the chest, a sit with a leg stretched out, a sit LAID DOWN on her back and sat up again — with the SKIN's height over the floor, the pelvis's pitch and the worst single-tick move asserted, and the sat-up pose shot from the FRONT as well: a drag in the sagittal plane must leave her symmetric (the pelvis bone's twist and side bend are asserted), and legs folded to one side do not show from the side. |
+| `gallery_group.txt` | Several joints dragged together (THE GROUP): both hands raised, pushed forward and brought down, both knees pushed forward — through `sclick` / `spress` — with the selection's bookkeeping asserted (a Shift+click on a member removes it, a plain click selects one joint alone). |
 | `session_poses.txt` | Whole poses built from several drags in a row (a walk, a sit with a hand to the knee, a high reach, picking something up), shot from a three-quarter view. |
 | `check_returns.txt` | Numbers only: out-and-home in one drag, a bow undone in a second drag, a walking drag let go of mid-step, a posed head. |
 | `gallery_hands.txt` | Hands laid on the body: a hand on the hip, both hands on the hips, on the heart, on top of the head, on the belly, behind the back, seated on the knee, and a hand laid and taken away — with `palm.<bone>` asserted. |
@@ -91,6 +92,8 @@ along the bone's limb segment — the flesh, where a user clicks — instead of 
 | `click <bone>[@share] [dxPx dyPx]` | The real pick at that pixel (moved by the offset where given, +y down: a toe's tip lies past its last joint's pixel); prints what it found. The pixel is the NAMED bone's joint's, whatever a selection of it selects: `click lEye` clicks at the eye, and finds the head. |
 | `pick2d on\|off` | The A/B: the 2D pick alone, as before 2026-09-26 (every joint and bone body projected to the screen, the nearest within 32px taken, no occlusion check) — a hidden part CAN be selected through another. `POSESTUDIO_PICK_2D=1` does the same for a whole run. |
 | `press <bone>[@share]` | The real press: the pick at the bone's pixel, then the press path (an IK drag begins). The pick is honest — what it finds is what is under that pixel — and on another body that can be another limb (a broad character's hanging arm covers her chest from the side, one hand covers the other). When the rig would then drag a different joint than the one named, the bone is grabbed by name at the same point instead, and the log says `the pick found <other> there`. A small bone OF the named one (a pectoral for the chest) is what a user's click finds too, and stands. |
+| `sclick <bone>` | The Shift+CLICK at the bone's pixel: adds the joint to THE GROUP (as its primary, the previous selection joining the group) or takes a member out; prints the group. |
+| `spress <bone>[@share]` | The Shift press: the pressed joint joins the selection as its primary and a whole-body drag of the whole group begins through it — every selected joint moves by the same displacement. |
 | `cpress <bone>[@share]` | The Ctrl press: the same pick and press path, beginning the Ctrl + drag — a SCOPED drag for a limb or the head (the grabbed chain alone moves), the FIGURE MOVE for the body itself (the hips, the abdomen, the chest: the whole figure as posed, nothing planted, the user's pins holding), the digit's own drag for a finger or a toe. |
 | `drag <dxPx> <dyPx> <moveTicks> <holdTicks>` | Move the cursor in screen pixels (+y down), then hold. |
 | `dragv <right m> <up m> <moveTicks> <holdTicks>` | The same, given in metres along the view's right/up axes at the grab's depth. |
@@ -116,7 +119,9 @@ along the bone's limb segment — the flesh, where a user clicks — instead of 
 | `meshlow` | The lowest point of the posed SKIN over the floor, mm (negative = flesh through the floor — invisible to every joint reading). |
 | `gaze`, `headroll` | The head's look direction over the horizon and its sideways tilt, degrees. |
 | `tilt.<bone>` | A bone's tilt from upright, degrees. |
+| `swing.<bone>` | A bone's fore-aft angle from straight down, degrees, + forward of the figure: an upper arm swung forward by a stride reads about +20, one swung back -20. |
 | `y.<bone>`, `moved.<bone>`, `movedxz.<bone>` | A joint's height, its travel since the last press, and that travel along the floor alone (a planted foot's place, a heel lift aside), mm. |
+| `group` / `ingroup.<bone>` | The number of selected joints (the primary and THE GROUP's secondaries) / 1 if that joint is one of them, else 0. |
 | `selected.<bone>` | 1 if the selected joint is that bone or a bone of its rigid segment (what a `click` picked), else 0. |
 | `lit.<bone>` | 1 if the selection highlight tints that bone's flesh (the selected joint, or the twist bone of its limb segment), else 0. |
 | `euler.<bone>.<x\|y\|z>` | A posed channel, degrees. |
@@ -129,6 +134,10 @@ along the bone's limb segment — the flesh, where a user clicks — instead of 
 Expectations are regression guards set from what the app does today, with margin — not
 specifications. A gesture given in screen metres is only as exact as its guess at the figure's
 proportions: where a gate reads looser than the harness's, the gesture is off the joint's arc.
+
+## Do not minimize the app while a script runs
+
+`shot` waits for the next rendered frame, and a minimized window renders none: the script then waits forever at that line (the app keeps ticking and responding). A window behind others is fine — the frames are read back from the GPU — but one minimized to the taskbar is not. If a run stalls, check the window's state before anything else.
 
 ## What to look for
 

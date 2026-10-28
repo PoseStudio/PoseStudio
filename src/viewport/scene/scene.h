@@ -183,6 +183,24 @@ public:
     /// if within a small radius; see bonepicker.h). Returns the selected bone index, or -1 if
     /// none is selected.
     int selectBoneAt(float px, float py, float vpW, float vpH, const Camera& camera);
+    /// The pick selectBoneAt and shiftPressBoneAt share: the figure, the bone and the grab point
+    /// under the pixel, with no selection made. False on a miss.
+    bool pickBoneAt(float px, float py, float vpW, float vpH, const Camera& camera, int& outModel, int& outBone,
+                    glm::vec3& outGrab);
+    /// A SHIFT press at the pixel (THE GROUP, 2026-10-27): the same pick, but the selection is
+    /// EXTENDED rather than replaced — the picked joint becomes the PRIMARY (Armature::makeGroupPrimary),
+    /// the previous selection joining the group, and its grab point is set; @p wasMember says whether
+    /// it was a member already (a CLICK then removes it: removeGroupBone). A pick on another figure
+    /// than the active one, or of a finger or a toe, or with nothing selected, is a plain selection.
+    /// Returns the primary, or -1 on a miss.
+    int shiftPressBoneAt(float px, float py, float vpW, float vpH, const Camera& camera, bool& wasMember);
+    /// Removes @p bone from the active figure's group (Armature::removeFromGroup).
+    bool removeGroupBone(int bone);
+    /// The active figure's group secondaries (empty without a figure).
+    std::vector<int> groupBones() const;
+    /// Diagnostics (the scripted test): puts the active figure's selection and group back
+    /// (Armature::restoreSelection) after a by-name lookup replaced them.
+    void restoreSelection(int primary, const std::vector<int>& secondaries);
     /// A/B probe (the scripts' `pick2d on|off`): the 2D projection pick alone, as before the
     /// skin cast of 2026-09-26 — which parts a click may reach through others.
     void setPick2D(bool on) { m_pick2D = on; }

@@ -144,6 +144,13 @@ public:
     /// positions, channels and the rig's step count from it).
     const Armature& armature() const { return m_armature; }
     void setSelectedBone(int index) { m_armature.setSelectedBone(index); }
+    // THE GROUP (Armature::toggleGroupBone): several joints dragged together.
+    bool toggleGroupBone(int index) { return m_armature.toggleGroupBone(index); }
+    bool makeGroupPrimary(int index) { return m_armature.makeGroupPrimary(index); }
+    bool removeFromGroup(int index) { return m_armature.removeFromGroup(index); }
+    bool inGroup(int index) const { return m_armature.inGroup(index); }
+    const std::vector<int>& groupBones() const { return m_armature.groupBones(); }
+    void restoreSelection(int primary, const std::vector<int>& secondaries) { m_armature.restoreSelection(primary, secondaries); }
     /// What bone @p index is to the posing UI (Armature::boneClass: a joint of the body, a bone of
     /// the face rig — which selects the head — or a finger's or a toe's joint).
     BoneClass boneClass(int index) { return m_armature.boneClass(index); }
@@ -285,10 +292,11 @@ private:
     std::array<VkDescriptorSet, kMaxFramesInFlight> m_jointSets{}; // set 2; from m_descriptorPool
     std::array<std::uint64_t, kMaxFramesInFlight>   m_jointUploaded{}; // last skin version per slot
     // The joint buffer's SECOND HALF: per joint, whether its flesh is lit WITH the selection
-    // (Armature::highlightedWithSelection — the face rig under a selected head), as the .x of one
-    // more entry per joint; written per slot when the selection changes (the key is the selected
-    // bone + 2, so that 0 — the array's initial value — is "never written").
-    std::array<int, kMaxFramesInFlight>             m_highlightUploaded{};
+    // (Armature::highlightedWithSelection — the face rig under a selected head, the group's
+    // members), as the .x of one more entry per joint; written per slot when the selection
+    // changes (the key is the selected bone + 2 under the group's version, so that 0 — the
+    // array's initial value — is "never written").
+    std::array<std::uint64_t, kMaxFramesInFlight>   m_highlightUploaded{};
     uint32_t                                        m_jointCount = 1;
 
     // Pose correctives, blended on the GPU (set 2 bindings 1 + 2 — see correctiveset.h).

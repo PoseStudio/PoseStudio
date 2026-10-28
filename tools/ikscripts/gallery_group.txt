@@ -1,0 +1,77 @@
+# THE GROUP: several joints dragged together (Shift+click adds a joint, Shift+drag pulls them all).
+# Both hands up, both hands forward, both hands down, both knees forward — the body answering as it
+# answers one joint — and the selection's bookkeeping: a Shift+click on a member removes it, a plain
+# click selects one joint alone again.
+
+# 1. The selection: a Shift+click with nothing selected is a plain selection; the second joins it.
+view front
+sclick rHand
+expect group == 1
+sclick lHand
+expect group == 2
+expect ingroup.rHand == 1
+expect ingroup.lHand == 1
+
+# 2. Both hands raised 40cm: both arms rise, the body stands.
+spress lHand
+dragv 0 0.40 50 40
+expect moved.rHand > 300
+expect moved.lHand > 300
+expect hips < 40
+expect steps == 0
+shot 01_front_both_hands_up
+release
+shot 02_front_both_hands_up_released
+
+# 3. Both hands pushed 35cm forward (from the side; forward is screen-left in the right view).
+reset
+view right
+spress lHand
+dragv -0.35 0 50 60
+expect moved.rHand > 250
+expect moved.lHand > 250
+expect steps <= 2
+shot 03_side_both_hands_forward
+release
+
+# 4. Both hands brought 30cm down: the reach-down fold, both hands together.
+reset
+view right
+spress lHand
+dragv 0 -0.30 50 40
+expect moved.rHand > 200
+expect moved.lHand > 200
+expect steps == 0
+shot 04_side_both_hands_down
+release
+
+# 5. A Shift+click on a member takes it out; the primary stays.
+reset
+view front
+sclick rHand
+expect group == 1
+expect ingroup.rHand == 0
+expect ingroup.lHand == 1
+
+# 6. Both knees pushed forward over their planted feet.
+click lShin
+expect group == 1
+sclick rShin
+expect group == 2
+view right
+spress lShin
+dragv -0.12 0 40 40
+expect moved.lShin > 90
+expect moved.rShin > 90
+expect moved.lFoot < 10
+expect moved.rFoot < 10
+expect steps == 0
+shot 05_side_both_knees_forward
+release
+
+# 7. A plain click selects one joint alone.
+reset
+click lHand
+expect group == 1
+expect ingroup.rShin == 0
+quit

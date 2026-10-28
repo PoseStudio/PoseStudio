@@ -143,9 +143,26 @@ int Armature::knownPosingBone(int bone) const {
 }
 
 bool Armature::highlightedWithSelection(int bone) const {
-    return m_ikRig && highlightBone() >= 0 && highlightBone() == m_ikRig->headNode() && bone >= 0 &&
-           static_cast<std::size_t>(bone) < m_boneClass.size() &&
-           m_boneClass[static_cast<std::size_t>(bone)] == static_cast<char>(BoneClass::Face);
+    if (bone < 0) {
+        return false;
+    }
+    // THE GROUP's secondaries light with the selection, each with its highlight twin (a bend bone's
+    // twist child and vice versa: the whole upper arm for a grabbed shoulder) — and a secondary
+    // head lights its face rig as the selected head does.
+    for (const int member : m_groupBones) {
+        if (member == bone || (member >= 0 && static_cast<std::size_t>(member) < m_highlightTwin.size() &&
+                               m_highlightTwin[static_cast<std::size_t>(member)] == bone)) {
+            return true;
+        }
+    }
+    if (!m_ikRig || static_cast<std::size_t>(bone) >= m_boneClass.size() ||
+        m_boneClass[static_cast<std::size_t>(bone)] != static_cast<char>(BoneClass::Face)) {
+        return false;
+    }
+    if (highlightBone() >= 0 && highlightBone() == m_ikRig->headNode()) {
+        return true;
+    }
+    return inGroup(m_ikRig->headNode());
 }
 
 void Armature::localChannelDofs(int b, std::vector<JointSolverDof>& out) const {

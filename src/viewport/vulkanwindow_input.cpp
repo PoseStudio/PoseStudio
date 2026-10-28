@@ -86,8 +86,14 @@ void VulkanWindow::mousePressEvent(QMouseEvent* event) {
         if (m_ik.dragging) {
             abortIkDrag();
         }
-        if (!beginJointGesture(event->position(),
-                               event->modifiers().testFlag(Qt::ControlModifier))) {
+        m_ik.groupClickBone = -1;
+        // (Shift: THE GROUP — the press extends the selection and drags the whole group; see
+        // beginGroupGesture.)
+        const bool began = event->modifiers().testFlag(Qt::ShiftModifier)
+                               ? beginGroupGesture(event->position())
+                               : beginJointGesture(event->position(),
+                                                   event->modifiers().testFlag(Qt::ControlModifier));
+        if (!began) {
             m_leftClickCandidate = true; // the orbit gesture, until it moves
         }
         requestUpdate(); // reflect the new selection (outline / skeleton highlight)
@@ -118,6 +124,12 @@ void VulkanWindow::mouseReleaseEvent(QMouseEvent* event) {
                 // drag with no settle and no undo (the settle would still walk a hovering
                 // figure onto its ground-healed pins, turning a mere selection into an edit).
                 abortIkDrag();
+                if (m_ik.groupClickBone >= 0) {
+                    // A Shift+CLICK on a member of THE GROUP removes it (the press had made it the
+                    // primary, for the drag that never came).
+                    scene().removeGroupBone(m_ik.groupClickBone);
+                    m_ik.groupClickBone = -1;
+                }
             } else if (m_ik.dragging) {
                 // IK release: hand off to the ANIMATED settle — the timer keeps ticking, each
                 // tick relaxing the body onto its pins so hovering feet visibly land instead of

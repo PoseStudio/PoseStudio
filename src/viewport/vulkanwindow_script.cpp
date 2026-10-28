@@ -343,6 +343,35 @@ void VulkanWindow::scriptStep() {
                     togglePinSelectedJoint();
                 }
             }
+        } else if (cmd == QLatin1String("sclick") && w.size() > 1) {
+            // sclick <bone>: the Shift+CLICK at the bone's pixel — adds the joint to THE GROUP (as its
+            // primary) or removes a member; prints the group afterwards.
+            const Armature*        before = scene().figureArmature();
+            const int              prevPrimary = before != nullptr ? before->selectedBone() : -1;
+            const std::vector<int> prevGroup = scene().groupBones();
+            QPointF px;
+            if (scriptPixelOf(w[1], px)) {
+                scene().restoreSelection(prevPrimary, prevGroup); // (the lookup selected the bone by name: see spress)
+                closeOpenPoseEdits();
+                const bool began = beginGroupGesture(px);
+                if (began) {
+                    const int clicked = m_ik.groupClickBone;
+                    abortIkDrag();
+                    if (clicked >= 0) {
+                        scene().removeGroupBone(clicked);
+                        m_ik.groupClickBone = -1;
+                    }
+                }
+                const Armature* arm = scene().figureArmature();
+                std::string     members = arm && arm->selectedBone() >= 0
+                                              ? arm->boneName(static_cast<std::size_t>(arm->selectedBone()))
+                                              : std::string("nothing");
+                for (const int member : scene().groupBones()) {
+                    members += " + " + (arm ? arm->boneName(static_cast<std::size_t>(member)) : std::string("?"));
+                }
+                say("[ikscript]   shift-click at px(%.0f %.0f): the group is %s\n", px.x(), px.y(), members.c_str());
+                requestUpdate();
+            }
         } else if (cmd == QLatin1String("unpinall")) {
             unpinAllJoints();
         } else if (cmd == QLatin1String("pick2d") && w.size() > 1) {
@@ -359,17 +388,30 @@ void VulkanWindow::scriptStep() {
                     picked >= 0 && arm ? arm->boneName(static_cast<std::size_t>(picked)).c_str() : "nothing");
                 requestUpdate();
             }
-        } else if ((cmd == QLatin1String("press") || cmd == QLatin1String("cpress")) && w.size() > 1) {
+        } else if ((cmd == QLatin1String("press") || cmd == QLatin1String("cpress") || cmd == QLatin1String("spress")) &&
+                   w.size() > 1) {
             // The real press: the picker at the pixel, then the press path (IK drag + undo snapshot).
             // cpress is the Ctrl press (IkScope::Part): the SCOPED drag of the grabbed chain alone for
             // a limb or the head, the FIGURE MOVE for a grab of the body itself.
             const bool scoped = cmd == QLatin1String("cpress");
+            // spress is the SHIFT press (THE GROUP): the pressed joint joins the selection as its primary
+            // and the whole group is dragged through it.
+            const bool shift = cmd == QLatin1String("spress");
+            // (scriptPixelOf selects the named bone to find its pixel, which a plain press relies on;
+            // the Shift press must find the selection AS IT WAS — a member pressed again is the
+            // primary, a selected joint not pressed becomes a secondary — so it is put back.)
+            const Armature*        before = scene().figureArmature();
+            const int              prevPrimary = before != nullptr ? before->selectedBone() : -1;
+            const std::vector<int> prevGroup = scene().groupBones();
             QPointF px;
             if (!scriptPixelOf(w[1], px)) {
                 continue;
             }
+            if (shift) {
+                scene().restoreSelection(prevPrimary, prevGroup);
+            }
             closeOpenPoseEdits();
-            bool began = beginJointGesture(px, scoped) && m_ik.dragging;
+            bool began = (shift ? beginGroupGesture(px) : beginJointGesture(px, scoped)) && m_ik.dragging;
             // The pick is honest: what it finds is what is under that pixel. On another body that is
             // not always the bone the script names — a broad character's hanging arm covers her chest
             // from the side, one hand covers the other — and the gesture that follows is then some
@@ -386,8 +428,8 @@ void VulkanWindow::scriptStep() {
                 // (A DIGIT drag has no rig effector: what it drags is the selected digit's joint.)
                 const int         dragged = found && found->ikDigitDrag() ? found->selectedBone()
                                             : found && found->ikRig() ? found->ikRig()->dragEffector() : -1;
-                if (began && found && wanted >= 0 && !found->sameRigidSegment(found->selectedBone(), wanted) && found->ikRig() &&
-                    dragged != wanted) {
+                if (!shift && began && found && wanted >= 0 && !found->sameRigidSegment(found->selectedBone(), wanted) &&
+                    found->ikRig() && dragged != wanted) {
                     const std::string other = found->boneName(static_cast<std::size_t>(found->selectedBone()));
                     abortIkDrag();
                     scene().selectBoneByName(name);
@@ -695,6 +737,11 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         value = moved(arm->boneIndex("hip"));
     } else if (key == QLatin1String("head") && part.size() == 1) {
         value = moved(head);
+    } else if (key == QLatin1String("group")) {
+        value = static_cast<double>(scene().groupBones().size()) + (arm->selectedBone() >= 0 ? 1.0 : 0.0); // the selected joints
+    } else if (key == QLatin1String("ingroup") && bone >= 0) {
+        const int posed = arm->knownPosingBone(bone);
+        value = (posed == arm->selectedBone() || arm->inGroup(posed)) ? 1.0 : 0.0;
     } else if (key == QLatin1String("steps")) {
         value = arm->ikRig() != nullptr ? arm->ikRig()->stepsTaken() : 0;
     } else if (key == QLatin1String("jump")) {
@@ -746,6 +793,30 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         }
         const glm::vec3 dir = (arm->boneWorldPosition(static_cast<std::size_t>(child)) - arm->boneWorldPosition(static_cast<std::size_t>(bone))) / longest;
         value = glm::degrees(std::acos(glm::clamp(-dir.y, -1.0f, 1.0f)));
+    } else if (key == QLatin1String("swing") && bone >= 0) {
+        // The bone's fore-aft angle from straight down, degrees, + forward of the figure (the hips'
+        // heading): an upper arm swung forward reads +20, one hanging back -20.
+        int   child = -1;
+        float longest = 0.0f;
+        for (std::size_t i = 0; i < arm->boneCount(); ++i) {
+            if (arm->boneParent(i) != bone) {
+                continue;
+            }
+            const float len = glm::length(arm->boneWorldPosition(i) - arm->boneWorldPosition(static_cast<std::size_t>(bone)));
+            if (len > longest) {
+                longest = len;
+                child = static_cast<int>(i);
+            }
+        }
+        const int hip = arm->boneIndex(figureBoneName(arm, "hip"));
+        if (child < 0 || longest < 1.0e-4f || hip < 0) {
+            return false;
+        }
+        const glm::vec3 dir = (arm->boneWorldPosition(static_cast<std::size_t>(child)) - arm->boneWorldPosition(static_cast<std::size_t>(bone))) / longest;
+        glm::vec3       fore = glm::mat3(arm->poseGlobal(static_cast<std::size_t>(hip))) * glm::vec3(0.0f, 0.0f, 1.0f);
+        fore.y = 0.0f;
+        fore = glm::length(fore) > 1.0e-4f ? glm::normalize(fore) : glm::vec3(0.0f, 0.0f, 1.0f);
+        value = glm::degrees(std::atan2(glm::dot(dir, fore), -dir.y));
     } else if (key == QLatin1String("y") && bone >= 0) {
         value = arm->boneWorldPosition(static_cast<std::size_t>(bone)).y * 1000.0;
     } else if (key == QLatin1String("moved") && bone >= 0) {

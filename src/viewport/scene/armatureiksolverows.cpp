@@ -136,6 +136,21 @@ glm::vec3 Armature::ikKneeHangUnder(IkSolveScratch& s) {
 }
 
 /// The PIN ROWS, part one: the per-drag state the pins' rows share (the eased pin targets, the palm and fingertip rows, the ceilings, the rise positions).
+// A hand contact's TAUT share (kHandTautReachBand): 0 while its arm is slack by both measures — the
+// limb's own stretch (IkRig::liveContactStretch, 1 = a straight arm) and the junction's reach over the
+// chain's span — 1 once the arm is dead straight by its stretch, or past kHandSlackShare by the reach.
+// A continuous function of the pose: the hold a hand keeps under a rise fades as the arm straightens,
+// and comes back if the hand's rise folds it. (IK_JS_HAND_UNLOAD_SWITCH: the switch it replaced.)
+static float handTautShare(float stretch, float reachSpan) {
+    static const bool kSwitch = std::getenv("IK_JS_HAND_UNLOAD_SWITCH") != nullptr; // A/B probe
+    if (kSwitch) {
+        return stretch < kHandSlackShare && reachSpan < kHandSlackShare ? 0.0f : 1.0f;
+    }
+    const float byStretch = glm::smoothstep(kHandSlackShare, 1.0f, stretch);
+    const float byReach = glm::smoothstep(kHandSlackShare - kHandTautReachBand, kHandSlackShare, reachSpan);
+    return std::max(byStretch, byReach);
+}
+
 void Armature::ikPinRowsBegin(IkSolveScratch& s) {
     const std::size_t n = s.n;
     const std::vector<IkEffector>& pins = s.pins;
@@ -148,6 +163,32 @@ void Armature::ikPinRowsBegin(IkSolveScratch& s) {
     }
     s.pinned.assign(n, 0);
     std::vector<char>& pinned = s.pinned;
+    // (A bone that is no live contact this tick forgets the rise it formed under — see
+    // m_jsContactRiseBase; the base is taken afresh when it next lands.)
+    if (m_jsContactRiseBase.size() != n) {
+        m_jsContactRiseBase.assign(n, -1.0f);
+    }
+    {
+        std::vector<char> livePin(n, 0);
+        for (std::size_t p = 0; p < pins.size(); ++p) {
+            if (pins[p].node >= 0 && static_cast<std::size_t>(pins[p].node) < n && s.rig.pinIsLive(p)) {
+                livePin[static_cast<std::size_t>(pins[p].node)] = 1;
+            }
+        }
+        if (m_jsContactRebased.size() != n) {
+            m_jsContactRebased.assign(n, 0);
+        }
+        if (m_jsHandUnload.size() != n) {
+            m_jsHandUnload.assign(n, 0.0f);
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            if (!livePin[i]) {
+                m_jsContactRiseBase[i] = -1.0f;
+                m_jsContactRebased[i] = 0;
+                m_jsHandUnload[i] = 0.0f;
+            }
+        }
+    }
     s.pinsEasing = false;
     bool& pinsEasing = s.pinsEasing;
     std::array<std::size_t, 4>& kneeFootRows = s.kneeFootRows; // its position rows [0,1) and orientation rows [2,3)
@@ -210,6 +251,36 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
     std::vector<std::tuple<std::size_t, int, float>>& kneeCeilings = s.kneeCeilings;
     std::vector<glm::vec3>& risePositions = s.risePositions;
 
+    // The arm of a hand contact the rise is UNLOADING is referred to where the unload finds it (the
+    // fade block): EVERY TICK the unload is in progress, the channels from the hand up to the limb's
+    // junction — in this tick's dofs, and through m_jsPostStepTurned for the rest of the drag. Once
+    // per contact it stored strain instead: over the three ticks the hold faded the shoulder pulled
+    // the arm dead straight and twisted 23 degrees against references fixed at the first of them,
+    // and the tick the pin went the arm sprang back by that much — 131mm at a fingertip. An arm
+    // whose hand is letting go has no pose of its own to spring to: it is where the body left it,
+    // and the hang takes it from there. (IK_JS_HAND_UNLOAD_SWITCH keeps the drag-start references.)
+    const auto rebaseContactArm = [&](std::size_t hand) {
+        static const bool kSwitch = std::getenv("IK_JS_HAND_UNLOAD_SWITCH") != nullptr; // A/B probe
+        if (kSwitch || hand >= m_jsContactRebased.size()) {
+            return;
+        }
+        m_jsContactRebased[hand] = 1;
+        const int junction = rig.limbJunction(static_cast<int>(hand));
+        for (int cur = static_cast<int>(hand); cur >= 0 && cur != junction && cur != root;
+             cur = m_bones[static_cast<std::size_t>(cur)].parent) {
+            const std::size_t b = static_cast<std::size_t>(cur);
+            if (b < m_jsPostStepEuler.size() && b < m_jsPostStepTurned.size()) {
+                m_jsPostStepEuler[b] = m_boneEuler[b];
+                m_jsPostStepTurned[b] = 1;
+            }
+            for (JointSolverDof& dof : problem.dofs) {
+                if (dof.bone == cur) {
+                    dof.reference = m_boneEuler[b][dof.axis];
+                }
+            }
+        }
+    };
+
     if (static_cast<int>(p) == kneeFootPin) {
         kneeFootRows[0] = problem.positions.size();
         kneeFootRows[2] = problem.orientations.size();
@@ -247,7 +318,12 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
     // only, free to swing about it. (Pivoting on the ball instead — every other planted
     // foot's hard point — the solve found the cheap way to take a knee outward: carry the
     // ANKLE out under it, 9cm, the toes turning IN.)
-    const bool kneeFoot = static_cast<int>(p) == kneeFootPin && ball >= 0;
+    // (... and the foot below one of THE GROUP's secondary knees turns on its heel the same way —
+    // its knee never lifts it, so it keeps the planted model in full: both knees pushed forward
+    // together swing over both feet, where the standing model lifted the second heel 12mm and the
+    // pose came out lopsided. The primary's foot alone has the knee drag's lift and hang rows.)
+    const bool primaryKneeFoot = static_cast<int>(p) == kneeFootPin && ball >= 0;
+    const bool kneeFoot = ball >= 0 && (primaryKneeFoot || (rig.pinUnderAnyEffector(p) && !rig.pinUnderEffector(p)));
     if (kneeFoot) {
         task.axisScale = glm::dvec3(0.0, 1.0, 0.0);
     }
@@ -800,7 +876,8 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
         static const bool kHandsUnilateral = std::getenv("IK_JS_HANDS_UNILATERAL") != nullptr; // A/B probe
         if (!kHandsUnilateral && !rig.pinIsShadow(p) && m_jsKneelUpRise < 0.5f && m_jsWristOf.size() == n && m_jsWristOf[node] == static_cast<int>(node)) { // (the wrist's own contact; a carpal's rides it)
             const float reachSpan = glm::length(glm::vec3(m_poseGlobal[static_cast<std::size_t>(rig.limbJunction(pin.node))][3]) - pin.target) / std::max(rig.liveSpan(p), 1.0e-4f);
-            if (rig.liveSpan(p) > 0.0f && rig.liveContactStretch(p, risePositions) < kHandSlackShare && reachSpan < kHandSlackShare) {
+            const float tautShare = rig.liveSpan(p) > 0.0f ? handTautShare(rig.liveContactStretch(p, risePositions), reachSpan) : 1.0f;
+            if (rig.liveSpan(p) > 0.0f && tautShare < 0.999f) {
                 // (A CEILING at its planted height, not a hold: the hand may still go DOWN — a
                 // hand that lands on its fingertips rolls onto its palm 13cm lower — only not up.
                 // Held in y it stayed on its fingertips, the palm roll blocked.)
@@ -837,8 +914,18 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
                     if (1.0f - m_jsTargetDown > 1.0e-3f) {
                         handCeilings.emplace_back(pin.node, pin.target.y, 1.0f - m_jsTargetDown);
                     }
-                } else if (m_jsTargetDown < 0.999f) {
-                    handCeilings.emplace_back(pin.node, pin.target.y + kHandCeilingSlack * rig.sizeScale() * m_jsTargetDown, 1.0f);
+                } else {
+                    // (... and through its slack as the arm STRAIGHTENS too, 2026-10-27: the ceiling
+                    // rises with the hand's taut share — handTautShare — so a hand under an arm going
+                    // dead straight may come up off the floor by the slack before its hold is gone,
+                    // instead of being nailed down one tick and free the next.)
+                    // (... and no faster than the hold fades: the EASED unload, as the last tick left
+                    // it — m_jsHandUnload, kHandUnloadStep — not the raw taut share.)
+                    const float eased = node < m_jsHandUnload.size() ? std::min(tautShare, m_jsHandUnload[node]) : tautShare;
+                    const float lift = std::max(m_jsTargetDown, eased);
+                    if (lift < 0.999f) {
+                        handCeilings.emplace_back(pin.node, pin.target.y + kHandCeilingSlack * rig.sizeScale() * lift, 1.0f);
+                    }
                 }
                 // (Tried and taken out the same day, 2026-09-26: the held arm's posture references
                 // FOLLOWING the pose while the ceiling holds, so that the arm would not spring back
@@ -1013,7 +1100,8 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
             // the pelvis, and a figure got up off her belly into a kneeling plank with her hands
             // in the air. IK_JS_RISE_UNLOADS_HANDS restores it.)
             static const bool kRiseUnloadsHands = std::getenv("IK_JS_RISE_UNLOADS_HANDS") != nullptr; // A/B probe
-            bool armSlack = false;
+            bool  armSlack = false;
+            float handTaut = 1.0f; // (a hand's: 0 slack, 1 taut — handTautShare; everything else unloads in full)
             if (!kRiseUnloadsHands && m_jsWristOf.size() == n && m_jsWristOf[node] >= 0) {
                 const float stretch = rig.liveContactStretch(p, risePositions); // (1 = a straight arm)
                 const float reachSpan = glm::length(glm::vec3(m_poseGlobal[static_cast<std::size_t>(rig.limbJunction(pin.node))][3]) - pin.target) / std::max(rig.liveSpan(p), 1.0e-4f);
@@ -1036,7 +1124,8 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
                 // let go; by the stretch alone the main family's hands, landed with 30 degrees of
                 // elbow, were held under a hip rising to standing while the solve folded the trunk
                 // rather than straighten the arms — the reach had released them at 1.05.)
-                armSlack = rig.liveSpan(p) > 0.0f && stretch < kHandSlackShare && reachSpan < kHandSlackShare;
+                handTaut = rig.liveSpan(p) > 0.0f ? handTautShare(stretch, reachSpan) : 1.0f;
+                armSlack = handTaut < 1.0e-3f;
                 static const bool kHandTrace = std::getenv("IK_JS_HAND_CEILING_TRACE") != nullptr;
                 if (kHandTrace) {
                     std::fprintf(stderr, "[hand-ceiling] %s: stretch %.3f reach/span %.3f slack=%d shadow=%d", m_boneNames[node].c_str(), stretch,
@@ -1050,7 +1139,8 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
             // let go and the shins swung 14-16cm in a tick. A knee is a support until the hips
             // stand kKneeUnloadHeight of the thigh's length over it. IK_JS_RISE_UNLOADS_KNEES.)
             static const bool kRiseUnloadsKnees = std::getenv("IK_JS_RISE_UNLOADS_KNEES") != nullptr; // A/B probe
-            bool kneeBelowHips = false;
+            bool  kneeBelowHips = false;
+            float kneeHoldRelease = 1.0f; // (a knee the hips were low over: how far its hold has been let go of, 0..1)
             if (!kRiseUnloadsKnees && m_jsWristOf.size() == n && m_jsWristOf[node] < 0 && !rig.isGirdleJoint(pin.node)) {
                 if (rig.isLegJointAboveFoot(pin.node)) { // (a knee: a foot-class joint below it)
                     const int socket = m_bones[node].parent;
@@ -1067,7 +1157,36 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
                     const float over = socketIndex < m_jsStartPos.size() && node < m_jsStartPos.size()
                                            ? m_jsStartPos[socketIndex].y - m_jsStartPos[node].y
                                            : thigh;
-                    kneeBelowHips = thigh > 0.0f && over < kKneeUnloadHeight * thigh;
+                    const bool belowAtPress = thigh > 0.0f && over < kKneeUnloadHeight * thigh;
+                    // (... LET GO OF once the TARGET rises past what a planted knee can serve, 2026-10-28:
+                    // the hips' height the target asks for — the root's start plus the target's rise over
+                    // the effector's — over the knee's planted height, against the ROOT'S STANDING HEIGHT
+                    // OVER THE KNEE at bind, of which a tall kneel is 1.0 (the thigh vertical):
+                    // kKneeHoldReleaseFrom..To of it, a function of the target; the last value kept
+                    // through the release's settle. Held for the whole drag, a figure sat back on her
+                    // heels could not be pulled up off her knees: the hips rose to a tall kneel and
+                    // stopped against a pull of 75cm. (Sized by `thigh` above — the PARENT bone's length,
+                    // the thigh's twist bone on this generation, 25cm — a first cut let the belly's
+                    // prone-up go at 25cm of rise.) IK_JS_KNEE_HOLD_FOR_DRAG.)
+                    static const bool kHoldForDrag = std::getenv("IK_JS_KNEE_HOLD_FOR_DRAG") != nullptr; // A/B probe
+                    float kneeHold = belowAtPress ? 1.0f : 0.0f;
+                    if (belowAtPress && !kHoldForDrag && node < m_jsKneeHold.size()) {
+                        const std::size_t rootIndex = static_cast<std::size_t>(root);
+                        if (s.dragTarget != nullptr && static_cast<std::size_t>(effector) < m_jsStartPos.size() && rootIndex < m_jsStartPos.size() &&
+                            rootIndex < m_ikBindPos.size()) {
+                            const float standingOverKnee = m_ikBindPos[rootIndex].y - m_ikBindPos[node].y;
+                            const float hipsTargetY = m_jsStartPos[rootIndex].y + (s.dragTarget->y - m_jsStartPos[static_cast<std::size_t>(effector)].y);
+                            const float overKnee = hipsTargetY - pin.target.y;
+                            kneeHold = standingOverKnee > 1.0e-3f
+                                           ? 1.0f - glm::smoothstep(kKneeHoldReleaseFrom * standingOverKnee, kKneeHoldReleaseTo * standingOverKnee, overKnee)
+                                           : 1.0f;
+                            m_jsKneeHold[node] = kneeHold;
+                        } else {
+                            kneeHold = m_jsKneeHold[node];
+                        }
+                    }
+                    kneeBelowHips = belowAtPress && kneeHold > 0.5f;
+                    kneeHoldRelease = belowAtPress ? 1.0f - kneeHold : 1.0f; // (the rise's unload comes in with the release)
                     if (kneeBelowHips && node < m_jsKneeHeldDown.size()) {
                         m_jsKneeHeldDown[node] = 1; // (its lying foot stays lying: the flat block)
                     }
@@ -1121,19 +1240,63 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
             if (!kNoKneelUpUnload && m_jsWristOf.size() == n && m_jsWristOf[node] >= 0) {
                 gone = std::max(gone, m_jsKneelUpRise);
             }
-            if (!kNoRiseUnload && !armSlack && !kneeBelowHips) {
-                gone = std::max(gone, m_jsRootRise);
-                if (!kNoDipUnload) {
-                    gone = std::max(gone, m_jsContactRise);
+            // THE RISE SINCE THE CONTACT FORMED (m_jsContactRiseBase; IK_JS_RISE_UNLOAD_ABSOLUTE is the
+            // drag's whole rise, as before): a contact that lands under a body already risen holds in
+            // full, and is unloaded by what the body rises from there.
+            static const bool kAbsoluteRise = std::getenv("IK_JS_RISE_UNLOAD_ABSOLUTE") != nullptr; // A/B probe
+            const float riseNow = std::max(m_jsRootRise, kNoDipUnload ? 0.0f : m_jsContactRise);
+            if (node < m_jsContactRiseBase.size() && m_jsContactRiseBase[node] < 0.0f) {
+                m_jsContactRiseBase[node] = riseNow;
+            }
+            const float riseSince = (kAbsoluteRise || node >= m_jsContactRiseBase.size())
+                                        ? riseNow
+                                        : std::max(0.0f, riseNow - m_jsContactRiseBase[node]);
+            // (A HAND's unload comes in with its arm's TAUT share — handTautShare, 2026-10-27 — never
+            // at once: "slack" had been a switch, and thrown with the body's rise already complete
+            // it took the hold from 1e8 to nothing in one solve. And the arm the pin has stretched
+            // is REFERRED TO WHERE THE UNLOAD FINDS IT — its channels re-based as a post-step's are,
+            // rebaseContactArm — so the fading hold leaves the arm as it stands for the hang to take,
+            // instead of snapping it back toward the fold the drag began in: 219mm at a thumb, the
+            // collar 13 degrees, the shoulder 15 and the forearm 20 in one tick — the prone-up's pop.)
+            float unloadRise = riseSince * handTaut;
+            if (m_jsWristOf.size() == n && m_jsWristOf[node] >= 0 && node < m_jsHandUnload.size()) {
+                // (EASED IN TIME, kHandUnloadStep a tick — a hand's hold fades over ten ticks however
+                // fast its arm crosses the taut band: at a drag's pace the band is two ticks, and the
+                // trunk the hand had been holding down sprang 122mm at the brow in the one tick the
+                // hold went. IK_JS_HAND_UNLOAD_SWITCH: unlimited, as before.)
+                static const bool kSwitch = std::getenv("IK_JS_HAND_UNLOAD_SWITCH") != nullptr; // A/B probe
+                if (!kSwitch) {
+                    const float prev = m_jsHandUnload[node];
+                    static const float kStep = envOr("IK_JS_HANDUNLOADSTEP", kHandUnloadStep); // (A/B lever)
+                    unloadRise = glm::clamp(unloadRise, prev - kStep, prev + kStep);
+                }
+                m_jsHandUnload[node] = unloadRise;
+            }
+            unloadRise *= kneeHoldRelease; // (a held knee's unload comes in with the release: the knee-hold block)
+            if (!kNoRiseUnload && (!kneeBelowHips || kneeHoldRelease > 1.0e-4f) && unloadRise > 1.0e-4f) {
+                gone = std::max(gone, unloadRise);
+                if (m_jsWristOf.size() == n && m_jsWristOf[node] >= 0) {
+                    rebaseContactArm(node);
                 }
                 // (A HAND the rise has unloaded outright is TAUT to the rig's lift-off — see
                 // m_jsContactRiseUnloaded: its arm has no length to give by the solve's measure,
                 // and left to the rig's — the junction's reach — a straight arm on a shrugged
                 // collar never read taut, its hand riding the rising chest 17cm into the air
                 // weightless with its pin standing.)
-                if (std::max(m_jsRootRise, kNoDipUnload ? 0.0f : m_jsContactRise) >= kRiseUnloadedShare &&
-                    m_jsWristOf.size() == n && m_jsWristOf[node] >= 0 && node < m_jsContactRiseUnloaded.size()) {
-                    m_jsContactRiseUnloaded[node] = 1;
+                // (... and a hand whose hold the rise has taken OUTRIGHT (the rise term at 1: the
+                // row's weight is zero) is let go of by the rig AT ONCE, whatever its height —
+                // 2026-10-27: a prone-up's hand pressed to the floor under a rising chest, its
+                // arm folded beneath, was never 2cm up for the three ticks the lift-off asks,
+                // held nothing, and the torso's volume rows threw the weightless arm out from
+                // under the chest in one tick, 219mm at a thumb.)
+                // (... and while the unload is still EASING IN — under kRiseUnloadedShare — the rig is
+                // told so (3, IkRig::riseUnloading): its lift-off by the junction's reach WAITS for
+                // the hold to fade. Released on the reach alone with the hold still at 1e5, the trunk
+                // the hand had been holding down sprang 83mm at the brow in the tick the pin went.)
+                if (m_jsWristOf.size() == n && m_jsWristOf[node] >= 0 && node < m_jsContactRiseUnloaded.size()) {
+                    m_jsContactRiseUnloaded[node] = unloadRise >= kRiseUnloadedOutrightShare ? 2
+                                                    : unloadRise >= kRiseUnloadedShare       ? 1
+                                                                                             : 3;
                 }
             }
             task.weight *= gone >= 1.0f ? 0.0 : std::pow(10.0, -6.0 * static_cast<double>(gone));
@@ -1164,10 +1327,15 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
             // its cursor) and let go of everything in one tick — 260mm; free, the knee lifted with the
             // hips while the foot still hung in the air on its soft spring, and where the foot hung when
             // its rows returned decided the pop: 52 to 275mm, rig by rig and variant by variant.
-            if (rig.isLegJointAboveFoot(pin.node) && m_jsFootUnrollProgress.size() == n) {
+            // (The ceiling itself is made in ikPinRowsEnd, from the planted height recorded here —
+            // so it SURVIVES the knee pin's lift-off, 2026-10-28: tied to the pin, it went the tick the
+            // knee rose 2cm off the floor, a third of the way through the roll, and a knee under a
+            // cursor yanked 70cm up caught up in one tick, 375mm at the shin.)
+            if (rig.isLegJointAboveFoot(pin.node) && m_jsFootUnrollProgress.size() == n && m_jsKneeUnrollBaseY.size() == n) {
                 for (std::size_t f = 0; f < m_jsFootKnee.size() && f < m_jsFootWasFlat.size() && f < m_jsFootUnrolled.size(); ++f) {
                     if (m_jsFootKnee[f] == static_cast<int>(node) && m_jsFootWasFlat[f] && !m_jsFootUnrolled[f]) {
-                        handCeilings.emplace_back(pin.node, pin.target.y + m_jsFootUnrollProgress[f] * kKneeUnrollLift * rig.sizeScale(), 1.0f);
+                        m_jsKneeUnrollBaseY[f] = pin.target.y;
+                        m_jsKneeUnrollBaseValid[f] = 1;
                     }
                 }
             }
@@ -1231,7 +1399,9 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
     }
     problem.positions.push_back(task);
     if (kneeFoot) {
-        kneePlaceRow = problem.positions.size();
+        if (primaryKneeFoot) {
+            kneePlaceRow = problem.positions.size(); // (the knee drag's lift fades THIS row: the primary's alone)
+        }
         JointPositionTask place;
         place.bone = pin.node;
         place.target = glm::dvec3(m_jsPinTarget[node]);
@@ -1535,7 +1705,7 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
                 hold.frame = glm::dmat3(lateral, upSquare, glm::cross(lateral, upSquare));
                 hold.axisWeights = glm::dvec3(kSolePitchWeight, weight * kPinOrientScale * kPinOrientScale, kRoll);
                 static const double kKneeHeading = envOr("IK_JS_KNEEHEADING", kKneeFootHeadingWeight);
-                if (static_cast<int>(p) == kneeFootPin) {
+                if (kneeFoot) {
                     hold.axisWeights[1] = kKneeHeading;
                 }
                 // (A KNEELING FOOT LIES FLAT: the sole's hold goes with the foot's share. Its pitch is
@@ -1585,7 +1755,7 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
                 // found them at — goes with the foot's share while the foot rolls onto its top; a
                 // foot found lying keeps it, its found orientation being the lying one.)
                 toes.weight *= std::pow(10.0, -6.0 * static_cast<double>(flat));
-                if (static_cast<int>(p) == kneeFootPin) {
+                if (kneeFoot) {
                     // (The toes turn WITH their foot: their yaw is locked to it, so a toe
                     // hold in full was the foot's heading held hard by another name.)
                     static const double kKneeHeading = envOr("IK_JS_KNEEHEADING", kKneeFootHeadingWeight);
@@ -1655,6 +1825,42 @@ void Armature::ikPinRows(IkSolveScratch& s, std::size_t p) {
 void Armature::ikPinRowsEnd(IkSolveScratch& s) {
     const std::size_t n = s.n;
     const int effector = s.effector;
+    // THE KNEE LIFTS AS ITS FOOT ROLLS ONTO ITS TOES (A KNEELING FOOT LIES FLAT, 2026-09-26): a knee
+    // whose lying foot is still rolling back gets a ceiling that RISES with the roll's progress
+    // (kKneeUnrollLift), so the knee comes up as the toes tuck under and no faster — with or without
+    // the knee's pin (its planted height was recorded in ikPinRows while it stood; 2026-10-28) — and
+    // goes on rising at the pins' pace for kKneeUnrollExtra after the handover, then is dropped.
+    if (m_jsKneeUnrollBaseY.size() == n && m_jsFootUnrollProgress.size() == n) {
+        static const bool kCeilingWithPin = std::getenv("IK_JS_KNEE_UNROLL_CEILING_WITH_PIN") != nullptr; // A/B probe
+        for (std::size_t f = 0; f < n && f < m_jsFootKnee.size() && f < m_jsFootWasFlat.size() && f < m_jsFootUnrolled.size(); ++f) {
+            if (!m_jsKneeUnrollBaseValid[f] || !m_jsFootWasFlat[f] || m_jsFootKnee[f] < 0) {
+                continue;
+            }
+            const int knee = m_jsFootKnee[f];
+            if (kCeilingWithPin) {
+                bool pinned = false;
+                for (const IkEffector& pin : s.pins) {
+                    pinned = pinned || pin.node == knee;
+                }
+                if (!pinned || m_jsFootUnrolled[f]) {
+                    continue;
+                }
+            }
+            float lift = kKneeUnrollLift * s.rig.sizeScale();
+            if (!m_jsFootUnrolled[f]) {
+                lift *= m_jsFootUnrollProgress[f];
+                m_jsKneeUnrollExtra[f] = 0.0f;
+            } else {
+                m_jsKneeUnrollExtra[f] += kPinEaseStep * s.legScale;
+                if (m_jsKneeUnrollExtra[f] > kKneeUnrollExtra * s.rig.sizeScale()) {
+                    m_jsKneeUnrollBaseValid[f] = 0; // (dropped: the knee is free)
+                    continue;
+                }
+                lift += m_jsKneeUnrollExtra[f];
+            }
+            s.handCeilings.emplace_back(knee, m_jsKneeUnrollBaseY[f] + lift, 1.0f);
+        }
+    }
     const std::vector<IkEffector>& pins = s.pins;
     const float& legScale = s.legScale;
     bool& kneeDrag = s.kneeDrag;
@@ -1924,6 +2130,26 @@ void Armature::ikCursorRows(IkSolveScratch& s) {
         problem.positions.push_back(task);
     } else {
         goalTask = static_cast<std::size_t>(-1);
+    }
+    // THE GROUP's secondaries (2026-10-27): one row each on its own target — where it stood at the
+    // press, carried by the cursor's displacement (Armature::updateGroupTargets) — at the cursor
+    // row's weight and bounded pull: with every grabbed joint on its target the pose is the one
+    // the posture model finds for them together, and a target out of reach draws its limb only
+    // until the posture's gradient matches the pull, as the primary's does.
+    for (std::size_t i = 0; i < s.secondaries.size(); ++i) {
+        const int sec = s.secondaries[i];
+        if (goal == nullptr || sec < 0 || static_cast<std::size_t>(sec) >= n || i >= m_jsGroupTargetValid.size() ||
+            !m_jsGroupTargetValid[i] || pinned[static_cast<std::size_t>(sec)]) {
+            continue;
+        }
+        static const double kGroupPull = envOr("IK_JS_PULL", kEffectorPull);
+        static const double kGroupRootPull = envOr("IK_JS_ROOTPULL", kRootDragPullScale);
+        JointPositionTask task;
+        task.bone = sec;
+        task.target = glm::dvec3(m_jsGroupTargets[i]);
+        task.weight = kEffectorWeight;
+        task.huber = kGroupPull * (sec == root ? kGroupRootPull : 1.0) / (2.0 * kEffectorWeight);
+        problem.positions.push_back(task);
     }
 
     // The hip sway's CHEST: level (its roll about the fore axis), as the drag found it.

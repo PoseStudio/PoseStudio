@@ -72,6 +72,19 @@ constexpr float kFingerRelaxMinRangeDeg = 30.0f; // ... on the joints that span 
 constexpr float kFingerUnposedDeg = 0.5f;     // a hand whose finger channels all lie within this of the bind at the press is UNPOSED
 constexpr float kFingerOpenHeight = 0.15f;    // a hand this close to the floor (its lowest part, figure-scaled) OPENS before it lands
 constexpr float kArmHangSettle = 0.0015f;    // the stop lets a hanging arm settle this much deeper into a volume than the press had it
+// THE STRIDE SWING (2026-10-27): a hanging arm swings AGAINST the stance — forward on the side of
+// the trailing foot, back on the side of the leading one, as a walker's do — by the standing feet's
+// fore-aft split (the same-side foot ahead of the other, metres), saturating toward kArmSwingMaxDeg,
+// faded as the hips come down (a lunge is a stride with the hips low, and no walk). In every walking
+// frame the arms hung straight down like a mannequin's.
+constexpr float kArmSwingPerMetre = 1.0f;  // radians of swing per metre of split beyond the dead zone: a 50cm stride swings an arm ~24 degrees
+constexpr float kArmSwingDeadZone = 0.04f; // of split (figure-scaled): a stance from here. Without it a hair of heading yaw across a
+                                           // 12cm-wide stance read as a split of a fifth of a millimetre, the forward arm's elbow took a
+                                           // hundredth of a degree of it, and a chaotic reach to the floor flipped into its other basin.
+constexpr float kArmSwingMaxDeg = 32.0f;   // ... saturating toward this
+constexpr float kArmSwingElbowDeg = 18.0f; // the forward-swung arm's elbow flexes up to this, at the full swing
+constexpr float kArmSwingLowFrom = 0.08f;  // the swing fades as the hips drop below standing: from this far (figure-scaled) ...
+constexpr float kArmSwingLowGone = 0.25f;  // ... gone by this
 constexpr float kArmHangOutMost = 0.21f;     // a blocked hang asks for the same hang turned OUT, up to this (radians: 12 degrees) ...
 constexpr int   kArmHangOutBisections = 8;   // ... found by bisection to this many halvings (0.05 degrees) ...
 constexpr float kArmHangOutThrough = 0.9f;   // ... the least angle whose turn goes this far through
@@ -209,6 +222,79 @@ bool Armature::hangIdleArms() {
         }
         return false;
     };
+    // THE STRIDE SWING (kArmSwingPerMetre): the stance's fore-aft SPLIT for the arm on side
+    // @p armSide (+1 her left, -1 her right) — the same-side foot ahead of the other along
+    // @p fore, metres — read off the two standing feet: the rig's pins (a stepping foot's target
+    // walks through its swing, so the arms swing through a walk) and the DRAGGED foot where the
+    // effector is one, by its own position on the floor, fading as it lifts (a foot slid forward
+    // is a stride; one carried in the air is no stance). A lifted or a live foot leaves no
+    // stance to read. False without exactly one foot a side.
+    const float floorModelY = -m_transform[3][1];
+    const auto  stanceSplit = [&](float armSide, const glm::vec3& fore, float& split) {
+        const std::vector<IkEffector>& pins = rig.pins();
+        const float scale = rig.sizeScale();
+        glm::vec3   same(0.0f);
+        glm::vec3   other(0.0f);
+        float       sameWeight = 0.0f;
+        float       otherWeight = 0.0f;
+        int         sameCount = 0;
+        int         otherCount = 0;
+        const auto  count = [&](int node, const glm::vec3& at, float weight) {
+            const float footSide = m_ikBindPos[static_cast<std::size_t>(node)].x - m_ikBindPos[static_cast<std::size_t>(root)].x;
+            if (std::abs(footSide) < 0.01f * scale) {
+                return;
+            }
+            if ((footSide > 0.0f) == (armSide > 0.0f)) {
+                same = at;
+                sameWeight = weight;
+                ++sameCount;
+            } else {
+                other = at;
+                otherWeight = weight;
+                ++otherCount;
+            }
+        };
+        for (std::size_t p = 0; p < pins.size(); ++p) {
+            const int node = pins[p].node;
+            if (node < 0 || static_cast<std::size_t>(node) >= n || rig.pinIsLive(p) || rig.pinIsUser(p) ||
+                m_ikBindPos[static_cast<std::size_t>(node)].y >= 0.20f * scale) {
+                continue;
+            }
+            count(node, pins[p].target, 1.0f);
+        }
+        const int effector = rig.dragEffector();
+        if (effector >= 0 && static_cast<std::size_t>(effector) < n && effector != root &&
+            m_ikBindPos[static_cast<std::size_t>(effector)].y < 0.20f * scale) {
+            const glm::vec3 at(m_poseGlobal[static_cast<std::size_t>(effector)][3]);
+            const float     lift = at.y - (m_ikBindPos[static_cast<std::size_t>(effector)].y + floorModelY);
+            count(effector, at, 1.0f - glm::smoothstep(0.02f * scale, 0.12f * scale, lift));
+        }
+        if (sameCount != 1 || otherCount != 1) {
+            return false;
+        }
+        split = glm::dot(same - other, fore) * sameWeight * otherWeight;
+        return true;
+    };
+    // ... and the swing that split gives an arm, degrees, + forward (the same-side foot ahead: the
+    // arm swings BACK), faded as the hips come down below standing — a lunge is no walk —
+    // saturating toward kArmSwingMaxDeg.
+    const auto swingDegOf = [&](float split) {
+        const float scale = rig.sizeScale();
+        const float drop = (m_ikBindPos[static_cast<std::size_t>(root)].y + floorModelY) -
+                           m_poseGlobal[static_cast<std::size_t>(root)][3].y;
+        const float low = 1.0f - glm::smoothstep(kArmSwingLowFrom * scale, kArmSwingLowGone * scale, drop);
+        const float cap = glm::radians(kArmSwingMaxDeg);
+        const float beyond = std::max(0.0f, std::abs(split) - kArmSwingDeadZone * scale) * (split < 0.0f ? -1.0f : 1.0f);
+        return glm::degrees(cap * std::tanh(-kArmSwingPerMetre * beyond * low / cap));
+    };
+    if (m_hangSwingDeg.size() != n) {
+        m_hangSwingDeg.assign(n, 0.0f);
+        m_hangBaseValid.assign(n, 0);
+    }
+    // An upper arm's fore-aft angle from straight down about @p fore (degrees, + forward).
+    const auto sagittalDeg = [](const glm::vec3& dir, const glm::vec3& fore) {
+        return glm::degrees(std::atan2(glm::dot(dir, fore), -dir.y));
+    };
     if (!m_jsHangArmsFound) {
         m_jsHangArmsFound = true;
         m_jsHangArms.clear();
@@ -238,6 +324,15 @@ bool Armature::hangIdleArms() {
             }
             // Not the limb the user has hold of (the solve's effector, or the bone that was grabbed).
             if (under(rig.dragEffector(), socket) || (m_selectedBone >= 0 && under(m_selectedBone, socket))) {
+                continue;
+            }
+            // (... nor a limb THE GROUP has hold of: a second hand pulled up with the first is no
+            // hanging arm, and turned back toward hanging every tick it would fight its own row.)
+            bool grouped = false;
+            for (const int sec : rig.secondaryEffectors()) {
+                grouped = grouped || under(sec, socket);
+            }
+            if (grouped) {
                 continue;
             }
             const glm::vec3 offset = m_jsStartPos[e] - m_jsStartPos[static_cast<std::size_t>(socket)];
@@ -273,8 +368,15 @@ bool Armature::hangIdleArms() {
                 landedAtPress = landedAtPress || (under(pin.node, static_cast<int>(e)) && pin.node != static_cast<int>(e));
             }
             static const bool kBentLandedRides = std::getenv("IK_ARM_HANG_BENT_LANDED_RIDES") != nullptr; // A/B probe
-            const bool hung = !(offset.y / length > -kArmHangCone || ((kBentLandedRides || !landedAtPress) && std::abs(m_ikStartEuler[e][foldAxis]) > kArmHangElbowDeg));
+            // (... whatever its DIRECTION reads, too, 2026-10-27: a prone figure's arms stand on
+            // their hands BEHIND the shoulders, the upper arms pointing back along the body — outside
+            // the cone, so read as posed — and when the hips went up and the hands let go the arms
+            // rode where the release left them, the hands hovering a palm off the floor ahead of
+            // her. A hand on the floor is a support, not a pose; once it lifts the arm hangs.)
+            const bool hungByPose = !(offset.y / length > -kArmHangCone || std::abs(m_ikStartEuler[e][foldAxis]) > kArmHangElbowDeg);
+            const bool hung = hungByPose || (!kBentLandedRides && landedAtPress);
             if (!seatedTrunkDrag && !hung) {
+                m_hangBaseValid[static_cast<std::size_t>(socket)] = 0; // (posed: its swing base is forgotten)
                 continue; // not hanging: a raised arm, a hand on a hip — posed, and it rides
             }
             HangArm arm{socket, static_cast<int>(e), offset / length, offset / length};
@@ -288,25 +390,92 @@ bool Armature::hangIdleArms() {
                     arm.hand = static_cast<int>(i);
                 }
             }
-            if (!hung) {
-                // (Found lying beside a figure on her back, say: what it wants is to hang by her
-                // side — down, a little out — as soon as the floor lets it. Kept as found, a figure
-                // sat up from her back held both arms straight out in front of her.)
+            if (!hungByPose) {
+                // (Found lying beside a figure on her back, say, or standing on its hand: what it
+                // wants is to hang by her side — down, a little out — as soon as the floor lets it.
+                // Kept as found, a figure sat up from her back held both arms straight out in front
+                // of her.)
                 glm::vec3 out = m_jsStartPos[static_cast<std::size_t>(socket)] - m_jsStartPos[static_cast<std::size_t>(root)];
                 const glm::vec3 lateral(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
                 out = lateral * (glm::dot(out, lateral) < 0.0f ? -1.0f : 1.0f);
                 arm.wants = glm::normalize(glm::vec3(0.0f, -1.0f, 0.0f) + 0.25f * out);
             }
+            {
+                // THE STRIDE SWING's BASE for this arm — the un-swung hang the swing is applied to:
+                // remembered from the last drag that hung it (m_hangBase, carried to this press's
+                // heading), else the found direction LESS the swing the stance it stands in would
+                // give (a loaded stride pose with plumb arms keeps them plumb until the stance
+                // changes; a standing figure's base is the found hang itself).
+                const glm::vec3 lateralStart(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
+                const glm::vec3 foreStart = glm::normalize(glm::cross(lateralStart, glm::vec3(0.0f, 1.0f, 0.0f)));
+                const glm::vec3 side = m_jsStartPos[static_cast<std::size_t>(socket)] - m_jsStartPos[static_cast<std::size_t>(root)];
+                const float     armSide = glm::dot(side, lateralStart) < 0.0f ? -1.0f : 1.0f;
+                float           splitPress = 0.0f;
+                arm.hasSwing = stanceSplit(armSide, foreStart, splitPress);
+                const std::size_t si = static_cast<std::size_t>(socket);
+                if (!m_hangBaseValid[si]) {
+                    // (No memory: the found pose is taken to carry its stance's swing.)
+                    m_hangSwingDeg[si] = arm.hasSwing ? swingDegOf(splitPress) : 0.0f;
+                    m_hangBaseValid[si] = 1;
+                }
+                if (hung && std::abs(m_hangSwingDeg[si]) > 1.0e-3f) {
+                    // (The found direction tilted BACK by the swing it carries: minus a forward
+                    // swing is a turn about plus the lateral.)
+                    arm.wants = glm::normalize(glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(m_hangSwingDeg[si]), lateralStart)) * arm.wants);
+                }
+            }
             m_jsHangArms.push_back(arm);
         }
     }
     bool changed = false;
+    // THE STRIDE SWING this tick, per arm: the swing the stance gives it now (degrees, + forward),
+    // absolute on the arm's remembered base. The SPLIT is read along the HIPS' heading now — the
+    // stance is the legs': read along the CHEST's, a chest that turned as one hand reached the
+    // floor made two symmetric feet a split of centimetres, and the other arm swung by a fraction
+    // of a degree through a reach that has no stance in it (the all-fours gallery moved 0.8% of
+    // its pixels on a route whose feet never moved). IK_ARM_HANG_NO_SWING is the A/B;
+    // IK_ARM_HANG_TRACE prints each arm's split and swing per tick.
+    static const bool kNoSwing = std::getenv("IK_ARM_HANG_NO_SWING") != nullptr; // A/B probe
+    static const bool kSwingTrace = std::getenv("IK_ARM_HANG_TRACE") != nullptr;
+    std::vector<float> swings(m_jsHangArms.size(), 0.0f);
+    {
+        const glm::vec3 lateralStart(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
+        const glm::mat3 rootTurned = glm::mat3(m_poseGlobal[static_cast<std::size_t>(root)]) *
+                                     glm::transpose(m_jsStartRot[static_cast<std::size_t>(root)]);
+        glm::vec3 hipsLateral = rootTurned * lateralStart;
+        hipsLateral.y = 0.0f;
+        const bool      hipsLevel = glm::length(hipsLateral) > 0.2f;
+        const glm::vec3 hipsFore = hipsLevel ? glm::normalize(glm::cross(glm::normalize(hipsLateral), glm::vec3(0.0f, 1.0f, 0.0f))) : glm::vec3(0.0f);
+        for (std::size_t ai = 0; ai < m_jsHangArms.size() && !kNoSwing && hipsLevel; ++ai) {
+            const HangArm&    arm = m_jsHangArms[ai];
+            const std::size_t s = static_cast<std::size_t>(arm.socket);
+            if (!arm.hasSwing || hangArmHeld(arm)) {
+                continue;
+            }
+            const glm::vec3 side = m_jsStartPos[s] - m_jsStartPos[static_cast<std::size_t>(root)];
+            float           splitNow = 0.0f;
+            if (stanceSplit(glm::dot(side, lateralStart) < 0.0f ? -1.0f : 1.0f, hipsFore, splitNow)) {
+                swings[ai] = swingDegOf(splitNow);
+            }
+            if (kSwingTrace) {
+                std::fprintf(stderr, "[hang-swing] %s: split %.4f m -> swing %.3f deg (carried %.3f)\n", m_boneNames[s].c_str(), splitNow,
+                             swings[ai], s < m_hangSwingDeg.size() ? m_hangSwingDeg[s] : 0.0f);
+            }
+        }
+    }
     // THE ELBOW SOFTENS as the hand nears the floor (kArmLandSoftenDeg): by the fingertip's height
     // over its clearance, eased. Only ever MORE flexion than the drag found, and given back as the
-    // hand comes away again.
+    // hand comes away again. (... and the FORWARD-swung arm's elbow flexes with its swing, up to
+    // kArmSwingElbowDeg: a walker's leading arm is bent, the trailing one straight.)
     static const bool kNoSoften = std::getenv("IK_ARM_HANG_NO_SOFTEN") != nullptr; // A/B probe
     for (const HangArm& arm : m_jsHangArms) {
-        if (kNoSoften || arm.hand < 0 || hangArmHeld(arm)) {
+        if (arm.hand < 0 || hangArmHeld(arm)) {
+            continue;
+        }
+        const std::size_t ai = static_cast<std::size_t>(&arm - m_jsHangArms.data());
+        const float       swingShare = ai < swings.size() ? glm::clamp(swings[ai] / kArmSwingMaxDeg, 0.0f, 1.0f) : 0.0f;
+        const float       swingWanted = kArmSwingElbowDeg * swingShare;
+        if (kNoSoften && swingWanted <= 0.0f) {
             continue;
         }
         float lowest = 1.0e9f;
@@ -316,9 +485,14 @@ bool Armature::hangIdleArms() {
             }
         }
         const float       scale = rig.sizeScale();
-        const float       wanted = kArmLandSoftenDeg * (1.0f - glm::smoothstep(0.02f * scale, kArmLandSoftenFrom * scale, lowest));
+        const float       landWanted = kNoSoften ? 0.0f : kArmLandSoftenDeg * (1.0f - glm::smoothstep(0.02f * scale, kArmLandSoftenFrom * scale, lowest));
+        const float       wanted = std::max(landWanted, swingWanted);
         const std::size_t e = static_cast<std::size_t>(arm.elbow);
-        const float       found = m_ikStartEuler[e][arm.foldAxis] * arm.foldSign; // (its flexion as the drag found it)
+        // (The flexion the drag FOUND is the floor of the goal for an arm that hung at the press; an
+        // arm that stood on its hand — handLandedAtPress — found its bend on the floor, a strut's,
+        // and once the hand lifts it hangs straight: folded back to the strut's 71 degrees at the
+        // soften's pace, a figure kneeling up off a sphinx hung her forearms up like paws.)
+        const float       found = arm.handLandedAtPress ? 0.0f : m_ikStartEuler[e][arm.foldAxis] * arm.foldSign; // (its flexion as the drag found it)
         const float       now = m_boneEuler[e][arm.foldAxis] * arm.foldSign;
         const float       goal = std::max(found, wanted);
         const float       next = now + glm::clamp(goal - now, -kArmLandSoftenStepDeg, kArmLandSoftenStepDeg);
@@ -497,6 +671,9 @@ bool Armature::hangIdleArms() {
         glm::vec3      delta;
         glm::vec3      wanted;
         glm::vec3      out{0.0f}; // the arm's outward axis (levelled lateral, toward its side), or zero
+        glm::vec3      unswung{0.0f}; // the wanted direction before THE STRIDE SWING's tilt (see m_hangSwingDeg)
+        glm::vec3      fore{0.0f};    // the trunk's fore axis now, or zero
+        float          swingAsked = 0.0f; // the swing the tilt asked (degrees, + forward)
         float          depthBefore = 0.0f;
         float          fraction = 1.0f;
     };
@@ -641,7 +818,18 @@ bool Armature::hangIdleArms() {
         // down with her arms beside her. (A hand the user PUT on the floor is a contact from the
         // press, and props her as it did.)
         static const bool kNoHangFloor = std::getenv("IK_NO_ARM_HANG_FLOOR") != nullptr; // A/B probe
-        if (m_jsSeatRolls && !kNoHangFloor) {
+        // ... AND WHILE THE HIPS ARE TAKEN DOWN (2026-10-27; IK_ARM_HANG_FLOOR_SEAT_ONLY): a figure
+        // sat down onto the floor by the hips hangs her hands beside her hips, and whether their
+        // fingertips come within the contact band of the floor was a knife edge — with the
+        // rotation order composed the format's way the third generation's hands touched down a
+        // centimetre lower in its floor sit, were planted as live contacts, and with the hips
+        // still going down the trunk folded forward between them, 38 degrees; the sit-up that
+        // followed read a trunk 51 degrees from upright and SAT her up (74cm short) where it had
+        // stood her. A person sitting down keeps her hands off the floor, or rests them on her
+        // thighs — the hang turns them clear, as it does while the seat rolls.
+        static const bool kFloorSeatOnly = std::getenv("IK_ARM_HANG_FLOOR_SEAT_ONLY") != nullptr; // A/B probe
+        const bool hipsDown = !kFloorSeatOnly && rig.dragEffector() == rig.rootNode() && m_jsTargetDown > 0.0f;
+        if ((m_jsSeatRolls || hipsDown) && !kNoHangFloor) {
             const glm::vec3 ridesWorld = glm::normalize(parentNow * glm::transpose(m_jsStartRot[par]) * arm.direction);
             const glm::vec3 socketAt(m_poseGlobal[s][3]);
             const glm::vec3 nowDir = glm::normalize(glm::vec3(m_poseGlobal[static_cast<std::size_t>(arm.elbow)][3]) - socketAt);
@@ -685,9 +873,21 @@ bool Armature::hangIdleArms() {
                 wanted = best;
             }
         }
+        // THE STRIDE SWING, last: the wanted direction tilted fore or aft by the arm's swing (found
+        // above) about the trunk's lateral axis — down turned toward fore is a turn about minus the
+        // lateral. The un-swung target is kept on the turn: what the arm actually ends up carrying,
+        // measured against it below, is what the next press undoes (m_hangSwingDeg).
+        const glm::vec3   unswung = wanted;
+        const std::size_t ai = static_cast<std::size_t>(&arm - m_jsHangArms.data());
+        if (ai < swings.size() && std::abs(swings[ai]) > 1.0e-3f && glm::length(lateral) > 0.2f) {
+            wanted = glm::normalize(glm::mat3(glm::rotate(glm::mat4(1.0f), -glm::radians(swings[ai]), lateral)) * wanted);
+        }
         Turn turn;
         if (findTurn(arm, wanted, turn)) {
             turn.out = out;
+            turn.unswung = unswung;
+            turn.fore = glm::length(lateral) > 0.2f ? glm::normalize(glm::cross(lateral, glm::vec3(0.0f, 1.0f, 0.0f))) : glm::vec3(0.0f);
+            turn.swingAsked = ai < swings.size() ? swings[ai] : 0.0f;
             turns.push_back(turn);
         }
     }
@@ -787,6 +987,9 @@ bool Armature::hangIdleArms() {
                     return false;
                 }
                 retry.out = t.out;
+                retry.unswung = t.unswung;
+                retry.fore = t.fore;
+                retry.swingAsked = t.swingAsked;
                 retry.depthBefore = t.depthBefore;
                 stopFraction(retry);
                 return true;
@@ -848,6 +1051,15 @@ bool Armature::hangIdleArms() {
         if (s < m_jsPostStepEuler.size()) {
             m_jsPostStepEuler[s] = m_boneEuler[s];
             m_jsPostStepTurned[s] = 1;
+        }
+        if (glm::length(t.fore) > 0.5f && s < m_hangSwingDeg.size()) {
+            // The swing the arm now CARRIES: its fore-aft angle against the un-swung target's — no
+            // more than was ASKED, and never the other way: a shortfall of the hang's own (an arm
+            // the body stops short of its plumb under a fold) is not a swing, and remembered as one
+            // it was asked for again at the next press.
+            const glm::vec3 nowDir = glm::normalize(glm::vec3(m_poseGlobal[static_cast<std::size_t>(t.arm->elbow)][3]) - glm::vec3(m_poseGlobal[s][3]));
+            const float     carried = sagittalDeg(nowDir, t.fore) - sagittalDeg(t.unswung, t.fore);
+            m_hangSwingDeg[s] = glm::clamp(carried, std::min(0.0f, t.swingAsked), std::max(0.0f, t.swingAsked));
         }
         if (kHangTrace) {
             std::fprintf(stderr, "[hang] %s: wanted step (%.2f %.2f %.2f) applied (%.2f %.2f %.2f) depth %.1f -> %.1f mm",

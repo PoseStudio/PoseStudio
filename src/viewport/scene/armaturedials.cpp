@@ -96,12 +96,13 @@ glm::vec3 Armature::limbDirection(int bone) const {
         return size;
     };
 
-    // The bone's LENGTH AXIS is the format's own statement: the rotation order's first axis, in
-    // the bone's orientation frame. (Read off the joints instead it is wrong wherever a bone's
+    // The bone's LENGTH AXIS is the format's own statement: the rotation order's first axis — the
+    // twist, applied innermost; the STORED order's last letter (lengthAxisLetter) — in the bone's
+    // orientation frame. (Read off the joints instead it is wrong wherever a bone's
     // children do not lie along it: the toes fan sideways from the ball, a mid-foot bone sits
     // millimetres from its ankle, the chest's heaviest children are the collars.) What the
     // joints say is only which WAY along it is distal.
-    const int       lengthAxis = std::max(0, orderAxis(src.rotationOrder.empty() ? 'X' : src.rotationOrder[0]));
+    const int       lengthAxis = std::max(0, orderAxis(lengthAxisLetter(src)));
     const glm::vec3 axis = glm::normalize(glm::vec3(src.orient[lengthAxis]));
     const glm::vec3 origin = bindPos(bone);
 
@@ -234,7 +235,7 @@ JointDial Armature::jointDial(int bone, JointDialKind kind) const {
         return std::abs(hi) > std::abs(lo) ? 1.0f : -1.0f;
     };
 
-    const int twistAxis = std::max(0, orderAxis(b.rotationOrder.empty() ? 'X' : b.rotationOrder[0]));
+    const int twistAxis = std::max(0, orderAxis(lengthAxisLetter(b)));
 
     if (kind == JointDialKind::Twist) {
         // The joint's own twist channel — or, where that is locked, its limb's twist bone's (the

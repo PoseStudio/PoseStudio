@@ -36,6 +36,7 @@ struct IkSolveScratch {
     const JointSolver&              solver;     ///< The solver built for this skeleton (its ancestry queries).
     const std::vector<IkEffector>&  pins;       ///< The rig's pins (contacts, user pins).
     const std::vector<char>&        active;     ///< Per node: on a path from the effector or a pin to the root.
+    const std::vector<int>&         secondaries; ///< THE GROUP's other dragged joints (IkRig::secondaryEffectors): each rides the cursor's displacement with the effector (Armature::m_jsGroupTargets), its limb freed and priced as the dragged one.
     const glm::vec3*                dragTarget; ///< The cursor's target this tick, or null on the release.
     const glm::vec3*                holdTarget; ///< The released joint's hold, or null.
 
@@ -60,8 +61,8 @@ struct IkSolveScratch {
     std::vector<char>               pinNode;  ///< the pinned joints themselves
     std::vector<char>               homeLimb;  ///< a STANDING FOOT's limb: what goes home as the body rises
     std::vector<char>               girdle;  ///< under an elbow drag: the bones above the arm's socket (the collar)
-    int                             handCollar = -1;  ///< under a HAND drag: the girdle bone the arm's socket hangs from (the collar), and its ELEVATION channel (the unlocked channel about the fore axis), whose box is capped at kCollarElevationMaxDeg; -1 = none
-    int                             handCollarAxis = -1;
+    std::vector<int>                handCollars;  ///< under a HAND drag: the girdle bone each dragged arm's socket hangs from (the collar) — the effector's, and THE GROUP's secondary wrists' — and its ELEVATION channel (the unlocked channel about the fore axis), whose box is capped at kCollarElevationMaxDeg
+    std::vector<int>                handCollarAxes;
     // --- Set by ikFootDrag ---
     float                           legScale{};  ///< The rig's size scale (IkRig::sizeScale): every leg-drag length is figure-scaled by it.
     bool                            legDrag{};  ///< The grabbed joint is foot-class (low at BIND): a foot drag.

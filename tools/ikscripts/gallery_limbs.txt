@@ -64,6 +64,8 @@ dragv -0.45 0 50 40
 shot 25_side_stride
 expect grab < 5
 expect gaze > -8
+expect swing.lShldr < -10
+expect swing.rShldr > 10
 release
 reset
 

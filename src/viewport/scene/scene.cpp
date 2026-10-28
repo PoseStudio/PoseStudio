@@ -386,7 +386,8 @@ int Scene::selectBoneByName(const std::string& name) {
     return fig ? fig->selectBoneByName(name) : -1;
 }
 
-int Scene::selectBoneAt(float px, float py, float vpW, float vpH, const Camera& camera) {
+bool Scene::pickBoneAt(float px, float py, float vpW, float vpH, const Camera& camera, int& outModel, int& outBone,
+                       glm::vec3& outGrab) {
     // A CLICK PICKS WHAT THE CURSOR IS ON (2026-09-26): the click is cast against every figure's
     // posed SKIN (Model::pickSurface) and the FIRST surface along the ray wins — its bone the joint
     // that weighs most on the skin at the hit, its point the grab point (Armature::setIkGrabPoint).
@@ -536,7 +537,7 @@ int Scene::selectBoneAt(float px, float py, float vpW, float vpH, const Camera& 
     } else if (pickedBone < 0) {
         const BonePick pick = pickBone(m_models, px, py, vpW, vpH, camera);
         if (pick.bone < 0) {
-            return -1;
+            return false;
         }
         const Model& fig = *m_models[static_cast<std::size_t>(pick.model)];
         // The picked point: the joint itself for a pick of the joint, the clicked point of the
@@ -564,12 +565,25 @@ int Scene::selectBoneAt(float px, float py, float vpW, float vpH, const Camera& 
                 glm::vec3 point(0.0f);
                 int       bone = -1;
                 if (other->hasSkeleton() && other->pickSurface(toward, t, point, bone) && t < dist - kFallbackFleshDepth) {
-                    return -1; // hidden behind another part: not what the cursor is on
+                    return false; // hidden behind another part: not what the cursor is on
                 }
             }
         }
         pickedModel = pick.model;
         pickedBone = pick.bone;
+    }
+    outModel = pickedModel;
+    outBone = pickedBone;
+    outGrab = grab;
+    return true;
+}
+
+int Scene::selectBoneAt(float px, float py, float vpW, float vpH, const Camera& camera) {
+    int       pickedModel = -1;
+    int       pickedBone = -1;
+    glm::vec3 grab(0.0f);
+    if (!pickBoneAt(px, py, vpW, vpH, camera, pickedModel, pickedBone, grab)) {
+        return -1;
     }
     if (pickedModel != activeFigureIndex()) {
         // Switching figures: the previous one's selection goes away.
@@ -582,6 +596,52 @@ int Scene::selectBoneAt(float px, float py, float vpW, float vpH, const Camera& 
     figure.setSelectedBone(pickedBone); // (a bone of the face rig selects the HEAD: Armature::posingBone)
     figure.setIkGrabPoint(pickedBone, grab);
     return figure.selectedBone();
+}
+
+int Scene::shiftPressBoneAt(float px, float py, float vpW, float vpH, const Camera& camera, bool& wasMember) {
+    wasMember = false;
+    int       pickedModel = -1;
+    int       pickedBone = -1;
+    glm::vec3 grab(0.0f);
+    if (!pickBoneAt(px, py, vpW, vpH, camera, pickedModel, pickedBone, grab)) {
+        return -1;
+    }
+    Model& figure = *m_models[static_cast<std::size_t>(pickedModel)];
+    // Another figure than the active one, a digit (posed alone), or nothing selected yet: a plain
+    // selection, as without Shift.
+    if (pickedModel != activeFigureIndex() || figure.selectedBone() < 0 ||
+        figure.boneClass(pickedBone) == BoneClass::Digit) {
+        return selectBoneAt(px, py, vpW, vpH, camera);
+    }
+    const int primary = figure.armature().knownPosingBone(pickedBone); // (a face-rig bone: the head)
+    wasMember = primary == figure.selectedBone() || figure.inGroup(primary);
+    static const bool kShiftTrace = std::getenv("POSESTUDIO_PICK_TRACE") != nullptr;
+    if (kShiftTrace) {
+        std::fprintf(stderr, "[pick] shift press: picked %s (model %d), selected before %d, group %zu, member %d\n",
+                     figure.armature().boneName(static_cast<std::size_t>(pickedBone)).c_str(), pickedModel, figure.selectedBone(),
+                     figure.groupBones().size(), wasMember ? 1 : 0);
+    }
+    if (!figure.makeGroupPrimary(pickedBone)) {
+        return selectBoneAt(px, py, vpW, vpH, camera);
+    }
+    figure.setIkGrabPoint(pickedBone, grab);
+    return figure.selectedBone();
+}
+
+bool Scene::removeGroupBone(int bone) {
+    Model* fig = figureModel();
+    return fig != nullptr && fig->removeFromGroup(bone);
+}
+
+std::vector<int> Scene::groupBones() const {
+    const Model* fig = figureModel();
+    return fig != nullptr ? fig->groupBones() : std::vector<int>();
+}
+
+void Scene::restoreSelection(int primary, const std::vector<int>& secondaries) {
+    if (Model* fig = figureModel()) {
+        fig->restoreSelection(primary, secondaries);
+    }
 }
 
 } // namespace pose

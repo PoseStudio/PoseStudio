@@ -476,6 +476,13 @@ private:
     /// undo. Returns false when no joint is under the cursor (the press is then the orbit/click
     /// gesture).
     bool beginJointGesture(const QPointF& localPos, bool scoped);
+    /// A SHIFT + left press on the joint under @p localPos (THE GROUP, 2026-10-27): the joint joins
+    /// the selection as its primary — the previous selection becoming the group's secondaries, a
+    /// member pressed again becoming the primary — and a whole-body IK drag of the whole group
+    /// begins through it (Armature::beginIkDrag). Released without a move it is a Shift+CLICK:
+    /// a new joint stays added, a member is removed (m_ik.groupClickBone). Returns false when no
+    /// joint is under the cursor.
+    bool beginGroupGesture(const QPointF& localPos);
     /// Begins the IK drag of the selected joint (the drag plane anchored at its grab point) and
     /// starts the tick — the whole body's, or @p scoped the grabbed chain's alone. Returns false
     /// without a figure/selection.
@@ -526,6 +533,10 @@ private:
         // drag's ground-healed pins, visibly shifting a hovering figure and committing an undo
         // entry for a gesture the user perceived as a click.
         bool      poseChanged = false;
+        // THE GROUP: a Shift press on a joint that was ALREADY a member (or the primary) — released
+        // as a CLICK, with no solve having moved the pose, it REMOVES that joint from the group
+        // (beginGroupGesture / mouseReleaseEvent); -1 otherwise.
+        int       groupClickBone = -1;
         glm::vec3 planePoint{0.0f};
         glm::vec3 lastTarget{0.0f};
         // The adaptive low-pass the raw cursor target goes through before each solve tick (see

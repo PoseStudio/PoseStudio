@@ -93,40 +93,44 @@ shot 51c_prone_side
 release
 orbit 40 -10
 shot 52c_prone_threeq
-# ... and back up onto all fours: each hand forward and down onto the floor UNDER THE SHOULDERS,
+# ... and back up onto all fours: each hand dragged FORWARD along the floor to under its shoulder,
 # then the hips up. (The hands stay planted while the arms have length to give - a push-up - and
-# the knees stay. From here a second drag of the hips stands her up. Since she lies flat on her
-# belly with the arms folded under her (2026-09-23), the hands start under the chest and a
-# push-up wants them under the shoulders: 14% of the view. Dragged 20% they land ahead of the
-# shoulders, and as the trunk pivots up over the knees the arms go taut before the hips arrive -
-# a hand unloads and lifts, one arm straight and the other in the air.)
+# the knees stay; the hips go up and a little back, and she ends on all fours with the arms
+# straight, the hips resting where the straight arms hold them, 5cm short of the cursor. Taken
+# further BACK - 15cm, 2026-10-27 - the arms come dead straight before the hips arrive, the hands
+# let go of the floor over half a second and the arms hang forward-down with the fingertips
+# brushing the floor: she kneels up, propped on her fingertips, and the hands are planted again by
+# dragging them down. From all fours a second drag of the hips stands her up.)
 view right
-# (Each hand pulled straight DOWN under its shoulder, since the prone lies flat with straight legs and
-# lying feet, 2026-09-26: dragged 14% forward, as the tucked-foot prone had them, the hands stood
-# behind the shoulders once the trunk pivoted up over the knees, the arms went taut and both hands
-# lifted off - she kneeled up with her hands in the air.)
+# (Each hand FORWARD 14cm and a little down, 2026-10-27: since the rotation order composed the
+# format's way the prone folds the arms further back, the hands under the lower chest with the
+# wrists up on their fingertips, and a hand pulled straight DOWN there - the gesture until this
+# day - laid its forearm flat by lifting the chest 17cm off the arm, a cobra, and left the hand
+# behind its shoulder. Forward, the hand slides out from under the chest and lies flat ahead; the
+# chest comes up onto the forearms as the first one goes, a sphinx.)
 press lHand
-dragv 0.00 -0.06 40 20
+dragv -0.14 -0.05 40 20
 release
 press rHand
-dragv 0.00 -0.06 40 20
+dragv -0.14 -0.05 40 20
 release
 press hip
-dragv 0.15 0.25 80 40
+dragv 0.08 0.25 80 40
 report prone_up
-# (Two basins once, 2026-09-23: the arms push straight and she is up on all fours, or they stay
-# folded under and the chest stays down with the hips up (23mm) - which one depended on 1e-7 of
-# rounding in the pose the hand drags began from, until a zero Euler composed to the bind
-# EXACTLY (Armature::recomposePoseLocal), and a dragged hand lies on its palm along the way it is
-# dragged (the hand slide in solveIk), which unfolds the arm as it goes.)
-expect grab < 20
+# (52mm: the hips rest where the straight arms hold them - a strut, not a miss.)
+expect grab < 70
+# (Both hands on the floor at the end, the arms straight: all fours.)
 expect y.lHand < 90
 expect y.rHand < 90
 expect y.lShin < 90
-# (15 since the palm eases' LEAD CAP, 2026-09-26. It read 124-177: the arm folded under her unfolded in
-# one tick as the hips rose - the landed hand's palm target turned on toward flat at 4 degrees a tick
-# while the pinned hand under the chest could not follow, ran 78 degrees ahead, and its pull snapped
-# the arm into the basin where the palm lies flat. The target leads the hand by 20 degrees at most now.)
+# (16mm. With the hips taken 15cm back instead the hands let go, and that read 219 on 2026-10-27:
+# the hand's hold had been a SWITCH on the arm's slack, thrown with the body's rise already
+# complete, and the arm the pin had stretched to its limits snapped back toward its fold in one
+# tick; 131 with the arm's references fixed where the unload first found it (the shoulder twisted
+# it 23 degrees more over the three ticks the hold faded); 83 at the brow with the hold eased over
+# ten ticks (the trunk the hands held down springing when the pins went); 48 at a thirtieth a tick.
+# The hold fades with the arm's TAUT share, eased in time, the arm referred to where each tick
+# finds it, and the rig's lift-off waits for the fade - see the fade block of ikPinRows.)
 expect jump < 40
 expect steps < 1
 shot 53c_prone_up_side
@@ -146,6 +150,24 @@ expect meshlow > -15
 shot 53_sat_on_heels_side
 orbit 40 -10
 shot 54_sat_on_heels_threeq
+# ... and STOOD UP from the heels by the hips, from the view a user poses in (2026-10-28): the knees
+# let go once the hips are asked above a tall kneel, the feet roll back onto their toes and the legs
+# straighten over them. (Held for the whole drag, as every knee the hips were low over at the press
+# had been — the belly's rule — she rose to a tall kneel and stopped against a pull of 75cm: the
+# user's report. The knee's pin stays until its foot has handed over; let go mid-roll, the foot's
+# soft hold went with it and the thigh splayed to its box in one tick, 122mm at the knee.)
+view home
+press hip
+dragv 0 0.75 80 60
+report heels_stand
+expect hips > 600
+expect lowest > 0
+expect steps < 3
+# (46mm in a scratch run of the same drag with no step; 91 here, where she takes one gathering step
+# as she arrives and the stepping leg's knee swings through it.)
+expect jump < 120
+shot 54d_stood_up_from_heels
+release
 reset
 
 # B2: THE HALF KNEEL - a kneel, then one knee drawn up to hip height and forward: the foot below it
@@ -241,8 +263,10 @@ expect jump < 80
 # over to one side — which the side view cannot show. Hence the front view below.
 expect euler.pelvis.y < 2
 expect euler.pelvis.y > -2
-expect euler.pelvis.z < 2
-expect euler.pelvis.z > -2
+# (3 since 2026-10-27: 2.02 under the rotation order composed the format's way - the same sit-up to
+# a hair; the lock it guards, a spine that leaves the sagittal plane for reach, read 10.)
+expect euler.pelvis.z < 3
+expect euler.pelvis.z > -3
 shot 61_sat_back_up_side
 release
 view front

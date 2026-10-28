@@ -50,8 +50,75 @@ void Armature::ikPostureModel(IkSolveScratch& s) {
     std::vector<char>& pinNode = s.pinNode;
     std::vector<char>& homeLimb = s.homeLimb;
     std::vector<char>& girdle = s.girdle;
-    const int handCollar = s.handCollar;         // (the dragged arm's collar and its ELEVATION channel: capped at kCollarElevationMaxDeg)
-    const int handCollarAxis = s.handCollarAxis;
+    const std::vector<int>& handCollars = s.handCollars; // (each dragged arm's collar and its ELEVATION channel: capped at kCollarElevationMaxDeg)
+    const std::vector<int>& handCollarAxes = s.handCollarAxes;
+    // The thighs whose foot the rig has PLANTED (a standing foot model: its ball found), and each
+    // one's ABDUCTION channel: of its unlocked channels, neither the twist nor the flexion, the
+    // one whose axis lies most along the figure's fore axis at bind (every bind is
+    // translation-only, so a channel's orientation axis is a world axis at rest). See the
+    // abduction box below (kThighAbductBoxDeg).
+    std::vector<char> plantedThigh(n, 0);
+    std::vector<int>  abductAxis(n, -1);
+    std::vector<int>  flexAxis(n, -1); // the thigh's third channel: its flexion, which tightens the box
+    for (std::size_t p = 0; p < s.pins.size(); ++p) {
+        const int node = s.pins[p].node;
+        if (node < 0 || static_cast<std::size_t>(node) >= n || static_cast<std::size_t>(node) >= m_jsBall.size() ||
+            m_jsBall[static_cast<std::size_t>(node)] < 0) {
+            continue;
+        }
+        // The THIGH: the foot's ancestor that hangs from the solve root or the pelvis bone — the
+        // bend bone that flexes and abducts. (Not IkRig::legOf: the thigh SOCKET is a girdle joint
+        // to the rig, and that walk returns the bone below it — the twist bone on the generations
+        // that cut the thigh's twist out, the SHIN on the one whose thighs hang straight off the
+        // hips with their twist helpers beside the shin.)
+        int thigh = node;
+        while (thigh >= 0 && static_cast<std::size_t>(thigh) < n) {
+            const int par = m_bones[static_cast<std::size_t>(thigh)].parent;
+            if (par < 0 || par == root || rig.isPelvisBone(par)) {
+                break;
+            }
+            thigh = par;
+        }
+        if (thigh < 0 || thigh == node || static_cast<std::size_t>(thigh) >= n) {
+            continue;
+        }
+        const Bone& tb = m_bones[static_cast<std::size_t>(thigh)];
+        int   best = -1;
+        float bestFore = 0.0f;
+        int   flex = -1;
+        float flexLateral = 0.0f;
+        for (int a = 0; a < 3; ++a) {
+            if (m_jsTwistAxis[static_cast<std::size_t>(thigh)] == a) {
+                continue;
+            }
+            const float range = tb.rotLimited[a] ? tb.rotMax[a] - tb.rotMin[a] : 360.0f;
+            if (range < 2.0f) {
+                continue; // locked
+            }
+            const float fore = std::abs(glm::vec3(tb.orient[a]).z);
+            if (best < 0 || fore > bestFore) {
+                best = a;
+                bestFore = fore;
+            }
+            const float lateral = std::abs(glm::vec3(tb.orient[a]).x);
+            if (flex < 0 || lateral > flexLateral) {
+                flex = a;
+                flexLateral = lateral;
+            }
+        }
+        if (best >= 0 && flex >= 0 && flex != best) {
+            plantedThigh[static_cast<std::size_t>(thigh)] = 1;
+            abductAxis[static_cast<std::size_t>(thigh)] = best;
+            flexAxis[static_cast<std::size_t>(thigh)] = flex;
+        }
+        static const bool kAbductTrace = std::getenv("IK_JS_ABDUCT_TRACE") != nullptr; // the planted thighs and their boxed channel
+        if (kAbductTrace) {
+            std::fprintf(stderr, "[js-abduct] pin %s -> thigh %s: abduction axis %d (fore %.2f), twist axis %d, euler (%.1f %.1f %.1f)\n",
+                         m_boneNames[static_cast<std::size_t>(node)].c_str(), m_boneNames[static_cast<std::size_t>(thigh)].c_str(), best, bestFore,
+                         m_jsTwistAxis[static_cast<std::size_t>(thigh)], m_boneEuler[static_cast<std::size_t>(thigh)].x,
+                         m_boneEuler[static_cast<std::size_t>(thigh)].y, m_boneEuler[static_cast<std::size_t>(thigh)].z);
+        }
+    }
     const float& legScale = s.legScale;
     bool& legDrag = s.legDrag;
     const glm::vec3*& goalPoint = s.goalPoint;
@@ -593,13 +660,45 @@ void Armature::ikPostureModel(IkSolveScratch& s) {
             // (A standing body's: hanging by the hand, the shoulder girdle is stretched to whatever the
             // rig allows — with the box the two oldest generations' rigid hang rested 81-87mm short of
             // the cursor, 52-66 before.)
-            if (static_cast<int>(b) == handCollar && handCollarAxis >= 0 && !rig.suspended()) {
+            int handCollarAxis = -1; // (this bone's, if it is a dragged arm's collar)
+            for (std::size_t k = 0; k < handCollars.size(); ++k) {
+                if (handCollars[k] == static_cast<int>(b)) {
+                    handCollarAxis = handCollarAxes[k];
+                }
+            }
+            if (handCollarAxis >= 0 && !rig.suspended()) {
                 static const double kCollarMax = envOr("IK_JS_COLLARMAX", kCollarElevationMaxDeg);
                 static const double kCollarOther = envOr("IK_JS_COLLAROTHERMAX", kCollarOtherMaxDeg);
                 const double cap = a == handCollarAxis ? kCollarMax : kCollarOther; // (its swing and twist: what a clavicle does)
                 if (cap > 0.0) {
                     dof.minDeg = std::max(dof.minDeg, std::min(static_cast<double>(m_boneEuler[b][a]), -cap));
                     dof.maxDeg = std::min(dof.maxDeg, std::max(static_cast<double>(m_boneEuler[b][a]), cap));
+                }
+            }
+            // A PLANTED LEG'S THIGH ABDUCTS kThighAbductBoxDeg AT MOST (2026-10-27): the thigh of a
+            // foot the rig has planted (a standing foot model: its ball found) has its ABDUCTION
+            // channel — the free channel about the fore axis, neither the twist nor the flexion —
+            // boxed to +-that about the bind, never tighter than where it stands. (A lifted leg's
+            // thigh, a dragged foot's: the rig's own limit — a side kick, a wide step.)
+            if (plantedThigh[b] && a == abductAxis[b] && !rig.suspended()) {
+                static const double kAbductFlexed = envOr("IK_JS_THIGHABDUCT", kThighAbductBoxDeg);
+                static const double kAbductStraight = envOr("IK_JS_THIGHABDUCT_STRAIGHT", kThighAbductBoxStraightDeg);
+                // (By the thigh's flexion AND by the pelvis's descent: a kneel's abduction was spent
+                // in the descent's first centimetres, the thigh still near straight and the box at
+                // its straight width, and a box never tighter than where the thigh stands could not
+                // take it back once the thigh was flexed — the knees still landed 15cm outside the
+                // feet. m_jsTargetDown is the target's downward travel since the press.)
+                const float  flexion = std::abs(m_boneEuler[b][static_cast<std::size_t>(flexAxis[b])]);
+                const float  tight = std::max(glm::smoothstep(kThighAbductFlexFromDeg, kThighAbductFlexFullDeg, flexion), m_jsTargetDown);
+                const double kAbductBox = glm::mix(kAbductStraight, kAbductFlexed, static_cast<double>(tight));
+                if (kAbductBox > 0.0) {
+                    dof.minDeg = std::max(dof.minDeg, std::min(static_cast<double>(m_boneEuler[b][a]), -kAbductBox));
+                    dof.maxDeg = std::min(dof.maxDeg, std::max(static_cast<double>(m_boneEuler[b][a]), kAbductBox));
+                    static const bool kBoxTrace = std::getenv("IK_JS_ABDUCT_TRACE") != nullptr;
+                    if (kBoxTrace) {
+                        std::fprintf(stderr, "[js-abduct] %s axis %d boxed [%.1f, %.1f] at %.1f\n", m_boneNames[b].c_str(), a, dof.minDeg, dof.maxDeg,
+                                     m_boneEuler[b][a]);
+                    }
                 }
             }
             problem.dofs.push_back(dof);

@@ -213,7 +213,8 @@ void Model::uploadJointsIfDirty(uint32_t frameIndex) {
     }
     // The buffer's second half: which joints' flesh is lit WITH the selection (the face rig under
     // a selected head) — per slot, when the selection has changed since the slot was written.
-    const int selectionKey = m_armature.highlightBone() + 2;
+    const std::uint64_t selectionKey = (static_cast<std::uint64_t>(m_armature.groupVersion()) << 32) |
+                                       static_cast<std::uint32_t>(m_armature.highlightBone() + 2);
     if (m_highlightUploaded[frameIndex] != selectionKey) {
         glm::vec4* lit = dst + std::size_t{2} * m_jointCount;
         for (uint32_t j = 0; j < m_jointCount; ++j) {

@@ -64,6 +64,10 @@ struct Scenario {
     /// joint in the pose the drag begins in (Armature::setIkGrabPoint) — a fingertip's pad, a
     /// toe's tip: where a click on a LEAF bone lands, which has no segment to take a share of.
     glm::vec3             grabOffset{0.0f};
+    /// THE GROUP (2026-10-27): joints taken hold of WITH the grab — Shift+click's secondaries
+    /// (Armature::toggleGroupBone). The measured drag pulls them all by the path's displacement,
+    /// the grab the primary; the preludes stay single drags.
+    std::vector<std::string> alsoGrab;
     /// The measured drag is the app's CTRL+DRAG (Armature's IkScope::Part): a grab of the body
     /// itself moves the whole figure as she is posed; anything else is SCOPED — the grabbed
     /// chain alone moves. The preludes stay whole-body drags.

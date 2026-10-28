@@ -307,6 +307,77 @@ glm::vec3 Armature::ikGrabPointWorld() const {
     return glm::vec3(0.0f);
 }
 
+// --- THE GROUP (see armature.h) ------------------------------------------------------------
+
+bool Armature::inGroup(int bone) const {
+    return std::find(m_groupBones.begin(), m_groupBones.end(), bone) != m_groupBones.end();
+}
+
+void Armature::clearGroup() {
+    if (!m_groupBones.empty()) {
+        m_groupBones.clear();
+        ++m_groupVersion;
+    }
+}
+
+bool Armature::toggleGroupBone(int bone) {
+    bone = posingBone(bone); // (a point of the face is the HEAD's)
+    if (bone < 0 || bone >= static_cast<int>(m_bones.size()) || bone == m_selectedBone ||
+        boneClass(bone) == BoneClass::Digit) {
+        return false;
+    }
+    const auto it = std::find(m_groupBones.begin(), m_groupBones.end(), bone);
+    if (it != m_groupBones.end()) {
+        m_groupBones.erase(it);
+        ++m_groupVersion;
+        return false;
+    }
+    m_groupBones.push_back(bone);
+    ++m_groupVersion;
+    return true;
+}
+
+bool Armature::makeGroupPrimary(int bone) {
+    bone = posingBone(bone);
+    if (bone < 0 || bone >= static_cast<int>(m_bones.size()) || boneClass(bone) == BoneClass::Digit) {
+        return false;
+    }
+    if (bone == m_selectedBone) {
+        return true;
+    }
+    const auto it = std::find(m_groupBones.begin(), m_groupBones.end(), bone);
+    if (it != m_groupBones.end()) {
+        m_groupBones.erase(it);
+    }
+    if (m_selectedBone >= 0 && m_selectedBone < static_cast<int>(m_bones.size()) && !inGroup(m_selectedBone)) {
+        m_groupBones.insert(m_groupBones.begin(), m_selectedBone);
+    }
+    m_selectedBone = bone;
+    m_ikGrabBone = -1;
+    ++m_groupVersion;
+    return true;
+}
+
+bool Armature::removeFromGroup(int bone) {
+    bone = posingBone(bone);
+    if (bone >= 0 && bone == m_selectedBone) {
+        m_selectedBone = m_groupBones.empty() ? -1 : m_groupBones.front();
+        if (!m_groupBones.empty()) {
+            m_groupBones.erase(m_groupBones.begin());
+        }
+        m_ikGrabBone = -1;
+        ++m_groupVersion;
+        return true;
+    }
+    const auto it = std::find(m_groupBones.begin(), m_groupBones.end(), bone);
+    if (it == m_groupBones.end()) {
+        return false;
+    }
+    m_groupBones.erase(it);
+    ++m_groupVersion;
+    return true;
+}
+
 bool Armature::beginIkDrag(IkScope scope) {
     m_ikScope = IkScope::Body; // (set once the rig has the drag: a failed begin leaves no scope behind)
     if (m_selectedBone < 0 || m_selectedBone >= static_cast<int>(m_bones.size()) ||
@@ -438,7 +509,21 @@ bool Armature::beginIkDrag(IkScope scope) {
                      m_ikGrabFarJoint ? 1 : 0, m_ikSegmentNear, m_ikSegmentFar);
         std::fputc(10, stderr);
     }
-    if (!m_ikRig->beginDrag(grabNode, positions, contacts, groundOffsetY, &userPins)) {
+    // THE GROUP (see toggleGroupBone): the secondaries go to the rig with the primary — their own
+    // contacts lifted, their limbs active and priced as the dragged one — for a whole-body drag
+    // only: a Ctrl+drag's scoped chain or figure move, and the landing bounce's own pelvis drag,
+    // are the primary's alone.
+    std::vector<int> secondaries;
+    if (scope == IkScope::Body) {
+        for (const int member : m_groupBones) {
+            if (member >= 0 && member < static_cast<int>(m_bones.size()) && member != grabNode &&
+                boneClass(member) == BoneClass::Body) {
+                secondaries.push_back(member);
+            }
+        }
+    }
+    if (!m_ikRig->beginDrag(grabNode, positions, contacts, groundOffsetY, &userPins,
+                            secondaries.empty() ? nullptr : &secondaries)) {
         return false;
     }
     static const bool kNoFigureMove = std::getenv("POSESTUDIO_NO_FIGURE_MOVE") != nullptr; // A/B probe: the scoped chain, as before 2026-09-28
@@ -448,6 +533,27 @@ bool Armature::beginIkDrag(IkScope scope) {
     }
     m_ikScope = scope;
     m_ikRig->setScoped(scope == IkScope::Chain); // (no intent, no suspension, no step under a scoped drag)
+    {
+        // THE GROUP's drag state (updateGroupTargets): where each secondary effector stood at the
+        // press, and the primary's grab point — the cursor's displacement is measured from it.
+        const std::vector<int>& secs = m_ikRig->secondaryEffectors();
+        m_jsGroupStartPos.resize(secs.size());
+        for (std::size_t i = 0; i < secs.size(); ++i) {
+            m_jsGroupStartPos[i] = positions[static_cast<std::size_t>(secs[i])];
+        }
+        m_jsGroupTargets.assign(secs.size(), glm::vec3(0.0f));
+        m_jsGroupTargetValid.assign(secs.size(), 0);
+        m_jsGroupCursorStart = glm::vec3(m_ikInvTransform * glm::vec4(ikGrabPointWorld(), 1.0f));
+        m_jsGroupCursorValid = false;
+        m_jsGroupFollowValid = false;
+        if (kIkTrace && !secs.empty()) {
+            std::fprintf(stderr, "[ik] group: %zu secondaries:", secs.size());
+            for (const int sec : secs) {
+                std::fprintf(stderr, " %s", m_boneNames[static_cast<std::size_t>(sec)].c_str());
+            }
+            std::fputc(10, stderr);
+        }
+    }
     if (kDragStateTrace) { // (the pins the rig planted: node, target, kind)
         const std::vector<IkEffector>& pins = m_ikRig->pins();
         for (std::size_t p = 0; p < pins.size(); ++p) {
@@ -465,6 +571,9 @@ bool Armature::beginIkDrag(IkScope scope) {
     m_jsKneelSeat = m_jsKneelStart ? m_ikRig->kneelSeat() : glm::vec3(0.0f, -1.0f, 0.0f);
     m_jsHandTipValid.assign(m_bones.size(), 0);
     m_jsContactGone.assign(m_bones.size(), 0.0f);
+    m_jsContactRiseBase.assign(m_bones.size(), -1.0f);
+    m_jsContactRebased.assign(m_bones.size(), 0);
+    m_jsHandUnload.assign(m_bones.size(), 0.0f);
     // A KNEELING FOOT LIES FLAT: the share persists across drags (a kneel let go of is still a
     // kneel); the drag-local flags reset. (Whether a foot IS flat is re-read at the first tick from
     // the pins and the pose: a Reset Pose leaves no planted knee, and the share goes at once.)
@@ -491,6 +600,10 @@ bool Armature::beginIkDrag(IkScope scope) {
     m_jsFootUnrolled.assign(m_bones.size(), 0);
     m_jsFootUnrollProgress.assign(m_bones.size(), 1.0f);
     m_jsKneeHeldDown.assign(m_bones.size(), 0);
+    m_jsKneeHold.assign(m_bones.size(), 1.0f);
+    m_jsKneeUnrollBaseY.assign(m_bones.size(), 0.0f);
+    m_jsKneeUnrollBaseValid.assign(m_bones.size(), 0);
+    m_jsKneeUnrollExtra.assign(m_bones.size(), 0.0f);
     m_jsKneeHeldDownPrev.assign(m_bones.size(), 0);
     m_jsFlatRiseBase.assign(m_bones.size(), 0.0f);
     for (std::size_t i = 0; i < m_bones.size(); ++i) {
@@ -801,6 +914,8 @@ bool Armature::dragIkTo(const glm::vec3& targetWorld) {
                   glm::transpose(m_ikGrabRotStart);
     glm::vec3 grabOffset = grabRot * m_ikGrabOffset;
     const glm::vec3 cursor(m_ikInvTransform * glm::vec4(targetWorld, 1.0f));
+    m_jsGroupCursorRaw = cursor; // (THE GROUP's secondaries ride its displacement: updateGroupTargets)
+    m_jsGroupCursorValid = true;
     bool mapped = false;
     glm::vec3 mappedTarget(0.0f);
     if (m_ikGrabFarJoint && m_ikSegmentNear >= 0 && m_ikSegmentFar == m_ikRig->dragEffector() &&

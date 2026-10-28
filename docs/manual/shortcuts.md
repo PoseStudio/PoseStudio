@@ -13,10 +13,11 @@ Every control in one place. "Viewport focus" means you have clicked in the 3D vi
 | Ctrl + left-drag | on the body (hips, belly, chest) | Moves the whole figure as she is posed: nothing is anchored to the floor, no joint turns. Pinned joints stay where they are pinned. |
 | Left-click | on a model | Select it (blue outline); on empty space, deselect. |
 | Left-click | on a joint | Select the joint (and make its figure the active one). A click on the face selects the head. |
+| Shift + left-click | on a joint | Add the joint to the selection, or take a selected joint out of it again. |
+| Shift + left-drag | on a selected joint | Move all the selected joints together, by the same amount; the body follows as in a plain drag. |
 | Middle-drag | anywhere | Pan. |
 | Wheel | normally | Zoom. |
 | Wheel | during a left-drag of a joint | Move the grabbed point toward (scroll down) or away from (scroll up) the camera. |
-| Wheel | while holding `X`, `Y` or `Z` with a joint selected | Rotate the joint about that axis, 5° a notch. |
 | Right-click | on a model or joint | The context menu: pin / unpin, reset joint or limb, mirror limb, delete. |
 
 ## Camera
