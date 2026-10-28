@@ -40,6 +40,7 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
     m_bindPos.assign(n, glm::vec3(0.0f));
     m_edgeRestDir.assign(n, glm::vec3(0.0f, 1.0f, 0.0f));
     m_edgeRestLen.assign(n, 0.0f);
+    m_helperNode.assign(n, 0);
     m_pelvis = -1;
     m_pelvisBoneNode = -2;
 
@@ -48,6 +49,7 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
     for (std::size_t i = 0; i < n; ++i) {
         m_parents[i] = bones[i].parent;
         m_bindPos[i] = bones[i].bindPos;
+        m_helperNode[i] = bones[i].helper ? 1 : 0;
         names[i] = bones[i].name;
         if (bones[i].parent < 0 && anatomicalRoot < 0) {
             anatomicalRoot = static_cast<int>(i);

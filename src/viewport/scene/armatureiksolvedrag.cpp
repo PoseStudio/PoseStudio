@@ -647,6 +647,17 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
                              ? m_jsReachDown * standingStart
                              : 0.0f;
         m_jsTrunkHinge = std::max(m_jsTrunkHinge, m_jsReachHinge);
+        // THE SEAT ROCKS UNDER A HAND DRAG TOO (2026-10-28; IK_JS_SEAT_ROCK_TRUNK_ONLY): a pinned
+        // pelvis rocked under a TRUNK drag alone, and a seated figure reaching with a hand bent her
+        // spine over a pelvis held bolt upright — a hand laid on the knee leaned the trunk 25-30cm
+        // at the head through the spine. A person reaching forward or down from a chair hinges at
+        // the hips: the trunk drag's hinge (the root's pitch at the bow's price, coupled into the
+        // spine's chain; the seat pin's pitch hold zero, ikPinRows), the reference where she sits,
+        // so the arm's reach pulls the pelvis over only as far as its bounded pull buys.
+        static const bool kSeatRockTrunkOnly = std::getenv("IK_JS_SEAT_ROCK_TRUNK_ONLY") != nullptr; // A/B probe
+        if (!kSeatRockTrunkOnly && handDrag && rig.seatPin() >= 0 && !rig.suspended() && !m_jsWasSuspended) {
+            m_jsTrunkHinge = 1.0f;
+        }
     }
     if (m_jsTrunkHinge > 1.0e-3f) {
         dofBone[rootDofMark] = 1;
@@ -819,7 +830,25 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
     // degree short of home, and a hinge brought back left the head 3mm from where it began.)
     s.swayChest = -1;
     int& swayChest = s.swayChest;
-    m_jsTrunkInSolve = m_jsTrunkInSolve || swayValid || pelvisBalance > 0.0f;
+    // (... and while the body RISES, 2026-10-28: THE TRUNK COMES UP WITH THE RISE — the spine's
+    // references turn home with the rise's progress in ikPostureModel, which needs the chain among
+    // the unknowns. Standing up by the hips off all fours or out of a sit-up, the root came upright
+    // and the spine kept its fold: she stood bent double with her head down. IK_JS_NO_RISE_TRUNK_HOME.)
+    static const bool kNoRiseTrunkHome = std::getenv("IK_JS_NO_RISE_TRUNK_HOME") != nullptr; // A/B probe
+    // (... and only once NO HAND IS PINNED (m_jsHandsPlanted: a live, non-shadow wrist contact): in
+    // the solve while the hands held, the hand rows bent the spine against its references as the
+    // hips rose, and it sprang back the tick the pins went — 271mm at a fingertip, 105 at the brow.
+    // Entering after the lift-off it enters at its references: the spine rode the pelvis rigidly
+    // until then, its channels unchanged.)
+    m_jsHandsPlanted = false;
+    for (std::size_t p = 0; p < pins.size(); ++p) {
+        const int node = pins[p].node;
+        if (node >= 0 && static_cast<std::size_t>(node) < n && m_jsWristOf.size() == n && m_jsWristOf[static_cast<std::size_t>(node)] == node &&
+            rig.pinIsLive(p) && !rig.pinIsShadow(p)) {
+            m_jsHandsPlanted = true;
+        }
+    }
+    m_jsTrunkInSolve = m_jsTrunkInSolve || swayValid || pelvisBalance > 0.0f || (!kNoRiseTrunkHome && rising > 0.0f && !m_jsHandsPlanted);
     if (m_jsTrunkInSolve && effector == root) {
         std::vector<int> size(n, 1);
         std::vector<char> hasFoot(n, 0);

@@ -52,6 +52,7 @@ struct IkRigBone {
     std::string name;
     int         parent = -1;         ///< Anatomical parent index (-1 = skeleton root).
     glm::vec3   bindPos{0.0f};       ///< Bind joint position (model space).
+    bool        helper = false;      ///< A twist helper that splits a rigid segment (Armature::isTwistBone): no joint a body rests on — never a contact of its own (see IkRig::helperNode).
 };
 
 /**
@@ -311,6 +312,16 @@ public:
     /// themselves in an earlier drag — no supports of hers, and props if they are held. Set by
     /// the Armature before beginDrag.
     void setIncidentalContacts(std::vector<char> nodes) { m_incidentalContact = std::move(nodes); }
+    /// A TWIST HELPER IS NO CONTACT (2026-10-28; IK_HELPER_CONTACTS is the A/B): a bone that splits
+    /// a rigid segment — the main family's mid-thigh and mid-forearm twist bones — has no joint a
+    /// body rests on; the segment's far joint (the knee, the hand) is the contact. The contact rules
+    /// took the FIRST real-mass joint whose flesh reached the floor, in node order, and on a
+    /// character whose prone lies flatter than the base figure's the thigh twist's flesh reached it
+    /// before the knee's: planted 12cm up and held DOWN by the belly's knee ceiling, with the knee
+    /// itself free, the hips dragged up off the belly lifted the thigh about its middle — 106mm of
+    /// 250, the trunk hinged into a cobra — and the lying foot's model asked the ankle 7cm UP to
+    /// the "knee's" height. No reference rig ever planted one (their thighs slope from a higher hip).
+    bool helperNode(int node) const;
     /// Per bone, this tick: a HAND contact whose hold the solve's RISE has faded out entirely because
     /// its arm has no length to give (Armature::m_jsContactRiseUnloaded). Such a contact is TAUT for
     /// the lift-off's purposes (updateContacts; IK_LIFT_TAUT_ONLY): the solve reads an arm's stretch
@@ -446,6 +457,7 @@ private:
     /// True for a drag of a figure SEATED ON THE FLOOR by a joint of her upper body (set where the
     /// pose's contacts are seeded): her arms are no supports in it (seedPoseContacts).
     bool                                m_seatedTrunkDrag = false;
+    std::vector<char>            m_helperNode;     ///< Per bone: IkRigBone::helper — a twist helper, never a contact (helperNode()).
     std::vector<char>            m_bodyNode;       ///< False for the figure-node chain above the
                                                    ///< pelvis: no edges, contacts, or mass.
     /// Per bone: its token-mass descendants — the parts that ride it rigidly whenever it is not

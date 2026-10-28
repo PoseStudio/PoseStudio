@@ -727,6 +727,9 @@ private:
     std::vector<int>              m_jsHeadFree;
     int                           m_jsHeadBase = -1;
     glm::mat3                     m_jsHeadIntrinsic{1.0f}; ///< The drag-start righting, in the chest's frame (see rightIdleHead).
+    float                         m_jsHeadIntrinsicHang = 0.0f; ///< How far the righting was faded at the press (0-1): that share of the intrinsic relaxes with the rise.
+    float                         m_jsTrunkHomeShare = 0.0f;    ///< THE TRUNK COMES UP WITH THE RISE: how far the spine's references have turned home (ikPostureModel; kTrunkHomeStep).
+    bool                          m_jsHandsPlanted = false;     ///< This tick: a live, non-shadow wrist contact stands (ikTrunkPolicy) — the trunk waits for it to go before it comes up.
     bool                          m_jsHeadFound = false;
     /// How far the pelvis's pitch is an unknown of this trunk drag (solveIk: the bow), 0-1.
     float                         m_jsTrunkHinge = 0.0f;
@@ -757,6 +760,8 @@ private:
     std::vector<glm::vec3>        m_jsBallTarget;
     glm::vec3                     m_jsKneeUnderEased = glm::vec3(0.0f); ///< a dragged knee's foot target (kneeHangUnder), approached at the pins' pace
     char                          m_jsKneeUnderValid = 0;
+    float                         m_jsLyingHangY = 0.0f;   ///< THE LYING FOOT'S HANG HEIGHT, eased at the pins' pace (ikPinRowsEnd; a drawn-up knee's lying foot)
+    char                          m_jsLyingHangYValid = 0;
     std::vector<float>            m_jsFootAllow;          ///< a letting-go foot's joints' depth through the floor at the release's first tick (m): forgiven by its floor rows
     char                          m_jsFootAllowValid = 0;
     /// The ankle's offset from the ball as the drag found the foot (see the heel row in solveIk).
@@ -797,6 +802,7 @@ private:
     std::vector<char>             m_jsKneeUnrollBaseValid; ///< ... and whether it has one.
     std::vector<float>            m_jsKneeUnrollExtra;    ///< ... and the extra lift the ceiling has gained since the handover (kKneeUnrollExtra).
     std::vector<char>             m_jsFootUnrolled;   ///< the foot rolled back to standing this drag: its posture references are the standing ones from then
+    std::vector<char>             m_jsBallLanded;     ///< ... and its ball's target has met its spot since the handover: the gentle landing pace is over (ikPinRows)
     std::vector<float>            m_jsFlatRiseBase;   ///< the rise's progress at that handover: the heel's and the soles' turn to standing is measured from it
     /// The balance requirement's RAMP (JointSolver::Problem::balanceSlack): how far outside
     /// the support polygon the centre of mass may still sit. Set to the current distance

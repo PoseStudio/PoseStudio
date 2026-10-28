@@ -232,7 +232,21 @@ void IkRig::updateStepPolicy(const glm::vec3& target, const std::vector<glm::vec
         const bool crouchIntent =
             target.y < m_startPose[static_cast<std::size_t>(m_pelvis)].y - kCrouchIntentDepth * m_sizeScale;
         const glm::vec2 anchor(target.x, target.z);
-        updateStepping(positions, !crouchIntent && !lowBody && target.y >= lowY, &anchor);
+        // (... and a LOW body with nothing but its FEET on the floor may step after a target above
+        // the gate, 2026-10-28: the low-body gate is a kneel's — a figure dragged up out of one
+        // stepped a foot forward under her own knees while still kneeling — and stood up by the
+        // hips off a sphinx-like all fours, the hips a thigh's length ahead of the knees, the knees
+        // lift off, the legs reach full extension with the feet 63cm behind the hips, the pelvis
+        // rests 13cm under standing, and no step could come that would let it rise: a deadlock the
+        // gate itself made. No live contact left — no knee, hand or seat — is a standing body with
+        // its feet misplaced. IK_STEP_LOW_BODY_ALWAYS is the A/B.)
+        static const bool kLowBodyAlways = std::getenv("IK_STEP_LOW_BODY_ALWAYS") != nullptr; // A/B probe
+        bool liveContact = false;
+        for (std::size_t p = 0; p < m_pins.size() && !liveContact; ++p) {
+            liveContact = p < m_pinLive.size() && m_pinLive[p] != 0 && !pinIsShadow(p);
+        }
+        const bool lowKneeling = lowBody && (kLowBodyAlways || liveContact);
+        updateStepping(positions, !crouchIntent && !lowKneeling && target.y >= lowY, &anchor);
         return;
     }
     // The balance EFFORT: how far the solved centre of mass sits outside its support, low-passed.

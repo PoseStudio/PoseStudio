@@ -338,6 +338,13 @@ constexpr float kKneeHoldReleaseTo = 1.3f;
 /// more of lift (m, figure-scaled) before it is dropped: gone with the handover it let a knee catch
 /// up with a far cursor in one tick (a 70cm yank out of a kneel: 375mm at the shin).
 constexpr float kKneeUnrollExtra = 0.25f;
+/// THE TRUNK COMES UP WITH THE RISE (2026-10-28; ikPostureModel, ikSpineCoupling, rightIdleHead): the
+/// spine's references turn from the fold the drag found to upright by this share, which follows the
+/// rise's progress at no more than kTrunkHomeStep a tick (a third of a second for the whole fold) and
+/// WAITS while a hand is still planted (m_jsTrunkHomeShare). Pulled home against planted hands the
+/// spine stored its strain and released it the tick the hands let go: 302mm at a finger, 152 at the
+/// brow, standing up off all fours by the hips. IK_JS_NO_RISE_TRUNK_HOME is the A/B.
+constexpr float kTrunkHomeStep = 0.03f;
 constexpr double kSpineCoupling = 80.0;
 /// ... and the NECK's links to it (see the couplings in solveIk): the neck is the spine's top.
 constexpr double kNeckCoupling = 80.0;

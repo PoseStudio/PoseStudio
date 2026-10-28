@@ -614,6 +614,21 @@ void VulkanWindow::scriptDragTick() {
             }
             say("[ikscript]   tick %d eulers:%s\n", s.dragTicks, row.toUtf8().constData());
         }
+        // (... and POSESTUDIO_IK_SCRIPT_POS: named bones' world positions every tick, mm — which joint a
+        // pop is in when no channel of its chain moved.)
+        static const char* kPosBones = std::getenv("POSESTUDIO_IK_SCRIPT_POS");
+        if (kPosBones != nullptr) {
+            const QStringList names = QString::fromUtf8(kPosBones).split(QLatin1Char(','), Qt::SkipEmptyParts);
+            QString           row;
+            for (const QString& nm : names) {
+                const int b = arm->boneIndex(figureBoneName(arm, nm.trimmed().toStdString()));
+                if (b >= 0 && static_cast<std::size_t>(b) < now.size()) {
+                    const glm::vec3 w = now[static_cast<std::size_t>(b)] * 1000.0f;
+                    row += QStringLiteral(" %1(%2 %3 %4)").arg(nm.trimmed()).arg(w.x, 0, 'f', 0).arg(w.y, 0, 'f', 0).arg(w.z, 0, 'f', 0);
+                }
+            }
+            say("[ikscript]   tick %d positions (mm):%s\n", s.dragTicks, row.toUtf8().constData());
+        }
         s.lastPositions = now;
     }
     if (t >= s.moveTicks + s.holdTicks) {

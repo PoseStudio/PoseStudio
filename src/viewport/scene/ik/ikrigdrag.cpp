@@ -573,6 +573,12 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
             const float drop = (m_bindPos[rootIdx].y + m_groundOffsetY) - rootPos.y;
             const float low = glm::smoothstep(0.08f * m_sizeScale, 0.25f * m_sizeScale, drop);
             m_stanceRootOffset = glm::mix(poseOffset, bindOffset, low);
+            static const bool kStanceTrace = std::getenv("IK_STEP_TRACE") != nullptr;
+            if (kStanceTrace) {
+                std::fprintf(stderr, "[stance] feet %d pose offset (%.3f %.3f) bind offset (%.3f %.3f) root y %.3f standing %.3f drop %.3f low %.2f -> (%.3f %.3f)\n",
+                             stanceCount, poseOffset.x, poseOffset.y, bindOffset.x, bindOffset.y, rootPos.y, m_bindPos[rootIdx].y + m_groundOffsetY, drop, low,
+                             m_stanceRootOffset.x, m_stanceRootOffset.y);
+            }
         } else {
             // Fewer than two standing feet: stepping the single support would be a fall.
             m_pinSteppable.assign(m_pins.size(), 0);

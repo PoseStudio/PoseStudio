@@ -64,7 +64,16 @@ constexpr float kArmHangElbowDeg = 35.0f; // more bend than this at the press is
 constexpr float kArmHangStepDeg = 4.0f;   // per tick, the largest channel (a fingertip 4cm: the jump gates)
 constexpr float kArmHangMinLength = 0.12f; // socket to fold joint: an upper arm, not a finger's first bone
 constexpr float kArmHangDamping = 3.0e-5f;   // on the hang step's normal matrix (per-degree columns)
-constexpr float kArmHangFloorMargin = 0.02f; // while the seat rolls, an idle arm keeps this far over its floor clearances
+// While the seat rolls (or the hips go down) an idle arm keeps this far over its floor clearances.
+// A CENTIMETRE CLEAR OF THE RIG'S SEED BAND (2026-10-28; IkRig's kSeedContactBand is 2cm): the rig
+// seeds a joint within that band of its clearance as a live contact at the next press, and with
+// the floor-avoid turn made continuous (the bisection below) the arm rests EXACTLY at this margin
+// — at 2cm it sat on the seed band's edge, and a hand a millimetre lower was planted at the next
+// press: stood up out of a sit by the hips, the floor gallery's hands were seeded, the trunk's
+// home froze on the planted hands and no step came — she stood up folded in half with her hands
+// on the floor, 30cm short. (The quantized turn had rested the arm up to 4.7 degrees above the
+// margin, so nothing hangs higher than it did.) Two measures of one fact must not meet at the edge.
+constexpr float kArmHangFloorMargin = 0.03f;
 constexpr float kWristRelaxStepDeg = 4.0f;   // a lifted hand's wrist eases toward neutral this fast (per channel, per tick)
 constexpr float kFingerRelaxShare = 0.25f;    // an idle hand's fingers curl to this share of each joint's flexion range ...
 constexpr float kFingerRelaxStepDeg = 3.0f;   // ... this fast (per channel, per tick) ...
@@ -861,16 +870,44 @@ bool Armature::hangIdleArms() {
             glm::vec3   about = glm::cross(wanted, ridesWorld);
             if (between > 1.0e-3f && glm::length(about) > 1.0e-5f && !clears(wanted)) {
                 about = glm::normalize(about);
-                glm::vec3 best = ridesWorld;
+                const auto along = [&](float angle) {
+                    return glm::vec3(glm::mat3(glm::rotate(glm::mat4(1.0f), angle, about)) * wanted);
+                };
+                // The least turn that clears: a scan of sixteen steps along the arc brackets it, and
+                // THE BOUNDARY IS BISECTED (2026-10-28; IK_ARM_HANG_FLOOR_NO_BISECT): taken at the
+                // first clearing step alone, the direction was quantized in steps of between/16 —
+                // 4.7 degrees of a 75-degree arc — and as the chest rolled down the clearing step's
+                // index changed once, the wanted direction jumped by a whole step and the hang took
+                // its full 4 degrees in one tick: 46mm at a fingertip on a long-armed character, one
+                // tick into a still hold (every lay-down on every rig had the jump, hidden in the
+                // move's gate). Eight halvings make it 0.02 degrees: a continuous function of the
+                // pose, which the arm follows in small steps.
+                static const bool kNoFloorBisect = std::getenv("IK_ARM_HANG_FLOOR_NO_BISECT") != nullptr; // A/B probe
+                float lo = 0.0f; // does not clear (the hang itself)
+                float hi = -1.0f; // the first scanned angle that clears (-1: none, the ride direction is taken)
                 for (int k = 1; k <= 16; ++k) {
-                    const glm::vec3 candidate =
-                        glm::mat3(glm::rotate(glm::mat4(1.0f), between * static_cast<float>(k) / 16.0f, about)) * wanted;
-                    if (clears(candidate)) {
-                        best = candidate;
+                    const float angle = between * static_cast<float>(k) / 16.0f;
+                    if (clears(along(angle))) {
+                        hi = angle;
                         break;
                     }
+                    lo = angle;
                 }
-                wanted = best;
+                if (hi < 0.0f) {
+                    wanted = ridesWorld;
+                } else {
+                    if (!kNoFloorBisect) {
+                        for (int i = 0; i < 8; ++i) {
+                            const float mid = 0.5f * (lo + hi);
+                            if (clears(along(mid))) {
+                                hi = mid;
+                            } else {
+                                lo = mid;
+                            }
+                        }
+                    }
+                    wanted = along(hi);
+                }
             }
         }
         // THE STRIDE SWING, last: the wanted direction tilted fore or aft by the arm's swing (found
@@ -1175,6 +1212,16 @@ bool Armature::rightIdleHead() {
             const glm::mat3& base = m_jsStartRot[static_cast<std::size_t>(m_jsHeadBase)];
             // K = chest0^T . righting(chest0)^T . chest0: the drag-start righting UNDONE, in the chest's frame.
             m_jsHeadIntrinsic = glm::transpose(base) * glm::transpose(rightingOf(base, kGiveDeg)) * base;
+            // (... and how far the righting was FADED at the press — on all fours or lying down the
+            // neck is not held up, and the head's hang is captured here as if the user had posed it.
+            // That share of the intrinsic relaxes as the body RISES: stood up by the hips off all
+            // fours she kept looking 57 degrees down. A head the user turned on an upright trunk
+            // keeps its turn. 2026-10-28.)
+            {
+                const glm::vec3 axis0 = glm::normalize(base * glm::vec3(0.0f, 1.0f, 0.0f));
+                const float     tilt0 = std::acos(glm::clamp(axis0.y, -1.0f, 1.0f));
+                m_jsHeadIntrinsicHang = glm::smoothstep(glm::radians(kHeadRightFadeFromDeg), glm::radians(kHeadRightFadeGoneDeg), tilt0);
+            }
         }
     }
     if (m_jsHeadChain.empty()) {
@@ -1238,7 +1285,16 @@ bool Armature::rightIdleHead() {
                                                                : m_ikStartEuler[static_cast<std::size_t>(b)];
         rides = rides * glm::mat3(bone.orient) * glm::mat3(eulerMatrix(e, bone.rotationOrder)) * glm::mat3(bone.invOrient);
     }
-    const glm::mat3 target = rightingOf(baseNow, kGiveDeg, m_jsReachHinge) * baseNow * m_jsHeadIntrinsic * rides;
+    glm::mat3 intrinsic = m_jsHeadIntrinsic;
+    {
+        static const bool kNoRiseTrunkHome = std::getenv("IK_JS_NO_RISE_TRUNK_HOME") != nullptr; // A/B probe
+        const float relax = kNoRiseTrunkHome ? 0.0f : glm::clamp(m_jsTrunkHomeShare * m_jsHeadIntrinsicHang, 0.0f, 1.0f);
+        if (relax > 1.0e-4f) {
+            const glm::quat k = glm::normalize(glm::quat_cast(m_jsHeadIntrinsic));
+            intrinsic = glm::mat3_cast(glm::slerp(glm::quat(1.0f, 0.0f, 0.0f, 0.0f), k, 1.0f - relax));
+        }
+    }
+    const glm::mat3 target = rightingOf(baseNow, kGiveDeg, m_jsReachHinge) * baseNow * intrinsic * rides;
 
     // The chain's channels, and the head's rotation as a function of them.
     struct Channel {

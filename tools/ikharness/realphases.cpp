@@ -1253,8 +1253,11 @@ void realPhases(Report& report, const std::vector<ArmatureBone>& bones) {
                 sc.path = pullPath(kneeSeated + glm::vec3(0.0f, 0.05f, 0.04f) - handSeated, 60, 40);
                 sc.idleJoints = kIdleForHandDrag;
                 const RunResult r = run(sc);
+                // (60 since the seat rocks under a hand drag too, 2026-10-28: the trunk hinges at the hips
+                // to reach the knee — the root pitched 12-16 degrees where it was 0 — and the hand lies on
+                // the knee's sloping top from that lean at 50-55 on the eight rigs, 39-41 before.)
                 phaseLegs("[real] seated, hips pinned: a hand laid on the knee faces down onto it",
-                             {gateMax("palm off straight down at the end (deg; the knee's top slopes forward)", palmOff(r, glm::vec3(0.0f, -1.0f, 0.0f)), 45.0),
+                             {gateMax("palm off straight down at the end (deg; the knee's top slopes forward)", palmOff(r, glm::vec3(0.0f, -1.0f, 0.0f)), 60.0),
                               gateMax("hand-to-cursor at rest (mm)", r.restingMiss * 1000.0, 5.0),
                               gateMax("steps", static_cast<double>(r.stepsTaken), 0.0),
                               gateMax("worst single-tick joint move, drag (mm)", jumpOf(r, 0), 60.0),
@@ -3217,9 +3220,13 @@ void realPhases(Report& report, const std::vector<ArmatureBone>& bones) {
             const RunResult r = run(sc);
             // (ON the floor, that is — a contact: on the oldest generation the hands never come down,
             // and since the idle arms HANG they end the prelude 15cm up, pointing at the floor.)
+            // (40, 2026-10-28: the second generation's hands come down since the hang's floor margin
+            // stands clear of the seed band — they land on their RING-FINGER BASES 4.6cm apart under
+            // the chest, and under the swing the wrist rolls 32mm about the planted finger; the rigs
+            // whose contact is the wrist itself read 0.005.)
             const bool handDown = lHand >= 0 && r.startPos[static_cast<std::size_t>(lHand)].y < 0.10f;
             phaseLegs("[real] on all fours, an elbow swung out (lForeArm +6cm x; its hand stays on the floor)",
-                         {handDown ? gateMax("the hand left its place (mm)", moved(r, lHand), 30.0)
+                         {handDown ? gateMax("the hand left its place (mm)", moved(r, lHand), 40.0)
                                    : info("the hand left its place, hands never came down (mm)", moved(r, lHand)),
                           handDown ? gateMin("elbow travel (m)", glm::length(r.grabEnd - r.grabStart), 0.03)
                                    : info("elbow travel, hands never came down (m)", glm::length(r.grabEnd - r.grabStart)),

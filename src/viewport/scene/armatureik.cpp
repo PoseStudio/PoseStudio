@@ -85,6 +85,7 @@ bool Armature::ensureIkRig() {
             rigBone.name = m_boneNames[i];
             rigBone.parent = bone.parent;
             rigBone.bindPos = bindPos[i];
+            rigBone.helper = isTwistBone(static_cast<int>(i)); // (a twist helper is no contact: IkRig::helperNode)
         }
         m_ikRig = std::make_unique<IkRig>();
         m_ikRig->build(rigBones, m_bodyMesh.empty() ? nullptr : &m_bodyMesh);
@@ -598,6 +599,7 @@ bool Armature::beginIkDrag(IkScope scope) {
     m_jsFootWasFlat.assign(m_bones.size(), 0);
     m_jsFootFlatAtStart.assign(m_bones.size(), 0);
     m_jsFootUnrolled.assign(m_bones.size(), 0);
+    m_jsBallLanded.assign(m_bones.size(), 0);
     m_jsFootUnrollProgress.assign(m_bones.size(), 1.0f);
     m_jsKneeHeldDown.assign(m_bones.size(), 0);
     m_jsKneeHold.assign(m_bones.size(), 1.0f);
@@ -691,6 +693,7 @@ bool Armature::beginIkDrag(IkScope scope) {
     m_jsKneelUpRise = 0.0f;
     m_jsLowestTargetY = 1.0e9f;
     m_jsRiseProgress = 0.0f;
+    m_jsTrunkHomeShare = 0.0f;
     {
         const std::size_t root = static_cast<std::size_t>(m_ikRig->rootNode());
         m_jsRootRiseRoom = (m_ikBindPos[root].y + groundOffsetY) - positions[root].y;
@@ -833,6 +836,7 @@ bool Armature::beginIkDrag(IkScope scope) {
     m_jsToeMates.assign(m_bones.size(), {});
     m_jsBallTargetValid.assign(m_bones.size(), 0);
     m_jsKneeUnderValid = 0;
+    m_jsLyingHangYValid = 0;
     m_jsFootAllowValid = 0;
     m_jsTargetDown = 0.0f;
     m_jsHandSlideEase = 0.0f;

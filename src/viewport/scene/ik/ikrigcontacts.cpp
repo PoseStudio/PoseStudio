@@ -384,6 +384,12 @@ bool IkRig::servedByHandBelow(int c, const std::vector<glm::vec3>& positions) co
     return false;
 }
 
+bool IkRig::helperNode(int node) const {
+    static const bool kHelperContacts = std::getenv("IK_HELPER_CONTACTS") != nullptr; // A/B probe: twist helpers as contacts, as before
+    return !kHelperContacts && node >= 0 && static_cast<std::size_t>(node) < m_helperNode.size() &&
+           m_helperNode[static_cast<std::size_t>(node)] != 0;
+}
+
 bool IkRig::servedByPinAbove(int c) const {
     // A joint under a pin on its own path is SERVED by it — a planted foot's toes, a planted
     // hand's carpals — and is no contact of its own ... unless it is the LIMB'S TIP under a
@@ -395,7 +401,19 @@ bool IkRig::servedByPinAbove(int c) const {
     // hands folded at the chest, 40cm in the air. The hand is the contact that bears a push-up;
     // it stays down while its arm has length to give (the slack hand's ceiling, solveIk).
     static const bool kElbowServesHand = std::getenv("IK_ELBOW_SERVES_HAND") != nullptr; // A/B probe
+    // ... and A SEAT SERVES NO KNEE (2026-10-28; IK_SEAT_SERVES_LEGS): a pin on a joint of the
+    // pelvis girdle — the pelvis bone resting on the floor, a thigh socket whose flesh does — is
+    // above every leg joint on its path, and while a heavy body's belly rested on the floor in
+    // her prone no knee of hers could be a contact under a hand drag: the hands slid forward from
+    // under the chest, the sphinx arched the trunk, the knees — held by nothing — rose 3cm, and
+    // the hips-up that followed found none within the seed band and planked her. (The base
+    // figure's belly rides clear of the floor in its prone, so its knees were always its own.)
+    // The seat and the knees are separate supports; a girdle pin serves nothing below it.
+    static const bool kSeatServesLegs = std::getenv("IK_SEAT_SERVES_LEGS") != nullptr; // A/B probe
     for (const IkEffector& pin : m_pins) {
+        if (!kSeatServesLegs && pin.node != c && isGirdleJoint(pin.node)) {
+            continue;
+        }
         for (int cur = c; cur >= 0; cur = m_parents[static_cast<std::size_t>(cur)]) {
             if (cur != pin.node) {
                 continue;
@@ -471,8 +489,8 @@ void IkRig::seedPoseContacts(const std::vector<glm::vec3>& positions) {
         const bool realMass =
             m_masses[ci] >= kTokenBoneMass || m_subtreeMass[ci] >= kTokenLimbMass;
         if (!m_bodyNode[ci] || c == m_pelvis || isEffector(c) || !realMass ||
-            !descendsFromPelvis(c) || m_bindPos[ci].y < kFootBindHeight * scale) {
-            continue;
+            !descendsFromPelvis(c) || m_bindPos[ci].y < kFootBindHeight * scale || helperNode(c)) {
+            continue; // (helperNode: a twist helper is no contact — the segment's far joint is; see ikrig.h)
         }
         const float h = contactHeight(c, positions);
         if (kTrace && h < 0.08f * scale) {
@@ -1013,8 +1031,8 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
         const bool realMass =
             m_masses[ci] >= kTokenBoneMass || m_subtreeMass[ci] >= kTokenLimbMass;
         if (!m_bodyNode[ci] || c == m_pelvis || isEffector(c) || !realMass ||
-            !descendsFromPelvis(c)) {
-            continue;
+            !descendsFromPelvis(c) || helperNode(c)) {
+            continue; // (helperNode: a twist helper is no contact — the segment's far joint is; see ikrig.h)
         }
         const float h = contactHeight(c, applied);
         if (kTraceNear && h < 0.05f * scale) {

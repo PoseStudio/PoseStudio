@@ -253,6 +253,25 @@ void Armature::ikPostureModel(IkSolveScratch& s) {
     for (std::size_t k = 1; k < m_jsSpineChain.size(); ++k) {
         inSpine[static_cast<std::size_t>(m_jsSpineChain[k])] = 1;
     }
+    // THE TRUNK COMES UP WITH THE RISE — its share (m_jsTrunkHomeShare, kTrunkHomeStep): the rise's
+    // progress, followed at a bounded pace, and FROZEN while a hand is still planted (a live wrist
+    // contact the rise has not unloaded): turned home against planted hands the spine stored its
+    // strain and released it the tick they let go.
+    {
+        static const bool kNoRiseTrunkHome = std::getenv("IK_JS_NO_RISE_TRUNK_HOME") != nullptr; // A/B probe
+        // (While a hand's PIN stands, whatever its hold reads — ikTrunkPolicy's m_jsHandsPlanted, which
+        // also keeps the spine OUT of the solve until then: unloaded to 400/m2 but still pinned, the
+        // hands let the trunk come up a little and the pins' going released the rest at once.)
+        const bool  handsHold = m_jsHandsPlanted;
+        const float want = (kNoRiseTrunkHome || rising <= 0.0f) ? 0.0f : (handsHold ? m_jsTrunkHomeShare : risen);
+        static const float kStep = envOr<float>("IK_JS_TRUNKHOMESTEP", kTrunkHomeStep); // (A/B lever)
+        m_jsTrunkHomeShare = glm::clamp(want, m_jsTrunkHomeShare - kStep, m_jsTrunkHomeShare + kStep);
+        static const bool kHomeTrace = std::getenv("IK_JS_TRUNK_HOME_TRACE") != nullptr; // the share, the rise and what holds it
+        if (kHomeTrace && (rising > 0.0f || m_jsTrunkHomeShare > 0.0f)) {
+            std::fprintf(stderr, "[trunk-home] share %.3f want %.3f rising %.2f risen %.3f handsPlanted %d", m_jsTrunkHomeShare, want, rising, risen, m_jsHandsPlanted ? 1 : 0);
+            std::fputc(10, stderr);
+        }
+    }
     // THE SEAT ROLLS (a figure sitting ON THE FLOOR, her chest or head dragged): the pelvis's pitch
     // REFERENCE turns with the cursor about the seat — by the angle the line from the hips to the
     // target has swept, in the figure's sagittal plane, since the drag began. A price can only
@@ -557,8 +576,25 @@ void Armature::ikPostureModel(IkSolveScratch& s) {
             if (b < m_jsPostStepTurned.size() && m_jsPostStepTurned[b]) {
                 dof.reference = m_jsPostStepEuler[b][a];
             }
+            // (The trunk's HOME is measured from where a hand's unload RE-BASED it, where one did —
+            // rebaseContactArm in armatureiksolverows.cpp — else from the drag-start value.)
+            const float homeBase = (b < m_jsPostStepTurned.size() && m_jsPostStepTurned[b]) ? m_jsPostStepEuler[b][a] : m_ikStartEuler[b][a];
             if (static_cast<int>(b) == root && rising > 0.0f) {
-                dof.reference = glm::mix(m_ikStartEuler[b][a], m_jsRootUprightEuler[a], risen);
+                // (... at the trunk's PACED share once the trunk comes up with the rise, 2026-10-28
+                // — kTrunkHomeStep a tick, and frozen while a hand is still planted: by `risen` alone
+                // the pelvis was asked fully upright while the knees still held it pitched on all
+                // fours, and the tick the knees lifted it pitched 20 degrees at once, the coupled
+                // spine unfolding with it — 105mm at the brow, 271 at a fingertip.)
+                static const bool kNoRiseTrunkHomeRoot = std::getenv("IK_JS_NO_RISE_TRUNK_HOME") != nullptr; // A/B probe
+                dof.reference = glm::mix(homeBase, m_jsRootUprightEuler[a], kNoRiseTrunkHomeRoot ? risen : m_jsTrunkHomeShare);
+            }
+            // THE TRUNK COMES UP WITH THE RISE (2026-10-28): the spine chain's references turn from
+            // the fold the drag found to the bind — upright — by the rise's progress, as the root's
+            // own does. Left at the drag-start values, a figure stood up by the hips off all fours
+            // or out of a sit-up stood bent double, her gaze 57 degrees under the horizon (the
+            // coupling's references turn with them: ikSpineCoupling). IK_JS_NO_RISE_TRUNK_HOME.
+            if (m_jsTrunkHomeShare > 0.0f && static_cast<int>(b) != root && inSpine[b]) {
+                dof.reference = glm::mix(homeBase, 0.0f, m_jsTrunkHomeShare);
             }
             if (static_cast<int>(b) == root && swayValid) {
                 dof.reference = swayEuler[a]; // the hip sway's roll (above)
@@ -936,8 +972,15 @@ void Armature::ikSpineCoupling(IkSolveScratch& s) {
                 task.dofB = du;
                 task.scaleA = 1.0 / range(lower);
                 task.scaleB = 1.0 / range(upper);
-                task.refA = static_cast<double>(m_ikStartEuler[lower][a]) * 3.14159265358979323846 / 180.0;
-                task.refB = static_cast<double>(m_ikStartEuler[upper][a]) * 3.14159265358979323846 / 180.0;
+                // (THE TRUNK COMES UP WITH THE RISE: the coupling's references turn home with the
+                // posture's — held to the drag-start fold they would have held the spine in it.)
+                const double homeShare = static_cast<double>(m_jsTrunkHomeShare);
+                // (... from where a hand's unload RE-BASED the trunk, where one did: rebaseContactArm.)
+                const auto homeBase = [&](std::size_t bb) {
+                    return static_cast<double>((bb < m_jsPostStepTurned.size() && m_jsPostStepTurned[bb]) ? m_jsPostStepEuler[bb][a] : m_ikStartEuler[bb][a]);
+                };
+                task.refA = homeBase(static_cast<std::size_t>(lower)) * (1.0 - homeShare) * 3.14159265358979323846 / 180.0;
+                task.refB = homeBase(static_cast<std::size_t>(upper)) * (1.0 - homeShare) * 3.14159265358979323846 / 180.0;
                 task.weight = k + 1 < spineLinks ? kCoupling : kNeckWeight;
                 problem.couplings.push_back(task);
             }

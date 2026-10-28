@@ -135,6 +135,35 @@ expect jump < 40
 expect steps < 1
 shot 53c_prone_up_side
 release
+# ... and STOOD UP off all fours by the HIPS, from the view a user poses in (2026-10-28): the hands
+# let go as the shoulders rise beyond the arms' reach, the knees once the hips are asked above a tall
+# kneel, and the TRUNK COMES UP WITH THE RISE - the spine unfolds from the fold the drag found it in
+# and the head looks ahead at the end. (She stood up bent double with her gaze 57 degrees under the
+# horizon: the root turned upright with the rise, the spine kept its drag-start fold and the head the
+# hang the all-fours had given it. And the hands' nailed hold curled the spine 10 degrees more as the
+# hips rose, which sprang back in the tick the pins went - 144-341mm at a fingertip: the trunk is
+# re-based as the arm is while a hand's hold fades, and comes home at its own pace from there.)
+view home
+press hip
+dragv 0 0.60 80 60
+report allfours_stand
+expect hips > 450
+expect lowest > 0
+expect y.lHand > 400
+expect y.rHand > 400
+expect gaze > -15
+expect gaze < 15
+expect tilt.chest < 20
+expect steps < 3
+# (76 since the landed foot's pace, 2026-10-28: her feet were a thigh's length behind her on this all
+# fours, and the two steps that stand her up begin with the hips at a straight planted leg's full
+# reach of the cursor; she ends standing flat on both feet under her, on the cursor. Off the
+# kneel's all fours, the feet under her, she stands with a worst tick of 66. It read 125 while the
+# first step's swing snapped the straight knee's basin, 528 before the freed foot kept its spring.)
+expect jump < 120
+expect lowest < 25
+shot 53d_stood_up_off_all_fours
+release
 reset
 
 # B: a kneel, then sat back onto the heels.
@@ -271,4 +300,20 @@ shot 61_sat_back_up_side
 release
 view front
 shot 62_sat_back_up_front
+# ... and STOOD UP out of the sit by the HIPS (2026-10-28): the seat lets go, the feet take her, and
+# the trunk comes up with the rise - upright at the end, looking ahead. (A sit-up leaves the trunk
+# leaning after the chest's cursor; stood up by the hips it kept that lean and the gaze stayed down.)
+view home
+press hip
+dragv 0 0.90 90 60
+report sit_stand
+expect hips > 700
+expect lowest > 0
+expect gaze > -15
+expect gaze < 15
+expect tilt.chest < 20
+expect steps < 3
+expect jump < 90
+shot 63_stood_up_from_sitting
+release
 quit
