@@ -21,6 +21,7 @@
 #include <nlohmann/json_fwd.hpp>
 
 #include <string>
+#include <unordered_map>
 
 namespace pose {
 
@@ -37,9 +38,21 @@ void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolve
 /// Applies a hierarchical-materials preset (asset_info type "preset_hierarchical_material") onto
 /// @p fig. Its values ride in single-key `scene.animations` tracks, each url addressing one
 /// material property of one zone; only the properties the renderer consumes are read. Zones are
-/// matched by name alone (the node prefix is ignored). No-op without a `scene.animations` array.
+/// matched by name; the node prefix ("<node>#materials/…") is ignored unless @p onlyFigureNode is
+/// set, when a track applies only if that prefix names @p fig's own node (FigureData::figureNodeId
+/// or figureNodeName) — how a preset listed under ANOTHER follower's slot is applied to this one
+/// (see loadFigureFile). No-op without a `scene.animations` array.
 void applyAnimationMaterials(FigureData& fig, const nlohmann::json& root, UriResolver& resolver,
-                             const std::string& referringDir);
+                             const std::string& referringDir, bool onlyFigureNode = false);
+
+/// The UV set each material zone of @p root's `scene.materials` names — its `uv_set` URI, spread
+/// over the material's `groups` — as zone name → URI; a zone whose material names none is absent.
+/// Read BEFORE assembly, unlike the appliers above: the UVs are baked into the render mesh, and a
+/// zone's maps are painted on the layout its material names, which need not be the geometry's
+/// default (see uvparser.h). The hierarchical-material form carries `?uv_set` tracks too, which
+/// are not read: those presets are applied after assembly, and no content seen names a set other
+/// than the figure's own through them.
+std::unordered_map<std::string, std::string> sceneMaterialUvSets(const nlohmann::json& root);
 
 } // namespace pose
 

@@ -410,7 +410,8 @@ std::vector<FigureMesh> assembleCage(const CageState& cage) {
     return meshes;
 }
 
-CageState buildBaseCage(const GeometryData& geo, const UvSet& uv, const std::vector<VertexSkin>& skins) {
+CageState buildBaseCage(const GeometryData& geo, const std::vector<const UvSet*>& zoneUvs,
+                        const std::vector<VertexSkin>& skins) {
     CageState cage;
     cage.positions = geo.positions;
     cage.zones = geo.materialZones;
@@ -423,13 +424,20 @@ CageState buildBaseCage(const GeometryData& geo, const UvSet& uv, const std::vec
         Face f;
         f.material = gf.material;
         f.n = gf.count;
+        // A zone's corners read the UV set ITS material names — a character may paint its skin
+        // on one generation's layout and its eyes on another's (see uvparser.h). Meshes are
+        // assembled per zone, so a cage vertex shared by two zones on different layouts simply
+        // splits, as it does at any UV seam.
+        const UvSet* uv = (gf.material >= 0 && static_cast<std::size_t>(gf.material) < zoneUvs.size())
+                              ? zoneUvs[gf.material]
+                              : nullptr;
         for (int i = 0; i < gf.count; ++i) {
             f.c[i].pos = gf.v[i];
-            if (!uv.empty()) {
+            if (uv && !uv->empty()) {
                 // Seam overrides are keyed by the polygon's index in the SOURCE polylist, which
                 // the parser preserved past any skipped polygon.
-                const uint32_t uvIdx = uv.uvIndexFor(gf.sourceIndex, gf.v[i]);
-                f.c[i].uv = (uvIdx < uv.uvs.size()) ? uv.uvs[uvIdx] : glm::vec2(0.0f);
+                const uint32_t uvIdx = uv->uvIndexFor(gf.sourceIndex, gf.v[i]);
+                f.c[i].uv = (uvIdx < uv->uvs.size()) ? uv->uvs[uvIdx] : glm::vec2(0.0f);
             }
         }
         cage.faces.push_back(f);
@@ -439,9 +447,9 @@ CageState buildBaseCage(const GeometryData& geo, const UvSet& uv, const std::vec
 
 } // namespace
 
-SubdivisionResult subdivideFigure(const GeometryData& geo, const UvSet& uv,
+SubdivisionResult subdivideFigure(const GeometryData& geo, const std::vector<const UvSet*>& zoneUvs,
                                   const std::vector<VertexSkin>& skins, int levels) {
-    CageState cage = buildBaseCage(geo, uv, skins);
+    CageState cage = buildBaseCage(geo, zoneUvs, skins);
 
     auto topology = std::make_shared<SubdivisionTopology>();
     for (int l = 0; l < levels; ++l) {

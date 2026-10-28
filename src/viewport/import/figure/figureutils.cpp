@@ -118,21 +118,24 @@ std::size_t geometryVertexCount(const nlohmann::json& doc) {
     return (values != verts->end() && values->is_array()) ? values->size() : 0;
 }
 
-std::string findGeometryUri(const nlohmann::json& root) {
+const nlohmann::json* findFigureNode(const nlohmann::json& root) {
     const auto scene = root.find("scene");
     if (scene == root.end() || !scene->contains("nodes")) {
-        return {};
+        return nullptr;
     }
     for (const auto& node : (*scene)["nodes"]) {
         const auto geos = node.find("geometries");
-        if (geos != node.end() && geos->is_array() && !geos->empty()) {
-            const std::string uri = (*geos)[0].value("url", std::string());
-            if (!uri.empty()) {
-                return uri;
-            }
+        if (geos != node.end() && geos->is_array() && !geos->empty() &&
+            !(*geos)[0].value("url", std::string()).empty()) {
+            return &node;
         }
     }
-    return {};
+    return nullptr;
+}
+
+std::string findGeometryUri(const nlohmann::json& root) {
+    const nlohmann::json* node = findFigureNode(root);
+    return node ? (*node)["geometries"][0].value("url", std::string()) : std::string();
 }
 
 const nlohmann::json* findModifierById(const nlohmann::json& doc, const std::string& id) {

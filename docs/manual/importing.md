@@ -21,7 +21,7 @@ A model whose file uses an unsupported format is simply ignored — nothing appe
 A figure preset is a small file that *refers* to the figure's geometry, skeleton, skin weights, morphs, UV layout and materials, which live in a content folder alongside it, in a `data` subfolder. Importing one brings in the whole figure:
 
 - **The shape** — the base figure with the character's own morphs baked in, then smoothed once (Catmull-Clark subdivision) so limbs and faces read round.
-- **The materials** — per-zone physically based materials with diffuse, normal or bump, roughness, specular-mask and translucency maps, the eyes' clear shells rendered transparent, and eyelash and eyebrow cards cut out by their masks.
+- **The materials** — per-zone physically based materials with diffuse, normal or bump, roughness, specular-mask and translucency maps, the eyes' clear shells rendered transparent, and eyelash and eyebrow cards cut out by their masks. Each zone's maps are read through the UV layout its material names, so a character that paints its skin on one generation's layout and its eyes on another's renders both correctly.
 - **The rig** — every bone with its rest position, rotation order and the anatomical limits authored for it, plus the skin weights that let the mesh follow it.
 - **Pose correctives** — the corrective shapes that fix the mesh at deep elbow, knee, shoulder and hip bends; they blend live as you pose.
 - **Follower add-ons** the preset declares, such as eyelashes, eyebrows and replacement anatomy, merged into the figure.
@@ -53,4 +53,4 @@ Every folder you locate this way is remembered, so you only do this once per con
 | *Could not import a character figure from… Details: …* | Something in the files could not be read; the details line names it. |
 | Nothing happens after choosing a file | The file's format is not supported, or (for `.obj`) it could not be parsed. |
 
-A figure whose eyelash follower has no materials of its own may show its lashes as plain grey strips — a known gap in the current version.
+A materials preset a figure lists for one of its followers is applied to every follower it addresses by name, so eyelashes and tears that share one preset both receive their maps.

@@ -22,6 +22,35 @@
 
 namespace pose {
 
+std::unordered_map<std::string, std::string> sceneMaterialUvSets(const nlohmann::json& root) {
+    std::unordered_map<std::string, std::string> out;
+    const auto scene = root.find("scene");
+    if (scene == root.end()) {
+        return out;
+    }
+    const auto materials = scene->find("materials");
+    if (materials == scene->end() || !materials->is_array()) {
+        return out;
+    }
+    for (const auto& mat : *materials) {
+        const auto uvSet = mat.find("uv_set");
+        if (uvSet == mat.end() || !uvSet->is_string()) {
+            continue;
+        }
+        const std::string uri = uvSet->get<std::string>();
+        const auto groups = mat.find("groups");
+        if (uri.empty() || groups == mat.end() || !groups->is_array()) {
+            continue;
+        }
+        for (const auto& zone : *groups) {
+            if (zone.is_string()) {
+                out[zone.get<std::string>()] = uri; // the LAST material naming a zone wins, as the appliers' do
+            }
+        }
+    }
+    return out;
+}
+
 void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolver& resolver,
                          const std::string& referringDir) {
     if (!root.contains("scene") || !root["scene"].contains("materials")) {
@@ -138,10 +167,13 @@ void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolve
 //   "<node>#materials/<zone>:?diffuse/image_file"
 //   "<node>#materials/<zone>:?extra/studio_material_channels/channels/<Channel>/value"
 // with keys[0][1] holding the value. Only the properties the renderer consumes are read; the rest
-// (tiling, gloss layering, …) are skipped. Zones are matched by name alone (the node prefix is
-// ignored) — within one figure-plus-addons import, zone names don't collide in practice.
+// (tiling, gloss layering, …) are skipped. Zones are matched by name; the node prefix is ignored
+// for a preset applied to the follower whose own slot lists it (within one figure-plus-addons
+// import, zone names don't collide in practice), and is REQUIRED to name the figure's node when
+// the preset comes from another slot (onlyFigureNode) — a hierarchical preset carries several
+// followers' materials side by side, each under its own node.
 void applyAnimationMaterials(FigureData& fig, const nlohmann::json& root, UriResolver& resolver,
-                             const std::string& referringDir) {
+                             const std::string& referringDir, bool onlyFigureNode) {
     const nlohmann::json* animations = childOf(childOf(&root, "scene"), "animations");
     if (!animations || !animations->is_array()) {
         return;
@@ -171,6 +203,21 @@ void applyAnimationMaterials(FigureData& fig, const nlohmann::json& root, UriRes
         const std::size_t hash = url.find('#');
         if (hash == std::string::npos) {
             continue;
+        }
+        if (onlyFigureNode) {
+            // The node prefix is the node's id or name, URL-encoded ("Female%208_1%20Tear"); a
+            // selection form ("name://@selection/<node>:") is reduced to the node. A track with
+            // no prefix at all is left to the zone match, as before.
+            std::string node = urlDecode(url.substr(0, hash));
+            if (node.rfind("name://", 0) == 0) {
+                node = node.substr(node.find_last_of('/') + 1);
+                if (!node.empty() && node.back() == ':') {
+                    node.pop_back();
+                }
+            }
+            if (!node.empty() && node != fig.figureNodeId && node != fig.figureNodeName) {
+                continue;
+            }
         }
         std::string rest = url.substr(hash + 1);
         constexpr const char* kMaterialsPrefix = "materials/";

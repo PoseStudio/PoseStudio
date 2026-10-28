@@ -33,6 +33,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstdlib>
 #include <exception>
 #include <memory>
 #include <stdexcept>
@@ -141,19 +142,76 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
     const std::vector<DialedMorph> dialedMorphs =
         bakeDialedMorphs(root, resolver, presetDir, geo, figureScale, jointCenterOffsets);
 
-    // UV set (referenced by the geometry, resolved relative to the base file).
-    UvSet uv;
+    // The UV sets. The base geometry names the DEFAULT (resolved relative to the base file), and
+    // each scene material may name the set ITS zone's maps are painted on (`uv_set`, resolved
+    // relative to the preset): a newer generation's character commonly keeps the previous
+    // generation's skin maps and names that generation's layout for the skin zones while its eyes
+    // and nails use the new one. The two layouts differ by a few dozen UVs and seam entries —
+    // read through the default alone, every skin feature landed a little off: a crack along the
+    // scalp's seam, a patch between the shoulder blades, the throat's notch displaced (found
+    // 2026-10-26). Each distinct set is parsed once and shared by the zones that name it; a set
+    // authored for another cage (its vertex_count is not this geometry's) is refused — indexed by
+    // base vertex, it would scramble the mapping — and the zone keeps the default, as a zone whose
+    // set cannot be read does. POSESTUDIO_UV_DEFAULT_ONLY is the A/B: the default for every zone.
+    UvSet defaultUv;
+    std::string defaultUvKey; // the resolved "path#fragment": a material naming it shares the parse
     if (!geo.defaultUvSetUri.empty()) {
         const ResolvedUri uru = resolver.resolve(geo.defaultUvSetUri, baseDir);
         if (uru.resolved()) {
             std::shared_ptr<const FigureDocument> uvDoc = resolver.loadDocument(uru);
-            uv = parseUvSet(uvDoc->root(), uru.fragment);
+            defaultUv = parseUvSet(uvDoc->root(), uru.fragment);
+            defaultUvKey = uru.path + '#' + uru.fragment;
+        }
+    }
+    std::vector<const UvSet*> zoneUvs(geo.materialZones.size(), &defaultUv);
+    std::unordered_map<std::string, std::unique_ptr<UvSet>> ownUvSets; // by resolved key; null = refused
+    int zonesOnOwnUvSet = 0;
+    if (std::getenv("POSESTUDIO_UV_DEFAULT_ONLY") == nullptr) {
+        const std::unordered_map<std::string, std::string> zoneUris = sceneMaterialUvSets(root);
+        for (std::size_t zone = 0; zone < geo.materialZones.size(); ++zone) {
+            const auto named = zoneUris.find(geo.materialZones[zone]);
+            if (named == zoneUris.end()) {
+                continue;
+            }
+            try {
+                const ResolvedUri uru = resolver.resolve(named->second, presetDir);
+                if (!uru.resolved()) {
+                    continue;
+                }
+                const std::string key = uru.path + '#' + uru.fragment;
+                if (key == defaultUvKey) {
+                    continue;
+                }
+                auto it = ownUvSets.find(key);
+                if (it == ownUvSets.end()) {
+                    auto set = std::make_unique<UvSet>(
+                        parseUvSet(resolver.loadDocument(uru)->root(), uru.fragment));
+                    const bool fits = !set->empty() &&
+                                      (set->vertexCount == 0 ||
+                                       set->vertexCount == geo.positions.size());
+                    if (!fits) {
+                        set.reset(); // remembered as refused, so it is not re-read per zone
+                    }
+                    it = ownUvSets.emplace(key, std::move(set)).first;
+                }
+                if (it->second) {
+                    zoneUvs[zone] = it->second.get();
+                    ++zonesOnOwnUvSet;
+                }
+            } catch (const std::exception&) {
+                // An unreadable set: the zone keeps the default, as every zone did before.
+            }
         }
     }
 
     FigureData out;
     out.figureScale = figureScale;
+    out.zonesOnOwnUvSet = zonesOnOwnUvSet;
     out.graftPopulated = geo.graftPopulated;
+    if (const nlohmann::json* figureNode = findFigureNode(root)) {
+        out.figureNodeId = figureNode->value("id", std::string());
+        out.figureNodeName = figureNode->value("name", std::string());
+    }
 
     // Skeleton + skin weights (from the base file's node_library + its SkinBinding modifier), parsed
     // *before* assembly so each de-indexed render vertex can carry its base vertex's joint weights.
@@ -210,7 +268,7 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
     // stencils (carryCorrectivesToSubdivided), so the GPU's live corrective blend needs no change.
     // Level 1 (4x faces) is a good editing-time smoothness; raise for finer at a vertex-count cost.
     constexpr int kSubdivisionLevels = 1;
-    SubdivisionResult sub = subdivideFigure(geo, uv, out.vertexSkins, kSubdivisionLevels);
+    SubdivisionResult sub = subdivideFigure(geo, zoneUvs, out.vertexSkins, kSubdivisionLevels);
     out.meshes = std::move(sub.meshes);
     out.baseVertexCount = sub.vertexCount;
     if (!out.correctives.empty()) {
@@ -231,13 +289,20 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
         const AddonProjection projection =
             buildAddonProjection(geo, baseCagePositions, out.meshes);
 
+        // Every follower is loaded and given the presets ITS slot lists first, in slot order; a
+        // failure skips that follower alone.
+        struct LoadedAddon {
+            FigureData               data;
+            std::vector<std::string> presetUris; // the slot's own, applied in full below
+        };
+        std::vector<LoadedAddon> loaded;
         for (const AddonRef& addonRef : findPostLoadAddons(root)) {
             try {
                 const ResolvedUri location = resolver.resolve(addonRef.assetUri, presetDir);
                 if (!location.resolved()) {
                     continue;
                 }
-                FigureData addon = loadFigureFile(location.path, resolver, false);
+                LoadedAddon entry{loadFigureFile(location.path, resolver, false), addonRef.presetUris};
                 for (const std::string& presetUri : addonRef.presetUris) {
                     try {
                         const ResolvedUri presetLoc = resolver.resolve(presetUri, presetDir);
@@ -250,24 +315,66 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
                         // A materials preset comes in either form; each applier no-ops when its
                         // section is absent (the anime-eye presets use the animation-track form),
                         // so a non-material preset document just passes through harmlessly.
-                        applySceneMaterials(addon, addonPresetDoc->root(), resolver, addonPresetDir);
-                        applyAnimationMaterials(addon, addonPresetDoc->root(), resolver, addonPresetDir);
+                        applySceneMaterials(entry.data, addonPresetDoc->root(), resolver,
+                                            addonPresetDir);
+                        applyAnimationMaterials(entry.data, addonPresetDoc->root(), resolver,
+                                                addonPresetDir);
                     } catch (const std::exception&) {
                         // Unresolvable preset: the follower keeps its own materials.
                     }
                 }
-                // Shape-follow only the followers authored against the BASE figure. A populated
-                // graft marks a vendor-fitted in-place replacement (e.g. an anime character's
-                // custom eyeballs) — projecting the morph onto those double-shifts them off the
-                // face, verified both ways on real content.
-                if (projection.anyDelta && !addon.graftPopulated) {
-                    followParentShape(addon, baseCagePositions, projection.cageDeltas,
-                                      projection.eligibleCageVerts);
-                }
-                mergeAddonFigure(out, std::move(addon));
+                loaded.push_back(std::move(entry));
             } catch (const std::exception&) {
                 continue;
             }
+        }
+
+        // A hierarchical-materials preset addresses each figure BY NODE NAME, and the format's own
+        // loader applies it to the whole hierarchy whichever slot lists it. One generation's
+        // "add-on maps" preset carries its eyelash AND its tear follower's materials side by side,
+        // and the base figure and several characters list it under the TEAR slot alone — while the
+        // eyelash follower's own file holds only a grey placeholder material. Applied to the tear
+        // alone, the lashes rendered as opaque grey strips (the known gap until 2026-10-26). So
+        // every slot's presets reach every OTHER follower too, restricted to the tracks addressed
+        // to that follower's node; the scene-materials form stays with its own slot (it has no
+        // node to filter by, and no content needs it across slots). POSESTUDIO_ADDON_PRESETS_OWN_SLOT
+        // is the A/B: each follower gets its own slot's presets alone, as before.
+        const bool ownSlotOnly = std::getenv("POSESTUDIO_ADDON_PRESETS_OWN_SLOT") != nullptr;
+        for (std::size_t i = 0; i < loaded.size() && !ownSlotOnly; ++i) {
+            std::unordered_set<std::string> applied(loaded[i].presetUris.begin(),
+                                                    loaded[i].presetUris.end());
+            for (std::size_t j = 0; j < loaded.size(); ++j) {
+                if (j == i) {
+                    continue;
+                }
+                for (const std::string& presetUri : loaded[j].presetUris) {
+                    if (!applied.insert(presetUri).second) {
+                        continue; // its own slot applied it in full, or another slot already did
+                    }
+                    try {
+                        const ResolvedUri presetLoc = resolver.resolve(presetUri, presetDir);
+                        const std::shared_ptr<const FigureDocument> presetDoc =
+                            resolver.loadDocument(presetLoc);
+                        applyAnimationMaterials(loaded[i].data, presetDoc->root(), resolver,
+                                                directoryOf(presetLoc.path),
+                                                /*onlyFigureNode=*/true);
+                    } catch (const std::exception&) {
+                        // Unresolvable preset: this follower keeps what it has.
+                    }
+                }
+            }
+        }
+
+        for (LoadedAddon& entry : loaded) {
+            // Shape-follow only the followers authored against the BASE figure. A populated
+            // graft marks a vendor-fitted in-place replacement (e.g. an anime character's
+            // custom eyeballs) — projecting the morph onto those double-shifts them off the
+            // face, verified both ways on real content.
+            if (projection.anyDelta && !entry.data.graftPopulated) {
+                followParentShape(entry.data, baseCagePositions, projection.cageDeltas,
+                                  projection.eligibleCageVerts);
+            }
+            mergeAddonFigure(out, std::move(entry.data));
         }
     }
 

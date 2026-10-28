@@ -16,13 +16,13 @@ PoseStudio renders with Vulkan, which needs a graphics driver that provides it. 
 - **"Content Folder Needed" / "Locate Content Folder…"** — the preset's `data` folder was not found. Point PoseStudio at the folder that directly contains `data`; see [Importing Content](importing.md#when-the-figures-data-cannot-be-found). It is remembered for next time.
 - **"This file may be a pose, material, or other preset rather than a figure."** — only character presets import. Pose and material presets in that format are not supported yet.
 - **The import takes long** — a fully textured character takes some seconds while its textures decode and its correctives are prepared; the progress dialog names each stage. A debug build (the window title says so) is much slower.
-- **Eyelashes show as grey strips** on some figures of the newest generation — a known gap in the current version.
 
 ## The figure looks wrong
 
 - **Skin looks like wet plastic** in the PBR mode: lower **Specular** under Image-Based Lighting, or try a less glossy environment. Most skin materials render as intended; the remaining cases are content whose maps were authored for another renderer.
 - **The figure is dark**: raise **Exposure**, or switch the HDRI — some panoramas are much dimmer than others.
 - **A black or missing texture**: the texture file the material refers to is not where the preset expects it. PoseStudio skips textures it cannot decode and uses the material's colour.
+- **Skin details sit slightly off** — a seam across the scalp, a patch of mismatched skin on the back, the throat's notch out of place: the figure's maps are painted on a UV layout other than the one its materials name. PoseStudio reads each zone through the layout its material names, so this only happens when the content itself names the wrong one.
 - **The figure floats or sinks**: press the **Ground** button. Figures import on the floor; loading a pose file, turning joints with `B` / `S` / `T` or the Transform tab, or lifting her with Ctrl + drag can leave her off it.
 
 ## Posing does not do what I expect

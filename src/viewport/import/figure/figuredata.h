@@ -119,6 +119,16 @@ struct FigureData {
     /// the follower-addon path: populated-graft addons are vendor-fitted in place and must NOT be
     /// shape-follow projected (a generic follower's graft block is present but empty).
     bool                        graftPopulated = false;
+    /// The scene node that carries the geometry — its `id` and its `name` — as the preset wrote
+    /// them; empty for a bare base .dsf. A hierarchical-materials preset addresses a figure or a
+    /// follower by that name ("<node>#materials/<zone>:?…"), which is what its tracks are matched
+    /// against when the preset is applied across the followers (see applyAnimationMaterials).
+    std::string                 figureNodeId;
+    std::string                 figureNodeName;
+    /// How many material zones read their UVs through a set OTHER than the geometry's default —
+    /// the set their scene material names (see uvparser.h); 0 for a figure on one layout. Only
+    /// reported (the import service logs it); a merged follower's count is not carried over.
+    int                         zonesOnOwnUvSet = 0;
 };
 
 } // namespace pose

@@ -181,6 +181,10 @@ ModelData toModelData(FigureData&& fig) {
         qInfo("[figure] rests %.1f mm %s the floor as authored: put on it (mesh and skeleton together)",
               std::abs(lowest) * 1000.0f, lowest > 0.0f ? "above" : "below");
     }
+    if (fig.zonesOnOwnUvSet > 0) {
+        qInfo("[figure] %d material zones read their maps through the UV set their material names, not the geometry's default",
+              fig.zonesOnOwnUvSet);
+    }
     return model;
 }
 

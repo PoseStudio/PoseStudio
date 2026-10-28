@@ -30,6 +30,10 @@ UvSet parseUvSet(const nlohmann::json& uvDoc, const std::string& fragmentId) {
         set = &(*libIt)[0];
     }
 
+    if (const auto vc = set->find("vertex_count"); vc != set->end() && vc->is_number_unsigned()) {
+        out.vertexCount = vc->get<uint32_t>();
+    }
+
     if (const auto uvsIt = set->find("uvs"); uvsIt != set->end()) {
         const nlohmann::json& values = valuesArray(*uvsIt);
         out.uvs.reserve(values.size());

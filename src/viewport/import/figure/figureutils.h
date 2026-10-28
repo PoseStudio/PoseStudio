@@ -85,6 +85,9 @@ std::size_t geometryVertexCount(const nlohmann::json& doc);
 /// preset with several geometry-bearing nodes (a figure plus props) imports the first listed.
 std::string findGeometryUri(const nlohmann::json& root);
 
+/// The scene node findGeometryUri reads the geometry url from — the figure instance — or nullptr.
+const nlohmann::json* findFigureNode(const nlohmann::json& root);
+
 /// The modifier_library entry whose "id" equals @p id, or nullptr.
 const nlohmann::json* findModifierById(const nlohmann::json& doc, const std::string& id);
 
