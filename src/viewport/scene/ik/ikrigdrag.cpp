@@ -49,13 +49,13 @@ bool IkRig::isSpineJoint(int node) const {
            m_bodyNode[static_cast<std::size_t>(node)] && limbJunction(node) == m_pelvis && !hasFootBelow(node);
 }
 
-bool IkRig::hasFootBelow(int node) const {
+bool IkRig::computeHasFootBelow(int node) const {
     const int n = static_cast<int>(m_parents.size());
     if (node < 0 || node >= n) {
         return false;
     }
     for (int i = node + 1; i < n; ++i) {
-        if (m_bindPos[static_cast<std::size_t>(i)].y >= kFootBindHeight * m_sizeScale) {
+        if (!isFootClass(i)) {
             continue;
         }
         for (int cur = m_parents[static_cast<std::size_t>(i)]; cur >= 0; cur = m_parents[static_cast<std::size_t>(cur)]) {
@@ -92,7 +92,7 @@ bool IkRig::hangsBothLegs(int node) const {
         }
         bool foot = false;
         for (int i = child; i < n && !foot; ++i) {
-            if (m_bindPos[static_cast<std::size_t>(i)].y >= kFootBindHeight * m_sizeScale) {
+            if (!isFootClass(i)) {
                 continue;
             }
             for (int cur = i; cur >= 0; cur = m_parents[static_cast<std::size_t>(cur)]) {
@@ -293,7 +293,7 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
     for (const int c : contactNodes) {
         if (c >= 0 && c < n && !isEffector(c) && m_bodyNode[static_cast<std::size_t>(c)] &&
             descendsFromPelvis(c) &&
-            m_bindPos[static_cast<std::size_t>(c)].y < kFootBindHeight * m_sizeScale &&
+            isFootClass(c) &&
             !liftedByDrag(c)) {
             planted.push_back(c);
         }
@@ -312,7 +312,7 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
             int top = node;
             for (int cur = m_parents[static_cast<std::size_t>(node)];
                  cur >= 0 && m_bodyNode[static_cast<std::size_t>(cur)] && descendsFromPelvis(cur) &&
-                 m_bindPos[static_cast<std::size_t>(cur)].y < kFootBindHeight * m_sizeScale;
+                 isFootClass(cur);
                  cur = m_parents[static_cast<std::size_t>(cur)]) {
                 top = cur;
             }
@@ -374,7 +374,6 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
     m_pins.clear();
     std::vector<glm::vec2> support;
     support.reserve(planted.size());
-    const glm::vec3& rootStart = positions[static_cast<std::size_t>(m_pelvis)];
     float snapSum = 0.0f;
     int snapCount = 0;
     for (const int c : planted) {
@@ -415,7 +414,7 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
         int pinNode = c;
         for (int cur = m_parents[static_cast<std::size_t>(c)];
              cur >= 0 && !isEffector(cur) && m_bodyNode[static_cast<std::size_t>(cur)] && descendsFromPelvis(cur) &&
-             m_bindPos[static_cast<std::size_t>(cur)].y < kFootBindHeight * m_sizeScale &&
+             isFootClass(cur) &&
              !liftedByDrag(cur);
              cur = m_parents[static_cast<std::size_t>(cur)]) {
             pinNode = cur;
@@ -434,7 +433,7 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
                 target.y = ankleFloorY; // (no part of the hover statistics: a pitched foot is not a hover)
             }
         }
-        IkEffector pin{pinNode, target, true, 1.0f, -1.0f};
+        IkEffector pin{pinNode, target, 1.0f, -1.0f};
         pin.leashRadius = socketLeash(pinNode, target, positions, pin.leashOffset);
         m_pins.push_back(pin);
     }
@@ -494,7 +493,7 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
                 continue; // (further down the dragged joint's own limb it HOLDS: see kEffectorPinHoldReach)
             }
             const glm::vec3& held = positions[static_cast<std::size_t>(u)];
-            IkEffector userPin{u, held, true, 1.0f, -1.0f};
+            IkEffector userPin{u, held, 1.0f, -1.0f};
             userPin.leashRadius = socketLeash(u, held, positions, userPin.leashOffset);
             userPin.hard = true; // held in full, and harder than any contact (IkEffector::hard)
             bool replaced = false;
@@ -524,7 +523,7 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
     // Airborne fallback: nothing planted AND nothing user-pinned — pin the root in place (a
     // user-pinned hand is an anchor in its own right; the body may swing from it).
     if (planted.empty() && userPinCount == 0 && m_effector != m_pelvis) {
-        m_pins.push_back({m_pelvis, positions[static_cast<std::size_t>(m_pelvis)], true, 1.0f});
+        m_pins.push_back({m_pelvis, positions[static_cast<std::size_t>(m_pelvis)], 1.0f});
         m_pinUser.push_back(0);
     }
     // Live contacts (updateContacts) start empty: nothing here was detected mid-drag.
@@ -537,8 +536,9 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
     // The imbalance the pose BEGINS with is the user's (see m_startImbalance): a landing out of a
     // lift begins a new stance, and owes none.
     m_startImbalance = 0.0f;
-    static const bool kNoStartImbalance = std::getenv("IK_NO_START_IMBALANCE") != nullptr; // A/B probe
-    if (dragStart && !kNoStartImbalance && !m_supportHull.empty() && positions.size() == m_parents.size()) {
+    static const bool kNoStartImbalance = std::getenv("IK_NO_START_IMBALANCE") != nullptr;             // A/B probe
+    static const bool kStartImbalanceFeetOnly = std::getenv("IK_START_IMBALANCE_FEET_ONLY") != nullptr; // A/B probe: against the FEET alone, before the pose's contacts are seeded (below)
+    if (dragStart && !kNoStartImbalance && kStartImbalanceFeetOnly && !m_supportHull.empty() && positions.size() == m_parents.size()) {
         glm::vec2 need(0.0f);
         BalanceController::balanceCorrection(positions, m_parents, m_masses, m_supportHull,
                                              kBalanceMargin * m_sizeScale, need);
@@ -592,7 +592,7 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
             // height (ground-healed). A kneeling knee or an airborne-kept contact never steps.
             // (... and never the foot below a dragged knee: that one is the user's.)
             if (m_pins.size() >= 2 && !m_pinUser[p] && !pinUnderAnyEffector(p) &&
-                m_bindPos[static_cast<std::size_t>(node)].y < 0.2f * m_sizeScale &&
+                isFootClass(node) &&
                 std::abs(m_pins[p].target.y -
                          (m_bindPos[static_cast<std::size_t>(node)].y + m_groundOffsetY)) <
                     0.02f * m_sizeScale) {
@@ -653,7 +653,6 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
     // ahead of its feet — began every drag "30cm out of balance", and that forgiveness hid the
     // real need of the leaning stand a chest rise out of a flat kneel ended in: no step ever
     // came, 2026-09-26.)
-    static const bool kStartImbalanceFeetOnly = std::getenv("IK_START_IMBALANCE_FEET_ONLY") != nullptr; // A/B probe
     if (dragStart && !kNoStartImbalance && !kStartImbalanceFeetOnly && !m_supportHull.empty() && positions.size() == m_parents.size()) {
         glm::vec2 need(0.0f);
         BalanceController::balanceCorrection(positions, m_parents, m_masses, m_supportHull,

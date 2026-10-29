@@ -1,17 +1,16 @@
 /**
  * @file ikmath.cpp
- * @brief The IK module's shared rotation math: shortest-arc quaternions, signed angles about an
- *        axis, and the Euler composition/decomposition pair for the figure format's per-joint
- *        rotation orders.
+ * @brief The IK module's shared rotation math (see ikmath.h): the Euler composition and its exact
+ *        decomposition for the figure format's per-joint rotation orders, and the closest points
+ *        of two segments.
  *
- * Two policies here are load-bearing. shortestArc is guarded on the CROSS length, never the dot:
- * its inputs ride through long chains of quaternion products whose norms drift, and an acos /
- * normalize formulation once returned NaN for two identical vectors — the in-app "figure flies
- * off the screen" bug (NaN skin matrices). eulerFromMatrix is the EXACT inverse of eulerMatrix
- * for all six orders — the middle angle comes from atan2(sin, cos) rather than asin so it stays
+ * One policy here is load-bearing: eulerFromMatrix is the EXACT inverse of eulerMatrix for all
+ * six orders — the middle angle comes from atan2(sin, cos) rather than asin so it stays
  * conditioned near gimbal lock, where the third angle folds into the first — and the pair lives
- * together so the composition the Armature poses with and the decomposition the extraction fits
- * with can never drift apart. Qt-free (std + GLM).
+ * together so the composition the Armature poses with and the decomposition the head's righting
+ * and the dials read back can never drift apart. (The shortest-arc quaternion and the signed
+ * angle about an axis that the position-space solver needed went with it, 2026-10-29.)
+ * Qt-free (std + GLM).
  */
 #include "ikmath.h"
 
@@ -20,30 +19,6 @@
 #include <cmath>
 
 namespace pose {
-
-glm::quat shortestArc(const glm::vec3& from, const glm::vec3& to) {
-    // Guarded on the CROSS length, not the dot: the inputs ride through long chains of quaternion
-    // products whose norms drift, so two IDENTICAL slightly-non-unit vectors can have a dot just
-    // below any (1 - eps) parallel test while their cross is exactly zero — an acos/normalize
-    // formulation then returns NaN, which poisons every frame downstream (this was the in-app
-    // "figure flies off the screen" bug: NaN skin matrices). atan2(|cross|, dot) is also
-    // scale-tolerant, so slightly-short inputs still give the right angle.
-    const glm::vec3 c = glm::cross(from, to);
-    const float cLen = glm::length(c);
-    const float d = glm::dot(from, to);
-    if (cLen < 1e-7f) {
-        if (d >= 0.0f) {
-            return glm::quat(1.0f, 0.0f, 0.0f, 0.0f); // aligned (or degenerate): identity
-        }
-        // Antiparallel: 180 degrees about any axis perpendicular to `from`.
-        glm::vec3 axis = glm::cross(glm::vec3(1.0f, 0.0f, 0.0f), from);
-        if (glm::dot(axis, axis) < 1e-8f) {
-            axis = glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), from);
-        }
-        return glm::angleAxis(3.14159265f, glm::normalize(axis));
-    }
-    return glm::angleAxis(std::atan2(cLen, d), c / cLen);
-}
 
 float closestSegmentPoints(const glm::vec3& p1, const glm::vec3& q1, const glm::vec3& p2,
                            const glm::vec3& q2, float& s, float& t) {
@@ -83,30 +58,10 @@ float closestSegmentPoints(const glm::vec3& p1, const glm::vec3& q1, const glm::
     return glm::length((p1 + d1 * s) - (p2 + d2 * t));
 }
 
-float signedAngleAround(const glm::vec3& from, const glm::vec3& to, const glm::vec3& axis) {
-    const glm::vec3 f = from - axis * glm::dot(from, axis);
-    const glm::vec3 t = to - axis * glm::dot(to, axis);
-    if (glm::dot(f, f) < 1e-10f || glm::dot(t, t) < 1e-10f) {
-        return 0.0f; // a vector is (nearly) parallel to the axis — no measurable angle
-    }
-    return std::atan2(glm::dot(glm::cross(f, t), axis), glm::dot(f, t));
-}
-
-namespace {
-
-int axisIndex(char c) {
-    if (c == 'X' || c == 'x') return 0;
-    if (c == 'Y' || c == 'y') return 1;
-    if (c == 'Z' || c == 'z') return 2;
-    return -1;
-}
-
-} // namespace
-
 glm::mat4 eulerMatrix(const glm::vec3& degrees, const std::string& order) {
     glm::mat4 m(1.0f);
     for (const char c : order) {
-        const int axis = axisIndex(c);
+        const int axis = axisIndexOf(c);
         if (axis < 0) {
             continue;
         }
@@ -121,9 +76,9 @@ glm::vec3 eulerFromMatrix(const glm::mat3& m, const std::string& order) {
     // Axis indices of the three applied rotations, M = Ri(a) · Rj(b) · Rk(c).
     int i = 0, j = 1, k = 2;
     if (order.size() >= 3) {
-        const int oi = axisIndex(order[0]);
-        const int oj = axisIndex(order[1]);
-        const int ok = axisIndex(order[2]);
+        const int oi = axisIndexOf(order[0]);
+        const int oj = axisIndexOf(order[1]);
+        const int ok = axisIndexOf(order[2]);
         if (oi >= 0 && oj >= 0 && ok >= 0 && oi != oj && oj != ok && oi != ok) {
             i = oi;
             j = oj;

@@ -656,15 +656,9 @@ constexpr double kSoleRollWeight = 5.0;
 /// The ball is looked for among the pin's descendants whose bind height is under this fraction
 /// of the pin's own (an ankle 8cm up: under 3.6cm) and which carry children (not a toe tip).
 constexpr float kBallHeightFraction = 0.45f;
-/// A FOLD channel: at least this much range, all but a sliver of it to one side of straight.
-constexpr float kFoldRangeDeg = 100.0f;
-constexpr float kFoldNarrowFraction = 0.2f;
-/// ... and a fold joint is a HINGE: the bone's other channel — the twist excepted — spans no more
-/// than this (degrees). A knee's side channel spans 10, an elbow's is locked; a thigh's flexion
-/// spans 150, and its abduction channel, -85..15 on the two oldest generations, is not a fold.
-constexpr float kFoldHingeOtherDeg = 60.0f;
-/// Channels with under this range are locked (a twist bone's swing axes): not unknowns.
-constexpr float kLockedRangeDeg = 2.0f;
+/// (A FOLD channel and the HINGE test are the Armature's own: kFoldRangeDeg, kFoldNarrowFraction,
+/// kFoldHingeOtherDeg and isFoldChannel / foldAxisOf in armature.h.)
+/// (Channels with under Armature::kLockedRangeDeg of range are locked: not unknowns.)
 /// A pin target the rig MOVED (ground healing, a heel lift, a landing, a slide) is approached
 /// at this pace rather than jumped to; faster than the stepper's own 1.5cm/tick swing.
 constexpr float kPinEaseStep = 0.025f;
@@ -700,9 +694,8 @@ constexpr float kDigitMinRangeDeg = 30.0f;
 // 45-60 degrees of range, a heel bone — 0.02-0.05 of the foot's reach out; a thumb's base, the
 // digit joint nearest its limb's end, stands 0.15-0.17 out on every generation.
 constexpr float kDigitMinReachShare = 0.10f;
-// ... and a digit's joint is FOOT-CLASS where it is a toe's: low at bind (the rig's kFootBindHeight,
-// figure-scaled), with a foot-class parent — the ankle is the foot's most proximal such joint.
-constexpr float kDigitFootHeight = 0.20f;
+// (... and a digit's joint is FOOT-CLASS where it is a toe's: IkRig::isFootClass, with a foot-class
+// parent — the ankle is the foot's most proximal such joint.)
 // THE LANDING BOUNCE (armaturelanding.cpp; 2026-09-28, the user: "if she lands on her feet ... add
 // a natural bounce to her legs ... greater the more acceleration there is in the drop ... purely
 // aesthetic"). A figure the Ground button dropped onto her FEET absorbs the landing: the hips dip
@@ -736,6 +729,9 @@ constexpr float kLandingBlendFrom = 0.85f;
 /// ... and the pace a LIFTED body comes up to its cursor at (see dragIkTick): per tick.
 constexpr float kLiftRiseStep = 0.025f;
 inline const bool kNoLiftEase = std::getenv("IK_JS_NO_LIFT_EASE") != nullptr; // A/B probe
+inline const bool kNoRiseTrunkHome = std::getenv("IK_JS_NO_RISE_TRUNK_HOME") != nullptr;   // A/B probe: the trunk keeps its fold through a rise (ikPostureModel, ikSpineCoupling, rightIdleHead)
+inline const bool kHandUnloadSwitch = std::getenv("IK_JS_HAND_UNLOAD_SWITCH") != nullptr;  // A/B probe: a hand's hold let go of at once, as before 2026-10-27 (ikPinRows)
+inline const bool kKneeLandingHeld = std::getenv("IK_JS_KNEE_LANDING_HELD") != nullptr;    // A/B probe: a landing knee nailed to the spot it hovered over (ikPinRows, dragIkTick)
 /// A cursor jump is solved through intermediate targets this far apart (continuation keeps
 /// the solve on its branch; it costs iterations, never lag).
 constexpr float kTargetSubstep = 0.04f;

@@ -332,21 +332,14 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
                                                                    : lever;
         bool upperBody = effector != root && rig.effectorIsTrunk() && above > 0.05f * rig.sizeScale();
         if (upperBody) {
-            const Bone& bone = m_bones[static_cast<std::size_t>(effector)];
-            for (int a = 0; a < 3 && upperBody; ++a) {
-                const float range = bone.rotMax[a] - bone.rotMin[a];
-                if (bone.rotLimited[a] && range >= kFoldRangeDeg && bone.rotMin[a] < 0.0f && bone.rotMax[a] > 0.0f) {
-                    upperBody = std::min(-bone.rotMin[a], bone.rotMax[a]) >
-                                kFoldNarrowFraction * std::max(-bone.rotMin[a], bone.rotMax[a]);
-                }
-            }
+            upperBody = foldAxisOf(effector) < 0; // (a fold joint — a knee, an elbow — is a limb's)
         }
         if (upperBody) {
             std::vector<int> stack{effector};
             while (!stack.empty() && upperBody) {
                 const int node = stack.back();
                 stack.pop_back();
-                upperBody = m_ikBindPos[static_cast<std::size_t>(node)].y >= 0.20f * rig.sizeScale();
+                upperBody = !rig.isFootClass(node);
                 for (const int c : m_children[static_cast<std::size_t>(node)]) {
                     stack.push_back(c);
                 }
@@ -406,7 +399,7 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
                     std::vector<int> parents(n);
                     std::vector<char> upper(n, 0), hasFoot(n, 0);
                     for (std::size_t i = n; i-- > 0;) { // children follow parents
-                        hasFoot[i] = hasFoot[i] || m_ikBindPos[i].y < 0.20f * rig.sizeScale();
+                        hasFoot[i] = hasFoot[i] || rig.isFootClass(static_cast<int>(i));
                         const int par = m_bones[i].parent;
                         if (par >= 0) {
                             hasFoot[static_cast<std::size_t>(par)] = hasFoot[static_cast<std::size_t>(par)] || hasFoot[i];
@@ -683,8 +676,8 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
     glm::vec3& swayEuler = s.swayEuler;
     if (!kNoSway && effector == root && rootTurns && dragTarget != nullptr && rising <= 0.0f &&
         static_cast<std::size_t>(root) < m_jsStartPos.size()) {
-        const glm::vec3 lateral(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
-        const glm::vec3 fore(std::sin(m_jsRootHeading), 0.0f, std::cos(m_jsRootHeading));
+        const glm::vec3& lateral = s.lateral;
+        const glm::vec3& fore = s.fore;
         const glm::vec3 rootStart = m_jsStartPos[static_cast<std::size_t>(root)];
         const glm::vec2 stanceAt(rootStart.x + rig.stanceShift().x, rootStart.z + rig.stanceShift().z);
         const glm::vec2 hipsAt(dragTarget->x, dragTarget->z);
@@ -692,7 +685,7 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
         float legInHand = 1.0e9f;
         for (std::size_t p = 0; p < pins.size(); ++p) {
             const int node = pins[p].node;
-            if (node < 0 || rig.pinIsLive(p) || m_ikBindPos[static_cast<std::size_t>(node)].y >= 0.20f * rig.sizeScale()) {
+            if (node < 0 || rig.pinIsLive(p) || !rig.isFootClass(node)) {
                 continue; // a standing FOOT's leg
             }
             const int junction = rig.limbJunction(node);
@@ -834,7 +827,6 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
     // references turn home with the rise's progress in ikPostureModel, which needs the chain among
     // the unknowns. Standing up by the hips off all fours or out of a sit-up, the root came upright
     // and the spine kept its fold: she stood bent double with her head down. IK_JS_NO_RISE_TRUNK_HOME.)
-    static const bool kNoRiseTrunkHome = std::getenv("IK_JS_NO_RISE_TRUNK_HOME") != nullptr; // A/B probe
     // (... and only once NO HAND IS PINNED (m_jsHandsPlanted: a live, non-shadow wrist contact): in
     // the solve while the hands held, the hand rows bent the spine against its references as the
     // hips rose, and it sprang back the tick the pins went — 271mm at a fingertip, 105 at the brow.
@@ -850,38 +842,13 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
     }
     m_jsTrunkInSolve = m_jsTrunkInSolve || swayValid || pelvisBalance > 0.0f || (!kNoRiseTrunkHome && rising > 0.0f && !m_jsHandsPlanted);
     if (m_jsTrunkInSolve && effector == root) {
-        std::vector<int> size(n, 1);
-        std::vector<char> hasFoot(n, 0);
-        for (std::size_t i = n; i-- > 0;) { // children follow parents
-            hasFoot[i] = hasFoot[i] || m_ikBindPos[i].y < 0.20f * rig.sizeScale();
-            const int par = m_bones[i].parent;
-            if (par >= 0) {
-                size[static_cast<std::size_t>(par)] += size[i];
-                hasFoot[static_cast<std::size_t>(par)] = hasFoot[static_cast<std::size_t>(par)] || hasFoot[i];
-            }
+        // (The spine chain, searched once per skeleton: ensureSpineChain. Its links are unknowns,
+        // and the sway's level chest is the junction the chain ended at.)
+        ensureSpineChain();
+        for (std::size_t k = 1; k < m_jsSpineChain.size(); ++k) {
+            dofBone[static_cast<std::size_t>(m_jsSpineChain[k])] = 1;
         }
-        int cur = root;
-        for (int depth = 0; depth < 8 && swayChest < 0; ++depth) {
-            int next = -1;
-            for (const int c : m_children[static_cast<std::size_t>(cur)]) {
-                if (!hasFoot[static_cast<std::size_t>(c)] &&
-                    (next < 0 || size[static_cast<std::size_t>(c)] > size[static_cast<std::size_t>(next)])) {
-                    next = c;
-                }
-            }
-            if (next < 0) {
-                break;
-            }
-            dofBone[static_cast<std::size_t>(next)] = 1;
-            int branches = 0;
-            for (const int c : m_children[static_cast<std::size_t>(next)]) {
-                branches += size[static_cast<std::size_t>(c)] >= 4 ? 1 : 0;
-            }
-            if (branches >= 3) {
-                swayChest = next;
-            }
-            cur = next;
-        }
+        swayChest = m_jsSpineChainChest;
         if (!swayValid) {
             swayChest = -1; // (the chest's level row is the sway's)
         }
@@ -919,16 +886,16 @@ void Armature::ikStiffnessClasses(IkSolveScratch& s) {
     std::vector<char>& homeLimb = s.homeLimb;
     s.girdle.assign(n, 0); // under an elbow drag: the bones above the arm's socket (the collar)
     std::vector<char>& girdle = s.girdle;
-    for (const IkEffector& pin : pins) {
+    for (std::size_t pinIndex = 0; pinIndex < pins.size(); ++pinIndex) {
+        const IkEffector& pin = pins[pinIndex];
         const int junction = rig.limbJunction(pin.node);
         if (pin.node >= 0 && static_cast<std::size_t>(pin.node) < n) {
             pinNode[static_cast<std::size_t>(pin.node)] = 1;
         }
-        if (junction >= 0 && junction != root && !rig.pinIsLive(static_cast<std::size_t>(&pin - pins.data()))) {
+        if (junction >= 0 && junction != root && !rig.pinIsLive(pinIndex)) {
             pinJunction[static_cast<std::size_t>(junction)] = 1;
         }
         const int ball = m_jsBall[static_cast<std::size_t>(pin.node)];
-        const std::size_t pinIndex = static_cast<std::size_t>(&pin - pins.data());
         const bool standingFoot = !rig.pinIsLive(pinIndex) && !rig.pinIsUser(pinIndex);
         for (int cur = ball >= 0 ? ball : pin.node; cur >= 0 && cur != junction && cur != root;
              cur = m_bones[static_cast<std::size_t>(cur)].parent) {
@@ -978,37 +945,18 @@ void Armature::ikStiffnessClasses(IkSolveScratch& s) {
         if (wrist < 0 || wrist == root || m_jsWristOf.size() != n || m_jsWristOf[static_cast<std::size_t>(wrist)] != wrist) {
             return collar;
         }
-        const auto freeChannels = [&](int b) {
-            const Bone& bone = m_bones[static_cast<std::size_t>(b)];
-            int count = 0;
-            for (int a = 0; a < 3; ++a) {
-                count += (bone.rotLimited[a] && bone.rotMax[a] - bone.rotMin[a] < kLockedRangeDeg) ? 0 : 1;
-            }
-            return count;
-        };
         // The ELBOW first — the fold joint up from the wrist (a channel of kFoldRangeDeg and more, all
         // but kFoldNarrowFraction of it to one side) — then the socket: the first bone above the elbow
         // that swings (two free channels), past the upper arm's twist bones. "The first bone above the
         // wrist with two free channels" stopped at the FOREARM on the rigs whose forearm carries its own
         // twist as a second channel (the two oldest generations, the newest), took the shoulder for the
         // collar, and capped the arm's ABDUCTION at 30 degrees — found by the trace, not by a gate.
-        const auto isFold = [&](int b) {
-            const Bone& bone = m_bones[static_cast<std::size_t>(b)];
-            for (int a = 0; a < 3; ++a) {
-                const float range = bone.rotMax[a] - bone.rotMin[a];
-                if (bone.rotLimited[a] && range >= kFoldRangeDeg && bone.rotMin[a] < 0.0f && bone.rotMax[a] > 0.0f &&
-                    std::min(-bone.rotMin[a], bone.rotMax[a]) <= kFoldNarrowFraction * std::max(-bone.rotMin[a], bone.rotMax[a])) {
-                    return true;
-                }
-            }
-            return false;
-        };
         int elbow = m_bones[static_cast<std::size_t>(wrist)].parent;
-        while (elbow >= 0 && elbow != root && !isFold(elbow)) {
+        while (elbow >= 0 && elbow != root && foldAxisOf(elbow) < 0) {
             elbow = m_bones[static_cast<std::size_t>(elbow)].parent;
         }
         int socket = elbow >= 0 && elbow != root ? m_bones[static_cast<std::size_t>(elbow)].parent : -1;
-        while (socket >= 0 && socket != root && freeChannels(socket) < 2) {
+        while (socket >= 0 && socket != root && freeChannelCount(socket) < 2) {
             socket = m_bones[static_cast<std::size_t>(socket)].parent;
         }
         if (socket >= 0 && socket != root) {
@@ -1088,7 +1036,7 @@ void Armature::ikFootDrag(IkSolveScratch& s) {
     // other leg, 75 on crossed legs.
     s.legScale = rig.sizeScale();
     const float& legScale = s.legScale;
-    s.legDrag = effector != root && m_ikBindPos[static_cast<std::size_t>(effector)].y < 0.20f * legScale;
+    s.legDrag = effector != root && rig.isFootClass(effector);
     bool& legDrag = s.legDrag;
     static const bool kNoLegDrag = std::getenv("IK_JS_NO_LEG_DRAG") != nullptr; // A/B probe
     legDrag = legDrag && !kNoLegDrag;
@@ -1146,15 +1094,8 @@ void Armature::ikKneeDrag(IkSolveScratch& s) {
     s.effectorFoldAxis = -1;
     int& effectorFoldAxis = s.effectorFoldAxis;
     if (effector != root) {
-        const Bone& bone = m_bones[static_cast<std::size_t>(effector)];
-        for (int a = 0; a < 3 && !effectorFolds; ++a) {
-            const float range = bone.rotMax[a] - bone.rotMin[a];
-            if (bone.rotLimited[a] && range >= kFoldRangeDeg && bone.rotMin[a] < 0.0f && bone.rotMax[a] > 0.0f) {
-                effectorFolds = std::min(-bone.rotMin[a], bone.rotMax[a]) <=
-                                kFoldNarrowFraction * std::max(-bone.rotMin[a], bone.rotMax[a]);
-                effectorFoldAxis = effectorFolds ? a : -1;
-            }
-        }
+        effectorFoldAxis = foldAxisOf(effector);
+        effectorFolds = effectorFoldAxis >= 0;
     }
     if (!kNoKneeDrag && effector != root && !legDrag && goalPoint != nullptr) {
         const bool fold = effectorFolds;
@@ -1163,7 +1104,7 @@ void Armature::ikKneeDrag(IkSolveScratch& s) {
         while (fold && !stack.empty() && !kneeDrag) {
             const int b = stack.back();
             stack.pop_back();
-            kneeDrag = m_ikBindPos[static_cast<std::size_t>(b)].y < 0.20f * legScale;
+            kneeDrag = rig.isFootClass(b);
             kneeAnkle = kneeDrag ? b : -1;
             stack.insert(stack.end(), m_children[static_cast<std::size_t>(b)].begin(),
                          m_children[static_cast<std::size_t>(b)].end());
@@ -1175,7 +1116,7 @@ void Armature::ikKneeDrag(IkSolveScratch& s) {
         // (A USER-pinned foot counts, and never lets go: the knee then swings over a foot that is
         // held in full — place and heading both, so as far as the leg's own joints allow.)
         if (pins[p].node >= 0 && rig.pinUnderEffector(p) && !rig.pinIsLive(p) &&
-            m_ikBindPos[static_cast<std::size_t>(pins[p].node)].y < 0.20f * legScale) {
+            rig.isFootClass(pins[p].node)) {
             kneeFootPin = static_cast<int>(p);
         }
     }
@@ -1212,11 +1153,7 @@ void Armature::ikKneeDrag(IkSolveScratch& s) {
             // knee swung 20cm sideways at the cursor's height is 5cm "beyond" it.)
             {
                 const glm::vec3 ankle = pins[static_cast<std::size_t>(kneeFootPin)].target;
-                float shin = 0.0f;
-                for (int cur = pins[static_cast<std::size_t>(kneeFootPin)].node; cur >= 0 && cur != effector;
-                     cur = m_bones[static_cast<std::size_t>(cur)].parent) {
-                    shin += glm::length(glm::vec3(m_bones[static_cast<std::size_t>(cur)].localBind[3]));
-                }
+                const float     shin = chainLength(pins[static_cast<std::size_t>(kneeFootPin)].node, effector);
                 const glm::vec2 across(goalPoint->x - ankle.x, goalPoint->z - ankle.z);
                 const float top = ankle.y + std::sqrt(std::max(0.0f, shin * shin - glm::dot(across, across)));
                 kneeLift = std::max(0.0f, std::min(goalPoint->y - m_jsStartTarget.y, goalPoint->y - top));
@@ -1235,20 +1172,16 @@ void Armature::ikKneeDrag(IkSolveScratch& s) {
             // pull, with nowhere else to go, lifted the soft heel (a knee swung 15cm sideways at
             // the cursor's height stood on tiptoe to stay under it).
             const glm::vec3 ankle = pins[static_cast<std::size_t>(kneeFootPin)].target;
-            float reach = 0.0f;
-            for (int cur = pins[static_cast<std::size_t>(kneeFootPin)].node; cur >= 0 && cur != effector;
-                 cur = m_bones[static_cast<std::size_t>(cur)].parent) {
-                reach += glm::length(glm::vec3(m_bones[static_cast<std::size_t>(cur)].localBind[3]));
-            }
+            const float     reach = chainLength(pins[static_cast<std::size_t>(kneeFootPin)].node, effector);
             const glm::vec3 out = kneeGoal - ankle;
-            const float far = glm::length(out);
+            const float dist = glm::length(out);
             // (In full until the foot's hold is SOFT — its last quarter, the ball's 1e8 down to
             // 1e2, a tenth of the pelvis's own price — then released: a target already beyond
             // the reach of a foot that still HOLDS puts the cursor's whole pull through the leg
             // into the hips, and she rose 3cm onto the other foot's toes before the foot gave.)
-            if (far > reach && far > 1.0e-5f) {
+            if (dist > reach && dist > 1.0e-5f) {
                 static const double kProj = envOr("IK_JS_KNEEPROJ", 0.25);
-                kneeGoal -= out * ((far - reach) / far * glm::smoothstep(0.0f, static_cast<float>(kProj), plant));
+                kneeGoal -= out * ((dist - reach) / dist * glm::smoothstep(0.0f, static_cast<float>(kProj), plant));
             }
         } else {
             cls[static_cast<std::size_t>(effector)] = 1; // (no pin below: not a pin's limb, and not trunk)
@@ -1278,7 +1211,7 @@ void Armature::ikKneeDrag(IkSolveScratch& s) {
                 const glm::vec3 socket = static_cast<std::size_t>(top) < m_jsStartPos.size()
                                              ? m_jsStartPos[static_cast<std::size_t>(top)]
                                              : glm::vec3(m_poseGlobal[static_cast<std::size_t>(top)][3]);
-                const glm::vec3 fore(std::sin(m_jsRootHeading), 0.0f, std::cos(m_jsRootHeading));
+                const glm::vec3& fore = s.fore;
                 // (Off the floor the first centimetres of HEIGHT are taken up gently — the knee
                 // rises h x smoothstep(h / kKneeLiftEase) under a cursor h up: a thigh hanging
                 // straight down gains height as the SQUARE of its swing, so a knee that matched
@@ -1304,7 +1237,7 @@ void Armature::ikKneeDrag(IkSolveScratch& s) {
                 // still hold). The goal comes in as the thigh comes up, and the row is met.
                 static const bool kNoLateralReach = std::getenv("IK_JS_NO_KNEE_LATERAL_REACH") != nullptr; // A/B probe
                 if (!kNoLateralReach) {
-                    const glm::vec3 lateral(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
+                    const glm::vec3& lateral = s.lateral;
                     const float     lat = glm::dot(v, lateral);
                     const float     along = glm::dot(v, fore);
                     const float     flexion = std::atan2(std::max(along, 0.0f), std::max(-v.y, 0.0f)); // 0 hanging, pi/2 horizontal forward
@@ -1345,7 +1278,7 @@ void Armature::ikKneeDrag(IkSolveScratch& s) {
                 if (kneeFootPin >= 0 && kneeAnkle >= 0 && plant < 1.0f &&
                     static_cast<std::size_t>(kneeAnkle) < m_jsStartPos.size()) {
                     const glm::vec3 found = m_jsStartPos[static_cast<std::size_t>(kneeAnkle)] - m_jsStartPos[static_cast<std::size_t>(effector)];
-                    const glm::vec3 lateral(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
+                    const glm::vec3& lateral = s.lateral;
                     const float     lat = glm::dot(found, lateral);
                     const float     len = glm::length(found);
                     const float     vlen = std::sqrt(std::max(0.0f, len * len - lat * lat));
@@ -1396,14 +1329,6 @@ void Armature::ikElbowDrag(IkSolveScratch& s) {
     // threw the hand off whatever it had been placed on. Taken right away, the elbow still
     // carries its arm (the hold goes with the target's distance from that place).
     static const bool kNoElbowDrag = std::getenv("IK_JS_NO_ELBOW_DRAG") != nullptr; // A/B probe
-    const auto freeChannels = [&](int b) {
-        const Bone& bone = m_bones[static_cast<std::size_t>(b)];
-        int count = 0;
-        for (int a = 0; a < 3; ++a) {
-            count += (bone.rotLimited[a] && bone.rotMax[a] - bone.rotMin[a] < kLockedRangeDeg) ? 0 : 1;
-        }
-        return count;
-    };
     s.elbowDrag = false;
     bool& elbowDrag = s.elbowDrag;
     s.elbowWrist = -1;   // the limb's end below the elbow: past the forearm's twist bones
@@ -1427,7 +1352,7 @@ void Armature::ikElbowDrag(IkSolveScratch& s) {
             if (main < 0) {
                 break;
             }
-            if (freeChannels(main) >= 2) {
+            if (freeChannelCount(main) >= 2) {
                 elbowWrist = main;
             }
             cur = main;
@@ -1459,7 +1384,7 @@ void Armature::ikElbowDrag(IkSolveScratch& s) {
         // dragged inward went outward.)
         int socket = m_bones[static_cast<std::size_t>(effector)].parent;
         float upper = glm::length(glm::vec3(m_bones[static_cast<std::size_t>(effector)].localBind[3]));
-        while (socket >= 0 && socket != root && freeChannels(socket) < 2) {
+        while (socket >= 0 && socket != root && freeChannelCount(socket) < 2) {
             upper += glm::length(glm::vec3(m_bones[static_cast<std::size_t>(socket)].localBind[3]));
             socket = m_bones[static_cast<std::size_t>(socket)].parent;
         }
@@ -1471,7 +1396,7 @@ void Armature::ikElbowDrag(IkSolveScratch& s) {
             }
         }
         if (socket >= 0 && socket != root && static_cast<std::size_t>(socket) < m_jsStartPos.size()) {
-            const glm::vec3 lateral(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
+            const glm::vec3& lateral = s.lateral;
             const glm::vec3 socketAt = m_jsStartPos[static_cast<std::size_t>(socket)];
             const float side = glm::dot(socketAt - m_jsStartPos[static_cast<std::size_t>(root)], lateral) < 0.0f ? -1.0f : 1.0f;
             const glm::vec3 outward = lateral * side;
@@ -1503,15 +1428,11 @@ void Armature::ikElbowDrag(IkSolveScratch& s) {
         if (elbowHeldPin >= 0 && (rig.pinIsUser(static_cast<std::size_t>(elbowHeldPin)) ||
                                   pins[static_cast<std::size_t>(elbowHeldPin)].hard)) {
             const glm::vec3 held = pins[static_cast<std::size_t>(elbowHeldPin)].target;
-            float reach = 0.0f;
-            for (int cur = pins[static_cast<std::size_t>(elbowHeldPin)].node; cur >= 0 && cur != effector;
-                 cur = m_bones[static_cast<std::size_t>(cur)].parent) {
-                reach += glm::length(glm::vec3(m_bones[static_cast<std::size_t>(cur)].localBind[3]));
-            }
+            const float     reach = chainLength(pins[static_cast<std::size_t>(elbowHeldPin)].node, effector);
             const glm::vec3 out = elbowGoal - held;
-            const float far = glm::length(out);
-            if (far > reach && far > 1.0e-5f) {
-                elbowGoal -= out * ((far - reach) / far);
+            const float dist = glm::length(out);
+            if (dist > reach && dist > 1.0e-5f) {
+                elbowGoal -= out * ((dist - reach) / dist);
             }
         }
     }
@@ -1542,19 +1463,13 @@ void Armature::ikElbowDrag(IkSolveScratch& s) {
         if (pinBelow) {
             continue;
         }
-        const bool secLeg = m_ikBindPos[static_cast<std::size_t>(sec)].y < 0.20f * s.legScale;
+        const bool secLeg = rig.isFootClass(sec);
         // The joint's OWN channels are priced as the primary's are: a foot's or a fold joint's
         // (a knee's, an elbow's) at the limb's price, a WRIST's at the trunk's — the primary wrist's
         // channels are unknowns (the hand lay) at that price, and priced as a limb a second hand's
         // ran to its 70-degree limit under its fingers' body-volume rows while the first stayed
         // at zero: 14-18cm at a thumb, on every rig.
-        const Bone& secBone = m_bones[static_cast<std::size_t>(sec)];
-        bool secFolds = false;
-        for (int a = 0; a < 3 && !secFolds; ++a) {
-            const float range = secBone.rotMax[a] - secBone.rotMin[a];
-            secFolds = secBone.rotLimited[a] && range >= kFoldRangeDeg && secBone.rotMin[a] < 0.0f && secBone.rotMax[a] > 0.0f &&
-                       std::min(-secBone.rotMin[a], secBone.rotMax[a]) <= kFoldNarrowFraction * std::max(-secBone.rotMin[a], secBone.rotMax[a]);
-        }
+        const bool secFolds = foldAxisOf(sec) >= 0;
         if (secLeg || secFolds) {
             s.cls[static_cast<std::size_t>(sec)] = 1;
         }
@@ -1575,36 +1490,14 @@ void Armature::ensureHandMaps() const {
     m_jsWristOf.assign(n, -1);
     m_jsHandTip.assign(n, -1);
     const IkRig& rig = *m_ikRig;
-    const auto under = [&](int node, int ancestor) {
-        for (int cur = node; cur >= 0; cur = m_bones[static_cast<std::size_t>(cur)].parent) {
-            if (cur == ancestor) {
-                return true;
-            }
-        }
-        return false;
-    };
-    const auto freeChannels = [&](int b) {
-        const Bone& bone = m_bones[static_cast<std::size_t>(b)];
-        int count = 0;
-        for (int a = 0; a < 3; ++a) {
-            count += !(bone.rotLimited[a] && bone.rotMax[a] - bone.rotMin[a] < kLockedRangeDeg);
-        }
-        return count;
-    };
     for (std::size_t e = 0; e < n; ++e) {
-        const Bone& bone = m_bones[e];
-        bool folds = false; // an ELBOW: a fold joint ...
-        for (int a = 0; a < 3 && !folds; ++a) {
-            const float range = bone.rotMax[a] - bone.rotMin[a];
-            folds = bone.rotLimited[a] && range >= kFoldRangeDeg && bone.rotMin[a] < 0.0f && bone.rotMax[a] > 0.0f &&
-                    std::min(-bone.rotMin[a], bone.rotMax[a]) <= kFoldNarrowFraction * std::max(-bone.rotMin[a], bone.rotMax[a]);
-        }
+        const bool folds = foldAxisOf(static_cast<int>(e)) >= 0; // an ELBOW: a fold joint ...
         if (!folds || static_cast<int>(e) == rig.rootNode()) {
             continue;
         }
         bool leg = false; // ... with no foot below it (that is a knee)
         for (std::size_t i = 0; i < n && !leg; ++i) {
-            leg = m_ikBindPos[i].y < 0.20f * rig.sizeScale() && under(static_cast<int>(i), static_cast<int>(e));
+            leg = rig.isFootClass(static_cast<int>(i)) && boneUnder(static_cast<int>(i), static_cast<int>(e));
         }
         if (leg) {
             continue;
@@ -1624,7 +1517,7 @@ void Armature::ensureHandMaps() const {
             if (main < 0) {
                 break;
             }
-            if (freeChannels(main) >= 2) {
+            if (freeChannelCount(main) >= 2) {
                 wrist = main;
             }
             cur = main;
@@ -1634,7 +1527,7 @@ void Armature::ensureHandMaps() const {
         }
         float reach = 0.0f;
         for (std::size_t i = static_cast<std::size_t>(wrist); i < n; ++i) {
-            if (!under(static_cast<int>(i), wrist)) {
+            if (!boneUnder(static_cast<int>(i), wrist)) {
                 continue;
             }
             m_jsWristOf[i] = wrist;

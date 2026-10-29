@@ -21,6 +21,7 @@
 #include "jointsolver.h"
 
 #include "balancecontroller.h"
+#include "ikmath.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -35,40 +36,32 @@ namespace pose {
 
 namespace {
 
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kDegToRad = kPi / 180.0;
-constexpr double kRadToDeg = 180.0 / kPi;
-/// The slack of a degenerate (one- or two-point) support, as in BalanceController.
+/// The slack of a degenerate (one- or two-point) support: BalanceController's
+/// kDegenerateSupportRadius, in the solver's double arithmetic (the float's promotion would
+/// not be the same number).
 constexpr double kDegenerateSupportRadius = 0.05;
 
-int axisIndexOf(char c) {
-    switch (c) {
-    case 'X': case 'x': return 0;
-    case 'Y': case 'y': return 1;
-    case 'Z': case 'z': return 2;
-    default: return -1;
-    }
-}
+// The solver's A/B and trace probes (env), read once; each is documented where it is read.
+const bool kRetryOnBalance = std::getenv("IK_JS_RETRY_ON_BALANCE") != nullptr; // A/B probe
+const bool kNoFoldRetry = std::getenv("IK_JS_NO_FOLD_RETRY") != nullptr;   // A/B probe
+const bool kRetryHardOnly = std::getenv("IK_JS_RETRY_HARD_ONLY") != nullptr; // A/B probe
+const bool kRetryTrace = std::getenv("IK_JS_RETRY_TRACE") != nullptr;
+const bool kExactActiveSet = std::getenv("IK_JS_EXACT_ACTIVE_SET") != nullptr;
+const bool kNoRowActive = std::getenv("IK_JS_NO_ROW_ACTIVE") != nullptr; // A/B probe
+const bool kNoRatioStep = std::getenv("IK_JS_NO_RATIO_STEP") != nullptr;
+const bool kStaleTrialPlanes = std::getenv("IK_JS_STALE_TRIAL_PLANES") != nullptr; // A/B probe
+const bool kLmTrace = std::getenv("IK_JS_LM_TRACE") != nullptr;
+const bool kTrialPlaneTrace = std::getenv("IK_JS_TRIAL_PLANE_TRACE") != nullptr;
+const bool kAllNear = std::getenv("IK_JS_TRIAL_PLANE_TRACE_NEAR") != nullptr; // ... and the rows within 5mm of their surface
+const bool kRowTrace = std::getenv("IK_JS_ROW_TRACE") != nullptr;
+const bool kRowTraceFirst = std::getenv("IK_JS_ROW_TRACE_FIRST") != nullptr; // the FIRST rejected attempt, not the last
+const char* const kGradTrace = std::getenv("IK_JS_GRAD_TRACE");
 
 /// Right-handed rotation about principal axis @p axis — glm::rotate, as eulerMatrix composes.
 glm::dmat3 axisRotation(int axis, double radians) {
     glm::dvec3 v(0.0);
     v[axis] = 1.0;
     return glm::dmat3(glm::rotate(glm::dmat4(1.0), radians, v));
-}
-
-/// The rotation vector (axis * angle, radians) of rotation matrix @p m.
-glm::dvec3 rotationVector(const glm::dmat3& m) {
-    glm::dquat q = glm::normalize(glm::quat_cast(m));
-    if (q.w < 0.0) {
-        q = -q;
-    }
-    const glm::dvec3 v(q.x, q.y, q.z);
-    const double s = glm::length(v);
-    if (s < 1e-12) {
-        return 2.0 * v; // small angle: angle*axis ~= 2*v
-    }
-    return v * (2.0 * std::atan2(s, q.w) / s);
 }
 
 /// The PER-AXIS orientation error of a task whose frame is (lateral, up, fore): the bone's
@@ -279,11 +272,19 @@ double JointSolver::postureCost(const Pose& pose, const Problem& problem) const 
 
 JointSolver::ComModel JointSolver::buildComModel(const Problem& problem) const {
     ComModel model;
+    buildComModel(problem, model);
+    return model;
+}
+
+void JointSolver::buildComModel(const Problem& problem, ComModel& model) const {
     const std::size_t n = m_bones.size();
     model.coeff.assign(n, 0.0);
+    model.total = 0.0;
+    model.inset.polygon.clear();
+    model.inset.valid = false;
     if (problem.masses == nullptr || problem.masses->size() != n || problem.supportHull == nullptr ||
         problem.supportHull->empty() || problem.balanceWeight <= 0.0) {
-        return model; // total 0 = the balance row is off
+        return; // total 0 = the balance row is off
     }
     for (std::size_t i = 0; i < n; ++i) {
         const double m = (*problem.masses)[i];
@@ -302,7 +303,10 @@ JointSolver::ComModel JointSolver::buildComModel(const Problem& problem) const {
             }
         }
     }
-    return model;
+    // The support polygon shrunk by the margin — what the balanced point is the nearest point of —
+    // once per descent: closestBalancedPoint rebuilt it at every residual (an O(hull^2) clip in the
+    // innermost loop), and it depends on the hull and the margin alone.
+    model.inset = BalanceController::insetPolygon(*problem.supportHull, static_cast<float>(problem.balanceMargin));
 }
 
 double JointSolver::balanceNeed(const Frames& frames, const Problem& problem, const ComModel& com,
@@ -320,7 +324,7 @@ double JointSolver::balanceNeed(const Frames& frames, const Problem& problem, co
     c.z += problem.comShift.y;
     const glm::vec2 comXZ(static_cast<float>(c.x), static_cast<float>(c.z));
     const glm::vec2 balanced = BalanceController::closestBalancedPoint(
-        *problem.supportHull, comXZ, static_cast<float>(problem.balanceMargin));
+        *problem.supportHull, com.inset, comXZ, static_cast<float>(problem.balanceMargin));
     glm::dvec2 need(static_cast<double>(balanced.x) - c.x, static_cast<double>(balanced.y) - c.z);
     if (glm::dot(problem.balanceAxis, problem.balanceAxis) > 0.5) {
         need = problem.balanceAxis * glm::dot(need, problem.balanceAxis);
@@ -474,10 +478,10 @@ double JointSolver::linearize(const Pose& pose, const Frames& frames, const Prob
 
     // The balance row: d(CoM) = sum_k c_k d(p_k) / M over a DoF's subtree, so the subtree sums
     // of c_k and c_k p_k give every DoF's column in O(1).
-    const std::size_t       balanceRow = rows - 1 - problem.couplings.size();
-    glm::dvec2              balanceDir(0.0);
-    std::vector<double>     subCoeff;
-    std::vector<glm::dvec3> subMoment;
+    const std::size_t        balanceRow = rows - 1 - problem.couplings.size();
+    glm::dvec2               balanceDir(0.0);
+    std::vector<double>&     subCoeff = m_ws.subCoeff;
+    std::vector<glm::dvec3>& subMoment = m_ws.subMoment;
     const bool balanceActive = r[balanceRow] != 0.0;
     if (balanceActive) {
         balanceNeed(frames, problem, com, balanceDir);
@@ -495,65 +499,111 @@ double JointSolver::linearize(const Pose& pose, const Frames& frames, const Prob
         }
     }
 
+    // What every DoF's column of a row shares — a position row's point and weight, an orientation
+    // row's error frame, a plane row's point, plane and normal — computed ONCE per row here, not
+    // once per DoF per row as it was: the columns below are the same arithmetic on the same terms.
+    Workspace& ws = m_ws;
+    ws.posX.resize(problem.positions.size());
+    ws.posSw.resize(problem.positions.size());
+    for (std::size_t p = 0; p < problem.positions.size(); ++p) {
+        const JointPositionTask& task = problem.positions[p];
+        const std::size_t tb = static_cast<std::size_t>(task.bone);
+        const glm::dvec3 x = frames.pos[tb] + frames.rot[tb] * task.offset;
+        const double len = glm::length((task.target - x) * task.axisScale);
+        double w = (task.huber > 0.0 && len > task.huber)
+                       ? task.weight * task.huber / len
+                       : task.weight;
+        if (stepBounds != nullptr && len > stepBounds->maxTaskStep && askKeepsGradient()) {
+            w *= len / stepBounds->maxTaskStep; // (the bounded ask at 1/k of the weight: residuals())
+        }
+        ws.posX[p] = x;
+        ws.posSw[p] = std::sqrt(w);
+    }
+    ws.ori.resize(problem.orientations.size());
+    for (std::size_t o = 0; o < problem.orientations.size(); ++o) {
+        const JointOrientationTask& task = problem.orientations[o];
+        OrientationTerms& terms = ws.ori[o];
+        if (task.perAxis) {
+            // The lateral axis as it stands, and the pitch's atan2(N, D) over the fore axis
+            // projected across the target lateral axis (the rotation's part along that axis when
+            // the lateral axis sits on its target).
+            terms.lateralNow = glm::dvec3(0.0);
+            lateralAxisError(task.target, frames.rot[static_cast<std::size_t>(task.bone)], task.frame, &terms.lateralNow);
+            const glm::dmat3 delta = frames.rot[static_cast<std::size_t>(task.bone)] * glm::transpose(task.target);
+            terms.foreNow = delta * task.frame[2];
+            terms.f = terms.foreNow - task.frame[0] * glm::dot(terms.foreNow, task.frame[0]);
+            terms.N = glm::dot(glm::cross(terms.f, task.frame[2]), task.frame[0]);
+            terms.D = glm::dot(terms.f, task.frame[2]);
+            terms.norm2 = terms.N * terms.N + terms.D * terms.D;
+            for (int k = 0; k < 3; ++k) {
+                terms.sqrtW[k] = std::sqrt(task.axisWeights[k]);
+            }
+        } else {
+            terms.sqrtW = glm::dvec3(std::sqrt(task.weight), 0.0, 0.0);
+        }
+    }
+    ws.plX.resize(planes.size());
+    ws.plP.resize(planes.size());
+    ws.plN.resize(planes.size());
+    ws.plSw.resize(planes.size());
+    for (std::size_t a = 0; a < planes.size(); ++a) {
+        const JointPlaneTask& task = planes[a];
+        const std::size_t tb = static_cast<std::size_t>(task.bone);
+        ws.plX[a] = frames.pos[tb] + frames.rot[tb] * task.offset;
+        glm::dvec3 P = task.planePoint;
+        glm::dvec3 nrm = task.normal;
+        if (task.refBone >= 0) {
+            const std::size_t rb = static_cast<std::size_t>(task.refBone);
+            P = frames.pos[rb] + frames.rot[rb] * task.planePoint;
+            nrm = frames.rot[rb] * task.normal;
+        }
+        ws.plP[a] = P;
+        ws.plN[a] = nrm;
+        ws.plSw[a] = std::sqrt(task.weight);
+    }
+
     for (std::size_t j = 0; j < nDof; ++j) {
         const JointSolverDof& dof = problem.dofs[j];
         const glm::dvec3 axis = dofAxis(pose, frames, dof);
         const bool translation = dof.axis >= 3;
         const glm::dvec3& pivot = frames.pos[static_cast<std::size_t>(dof.bone)];
         std::size_t row = 0;
-        for (const JointPositionTask& task : problem.positions) {
+        for (std::size_t p = 0; p < problem.positions.size(); ++p) {
+            const JointPositionTask& task = problem.positions[p];
             if (isAncestorOrSelf(dof.bone, task.bone)) {
-                const std::size_t tb = static_cast<std::size_t>(task.bone);
-                const glm::dvec3 x = frames.pos[tb] + frames.rot[tb] * task.offset;
-                const double len = glm::length((task.target - x) * task.axisScale);
-                double w = (task.huber > 0.0 && len > task.huber)
-                               ? task.weight * task.huber / len
-                               : task.weight;
-                if (stepBounds != nullptr && len > stepBounds->maxTaskStep && askKeepsGradient()) {
-                    w *= len / stepBounds->maxTaskStep; // (the bounded ask at 1/k of the weight: residuals())
-                }
-                const glm::dvec3 d = (translation ? axis : glm::cross(axis, x - pivot)) *
-                                     task.axisScale * std::sqrt(w);
+                const glm::dvec3 d = (translation ? axis : glm::cross(axis, ws.posX[p] - pivot)) *
+                                     task.axisScale * ws.posSw[p];
                 J[(row + 0) * nDof + j] = d.x;
                 J[(row + 1) * nDof + j] = d.y;
                 J[(row + 2) * nDof + j] = d.z;
             }
             row += 3;
         }
-        for (const JointOrientationTask& task : problem.orientations) {
+        for (std::size_t o = 0; o < problem.orientations.size(); ++o) {
+            const JointOrientationTask& task = problem.orientations[o];
             if (!translation && isAncestorOrSelf(dof.bone, task.bone)) {
+                const OrientationTerms& terms = ws.ori[o];
                 glm::dvec3 d(0.0);
                 if (task.perAxis) {
                     // d(error)/d(theta), negated like every row (r - J d): the lateral axis
                     // turns by axis x a, so the swing turns by (axis x a) x a_target — which is
                     // -(axis's part across a) when a sits on its target, the old row exactly —
                     // and the pitch by the rotation's part ALONG the target lateral axis.
-                    glm::dvec3 lateralNow(0.0);
-                    lateralAxisError(task.target, frames.rot[static_cast<std::size_t>(task.bone)], task.frame,
-                                     &lateralNow);
-                    const glm::dvec3 swingRate = -glm::cross(glm::cross(axis, lateralNow), task.frame[0]);
-                    // The pitch's exact rate: pitch = atan2(N, D) over the fore axis projected
-                    // across the target lateral axis (the rotation's part along that axis when
-                    // the lateral axis sits on its target).
-                    const glm::dmat3 delta = frames.rot[static_cast<std::size_t>(task.bone)] * glm::transpose(task.target);
-                    const glm::dvec3 foreNow = delta * task.frame[2];
-                    const glm::dvec3 f = foreNow - task.frame[0] * glm::dot(foreNow, task.frame[0]);
-                    glm::dvec3 df = glm::cross(axis, foreNow);
+                    const glm::dvec3 swingRate = -glm::cross(glm::cross(axis, terms.lateralNow), task.frame[0]);
+                    // The pitch's exact rate (the atan2's terms are the row's: OrientationTerms).
+                    glm::dvec3 df = glm::cross(axis, terms.foreNow);
                     df -= task.frame[0] * glm::dot(df, task.frame[0]);
-                    const double N = glm::dot(glm::cross(f, task.frame[2]), task.frame[0]);
-                    const double D = glm::dot(f, task.frame[2]);
                     const double dN = glm::dot(glm::cross(df, task.frame[2]), task.frame[0]);
                     const double dD = glm::dot(df, task.frame[2]);
-                    const double norm2 = N * N + D * D;
-                    const double pitchRate = norm2 > 1e-12 ? -(D * dN - N * dD) / norm2
-                                                           : glm::dot(axis, task.frame[0]);
+                    const double pitchRate = terms.norm2 > 1e-12 ? -(terms.D * dN - terms.N * dD) / terms.norm2
+                                                                 : glm::dot(axis, task.frame[0]);
                     const glm::dvec3 rate(pitchRate, glm::dot(swingRate, task.frame[1]),
                                           glm::dot(swingRate, task.frame[2]));
                     for (int k = 0; k < 3; ++k) {
-                        d += task.frame[k] * (rate[k] * std::sqrt(task.axisWeights[k]));
+                        d += task.frame[k] * (rate[k] * terms.sqrtW[k]);
                     }
                 } else {
-                    d = axis * std::sqrt(task.weight);
+                    d = axis * terms.sqrtW.x;
                 }
                 J[(row + 0) * nDof + j] = d.x;
                 J[(row + 1) * nDof + j] = d.y;
@@ -561,20 +611,15 @@ double JointSolver::linearize(const Pose& pose, const Frames& frames, const Prob
             }
             row += 3;
         }
-        for (const JointPlaneTask& task : planes) {
+        for (std::size_t a = 0; a < planes.size(); ++a) {
+            const JointPlaneTask& task = planes[a];
             const bool movesPoint = isAncestorOrSelf(dof.bone, task.bone);
             const bool movesPlane = task.refBone >= 0 && isAncestorOrSelf(dof.bone, task.refBone);
             if ((r[row] != 0.0 || planeClear != nullptr) && movesPoint != movesPlane) {
                 // (A DoF that carries both the point and the plane changes nothing between them.)
-                const std::size_t tb = static_cast<std::size_t>(task.bone);
-                const glm::dvec3 x = frames.pos[tb] + frames.rot[tb] * task.offset;
-                glm::dvec3 P = task.planePoint;
-                glm::dvec3 nrm = task.normal;
-                if (task.refBone >= 0) {
-                    const std::size_t rb = static_cast<std::size_t>(task.refBone);
-                    P = frames.pos[rb] + frames.rot[rb] * task.planePoint;
-                    nrm = frames.rot[rb] * task.normal;
-                }
+                const glm::dvec3& x = ws.plX[a];
+                const glm::dvec3& P = ws.plP[a];
+                const glm::dvec3& nrm = ws.plN[a];
                 // The row asks for MORE separation n.(x - P): its derivative over the DoF.
                 double d = 0.0;
                 if (movesPoint) {
@@ -585,7 +630,7 @@ double JointSolver::linearize(const Pose& pose, const Frames& frames, const Prob
                     d = -glm::dot(nrm, glm::cross(axis, P - pivot)) -
                         glm::dot(glm::cross(axis, nrm), P - x);
                 }
-                J[row * nDof + j] = d * std::sqrt(task.weight);
+                J[row * nDof + j] = d * ws.plSw[a];
             }
             row += 1;
         }
@@ -655,7 +700,6 @@ double JointSolver::softCost(const Pose& pose, const Problem& problem) const {
     }
     // (... and BALANCE, which rests a centimetre out by design wherever she leans on the edge of
     // her support: its pull meets the cursor's there. IK_JS_RETRY_ON_BALANCE counts it again.)
-    static const bool kRetryOnBalance = std::getenv("IK_JS_RETRY_ON_BALANCE") != nullptr; // A/B probe
     if (!kRetryOnBalance) {
         glm::dvec2   direction;
         const double need = balanceNeed(frames, problem, buildComModel(problem), direction);
@@ -708,8 +752,7 @@ void JointSolver::dofBounds(const Problem& problem, std::vector<double>& lo,
 
 JointSolver::Result JointSolver::solve(Pose& pose, const Problem& problem,
                                        const Settings& settings) const {
-    std::vector<char> blocked;
-    Result result = descend(pose, problem, settings, blocked);
+    Result result = descend(pose, problem, settings);
     // The FOLD retry (see JointSolverDof::foldSign): a fold channel the descent left NEARLY
     // STRAIGHT while a task is still unmet is tried a few degrees into flexion, and the cheaper
     // pose kept. "Nearly straight", not "pinned at its bound": a knee a hair off its bound is on
@@ -721,18 +764,14 @@ JointSolver::Result JointSolver::solve(Pose& pose, const Problem& problem,
     constexpr double kFoldKick = 6.0 * kDegToRad;
     constexpr double kFoldNearStraight = 3.0 * kDegToRad;
     constexpr double kFoldTaskCost = 1.0e-2;
-    (void)blocked;
     // ("A task still unmet" counts the SOFT rows too - a heel's hold, a sole's pitch, the couplings,
     // balance at rest on the support's edge - and so the retry fires on most ticks a knee or an
     // elbow stands near straight. Narrowed to the hard rows (IK_JS_RETRY_HARD_ONLY: softCost) it
     // was tried and put back: a foot lifted, carried and set down had been unlocking its straight
     // knee early and gently on exactly such a soft row, 49mm in its worst tick, and unlocked it
     // late and all at once without, 125mm. What must not be kicked says so: JointSolverDof::foldRetry.)
-    static const bool kNoFoldRetry = std::getenv("IK_JS_NO_FOLD_RETRY") != nullptr;   // A/B probe
-    static const bool kRetryHardOnly = std::getenv("IK_JS_RETRY_HARD_ONLY") != nullptr; // A/B probe
     if (!kNoFoldRetry &&
         result.cost - postureCost(pose, problem) - (kRetryHardOnly ? softCost(pose, problem) : 0.0) > kFoldTaskCost) {
-        static const bool kRetryTrace = std::getenv("IK_JS_RETRY_TRACE") != nullptr;
         if (kRetryTrace) {
             Frames frames;
             forwardKinematics(pose, frames);
@@ -774,8 +813,7 @@ JointSolver::Result JointSolver::solve(Pose& pose, const Problem& problem,
             }
         }
         if (any) {
-            std::vector<char> blockedKicked;
-            const Result retry = descend(kicked, problem, settings, blockedKicked);
+            const Result retry = descend(kicked, problem, settings);
             if (retry.cost < result.cost * (1.0 - 1.0e-3) - 1.0e-9) {
                 const int spent = result.iterations;
                 pose = kicked;
@@ -787,35 +825,56 @@ JointSolver::Result JointSolver::solve(Pose& pose, const Problem& problem,
     return result;
 }
 
-JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, const Settings& settings,
-                                         std::vector<char>& blockedOut) const {
+JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, const Settings& settings) const {
     Result result;
     const std::size_t nDof = problem.dofs.size();
-    blockedOut.assign(nDof, 0);
     if (nDof == 0 || m_bones.empty()) {
         result.converged = true;
         return result;
     }
-    std::vector<double> lo, hi, ref(nDof, 0.0);
+    Workspace&           ws = m_ws;
+    std::vector<double>& lo = ws.lo;
+    std::vector<double>& hi = ws.hi;
+    std::vector<double>& ref = ws.ref;
+    ref.assign(nDof, 0.0);
     dofBounds(problem, lo, hi);
     for (std::size_t j = 0; j < nDof; ++j) {
         const JointSolverDof& dof = problem.dofs[j];
         ref[j] = dof.axis < 3 ? dof.reference * kDegToRad : dof.reference;
     }
 
-    const ComModel com = buildComModel(problem);
-    Frames frames;
+    ComModel& com = ws.com;
+    buildComModel(problem, com);
+    Frames& frames = ws.frames;
     forwardKinematics(pose, frames);
-    std::vector<double> r, rTrial, J, planeClear;
-    std::vector<char>   rowOff, rowEntered;
-    std::vector<JointPlaneTask> planes = problem.planes;
-    std::vector<JointPlaneTask> trialPlanes;
+    std::vector<double>&         r = ws.r;
+    std::vector<double>&         rTrial = ws.rTrial;
+    std::vector<double>&         J = ws.J;
+    std::vector<double>&         planeClear = ws.planeClear;
+    std::vector<char>&           rowOff = ws.rowOff;
+    std::vector<char>&           rowEntered = ws.rowEntered;
+    std::vector<JointPlaneTask>& planes = ws.planes;
+    planes = problem.planes;
+    std::vector<JointPlaneTask>& trialPlanes = ws.trialPlanes;
     double cost0 = residuals(pose, frames, problem, planes, com, r) + postureCost(pose, problem);
 
-    std::vector<double> q(nDof), pull(nDof), dInv(nDof), step(nDof), d0(nDof), M, rhs;
-    std::vector<char>   blocked(nDof);
-    Pose   trial = pose;
-    Frames trialFrames;
+    std::vector<double>& q = ws.q;
+    std::vector<double>& pull = ws.pull;
+    std::vector<double>& dInv = ws.dInv;
+    std::vector<double>& step = ws.step;
+    std::vector<double>& d0 = ws.d0;
+    std::vector<double>& M = ws.M;
+    std::vector<double>& rhs = ws.rhs;
+    q.assign(nDof, 0.0);
+    pull.assign(nDof, 0.0);
+    dInv.assign(nDof, 0.0);
+    step.assign(nDof, 0.0);
+    d0.assign(nDof, 0.0);
+    std::vector<char>& blocked = ws.blocked;
+    blocked.assign(nDof, 0);
+    Pose& trial = ws.trial;
+    trial = pose;
+    Frames& trialFrames = ws.trialFrames;
     double mu = 1e-4;
 
     bool planesArePoses = false; // the planes are already this pose's own: the accepted trial's
@@ -846,7 +905,8 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
         // from its surface is a poor stand-in for it, and brought in from there it held joints off
         // volumes they were sliding along.
         const std::size_t planeRow0 = 3 * problem.positions.size() + 3 * problem.orientations.size();
-        const std::vector<double> rLinear = r;
+        std::vector<double>& rLinear = ws.rLinear;
+        rLinear = r;
         for (std::size_t j = 0; j < nDof; ++j) {
             q[j] = dofValue(pose, problem.dofs[j]);
             pull[j] = ref[j] - q[j];
@@ -868,43 +928,57 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                     dInv[j] = blocked[j] ? 0.0 : 1.0 / d;
                     d0[j] = blocked[j] ? 0.0 : pull[j] * s / d;
                 }
-                // rhs = r - J d0;  M = J D^-1 J^T + I
-                rhs.assign(rows, 0.0);
-                M.assign(rows * rows, 0.0);
+                // rhs = r - J d0;  M = J D^-1 J^T + I — over the ACTIVE rows alone. (A row out
+                // of the model used to stand in M as an identity row with a zero ask, factored
+                // with the rest: its pivot is 1 and its every product with the active block is
+                // +0.0, so the block's factorization — and the multipliers — are the same to the
+                // last bit, at rows^3 for the whole where the active rows are often a third of it;
+                // the plane rows are many and mostly out.) The multipliers are scattered back by
+                // row (rhs: the active-set tests below read them by the full index).
+                std::vector<std::size_t>& act = ws.act;
+                act.clear();
                 for (std::size_t a = 0; a < rows; ++a) {
-                    if (rowOff[a]) {
-                        M[a * rows + a] = 1.0; // out of the model: an identity row, a zero ask
-                        continue;
+                    if (!rowOff[a]) {
+                        act.push_back(a);
                     }
-                    const double* Ja = &J[a * nDof];
-                    double acc = r[a];
+                }
+                const std::size_t nAct = act.size();
+                std::vector<double>& Jd = ws.Jd; // J D^-1 over the active rows, formed once a pass
+                std::vector<double>& rhsAct = ws.rhsAct;
+                Jd.resize(nAct * nDof);
+                rhsAct.assign(nAct, 0.0);
+                M.assign(nAct * nAct, 0.0);
+                for (std::size_t i = 0; i < nAct; ++i) {
+                    const double* Ja = J.data() + act[i] * nDof;
+                    double*       Jdi = Jd.data() + i * nDof;
+                    double acc = r[act[i]];
                     for (std::size_t j = 0; j < nDof; ++j) {
                         acc -= Ja[j] * d0[j];
+                        Jdi[j] = Ja[j] * dInv[j];
                     }
-                    rhs[a] = acc;
-                    for (std::size_t b = 0; b <= a; ++b) {
-                        if (rowOff[b]) {
-                            continue;
-                        }
-                        const double* Jb = &J[b * nDof];
+                    rhsAct[i] = acc;
+                    for (std::size_t bi = 0; bi <= i; ++bi) {
+                        const double* Jb = J.data() + act[bi] * nDof;
                         double m = 0.0;
                         for (std::size_t j = 0; j < nDof; ++j) {
-                            m += Ja[j] * dInv[j] * Jb[j];
+                            m += Jdi[j] * Jb[j];
                         }
-                        M[a * rows + b] = m;
-                        M[b * rows + a] = m;
+                        M[i * nAct + bi] = m;
+                        M[bi * nAct + i] = m;
                     }
-                    M[a * rows + a] += 1.0;
+                    M[i * nAct + i] += 1.0;
                 }
-                if (rows > 0 && !choleskySolve(M, rhs, static_cast<int>(rows))) {
-                    std::fill(rhs.begin(), rhs.end(), 0.0); // posture-only step
+                if (nAct > 0 && !choleskySolve(M, rhsAct, static_cast<int>(nAct))) {
+                    std::fill(rhsAct.begin(), rhsAct.end(), 0.0); // posture-only step
+                }
+                rhs.assign(rows, 0.0);
+                for (std::size_t i = 0; i < nAct; ++i) {
+                    rhs[act[i]] = rhsAct[i];
                 }
                 for (std::size_t j = 0; j < nDof; ++j) {
                     double acc = 0.0;
-                    for (std::size_t a = 0; a < rows; ++a) {
-                        if (!rowOff[a]) {
-                            acc += J[a * nDof + j] * rhs[a];
-                        }
+                    for (std::size_t i = 0; i < nAct; ++i) {
+                        acc += J[act[i] * nDof + j] * rhsAct[i];
                     }
                     step[j] = d0[j] + dInv[j] * acc;
                 }
@@ -922,7 +996,6 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                     // channel 0.0004 degrees inside its 5-degree limit after the first tick of a
                     // crouch, locked both legs straight: the hips did not come down a millimetre
                     // under a cursor half a metre below them. (IK_JS_EXACT_ACTIVE_SET is the A/B.)
-                    static const bool kExactActiveSet = std::getenv("IK_JS_EXACT_ACTIVE_SET") != nullptr;
                     const double hair = kExactActiveSet ? 0.0 : 0.02 * std::abs(step[j]);
                     if ((q[j] <= lo[j] + std::max(1e-9, hair) && step[j] < 0.0) ||
                         (q[j] >= hi[j] - std::max(1e-9, hair) && step[j] > 0.0)) {
@@ -939,7 +1012,6 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                 // together, or dropped while others entered, rows came straight back across, ran
                 // out of entries, and the step went through the floor: every attempt rejected, a
                 // "converged" pose 2cm short of the one the solve had always found).
-                static const bool kNoRowActive = std::getenv("IK_JS_NO_ROW_ACTIVE") != nullptr; // A/B probe
                 if (!grew && !kNoRowActive) {
                     std::size_t drop = rows;
                     for (std::size_t a = planeRow0; a < planeRow0 + planes.size(); ++a) {
@@ -1002,7 +1074,6 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
             // the model holds for it, and blocked at the next pass. Tried THIRD, after the full
             // and the half step have failed clamped: where the clamped channel was not
             // load-bearing the full step is the faster one. IK_JS_NO_RATIO_STEP is the A/B.
-            static const bool kNoRatioStep = std::getenv("IK_JS_NO_RATIO_STEP") != nullptr;
             double ratio = 1.0;
             for (std::size_t j = 0; j < nDof && !kNoRatioStep; ++j) {
                 if (blocked[j] || std::abs(step[j]) < 1e-12) {
@@ -1041,7 +1112,6 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                 // descent: her upper arms wedged between the chest and hands that had let go, the
                 // head thrown 258mm when the cycle broke). The true cost of a pose is the cost
                 // under ITS rows.
-                static const bool kStaleTrialPlanes = std::getenv("IK_JS_STALE_TRIAL_PLANES") != nullptr; // A/B probe
                 const std::vector<JointPlaneTask>* judgedBy = &planes;
                 if (problem.planeSource && !kStaleTrialPlanes) {
                     trialPlanes.clear();
@@ -1050,7 +1120,6 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                 }
                 const double costTrial =
                     residuals(trial, trialFrames, problem, *judgedBy, com, rTrial) + postureCost(trial, problem);
-                static const bool kLmTrace = std::getenv("IK_JS_LM_TRACE") != nullptr;
                 if (kLmTrace) {
                     int nBlocked = 0;
                     for (const char b : blocked) {
@@ -1064,7 +1133,6 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                 // IK_JS_TRIAL_PLANE_TRACE: for a REJECTED trial, its cost under the linearization's
                 // rows beside its own, and every row of either set that costs at the trial — which
                 // surface the step ran into that the model had no row for.
-                static const bool kTrialPlaneTrace = std::getenv("IK_JS_TRIAL_PLANE_TRACE") != nullptr;
                 if (kTrialPlaneTrace && costTrial >= cost0 && judgedBy == &trialPlanes && (attempt == 0 || attempt == 9) && halving == 0) {
                     std::vector<double> rStale;
                     const double costStale = residuals(trial, trialFrames, problem, planes, com, rStale) + postureCost(trial, problem);
@@ -1082,7 +1150,6 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                                 normal = at.rot[ref] * plane.normal;
                             }
                             const double depth = -glm::dot(point - onPlane, normal);
-                            static const bool kAllNear = std::getenv("IK_JS_TRIAL_PLANE_TRACE_NEAR") != nullptr; // ... and the rows within 5mm of their surface
                             if (depth > 1.0e-4 || (kAllNear && depth > -5.0e-3)) {
                                 std::fprintf(stderr, "[trial-planes]   %s: bone %d (offset %.3f %.3f %.3f) against %d, %.2fmm through, weight %.3g\n", label, plane.bone,
                                              plane.offset.x, plane.offset.y, plane.offset.z, plane.refBone, depth * 1000.0, plane.weight);
@@ -1093,8 +1160,6 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                     dump("the pose's rows, at the trial", planes, trialFrames);
                     dump("the trial's rows, at the trial", trialPlanes, trialFrames);
                 }
-                static const bool kRowTrace = std::getenv("IK_JS_ROW_TRACE") != nullptr;
-                static const bool kRowTraceFirst = std::getenv("IK_JS_ROW_TRACE_FIRST") != nullptr; // the FIRST rejected attempt, not the last
                 if (kRowTrace && costTrial >= cost0 && ((attempt == 9 && halving == 1) || (kRowTraceFirst && attempt == 0 && halving == 0))) {
                     // Which row did the model get wrong? Per row: its residual, what the model
                     // predicted for it after this (tiny) step, and what it came to.
@@ -1131,8 +1196,12 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                     }
                 }
                 if (costTrial < cost0) {
-                    pose = trial;
-                    frames = trialFrames;
+                    // (The accepted trial SWAPPED in, not copied: `trial` is reassigned from the pose
+                    // before its next use, and `trialFrames` recomputed.)
+                    pose.eulerDeg.swap(trial.eulerDeg);
+                    pose.translation.swap(trial.translation);
+                    frames.rot.swap(trialFrames.rot);
+                    frames.pos.swap(trialFrames.pos);
                     cost0 = costTrial;
                     accepted = true;
                     appliedMax = maxApplied;
@@ -1150,12 +1219,10 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
             }
         }
         result.iterations = it + 1;
-        blockedOut = blocked;
         if (!accepted) {
             result.converged = true; // no step improves the cost: a (local) minimum
             break;
         }
-        result.maxStep = appliedMax;
         if (appliedMax < settings.stepTolerance) {
             result.converged = true;
             break;
@@ -1163,7 +1230,6 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
     }
     // IK_JS_GRAD_TRACE=<bone index>: at the end of a descent, what each row and the posture term
     // ask of that bone's channels (the true gradient's terms, J^T r with r unbounded).
-    static const char* kGradTrace = std::getenv("IK_JS_GRAD_TRACE");
     if (kGradTrace != nullptr) {
         const int bone = std::atoi(kGradTrace);
         std::vector<double> rTrue, Jt;

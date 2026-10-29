@@ -1,8 +1,8 @@
 /**
  * @file ikmath.h
- * @brief Small shared rotation math for the IK module and the Armature's pose composition:
- *        shortest-arc quaternions, signed angles about an axis, and Euler decomposition for the
- *        figure format's arbitrary per-joint rotation orders.
+ * @brief Small shared rotation math for the IK module and the Armature's pose composition: the
+ *        axis letters, rotation vectors, segment distances, and the Euler composition and
+ *        decomposition for the figure format's arbitrary per-joint rotation orders.
  *
  * eulerMatrix composes the figure format's per-joint Euler pose (M = R(order[0]) · R(order[1]) ·
  * R(order[2]), each a right-handed rotation about a principal axis) and eulerFromMatrix is its
@@ -18,18 +18,41 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <cmath>
 #include <string>
 
 namespace pose {
 
-/// The rotation carrying unit vector @p from onto unit vector @p to by the shortest arc.
-/// Antiparallel inputs rotate 180 degrees about an arbitrary perpendicular axis.
-glm::quat shortestArc(const glm::vec3& from, const glm::vec3& to);
+/// Pi and the degree/radian conversions the IK module computes in (double: the solver's
+/// arithmetic; a float caller converts the result).
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kDegToRad = kPi / 180.0;
+constexpr double kRadToDeg = 180.0 / kPi;
 
-/// Signed angle (radians) from @p from to @p to measured about @p axis (right-handed), using the
-/// two vectors' projections onto the plane perpendicular to @p axis. Returns 0 when either
-/// projection degenerates.
-float signedAngleAround(const glm::vec3& from, const glm::vec3& to, const glm::vec3& axis);
+/// The channel index of an axis letter of a rotation order ('X'/'x' = 0, 'Y' = 1, 'Z' = 2), -1 otherwise.
+inline int axisIndexOf(char c) {
+    switch (c) {
+    case 'X': case 'x': return 0;
+    case 'Y': case 'y': return 1;
+    case 'Z': case 'z': return 2;
+    default: return -1;
+    }
+}
+
+/// The rotation vector (axis x angle, radians) of rotation matrix @p m, in float (the Armature's
+/// post-steps) or double (the solver): the small-angle branch below @p small is 2v.
+template <typename T, glm::qualifier Q>
+glm::vec<3, T, Q> rotationVectorOf(const glm::mat<3, 3, T, Q>& m, T small) {
+    glm::qua<T, Q> q = glm::normalize(glm::quat_cast(m));
+    if (q.w < T(0)) {
+        q = -q;
+    }
+    const glm::vec<3, T, Q> v(q.x, q.y, q.z);
+    const T                 s = glm::length(v);
+    return s < small ? T(2) * v : v * (T(2) * std::atan2(s, q.w) / s);
+}
+inline glm::vec3 rotationVector(const glm::mat3& m) { return rotationVectorOf(m, 1.0e-6f); }
+inline glm::dvec3 rotationVector(const glm::dmat3& m) { return rotationVectorOf(m, 1e-12); }
 
 /// The closest points between the segments p1-q1 and p2-q2: returns their distance and writes
 /// the parameters @p s (on p1-q1) and @p t (on p2-q2), both in [0, 1]. The body volumes test

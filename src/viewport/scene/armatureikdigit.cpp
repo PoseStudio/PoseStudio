@@ -23,6 +23,7 @@
 #include "armature.h"
 #include "armatureiksolvetuning.h"
 
+#include "ikmath.h"
 #include "ikrig.h"
 #include "jointsolver.h"
 
@@ -44,7 +45,6 @@ void Armature::classifyBones() {
     const int    head = rig.headNode();
     const int    root = rig.rootNode();
     ensureHandMaps();
-    const float footHeight = kDigitFootHeight * rig.sizeScale();
     // (Parents precede children: one pass carries "below the head", "of the body", "foot-class"
     // and the LIMB END a bone hangs below — its wrist, or its ankle: the foot's most proximal
     // foot-class joint — with that hand's or foot's REACH, its farthest joint at bind.)
@@ -61,7 +61,7 @@ void Armature::classifyBones() {
         const bool hasParent = p >= 0 && static_cast<std::size_t>(p) < b;
         underHead[b] = hasParent && (p == head || underHead[static_cast<std::size_t>(p)]);
         ofBody[b] = static_cast<int>(b) == root || (hasParent && ofBody[static_cast<std::size_t>(p)]);
-        footClass[b] = ofBody[b] && static_cast<int>(b) != root && b < m_ikBindPos.size() && m_ikBindPos[b].y < footHeight;
+        footClass[b] = ofBody[b] && static_cast<int>(b) != root && rig.isFootClass(static_cast<int>(b));
         if (head >= 0 && underHead[b]) {
             m_boneClass[b] = static_cast<char>(BoneClass::Face);
             ++faces;
@@ -215,7 +215,7 @@ void Armature::localChannelDofs(int b, std::vector<JointSolverDof>& out) const {
             continue;
         }
         const double rangeDeg = bone.rotLimited[a] ? std::max(static_cast<double>(range), kMinRangeDeg) : kFreeRangeDeg;
-        const double rangeRad = rangeDeg * 3.14159265358979323846 / 180.0;
+        const double rangeRad = rangeDeg * kPi / 180.0;
         JointSolverDof dof;
         dof.bone = b;
         dof.axis = a;
@@ -229,8 +229,7 @@ void Armature::localChannelDofs(int b, std::vector<JointSolverDof>& out) const {
             const float otherRange = bone.rotLimited[o] ? bone.rotMax[o] - bone.rotMin[o] : 360.0f;
             hinge = otherRange <= kFoldHingeOtherDeg;
         }
-        if (hinge && bone.rotLimited[a] && range >= kFoldRangeDeg && bone.rotMin[a] < 0.0f && bone.rotMax[a] > 0.0f &&
-            std::min(-bone.rotMin[a], bone.rotMax[a]) <= kFoldNarrowFraction * std::max(-bone.rotMin[a], bone.rotMax[a])) {
+        if (hinge && isFoldChannel(b, a)) {
             dof.foldSign = bone.rotMax[a] > -bone.rotMin[a] ? 1 : -1;
             if (dof.foldSign > 0) {
                 dof.minDeg = std::min(m_boneEuler[static_cast<std::size_t>(b)][a], 0.0f);

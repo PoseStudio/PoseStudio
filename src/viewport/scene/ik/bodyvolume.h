@@ -129,6 +129,11 @@ inline VolumeAxis volumeAxis(const BodyVolume& v, int n, PosFn&& pos) {
 }
 
 /// The capsule's radius at parameter @p t along its axis (0 = the A end, 1 = the B end).
+/// The parameter (0..1) along axis @p ax of the point of the capsule's axis nearest @p P.
+inline float volumeAxisParam(const VolumeAxis& ax, const glm::vec3& P) {
+    return ax.ab2 > 1.0e-12f ? glm::clamp(glm::dot(P - ax.A, ax.ab) / ax.ab2, 0.0f, 1.0f) : 0.0f;
+}
+
 inline float volumeRadiusAt(const BodyVolume& v, float t) {
     if (v.radiusB < 0.0f) {
         return v.radius;

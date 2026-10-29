@@ -16,7 +16,6 @@ namespace pose {
 struct IkEffector {
     int       node = -1;
     glm::vec3 target{0.0f};
-    bool      pinned = false;
     float     weight = 1.0f;       ///< Kept for the rig's bookkeeping and traces (1 = a full pin).
     /// The pin's REACH LEASH: how far the limb's socket may sit from this pin — the socket-to-pin
     /// distance the stance provably held, never more than the limb can span (IkRig::socketLeash;

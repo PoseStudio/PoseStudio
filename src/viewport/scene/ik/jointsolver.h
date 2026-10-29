@@ -4,12 +4,13 @@
  *        own representation — the per-joint Euler channels plus the solve root's translation —
  *        as one regularized nonlinear least-squares problem, converged every tick.
  *
- * Why it exists. The position-space solver (fabriksolver.h) places joint POSITIONS, and the
- * Armature then has to turn those back into Euler channels (the rotation extraction), where the
- * authored limits, the unwitnessed twist and the capped fits all leave residuals; because that
- * loop is iterative, redundant and ill-posed, its per-tick output is kept calm by DAMPING
- * (under-relaxation, movement caps, a settle-freeze, a cursor filter), and damping is lag. The
- * two complaints — tremble and lag — are the two ends of that one trade-off.
+ * Why it exists. The position-space solver it replaced (a multi-chain FABRIK, deleted on
+ * 2026-09-18) placed joint POSITIONS, and the Armature then had to turn those back into Euler
+ * channels (the rotation extraction), where the authored limits, the unwitnessed twist and the
+ * capped fits all left residuals; because that loop was iterative, redundant and ill-posed, its
+ * per-tick output was kept calm by DAMPING (under-relaxation, movement caps, a settle-freeze, a
+ * cursor filter), and damping is lag. The two complaints — tremble and lag — were the two ends
+ * of that one trade-off.
  *
  * Here there is no trade-off to make, because the problem is WELL-POSED:
  *
@@ -41,6 +42,8 @@
 
 #ifndef JOINTSOLVER_H
 #define JOINTSOLVER_H
+
+#include "balancecontroller.h"
 
 #include <glm/glm.hpp>
 
@@ -202,7 +205,6 @@ public:
     struct Result {
         int    iterations = 0;
         double cost = 0.0;
-        double maxStep = 0.0;            ///< The last accepted step's largest DoF change.
         bool   converged = false;
     };
 
@@ -236,10 +238,12 @@ private:
     /// definition: each bone weighs in at its segment midpoint): per bone, its joint position's
     /// coefficient in the sum, and the total mass.
     struct ComModel {
-        std::vector<double> coeff;
-        double              total = 0.0;
+        std::vector<double>      coeff;
+        double                   total = 0.0;
+        BalanceController::Inset inset; ///< The support polygon shrunk by the margin, once per descent (balanceNeed reads it).
     };
     ComModel buildComModel(const Problem& problem) const;
+    void     buildComModel(const Problem& problem, ComModel& model) const; ///< ... into a reused model.
     /// The balance row: how far (metres) the centre of mass' ground projection sits outside
     /// the inset support polygon, and the unit XZ direction back in (0 when balanced / off).
     double balanceNeed(const Frames& frames, const Problem& problem, const ComModel& com,
@@ -267,11 +271,42 @@ private:
     double softCost(const Pose& pose, const Problem& problem) const;
     /// The box of @p problem's DoFs in their own units (radians / metres).
     void dofBounds(const Problem& problem, std::vector<double>& lo, std::vector<double>& hi) const;
-    /// One Levenberg-Marquardt descent from @p pose (see solve); @p blockedOut receives the
-    /// channels the last linearization found pushing against their bounds.
-    Result descend(Pose& pose, const Problem& problem, const Settings& settings,
-                   std::vector<char>& blockedOut) const;
+    /// One Levenberg-Marquardt descent from @p pose (see solve).
+    Result descend(Pose& pose, const Problem& problem, const Settings& settings) const;
     glm::dvec3 dofAxis(const Pose& pose, const Frames& frames, const JointSolverDof& dof) const;
+
+    /// A per-axis orientation row's error frame at the linearization's pose: what every DoF's
+    /// column of the row shares (linearize computes it once per row, not once per DoF per row).
+    struct OrientationTerms {
+        glm::dvec3 lateralNow{0.0};
+        glm::dvec3 foreNow{0.0};
+        glm::dvec3 f{0.0};
+        double     N = 0.0;
+        double     D = 0.0;
+        double     norm2 = 0.0;
+        glm::dvec3 sqrtW{0.0}; ///< per axis: sqrt(axisWeights); .x = sqrt(weight) for a uniform row
+    };
+    /// The descent's scratch, kept across descents (mutable: a solver serves one descent at a time,
+    /// and the Armature's solve is single-threaded). Every buffer is assigned before it is read;
+    /// what persists between calls is their capacity, so a tick's dozen descents allocate nothing.
+    struct Workspace {
+        std::vector<double>           lo, hi, ref, r, rTrial, rLinear, J, planeClear, q, pull, dInv, step, d0, M, rhs;
+        std::vector<std::size_t>      act;       ///< descend: the rows IN the model this pass (M and rhsAct are theirs)
+        std::vector<double>           Jd, rhsAct; ///< descend: J D^-1 over the active rows; their multipliers
+        std::vector<char>             rowOff, rowEntered, blocked;
+        std::vector<JointPlaneTask>   planes, trialPlanes;
+        Pose                          trial;
+        Frames                        frames, trialFrames;
+        ComModel                      com;
+        std::vector<double>           subCoeff;  ///< linearize: the balance row's subtree sums ...
+        std::vector<glm::dvec3>       subMoment;
+        std::vector<glm::dvec3>       posX;      ///< linearize: each position row's point ...
+        std::vector<double>           posSw;     ///< ... and its weight's root (the Huber and the bounded ask folded in)
+        std::vector<OrientationTerms> ori;       ///< linearize: each orientation row's terms
+        std::vector<glm::dvec3>       plX, plP, plN; ///< linearize: each plane row's point, plane point and normal
+        std::vector<double>           plSw;      ///< ... and its weight's root
+    };
+    mutable Workspace m_ws;
 
     std::vector<JointSolverBone>  m_bones;
     std::vector<int>              m_order;    ///< Per bone: 3 axis indices of the rotation order.

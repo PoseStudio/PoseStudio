@@ -23,11 +23,11 @@
  * updateStepPolicy() (balance- and anchor-driven foot re-planting) after it, all on the solved
  * pose. Positions in/out are model space. Qt-free (std + GLM).
  *
- * The implementation is split across five translation units by phase: ikrig.cpp (build, the
- * body volumes, the shared metric helpers), ikrigdrag.cpp (beginDrag / plantContacts),
- * ikrigpolicy.cpp (the per-tick intents, the lift-off test, the step policy's entry),
- * ikrigstepping.cpp (the stepper) and ikrigcontacts.cpp (live contacts, landings, pin-set
- * maintenance); their shared tuning constants live in the private ikrig_constants.h.
+ * The implementation is split across six translation units by phase: ikrig.cpp (build, the
+ * shared metric helpers), ikrigvolumes.cpp (the self-collision body volumes), ikrigdrag.cpp
+ * (beginDrag / plantContacts), ikrigpolicy.cpp (the per-tick intents, the lift-off test, the step
+ * policy's entry), ikrigstepping.cpp (the stepper) and ikrigcontacts.cpp (live contacts, landings,
+ * pin-set maintenance); their shared tuning constants live in the private ikrig_constants.h.
  */
 
 #ifndef IKRIG_H
@@ -66,6 +66,17 @@ public:
     /// Joints under this WORLD height are ground contacts when a drag begins (figure-scaled;
     /// the Armature's contact rule at the press) and re-plant when a lifted figure lands.
     static constexpr float kContactHeight = 0.15f;
+    /// A FOOT-CLASS joint sits under this height AT BIND (figure-scaled): the ankle's 8cm, the
+    /// toes — on the floor because the figure stands on it. Any other joint under the contact
+    /// height is there because of the POSE (a kneeling knee, a hand on the floor): plantContacts.
+    static constexpr float kFootBindHeight = 0.20f;
+    /// The FLESH RADIUS (figure-scaled): the joint-centred clearance every body joint had before the
+    /// floor's were fitted to the mesh (fitFloorClearances: never less than this), the body volumes'
+    /// default joint clearance, and the floor of a bone's reach along a direction.
+    static constexpr float kFleshRadius = 0.015f;
+    /// A LIMB's junction this far above the pelvis joint (figure-scaled) is an arm's or the head's:
+    /// a leg hangs from the pelvis itself (limbHangsAboveHips).
+    static constexpr float kArmJunctionHeight = 0.10f;
 
     /// Builds the body tree, the segment masses and the clearances from the bind skeleton. With
     /// a body mesh sample (bodymesh.h) the self-collision volumes are fitted to the mesh
@@ -197,7 +208,7 @@ public:
         m_secondaries.clear();
         m_secAncestor.clear();
         m_secAncestorLen.clear();
-        m_imbalanceTicks = 0; // a mid-confirm step trigger dies with the drag (stepPending())
+        m_imbalanceTicks = 0; // a mid-confirm step trigger dies with the drag
         m_stepPin = -1;       // steppingPin() stays callable after the drag: no stale index
         m_suspended = false;
         m_scoped = false;
@@ -221,6 +232,15 @@ public:
     /// it, so a 0.54-scale child crouches and walks instead of losing its pins to adult-sized
     /// thresholds.
     float sizeScale() const { return m_sizeScale; }
+
+    /// True for a FOOT-CLASS joint (kFootBindHeight): the ONE reading of the rule, for the rig's
+    /// own policy and the Armature's solve alike (both read the same bind positions).
+    bool isFootClass(int node) const {
+        return node >= 0 && static_cast<std::size_t>(node) < m_bindPos.size() &&
+               m_bindPos[static_cast<std::size_t>(node)].y < kFootBindHeight * m_sizeScale;
+    }
+    /// Per bone: its anatomical parent (-1 at the root) — the Armature's own, as the rig was built.
+    const std::vector<int>& parents() const { return m_parents; }
 
     /// Which nodes the current drag's solve moves (paths between effector, pins, pelvis, and the
     /// anchor root); everything else keeps its local pose and rides along.
@@ -278,8 +298,13 @@ public:
     bool isSpineJoint(int node) const;
     /// A leg joint with a foot-class joint below it — a knee, or a thigh's twist bone (never a girdle
     /// joint, never a foot): the joint a kneel plants, what the solve prices as a knee.
-    bool isLegJointAboveFoot(int node) const;
-    int  legOf(int node) const;               ///< The thigh socket a joint hangs from, or -1 for no leg.
+    bool isLegJointAboveFoot(int node) const {
+        return node >= 0 && static_cast<std::size_t>(node) < m_legAboveFoot.size() && m_legAboveFoot[static_cast<std::size_t>(node)] != 0;
+    }
+    /// The thigh socket a joint hangs from, or -1 for no leg.
+    int legOf(int node) const {
+        return node >= 0 && static_cast<std::size_t>(node) < m_legOfNode.size() ? m_legOfNode[static_cast<std::size_t>(node)] : -1;
+    }
     /// The PELVIS BONE: the joint of the girdle, other than the solve root, that BOTH LEGS hang
     /// from (two children or more with a foot-class joint below them); none on a rig whose legs
     /// hang off the root itself. NOT "a girdle joint with two children": one generation's thighs
@@ -314,7 +339,7 @@ public:
     /// drag (seedPoseContacts): the hands of arms that HUNG and came down on the floor by
     /// themselves in an earlier drag — no supports of hers, and props if they are held. Set by
     /// the Armature before beginDrag.
-    void setIncidentalContacts(std::vector<char> nodes) { m_incidentalContact = std::move(nodes); }
+    void setIncidentalContacts(const std::vector<char>& nodes) { m_incidentalContact = nodes; }
     /// A TWIST HELPER IS NO CONTACT (2026-10-28; IK_HELPER_CONTACTS is the A/B): a bone that splits
     /// a rigid segment — the main family's mid-thigh and mid-forearm twist bones — has no joint a
     /// body rests on; the segment's far joint (the knee, the hand) is the contact. The contact rules
@@ -331,12 +356,12 @@ public:
     /// as well as the junction's reach, the lift-off only the reach, and between the two a straight
     /// arm on a shrugged collar left its hand weightless on the floor and then in the air with its
     /// pin standing. Set by the Armature before each updateContacts().
-    void setRiseUnloadedContacts(std::vector<char> nodes) { m_riseUnloaded = std::move(nodes); }
+    void setRiseUnloadedContacts(const std::vector<char>& nodes) { m_riseUnloaded = nodes; } // (assigned, not moved: the buffer keeps its capacity across ticks)
     /// Per node, this tick: a live contact whose LIFT-OFF the solve defers — a knee whose lying foot is
     /// still rolling back onto its toes (the flat kneel's unroll, Armature::dragIkTick). With the pin
     /// went the foot's soft hold in place: the foot slid 10cm and the thigh splayed to its box in one
     /// tick, 122mm at the knee, standing up from a kneel sat back on the heels (2026-10-28).
-    void setLiftOffDeferred(std::vector<char> nodes) { m_liftOffDeferred = std::move(nodes); }
+    void setLiftOffDeferred(const std::vector<char>& nodes) { m_liftOffDeferred = nodes; }
     bool liftOffDeferred(int node) const {
         return node >= 0 && static_cast<std::size_t>(node) < m_liftOffDeferred.size() && m_liftOffDeferred[static_cast<std::size_t>(node)] != 0;
     }
@@ -458,6 +483,13 @@ private:
     std::vector<char>                   m_riseUnloaded;      ///< Per bone: see setRiseUnloadedContacts().
     std::vector<char>                   m_liftOffDeferred;   ///< Per bone: see setLiftOffDeferred().
     std::vector<char>                   m_fleshRows;         ///< Per bone: see fleshPoints().
+    // Per-node STRUCTURE the policy asks for every tick, cached at build (constants of the skeleton):
+    std::vector<char>      m_underPelvis;     ///< See descendsFromPelvis().
+    std::vector<char>      m_footBelow;       ///< See hasFootBelow().
+    std::vector<char>      m_legAboveFoot;    ///< See isLegJointAboveFoot().
+    std::vector<char>      m_limbTip;         ///< See isLimbTip().
+    std::vector<int>       m_legOfNode;       ///< See legOf().
+    std::vector<glm::vec3> m_lastAppliedPrev; ///< updateContacts: the tick before m_lastApplied (swapped, never reallocated).
     /// True for a drag of a figure SEATED ON THE FLOOR by a joint of her upper body (set where the
     /// pose's contacts are seeded): her arms are no supports in it (seedPoseContacts).
     bool                                m_seatedTrunkDrag = false;
@@ -650,19 +682,41 @@ private:
     /// True when @p node hangs below the pelvis in the anatomical tree: what a ground contact
     /// must be (a merged follower's scene node sits beside the pelvis at the origin and once
     /// read as "planted").
-    bool descendsFromPelvis(int node) const;
+    bool descendsFromPelvis(int node) const {
+        return node >= 0 && static_cast<std::size_t>(node) < m_underPelvis.size() && m_underPelvis[static_cast<std::size_t>(node)] != 0;
+    }
     /// isPelvisBone()'s test for one node (uncached).
     bool hangsBothLegs(int node) const;
     /// True when a foot-class joint (low at bind) hangs anywhere below @p node: a leg's joint, the
     /// pelvis bone — never a bone of the spine.
-    bool hasFootBelow(int node) const;
+    bool hasFootBelow(int node) const {
+        return node >= 0 && static_cast<std::size_t>(node) < m_footBelow.size() && m_footBelow[static_cast<std::size_t>(node)] != 0;
+    }
 
     /// A joint's height above the floor through its lowest riding part (see
     /// m_ridingDescendants), each part measured against its own floor clearance: 0 = touching.
     float contactHeight(int node, const std::vector<glm::vec3>& positions) const;
     /// True when @p joint is the KNEE over @p pinned: the real joint the pinned one hangs from.
     bool kneeOver(int joint, int pinned) const;
-    bool isLimbTip(int node) const;           ///< A real-mass joint with no real-mass joint below it (a hand, a foot, the head).
+    /// A real-mass joint with no real-mass joint below it (a hand, a foot, the head).
+    bool isLimbTip(int node) const {
+        return node >= 0 && static_cast<std::size_t>(node) < m_limbTip.size() ? m_limbTip[static_cast<std::size_t>(node)] != 0
+                                                                                : computeIsLimbTip(node);
+    }
+    /// The per-node structure above, computed (build caches them: constants of the skeleton that the
+    /// policy asked for every tick, each an O(n x depth) walk).
+    bool computeDescendsFromPelvis(int node) const;
+    /// A joint of an ARM (or the head): its limb hangs from a junction above the hips, where a
+    /// leg's is the pelvis. (The sit's rule — a floor sitter's arms are no supports under a trunk
+    /// drag — in seedPoseContacts and updateContacts.)
+    bool limbHangsAboveHips(int node) const {
+        return m_bindPos[static_cast<std::size_t>(limbJunction(node))].y >
+               m_bindPos[static_cast<std::size_t>(m_pelvis)].y + kArmJunctionHeight * m_sizeScale;
+    }
+    bool computeHasFootBelow(int node) const;
+    bool computeIsLegJointAboveFoot(int node) const;
+    bool computeIsLimbTip(int node) const;
+    int  computeLegOf(int node) const;
     bool servedByPinAbove(int node) const;    ///< A pin at or above the joint on its path makes it no contact of its own — a hand under an elbow excepted.
     bool servedByHandBelow(int node, const std::vector<glm::vec3>& positions) const; ///< A hand on the floor below an arm joint makes the joint (an elbow) no contact of its own.
 

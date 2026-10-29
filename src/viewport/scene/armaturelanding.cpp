@@ -86,8 +86,7 @@ bool Armature::beginLandingBounce(float impactSpeed) {
         if (node < 0 || m_ikRig->pinIsUser(p)) {
             continue; // (a user pin holds what it holds: a hand on a rail)
         }
-        const bool footClass = static_cast<std::size_t>(node) < m_ikBindPos.size() &&
-                               m_ikBindPos[static_cast<std::size_t>(node)].y < kDigitFootHeight * scale;
+        const bool footClass = m_ikRig->isFootClass(node);
         if (m_ikRig->pinIsLive(p) || !footClass) {
             other = true;
         } else {

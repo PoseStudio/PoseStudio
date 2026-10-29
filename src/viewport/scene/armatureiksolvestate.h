@@ -39,6 +39,8 @@ struct IkSolveScratch {
     const std::vector<int>&         secondaries; ///< THE GROUP's other dragged joints (IkRig::secondaryEffectors): each rides the cursor's displacement with the effector (Armature::m_jsGroupTargets), its limb freed and priced as the dragged one.
     const glm::vec3*                dragTarget; ///< The cursor's target this tick, or null on the release.
     const glm::vec3*                holdTarget; ///< The released joint's hold, or null.
+    glm::vec3                       lateral{};  ///< The figure's LATERAL axis at the press (her left), level: (cos h, 0, -sin h) of m_jsRootHeading.
+    glm::vec3                       fore{};     ///< ... and its FORE axis, the heading: (sin h, 0, cos h).
 
     // --- Set by ikChooseUnknowns ---
     std::vector<char>               dofBone;  ///< Per bone: one of the solve's unknowns (its unlocked channels are DoFs).
@@ -53,6 +55,25 @@ struct IkSolveScratch {
     float                           pelvisBalance{};  ///< THE HIP HINGE: how far balance is on under a pelvis drag (0-1), served by the trunk.
     float                           hingeSlack{};  ///< what the hinge has LET GO of (a walk, hips leaving the stance): the row's slack
     int                             swayChest{};  ///< The chest bone whose roll the sway keeps LEVEL (-1: none).
+    // --- Per-tick buffers (ikBalanceRow, ikPlaneRows): assigned before they are read ---
+    std::vector<glm::vec3>          realPositions;  ///< ikBalanceRow: the pose's joints as they stand (the hung arms' centre of mass)
+    std::vector<glm::vec3>          ridePositions;  ///< ikBalanceRow: Armature::balancePositions(), once a tick ...
+    bool                            ridePositionsValid{}; ///< ... once computed
+    std::vector<char>               floorExempt;    ///< ikPlaneRows: per bone, no floor row (a pin's subtree)
+    std::vector<float>              floorScale;     ///< ikPlaneRows: per bone, its floor rows' share of their weight (a foot letting go)
+    std::vector<float>              floorAllow;     ///< ikPlaneRows: per bone, the depth its floor rows forgive (m)
+    std::vector<char>               volumeExempt;   ///< ikPlaneRows: per bone, no volume row (a hanging arm's joint)
+    std::vector<std::pair<double, int>> fleshLow;   ///< the plane source's flesh scratch: the low points of one bone ...
+    std::vector<glm::dvec3>         fleshTaken;     ///< ... the ones taken as rows ...
+    std::vector<int>                fleshTakenIndex; ///< ... and their indices
+    std::vector<int>                subtreeBuf;     ///< Armature::collectSubtree's output, wherever a stage walks a subtree (cleared before each use)
+    // --- Set by ikPosturePolicy, read by ikPostureDofs / ikPostureRoot ---
+    std::vector<char>               plantedThigh; ///< Per bone: a planted foot's THIGH (its abduction is boxed: kThighAbductBoxDeg).
+    std::vector<int>                abductAxis;   ///< ... its abduction channel (the free one about the fore axis, neither twist nor flexion).
+    std::vector<int>                flexAxis;     ///< ... and its flexion channel, which tightens the box.
+    float                           seatRollLift{}; ///< THE SEAT ROLLS: how much higher (lower) the hip joint rests at the rolled pitch.
+    double                          sagittalLock{}; ///< The spine's twist and side-bend price multiplier under a sagittal trunk drag (kSagittalLock), 1 otherwise.
+    double                          kneelTilt{};    ///< ON HER KNEES THE PELVIS'S TILT IS DEAR: the eased tilt-price multiplier (m_jsKneelTilt).
     // --- Set by ikStiffnessClasses ---
     std::vector<char>               cls;  ///< Per bone: the stiffness class — 0 = trunk, 1 = the dragged limb, 2 = a limb serving a pin.
     std::vector<char>               twistPriced;  ///< Per bone: carries the limb TWIST price (kPinLimbTwistScale).
@@ -123,6 +144,30 @@ struct IkSolveScratch {
     // --- Set by ikApply ---
     float                           changed{};  ///< The largest channel (deg) or translation (mm) change the apply made.
     bool                            moved{};  ///< The apply changed the pose past 1e-5: what solveIk returns.
+};
+
+/// ONE PIN's state as ikPinRows builds its rows in parts (armatureiksolverows.cpp): the pin, its
+/// hold's weight and ball, its place row (a foot's soft HEEL, pushed once the live-contact and
+/// prone parts have scaled it), and the flat-foot model's state the standing foot's rows read.
+struct IkPinRowState {
+    std::size_t       p = 0;                   ///< the pin's index
+    const IkEffector* pin = nullptr;
+    std::size_t       node = 0;                ///< its joint
+    double            weight = 0.0;            ///< its hold: kPinWeight, x kUserPinScale for a user pin
+    int               ball = -1;               ///< its BALL joint (a standing foot's model), or -1
+    bool              primaryKneeFoot = false; ///< the foot below the DRAGGED knee
+    bool              kneeFoot = false;        ///< ... or below one of THE GROUP's secondary knees: it turns on its heel
+    JointPositionTask task;                    ///< the pin's place row (a foot's soft heel): finished and pushed by ikPinRowFootFree
+    std::size_t       heelTask = 0;            ///< ... its index among the position rows once pushed
+    // A KNEELING FOOT LIES FLAT (ikPinRowFlatFoot sets these; the foot rows read them):
+    float  flat = 0.0f;          ///< this foot's flat share (m_jsFootFlat, eased)
+    float  flip = 0.0f;          ///< how far its lying model has turned back to the standing one (the rise's progress, or the knee's lift)
+    bool   flatFoot = false;     ///< its model is the lying one (it is, or was this drag, flat)
+    bool   unrolling = false;    ///< let go of by its knee, rolling back onto its toes in place: the ankle rides the shin meanwhile
+    bool   toLying = false;      ///< its knee holds: the foot is lying, or rolling onto its top
+    float  rollProgress = 1.0f;  ///< how far the roll onto its top has gone (1: lying, or never rolled)
+    bool   lyingKneeFoot = false; ///< the DRAGGED KNEE's foot, found lying: it rides its shin
+    double footFree = 0.0;       ///< THE FEET COME UP: a foot behind a planted knee the hips have gone ahead of (its rows let go)
 };
 
 } // namespace pose

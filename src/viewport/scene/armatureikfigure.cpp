@@ -48,8 +48,7 @@ bool Armature::isBodyGrab(int effector) const {
     // A bone of the SPINE: what it hangs from, going up, is the root itself — a limb's, the neck's
     // and the head's junction is the bone they branch from — and it is no leg's joint (on a rig
     // whose thighs hang straight off the hips a leg's junction is the root too).
-    const bool footClass = static_cast<std::size_t>(effector) < m_ikBindPos.size() &&
-                           m_ikBindPos[static_cast<std::size_t>(effector)].y < kDigitFootHeight * rig.sizeScale();
+    const bool footClass = rig.isFootClass(effector);
     return rig.limbJunction(effector) == root && !rig.isLegJointAboveFoot(effector) && !footClass;
 }
 

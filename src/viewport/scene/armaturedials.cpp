@@ -17,6 +17,7 @@
  */
 
 #include "armature.h"
+#include "ikmath.h" // axisIndexOf
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -27,8 +28,6 @@ namespace pose {
 
 namespace {
 
-/// A channel whose limits span less than this is LOCKED: it has no dial (isTwistBone's measure).
-constexpr float kDialLockedRangeDeg = 2.0f;
 /// An unlimited channel (the hips' own rotation) reads 100 at half a turn.
 constexpr float kDialUnlimitedDeg = 180.0f;
 /// BEND FORWARD is the wider of the two bend channels — unless the narrower spans this share of
@@ -56,15 +55,6 @@ constexpr float kDialOffPlaneShare = 0.003f;
 /// stands closer than this share of the figure's height, where this share of it stands in.
 constexpr float kDialSweepMinShare = 0.04f;
 constexpr float kDialSweepDefaultShare = 0.08f;
-
-int orderAxis(char c) {
-    switch (c) {
-    case 'X': case 'x': return 0;
-    case 'Y': case 'y': return 1;
-    case 'Z': case 'z': return 2;
-    default:            return -1;
-    }
-}
 
 } // namespace
 
@@ -102,7 +92,7 @@ glm::vec3 Armature::limbDirection(int bone) const {
     // children do not lie along it: the toes fan sideways from the ball, a mid-foot bone sits
     // millimetres from its ankle, the chest's heaviest children are the collars.) What the
     // joints say is only which WAY along it is distal.
-    const int       lengthAxis = std::max(0, orderAxis(lengthAxisLetter(src)));
+    const int       lengthAxis = std::max(0, axisIndexOf(lengthAxisLetter(src)));
     const glm::vec3 axis = glm::normalize(glm::vec3(src.orient[lengthAxis]));
     const glm::vec3 origin = bindPos(bone);
 
@@ -196,11 +186,11 @@ JointDial Armature::jointDial(int bone, JointDialKind kind) const {
         JointDial out;
         float     lo = 0.0f, hi = 0.0f;
         limits(which, axis, lo, hi);
-        if (hi - lo < kDialLockedRangeDeg) {
+        if (hi - lo < kLockedRangeDeg) {
             return out; // locked: no dial
         }
         float full = sign > 0.0f ? hi : lo;
-        if (std::abs(full) < 0.5f * kDialLockedRangeDeg) {
+        if (std::abs(full) < 0.5f * kLockedRangeDeg) {
             full = sign > 0.0f ? lo : hi;
         }
         const float a = lo / full * 100.0f;
@@ -235,7 +225,7 @@ JointDial Armature::jointDial(int bone, JointDialKind kind) const {
         return std::abs(hi) > std::abs(lo) ? 1.0f : -1.0f;
     };
 
-    const int twistAxis = std::max(0, orderAxis(lengthAxisLetter(b)));
+    const int twistAxis = std::max(0, axisIndexOf(lengthAxisLetter(b)));
 
     if (kind == JointDialKind::Twist) {
         // The joint's own twist channel — or, where that is locked, its limb's twist bone's (the
@@ -244,7 +234,7 @@ JointDial Armature::jointDial(int bone, JointDialKind kind) const {
         int   axis = twistAxis;
         float lo = 0.0f, hi = 0.0f;
         limits(joint, twistAxis, lo, hi);
-        if (hi - lo < kDialLockedRangeDeg) {
+        if (hi - lo < kLockedRangeDeg) {
             twistBone = -1;
             const int main = mainChild(joint);
             if (main >= 0 && isTwistBone(main)) {
@@ -262,7 +252,7 @@ JointDial Armature::jointDial(int bone, JointDialKind kind) const {
             }
             const Bone& t = m_bones[static_cast<std::size_t>(twistBone)];
             for (int a = 0; a < 3; ++a) {
-                if (!(t.rotLimited[a] && (t.rotMax[a] - t.rotMin[a]) < kDialLockedRangeDeg)) {
+                if (!(t.rotLimited[a] && (t.rotMax[a] - t.rotMin[a]) < kLockedRangeDeg)) {
                     axis = a; // (a twist bone has exactly one free channel)
                 }
             }
@@ -365,7 +355,7 @@ bool Armature::jointDialSweep(const JointDial& dial, JointDialSweep& sweep) cons
     // frame and its parent's posed rotation put it in the model's space.
     glm::mat3 prefix(1.0f);
     for (const char ch : bone.rotationOrder) {
-        const int axis = orderAxis(ch);
+        const int axis = axisIndexOf(ch);
         if (axis < 0) {
             continue;
         }

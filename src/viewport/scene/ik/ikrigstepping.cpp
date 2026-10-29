@@ -5,10 +5,10 @@
  *        swing (updateStepping), lands it (landStep), and rebuilds the support polygon from the
  *        pins' footprints (rebuildSupportHull).
  *
- * The trigger is sustained and multi-signaled — the smoothed balance EFFORT, a standing foot's
- * entry pin error (the FK pose being dragged off its plant), or, for explicit pelvis drags only,
- * a foot far from its target-centered stance spot (what makes a hip walk step proactively and
- * take its final gathering step). Landings are reach-clamped against the leg's path from where
+ * The trigger is sustained and two-signaled — the smoothed balance EFFORT, or a foot far from
+ * its anchor-centred stance spot (what makes a hip walk, and a trunk drag that takes the hips
+ * along, step proactively and take the final gathering step). There is no pin-strain trigger:
+ * the solve never drags a foot off its plant. Landings are reach-clamped against the leg's path from where
  * the root is GOING and clearance-clamped on the near side of other pins so legs never scissor;
  * a step in flight always advances whatever the drag does meanwhile. See ikrig.cpp for the TU
  * layout; the constants come from ikrig_constants.h. Qt-free (std + GLM).

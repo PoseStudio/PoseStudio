@@ -397,6 +397,7 @@ add_executable(
     src/viewport/scene/ik/ikrigpolicy.cpp     # per-tick policy: intents, the lift-off test, the step policy's entry
     src/viewport/scene/ik/ikrigstepping.cpp   # balance-driven foot re-planting
     src/viewport/scene/ik/ikrigcontacts.cpp   # live contact re-detection mid-drag, landings
+    src/viewport/scene/ik/ikrigvolumes.cpp    # the self-collision body volumes: the mesh fit, the drag-start mask, the target clamp
     src/viewport/scene/ik/bodymesh.cpp        # the body mesh sample the volumes are fitted to (+ its dump sidecar)
     src/viewport/scene/ik/jointsolver.cpp     # THE IK solver: whole-body regularized least squares on the Euler channels
     src/viewport/scene/ik/jointsolver.h
@@ -606,6 +607,7 @@ add_executable(PoseStudioIkHarness
     src/viewport/scene/ik/ikrigpolicy.cpp
     src/viewport/scene/ik/ikrigstepping.cpp
     src/viewport/scene/ik/ikrigcontacts.cpp
+    src/viewport/scene/ik/ikrigvolumes.cpp
     src/viewport/scene/ik/bodymesh.cpp
     src/viewport/scene/ik/jointsolver.cpp
 )

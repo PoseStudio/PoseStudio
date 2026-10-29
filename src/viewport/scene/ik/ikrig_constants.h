@@ -48,10 +48,7 @@ constexpr float kEffectorPinHoldShare = 0.28f;
 /// the third spine bone (18-25cm) is three bones up and leans on the two below it.
 constexpr float kGirdleGrabReach = 0.20f;
 
-// A FOOT-CLASS joint: one that sits this low AT BIND (the ankle's 8cm, the toes) — on the floor
-// because the figure stands on it. Any other joint under the contact height is there because of
-// the POSE (a kneeling knee, a hand on the floor): see plantContacts.
-constexpr float kFootBindHeight = 0.20f;
+// (A FOOT-CLASS joint — one that sits low AT BIND — is IkRig::kFootBindHeight / isFootClass.)
 // A foot whose LOWEST joint stands this far over its own floor height, while another foot of
 // the figure stands, was LIFTED by the user and is not planted at a drag's start (plantContacts).
 // Over the residue the ground healing is for (millimetres), under any lift worth the name.

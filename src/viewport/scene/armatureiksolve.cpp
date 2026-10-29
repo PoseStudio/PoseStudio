@@ -86,14 +86,11 @@ int Armature::ikDamping() {
     return level;
 }
 
-void Armature::setIkDamping(int level) {
-    g_ikDamping.store(std::clamp(level, 0, kIkDampingLevels - 1));
-}
-
 void Armature::buildJointSolver() {
     std::vector<JointSolverBone> bones(m_bones.size());
     m_jsTwistAxis.assign(m_bones.size(), -1);
-    m_jsSpineChain.clear(); // (a new skeleton: searched again at the next solve)
+    m_jsSpineChain.clear(); // (a new skeleton: searched again at the next solve — ensureSpineChain)
+    m_jsSpineChainChest = -1;
     m_jsWristOf.clear();    // (... and the hands: ensureHandMaps)
     m_jsHandTip.clear();
     for (std::size_t i = 0; i < m_bones.size(); ++i) {
@@ -141,6 +138,8 @@ bool Armature::solveIk(const glm::vec3* dragTarget, const glm::vec3* holdTarget)
     }
     IkSolveScratch s{rig, n, root, effector, *m_jointSolver, rig.pins(), rig.activeNodes(), rig.secondaryEffectors(),
                      dragTarget, holdTarget};
+    s.lateral = glm::vec3(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
+    s.fore = glm::vec3(std::sin(m_jsRootHeading), 0.0f, std::cos(m_jsRootHeading));
 
     // The stages, in order — each a member function over the scratch (armatureiksolvestate.h):
     // what the drag IS and which channels answer it, the posture model that prices them, the
@@ -465,9 +464,9 @@ void Armature::updateGroupTargets() {
             const glm::vec3& pinTarget = m_ikRig->pins()[p].target;
             const float      reach = glm::length(m_jsGroupStartPos[i] - pinTarget);
             const glm::vec3  out = target - pinTarget;
-            const float      far = glm::length(out);
-            if (far > reach && far > 1.0e-5f) {
-                target = pinTarget + out * (reach / far);
+            const float      dist = glm::length(out);
+            if (dist > reach && dist > 1.0e-5f) {
+                target = pinTarget + out * (reach / dist);
             }
             break;
         }
@@ -525,13 +524,7 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
         // foot's: a shin with its foot weighs in as trunk-class, and a knee is no less a limb's.)
         bool limb = effector != rig.rootNode() && static_cast<std::size_t>(effector) < m_jsStartPos.size();
         if (limb && rig.effectorIsTrunk()) {
-            const Bone& bone = m_bones[static_cast<std::size_t>(effector)];
-            limb = m_ikBindPos[static_cast<std::size_t>(effector)].y < 0.20f * scale;
-            for (int a = 0; a < 3 && !limb; ++a) {
-                const float range = bone.rotMax[a] - bone.rotMin[a];
-                limb = bone.rotLimited[a] && range >= kFoldRangeDeg && bone.rotMin[a] < 0.0f && bone.rotMax[a] > 0.0f &&
-                       std::min(-bone.rotMin[a], bone.rotMax[a]) <= kFoldNarrowFraction * std::max(-bone.rotMin[a], bone.rotMax[a]);
-            }
+            limb = rig.isFootClass(effector) || foldAxisOf(effector) >= 0;
         }
         float limbBeyondUp = 0.0f; // (what the limb cannot give UPWARD: THE TIPTOE reads it below)
         if (!kLimbRises && limb) {
@@ -548,13 +541,13 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
                 m_jsLimbReach = reach;
             }
             const glm::vec3 out = target - m_jsStartPos[static_cast<std::size_t>(m_jsLimbSocket)];
-            const float far = glm::length(out);
-            const float beyond = std::max(0.0f, far - kLimbReachShare * m_jsLimbReach);
-            const float beyondUp = far > 1.0e-4f ? beyond * std::max(0.0f, out.y) / far : 0.0f;
+            const float dist = glm::length(out);
+            const float beyond = std::max(0.0f, dist - kLimbReachShare * m_jsLimbReach);
+            const float beyondUp = dist > 1.0e-4f ? beyond * std::max(0.0f, out.y) / dist : 0.0f;
             rose = std::min(rose, beyondUp);
             roseAgain = std::min(roseAgain, beyondUp);
             // (THE TIPTOE reads the target beyond the limb's FULL length: kTiptoeReachShare.)
-            limbBeyondUp = far > 1.0e-4f ? std::max(0.0f, far - kTiptoeReachShare * m_jsLimbReach) * std::max(0.0f, out.y) / far : 0.0f;
+            limbBeyondUp = dist > 1.0e-4f ? std::max(0.0f, dist - kTiptoeReachShare * m_jsLimbReach) * std::max(0.0f, out.y) / dist : 0.0f;
         }
         // ... and a trunk joint of a figure SITTING OR LYING ON THE FLOOR is, to her seat, what a
         // hand is to its shoulder: taken up, the trunk first comes up ABOUT the seat — she sits up,
@@ -725,8 +718,7 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
         static const double kTiptoePitch = envOr("IK_JS_TIPTOE_DEG", kTiptoeDeg);
         m_jsTiptoe = 0.0f;
         m_jsTiptoeTheta = 0.0f;
-        const bool footEffector = static_cast<std::size_t>(effector) < m_ikBindPos.size() &&
-                                  m_ikBindPos[static_cast<std::size_t>(effector)].y < 0.20f * scale;
+        const bool footEffector = rig.isFootClass(effector);
         if (!kNoTiptoe && m_jsTiptoeDrag && limb && !footEffector && !rig.suspended() && limbBeyondUp > 0.0f) {
             const float pitch = glm::radians(static_cast<float>(kTiptoePitch));
             const auto liftAt = [&](float t) { return m_jsTiptoeD * std::sin(t) + m_jsTiptoeH0 * (std::cos(t) - 1.0f); };
@@ -779,7 +771,8 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
             }
         }
     }
-    std::vector<glm::vec3> positions(n);
+    std::vector<glm::vec3>& positions = m_jsPositionsBuf; // (kept across ticks: no allocation)
+    positions.resize(n);
     for (std::size_t i = 0; i < n; ++i) {
         positions[i] = glm::vec3(m_poseGlobal[i][3]);
     }
@@ -835,8 +828,7 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
     }
     syncRigRotations(); // (the contacts are read off the SOLVED pose: its clearances, not the tick's first)
     // A knee still coming down is planted where it IS (see the hard live pins in solveIk).
-    static const bool kKneeLandingHeldTick = std::getenv("IK_JS_KNEE_LANDING_HELD") != nullptr;
-    for (std::size_t p = 0; p < rig.pins().size() && !kKneeLandingHeldTick; ++p) {
+    for (std::size_t p = 0; p < rig.pins().size() && !kKneeLandingHeld; ++p) {
         const IkEffector& pin = rig.pins()[p];
         if (!rig.pinIsLive(p) || !pin.hard || rig.pinUnderEffector(p) || pin.node < 0) {
             continue;
@@ -857,7 +849,8 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
     // to 190; the cause was the solver's — a trial judged by the rows of the pose it had left, see
     // JointSolver::descend — and with that mended the re-seat only made a reclining sit's hold jump
     // 39mm where it jumps 8 on two rigs, and a prone descent 61 where it jumps 29.)
-    std::vector<char> heldBefore(m_jsHangArms.size(), 0);
+    std::vector<char>& heldBefore = m_jsHeldBeforeBuf;
+    heldBefore.assign(m_jsHangArms.size(), 0);
     for (std::size_t a = 0; a < m_jsHangArms.size(); ++a) {
         heldBefore[a] = hangArmHeld(m_jsHangArms[a]) ? 1 : 0;
     }
@@ -867,13 +860,14 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
         // IkRig::setLiftOffDeferred: the foot's soft hold in place went with the pin, and the foot slid
         // 10cm while the thigh splayed to its box in one tick, 122mm at the knee, standing up off the
         // heels. The knee's ceiling and the roll pace it meanwhile — the flat block of ikPinRows.)
-        std::vector<char> deferred(n, 0);
+        std::vector<char>& deferred = m_jsDeferredBuf;
+        deferred.assign(n, 0);
         for (std::size_t f = 0; f < n && f < m_jsFootKnee.size() && f < m_jsFootWasFlat.size() && f < m_jsFootUnrolled.size(); ++f) {
             if (m_jsFootWasFlat[f] && !m_jsFootUnrolled[f] && m_jsFootKnee[f] >= 0 && static_cast<std::size_t>(m_jsFootKnee[f]) < n) {
                 deferred[static_cast<std::size_t>(m_jsFootKnee[f])] = 1;
             }
         }
-        rig.setLiftOffDeferred(std::move(deferred));
+        rig.setLiftOffDeferred(deferred);
     }
     if (rig.updateContacts(positions) && rig.takeLanded()) {
         captureFlatHold(true);
