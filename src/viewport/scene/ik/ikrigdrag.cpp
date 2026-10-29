@@ -44,6 +44,29 @@ bool IkRig::isGirdleJoint(int node) const {
            pathLenToRoot(node) < kGirdleGrabReach * m_sizeScale;
 }
 
+bool IkRig::isSpineJoint(int node) const {
+    return node >= 0 && node < static_cast<int>(m_parents.size()) && node != m_pelvis &&
+           m_bodyNode[static_cast<std::size_t>(node)] && limbJunction(node) == m_pelvis && !hasFootBelow(node);
+}
+
+bool IkRig::hasFootBelow(int node) const {
+    const int n = static_cast<int>(m_parents.size());
+    if (node < 0 || node >= n) {
+        return false;
+    }
+    for (int i = node + 1; i < n; ++i) {
+        if (m_bindPos[static_cast<std::size_t>(i)].y >= kFootBindHeight * m_sizeScale) {
+            continue;
+        }
+        for (int cur = m_parents[static_cast<std::size_t>(i)]; cur >= 0; cur = m_parents[static_cast<std::size_t>(cur)]) {
+            if (cur == node) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool IkRig::isPelvisBone(int node) const {
     if (m_pelvisBoneNode == -2) {
         m_pelvisBoneNode = -1; // (found once per rig: the solve asks for every bone, every tick)
@@ -125,6 +148,26 @@ bool IkRig::beginDrag(int effectorNode, const std::vector<glm::vec3>& positions,
         }
         m_effector = p;
     }
+    // A COLLAR under a SCOPED drag is the TRUNK's (2026-10-28; IK_SCOPED_COLLAR_STAYS is the A/B):
+    // the shoulder girdle's bone hangs off a spine joint and is its own chain's whole length — its
+    // limb junction is its parent — so Ctrl+dragging it turned the collar about its own joint and
+    // moved nothing a user could see ("ctrl+click drag on chest_2 does nothing"), and the collars'
+    // skin is the whole band of the upper chest above the breast line, in every view (a pixel scan
+    // over the chest: a click there picks a collar as often as the chest). Promoted to the spine
+    // joint it hangs from, as a pectoral is by its token mass, a Ctrl grab of the upper chest bends
+    // the trunk down to the pelvis wherever it lands; the Armature measures the grab's offset off
+    // the pose each tick, as for a pectoral. AND THE NECK'S LOWEST JOINT IS THE SAME CASE (the
+    // user's third report the same night: the lit upper chest runs up the throat, a click there
+    // picks the neck's base, and its chain — that one bone — moved nothing: head 0.0mm): it is
+    // promoted too. The upper neck and the head are not: their chains run down through the neck
+    // base, which bends, and Ctrl on the head or the upper neck bends the neck alone, by design.
+    static const bool kScopedCollarStays = std::getenv("IK_SCOPED_COLLAR_STAYS") != nullptr; // A/B probe
+    if (!kScopedCollarStays && m_scoped && m_effector != m_pelvis) {
+        const int par = m_parents[static_cast<std::size_t>(m_effector)];
+        if (par >= 0 && par != m_pelvis && limbJunction(m_effector) == par && isSpineJoint(par)) {
+            m_effector = par;
+        }
+    }
     // PELVIS-GIRDLE PROMOTION: a joint within two bones and kGirdleGrabReach of the solve root —
     // the pelvis bone and the first spine bone (their origins sit 2cm from the root's on every
     // generation), the thigh sockets and the second spine bone — goes where the pelvis goes and
@@ -136,9 +179,17 @@ bool IkRig::beginDrag(int effectorNode, const std::vector<glm::vec3>& positions,
     // flesh belongs to the pelvis bone's — in the app "dragging the hip" did next to nothing
     // sideways or fore and aft. The Armature keeps the GRABBED joint on the cursor (it measures
     // the grab's offset from the root on every tick: see Armature::dragIkTo).
+    // (... but NOT a joint of the SPINE under a SCOPED drag — Ctrl on the lower abdomen, 2026-10-28:
+    // the first and second spine bones are girdle grabs, and promoted to the pelvis they were the
+    // FIGURE MOVE under Ctrl where the user wants the trunk bent down to the pelvis. The effector
+    // stays the spine joint, and its scoped chain is the bones from it down to, not including,
+    // the root. The pelvis bone and the thigh sockets — a foot below them — go to the pelvis as
+    // ever: a Ctrl grab of the hips moves the figure. m_scoped is set before beginDrag for this.)
     if (m_effector != m_pelvis) {
         static const bool kNoGirdle = std::getenv("IK_NO_GIRDLE_GRAB") != nullptr; // A/B probe
-        if (!kNoGirdle && isGirdleJoint(m_effector)) {
+        static const bool kScopedSpinePromotes = std::getenv("IK_SCOPED_SPINE_GIRDLE_PROMOTES") != nullptr; // A/B probe: as before 2026-10-28
+        const bool spineUnderScope = !kScopedSpinePromotes && m_scoped && !hasFootBelow(m_effector);
+        if (!kNoGirdle && isGirdleJoint(m_effector) && !spineUnderScope) {
             m_effector = m_pelvis;
             m_girdleGrab = true;
         }
@@ -410,6 +461,15 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
             // second dragged foot would fight that foot's row as it would the first's.)
             const auto inSubtreeOf = [&](int eff) {
                 if (eff == m_pelvis) {
+                    return false;
+                }
+                // (... and a SCOPED TRUNK drag — Ctrl on the chest, the abdomen, the neck, 2026-10-28:
+                // the chain alone moves, and a pin below it is what the user asked to hold — the
+                // solve serves it with the pinned limb's own bones, which hang below the effector
+                // and are unknowns for that: a pinned hand stays while the chest bends toward it and
+                // its arm folds, and when the arm runs out the pin stops the chest. A PLAIN trunk
+                // drag leaves such a pin out, as before: the body follows the chest there.)
+                if (m_scoped && eff == m_effector && effectorIsTrunk()) {
                     return false;
                 }
                 for (int cur = m_parents[static_cast<std::size_t>(u)]; cur >= 0;

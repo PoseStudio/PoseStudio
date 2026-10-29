@@ -397,8 +397,9 @@ bool Armature::beginIkDrag(IkScope scope) {
         return beginDigitDrag();
     }
     // IkScope::Part (the app's Ctrl+drag) is resolved by what the rig's drag turns out to have hold
-    // of, below: the BODY itself -> the figure is moved as she is posed (Figure); anything else ->
-    // the grabbed chain alone (Chain).
+    // of, below: the HIPS — the solve root, which a grab of the pelvis girdle is promoted to — ->
+    // the figure is moved as she is posed (Figure); anything else, a spine joint included since
+    // 2026-10-28 (CTRL ON THE TORSO, below) -> the grabbed chain alone (Chain).
     const bool part = scope == IkScope::Part;
     if (part) {
         scope = IkScope::Chain;
@@ -461,9 +462,12 @@ bool Armature::beginIkDrag(IkScope scope) {
     const bool grabbedBody = m_ikGrabBone == m_selectedBone &&
                              (glm::length(m_ikGrabLocal) > 1.0e-4f || isTwistBone(m_selectedBone));
     // (The HEAD is no segment: what hangs below it is the face rig, whose joints are not the IK's —
-    // a point of the head or the face is dragged by the head's own joint, its offset measured.)
+    // a point of the head or the face is dragged by the head's own joint, its offset measured. Nor
+    // is the HAND or the FOOT, 2026-10-28: what hangs below is its carpals and digits — a point of
+    // the palm is dragged by the hand's own joint, its offset measured; ending at a carpal, the
+    // "segment" had a palm click near that end drag the carpal by dilation.)
     const bool segment = grabbedBody && rigidSegment(m_selectedBone, m_ikSegmentNear, m_ikSegmentFar) &&
-                         boneClass(m_ikSegmentFar) != BoneClass::Face;
+                         boneClass(m_ikSegmentFar) == BoneClass::Body;
     if (!segment) {
         m_ikSegmentNear = m_ikSegmentFar = -1;
     }
@@ -523,17 +527,30 @@ bool Armature::beginIkDrag(IkScope scope) {
             }
         }
     }
+    // (The rig reads the scope BEFORE the drag begins: under a SCOPED trunk drag the user's pins
+    // below the grabbed joint HOLD — IkRig::beginDrag's pin rule — where a plain trunk drag leaves
+    // them out. A failed begin, and the figure move's endDrag, clear it.)
+    m_ikRig->setScoped(scope == IkScope::Chain); // (no intent, no suspension, no step under a scoped drag)
     if (!m_ikRig->beginDrag(grabNode, positions, contacts, groundOffsetY, &userPins,
                             secondaries.empty() ? nullptr : &secondaries)) {
+        m_ikRig->setScoped(false);
         return false;
     }
     static const bool kNoFigureMove = std::getenv("POSESTUDIO_NO_FIGURE_MOVE") != nullptr; // A/B probe: the scoped chain, as before 2026-09-28
-    if (part && !kNoFigureMove && isBodyGrab(m_ikRig->dragEffector())) {
+    // CTRL ON THE TORSO (2026-10-28; POSESTUDIO_CTRL_TRUNK_MOVES is the A/B — the figure move for
+    // every grab of the body, as from 2026-09-28): the figure is MOVED by the HIPS alone — the solve
+    // root, which a grab of the pelvis girdle is promoted to; a spine joint under Ctrl bends the
+    // TRUNK ALONE, the scoped chain from the grabbed joint down to, not including, the root — the
+    // pelvis and the legs stay, the arms and the head ride (the user: "ctrl+click dragging the
+    // upper chest should continue to IK pose through the torso, but stop before the legs").
+    static const bool kTrunkMoves = std::getenv("POSESTUDIO_CTRL_TRUNK_MOVES") != nullptr;
+    const int  dragEffector = m_ikRig->dragEffector();
+    const bool bodyMove = kTrunkMoves ? isBodyGrab(dragEffector) : dragEffector == m_ikRig->rootNode();
+    if (part && !kNoFigureMove && bodyMove) {
         m_ikRig->endDrag(); // (the rig has no part in a figure move: nothing is planted)
         return beginFigureMove();
     }
     m_ikScope = scope;
-    m_ikRig->setScoped(scope == IkScope::Chain); // (no intent, no suspension, no step under a scoped drag)
     {
         // THE GROUP's drag state (updateGroupTargets): where each secondary effector stood at the
         // press, and the primary's grab point — the cursor's displacement is measured from it.

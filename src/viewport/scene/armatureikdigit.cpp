@@ -11,7 +11,13 @@
  * stepped, and no bone outside the digit moves. (Until 2026-09-28 a grab of either was PROMOTED to
  * the limb's real end joint — a finger pull was an arm gesture, an eye grab a head drag — see
  * IkRig::beginDrag, whose promotion stays for the small bones that are neither: a pectoral on the
- * chest, a carpal on the hand.) Qt-free (std + GLM).
+ * chest.) A CARPAL — what is below a wrist or an ankle and is neither the limb end nor a digit:
+ * the carpals, a hand's prop anchor, the mid-foot, the ball, the heel — is the hand's or the foot's
+ * own flesh (2026-10-28): a click on one selects the HAND or the FOOT, as a click on the face
+ * selects the head, and it lights with it. (Until then it was a Body bone: selectable, the hand's
+ * flesh split among four carpals and a click on the palm as often a carpal's as the hand's — "the
+ * hand node can be difficult to select, and posing carpals in IK mode is not practical".) Qt-free
+ * (std + GLM).
  */
 
 #include "armature.h"
@@ -49,6 +55,7 @@ void Armature::classifyBones() {
     std::vector<float> reach(n, 0.0f);
     int faces = 0;
     int digits = 0;
+    int carpals = 0;
     for (std::size_t b = 0; b < n; ++b) {
         const int  p = m_bones[b].parent;
         const bool hasParent = p >= 0 && static_cast<std::size_t>(p) < b;
@@ -101,6 +108,16 @@ void Armature::classifyBones() {
             ++digits;
         }
     }
+    // A CARPAL: what is left below a wrist or an ankle — the carpals, a hand's prop anchor, the
+    // mid-foot, the ball, the heel — is the hand's or the foot's own flesh, not a joint to pose: a
+    // click on one selects the limb end (posingBone), and it lights with it.
+    m_boneLimbEnd = limbEnd;
+    for (std::size_t b = 0; b < n; ++b) {
+        if (limbEnd[b] >= 0 && m_boneClass[b] == static_cast<char>(BoneClass::Body)) {
+            m_boneClass[b] = static_cast<char>(BoneClass::Carpal);
+            ++carpals;
+        }
+    }
     static const bool kTrace = std::getenv("POSESTUDIO_BONE_CLASS_TRACE") != nullptr;
     if (kTrace) {
         std::fprintf(stderr, "[bone-class] head %s: %d face-rig bones; %d digit joints:",
@@ -111,11 +128,13 @@ void Armature::classifyBones() {
             }
         }
         std::fputc(10, stderr);
-        // (... and what below a wrist or an ankle is NOT a digit: the hand's and the foot's own.)
-        std::fprintf(stderr, "[bone-class] of the hands and feet themselves:");
+        // (... and what below a wrist or an ankle is NOT a digit: the hand's and the foot's own —
+        // the CARPALS, each selecting its limb end.)
+        std::fprintf(stderr, "[bone-class] %d carpals, of the hands and feet themselves:", carpals);
         for (std::size_t b = 0; b < n; ++b) {
-            if (limbEnd[b] >= 0 && m_boneClass[b] == static_cast<char>(BoneClass::Body)) {
-                std::fprintf(stderr, " %s", m_boneNames[b].c_str());
+            if (m_boneClass[b] == static_cast<char>(BoneClass::Carpal)) {
+                std::fprintf(stderr, " %s->%s", m_boneNames[b].c_str(),
+                             limbEnd[b] >= 0 ? m_boneNames[static_cast<std::size_t>(limbEnd[b])].c_str() : "?");
             }
         }
         std::fputc(10, stderr);
@@ -133,13 +152,29 @@ BoneClass Armature::boneClass(int bone) {
 }
 
 int Armature::posingBone(int bone) {
-    return boneClass(bone) == BoneClass::Face ? m_ikRig->headNode() : bone;
+    const BoneClass cls = boneClass(bone);
+    if (cls == BoneClass::Face) {
+        return m_ikRig->headNode();
+    }
+    if (cls == BoneClass::Carpal && static_cast<std::size_t>(bone) < m_boneLimbEnd.size() && m_boneLimbEnd[static_cast<std::size_t>(bone)] >= 0) {
+        return m_boneLimbEnd[static_cast<std::size_t>(bone)]; // (the hand, the foot)
+    }
+    return bone;
 }
 
 int Armature::knownPosingBone(int bone) const {
-    const bool face = m_ikRig && bone >= 0 && static_cast<std::size_t>(bone) < m_boneClass.size() &&
-                      m_boneClass[static_cast<std::size_t>(bone)] == static_cast<char>(BoneClass::Face);
-    return face ? m_ikRig->headNode() : bone;
+    if (!m_ikRig || bone < 0 || static_cast<std::size_t>(bone) >= m_boneClass.size()) {
+        return bone;
+    }
+    const char cls = m_boneClass[static_cast<std::size_t>(bone)];
+    if (cls == static_cast<char>(BoneClass::Face)) {
+        return m_ikRig->headNode();
+    }
+    if (cls == static_cast<char>(BoneClass::Carpal) && static_cast<std::size_t>(bone) < m_boneLimbEnd.size() &&
+        m_boneLimbEnd[static_cast<std::size_t>(bone)] >= 0) {
+        return m_boneLimbEnd[static_cast<std::size_t>(bone)];
+    }
+    return bone;
 }
 
 bool Armature::highlightedWithSelection(int bone) const {
@@ -155,8 +190,15 @@ bool Armature::highlightedWithSelection(int bone) const {
             return true;
         }
     }
-    if (!m_ikRig || static_cast<std::size_t>(bone) >= m_boneClass.size() ||
-        m_boneClass[static_cast<std::size_t>(bone)] != static_cast<char>(BoneClass::Face)) {
+    if (!m_ikRig || static_cast<std::size_t>(bone) >= m_boneClass.size()) {
+        return false;
+    }
+    // A CARPAL lights with its hand or foot (the palm is the carpals' flesh).
+    if (m_boneClass[static_cast<std::size_t>(bone)] == static_cast<char>(BoneClass::Carpal)) {
+        const int end = static_cast<std::size_t>(bone) < m_boneLimbEnd.size() ? m_boneLimbEnd[static_cast<std::size_t>(bone)] : -1;
+        return end >= 0 && ((highlightBone() >= 0 && highlightBone() == end) || inGroup(end));
+    }
+    if (m_boneClass[static_cast<std::size_t>(bone)] != static_cast<char>(BoneClass::Face)) {
         return false;
     }
     if (highlightBone() >= 0 && highlightBone() == m_ikRig->headNode()) {

@@ -104,6 +104,31 @@ view right
 click head
 expect selected.head == 1
 
+# 7b. THE HAND (2026-10-28): the carpals are the hand's own flesh — a click on any of them, on the palm
+# or the back of the hand, selects the HAND, and the carpals light with it; the ball and the mid-foot
+# are the foot's the same way. (Before this the hand's flesh was split among four selectable carpals,
+# and "the hand node can be difficult to select".)
+view front
+closeup lHand 0.22
+click lCarpal1
+expect selected.lHand == 1
+expect lit.lCarpal1 == 1
+expect lit.lCarpal2 == 1
+click lCarpal3
+expect selected.lHand == 1
+click lCarpal2@0.5
+expect selected.lHand == 1
+shot 406b_hand_by_its_carpals
+view right
+closeup lFoot 0.2
+click lMetatarsals
+expect selected.lFoot == 1
+expect lit.lMetatarsals == 1
+# (The ball's own pixel is a toe's skin from the side — a toe, rightly: click the mid-foot's body.)
+click lMetatarsals@0.5
+expect selected.lFoot == 1
+reset
+
 # 8. ... and a drag that begins on the face is the head's drag: the head goes, the eye does not turn.
 view front
 closeup head 0.30

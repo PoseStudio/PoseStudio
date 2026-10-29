@@ -273,6 +273,9 @@ public:
     /// True for the solve root and for a joint of the pelvis girdle (see girdleGrab()): a joint
     /// that goes where the pelvis goes and nowhere else.
     bool isGirdleJoint(int node) const;
+    /// True for a joint of the SPINE: above the solve root, its limb junction the root itself, and
+    /// no foot-class joint anywhere below it (the pelvis bone and the thigh sockets have the feet).
+    bool isSpineJoint(int node) const;
     /// A leg joint with a foot-class joint below it — a knee, or a thigh's twist bone (never a girdle
     /// joint, never a foot): the joint a kneel plants, what the solve prices as a knee.
     bool isLegJointAboveFoot(int node) const;
@@ -347,7 +350,8 @@ public:
     bool riseUnloading(int node) const;
     /// A SCOPED drag (Armature's IkScope::Chain — the app's Ctrl+drag): the rig reads no intent,
     /// tests no suspension and begins no step; the chain alone answers the cursor. Set by the
-    /// Armature right after beginDrag(), cleared by endDrag().
+    /// Armature BEFORE beginDrag() — whose user-pin rule reads it: a pin below a scoped TRUNK
+    /// drag holds, where a plain trunk drag leaves it out — and cleared by endDrag().
     void setScoped(bool scoped) { m_scoped = scoped; }
     bool scoped() const { return m_scoped; }
     /// Moves live contact @p pin's place on the floor to (x, z) — a knee still COMING DOWN is
@@ -649,6 +653,9 @@ private:
     bool descendsFromPelvis(int node) const;
     /// isPelvisBone()'s test for one node (uncached).
     bool hangsBothLegs(int node) const;
+    /// True when a foot-class joint (low at bind) hangs anywhere below @p node: a leg's joint, the
+    /// pelvis bone — never a bone of the spine.
+    bool hasFootBelow(int node) const;
 
     /// A joint's height above the floor through its lowest riding part (see
     /// m_ridingDescendants), each part measured against its own floor clearance: 0 = touching.

@@ -443,7 +443,10 @@ bool Scene::pickBoneAt(float px, float py, float vpW, float vpH, const Camera& c
     // at the point it hit. A finger's or a toe's joint is dragged by the point the cursor is ON —
     // its drag moves the digit alone, and a point AT a joint has no lever on the bone it belongs
     // to. Neither snaps to a joint, and no joint of either is a snap candidate for a hit beside it
-    // (a click on the back of the hand is the hand's, not the knuckle's 10px away).
+    // (a click on the back of the hand is the hand's, not the knuckle's 10px away). A CARPAL — the
+    // hand's or the foot's own flesh below the wrist or the ankle (2026-10-28) — is the HAND's or
+    // the FOOT's click at the point it hit, like the face's the head's: it never snaps and is never
+    // a snap candidate; the selection below maps it.
     const auto classOf = [&](int model, int bone) {
         return m_models[static_cast<std::size_t>(model)]->boneClass(bone);
     };

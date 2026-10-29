@@ -89,8 +89,11 @@ struct IkSolveScratch; // the per-tick solve's shared stage state (armatureiksol
 /// the way down. See armatureikfigure.cpp.
 ///
 /// Part: what the app's Ctrl+drag ASKS for — resolved at the press by what was grabbed: Figure for
-/// a grab of the BODY itself (the hips, the abdomen, the chest: Armature::isBodyGrab), Chain for
-/// anything else (a limb, the head and neck), and a digit's own drag for a finger or a toe.
+/// a grab of the HIPS (the solve root, which a grab of the pelvis girdle is promoted to; from
+/// 2026-09-28 to 2026-10-28 the abdomen and the chest too — Armature::isBodyGrab, which the figure
+/// move's "a pin on the trunk holds her" still reads), Chain for anything else (a limb, the head
+/// and neck, and a spine joint: the trunk alone, down to the pelvis), and a digit's own drag for a
+/// finger or a toe.
 /// Armature::ikScope() reads the resolved scope while the drag is in flight.
 enum class IkScope { Body, Chain, Figure, Part };
 
@@ -100,7 +103,11 @@ enum class IkScope { Body, Chain, Figure, Part };
 /// expressions, none of the IK's business, and not selectable — a click on the face selects the
 /// HEAD (Armature::posingBone). Digit: a joint of a finger or a toe — dragged, it moves its own
 /// digit alone, up to where the digit joins the hand or the foot (the DIGIT DRAG, armatureikdigit.cpp).
-enum class BoneClass { Body, Face, Digit };
+/// Carpal (2026-10-28): a bone below a wrist or an ankle that is neither the limb end nor a digit —
+/// the carpals, a hand's prop anchor, the mid-foot, the ball, the heel: the hand's or the foot's
+/// own flesh, not a joint to pose — a click on one selects the HAND or the FOOT (posingBone), as a
+/// click on the face selects the head, and it lights with the selected hand or foot.
+enum class BoneClass { Body, Face, Digit, Carpal };
 
 /// The three TRANSFORM DIALS of a joint (the Transform tab; Armature::jointDial): the bend in the
 /// joint's natural direction, the bend in its secondary direction, and the twist about its length.
@@ -264,14 +271,16 @@ public:
     /// selectable and a digit grab the limb's, as before 2026-09-28); POSESTUDIO_BONE_CLASS_TRACE
     /// prints what was found.
     BoneClass boneClass(int bone);
-    /// The bone a selection of @p bone selects: the HEAD for a bone of the face rig, else itself.
+    /// The bone a selection of @p bone selects: the HEAD for a bone of the face rig, the hand or
+    /// the foot (the limb end, m_boneLimbEnd) for a Carpal, else itself.
     int posingBone(int bone);
     /// posingBone() as the classes stand, without building the rig (@p bone itself until it is
     /// built): for read-only callers — the scripted test asks what a name's selection IS.
     int knownPosingBone(int bone) const;
     /// True when @p bone's flesh is LIT with the selection though the bone is neither the selected
     /// joint nor its twin: a bone of the FACE RIG while the head is selected — the face is the
-    /// head's, and lit by the head bone's own skin weights alone a click on a cheek lit the scalp.
+    /// head's, and lit by the head bone's own skin weights alone a click on a cheek lit the scalp —
+    /// or a CARPAL while its hand or foot is (the palm is the carpals' flesh, 2026-10-28).
     /// (Reads the classes as they stand: false until the rig has been built.)
     bool highlightedWithSelection(int bone) const;
     /// The highlighted joint's twin (see m_highlightTwin), or -1 without a selection or twin.
@@ -1037,6 +1046,8 @@ private:
     // --- The bone classes and THE DIGIT DRAG (armatureikdigit.cpp) ---
     /// Per bone: its BoneClass (classifyBones, with the rig: empty until then).
     std::vector<char>             m_boneClass;
+    /// Per bone: the limb end a Carpal hangs below — its wrist or its ankle (classifyBones), else -1.
+    std::vector<int>              m_boneLimbEnd;
     void classifyBones();
     /// The digit drag in flight: the grabbed bone and the grabbed point in its frame (the joint
     /// itself without a grab point), and the bones whose channels answer the cursor — the digit's,

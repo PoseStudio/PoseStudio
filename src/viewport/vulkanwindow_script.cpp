@@ -839,8 +839,12 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
     } else if (key == QLatin1String("selected") && bone >= 0) {
         value = arm->selectedBone() >= 0 && arm->sameRigidSegment(arm->selectedBone(), bone) ? 1.0 : 0.0;
     } else if (key == QLatin1String("lit") && bone >= 0) {
-        // (What the mesh shader is told to tint: the highlighted joint and its twin.)
-        value = arm->highlightBone() >= 0 && (bone == arm->highlightBone() || bone == arm->selectedHighlightTwin()) ? 1.0 : 0.0;
+        // (What the mesh shader is told to tint: the highlighted joint and its twin — and what is lit
+        // WITH the selection: the face rig under a selected head, a carpal under a selected hand.)
+        value = arm->highlightBone() >= 0 && (bone == arm->highlightBone() || bone == arm->selectedHighlightTwin() ||
+                                              arm->highlightedWithSelection(bone))
+                    ? 1.0
+                    : 0.0;
     } else if (key == QLatin1String("movedxz") && bone >= 0) {
         const std::size_t b = static_cast<std::size_t>(bone);
         if (b >= s.pressPositions.size()) {

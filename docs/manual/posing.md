@@ -11,6 +11,7 @@ Move the pointer over the figure and **press the left button on the part you wan
 - Clicking **along a limb** takes hold of the point you clicked: the far end of the limb segment when you click nearer it (the knee for a thigh, the hand for a forearm), the near end otherwise.
 - A click on the **hips** takes hold of the pelvis; a click on the **chest** or the **head** takes hold of the trunk there.
 - A click anywhere on the **face** takes hold of the **head**, and the whole head lights up. The face's own bones — the eyes, the jaw, the lips, the brows, the ears — are there for expressions and are not posed: nothing on the face is selected by itself, and no drag turns one.
+- A click anywhere on the **palm** or the **back of the hand** takes hold of the **hand**, and the whole hand lights up — the small bones inside the hand are its own flesh, not joints to pose; the same for the **foot** below the ankle (the ball, the heel, the mid-foot).
 - A click on a **finger** or a **toe** takes hold of that digit, at the point you clicked. See [Fingers and toes](#fingers-and-toes).
 - Joints stay clickable whether the [skeleton overlay](shading.md#the-skeleton-overlay) is on or off. Turn it on to see exactly where they are. A click just outside the body still takes the nearest joint, as long as nothing is in front of it.
 
@@ -64,17 +65,18 @@ Some joints have their own way of being dragged, because that is what a person m
 
 ## Posing one part: Ctrl + drag
 
-Sometimes you want to move one part and leave the rest exactly as it is. **Ctrl + left-drag** a limb or the head and only the chain it belongs to follows the cursor:
+Sometimes you want to move one part and leave the rest exactly as it is. **Ctrl + left-drag** a limb, the head or the torso and only the chain it belongs to follows the cursor:
 
 - **A hand, elbow, foot or knee**: the limb moves, up to where it joins the body — the arm with its collar bone, the leg from the hip. The torso, the head and the other limbs stay where they were. A knee dragged this way swings over its planted foot, as it does in a plain drag.
-- **The head or neck**: the neck bends toward the cursor; the chest and everything below stay.
+- **The head or the upper neck**: the neck bends toward the cursor; the chest and everything below stay.
+- **The chest, the upper chest, the base of the neck, the collar bones or the belly**: the torso bends — the spine from the grabbed joint down to the pelvis, as one — and stops there. The pelvis and the legs stay exactly where they are; the arms and the head ride the chest. Use it to lean, twist or arch the upper body on a stance you have already set.
 - **A finger or a toe**: that digit alone, as in a plain drag ([Fingers and toes](#fingers-and-toes)).
 
-Nothing else happens in this mode: no balance, no step, no lift-off, and the arms and head are not re-posed for you. The joint limits, the floor and the body still hold, so the chain stops where it would collide. Pulled beyond the chain's reach, the part points toward the cursor and rests there. Each Ctrl-drag is one undo step, and the wheel's depth control works during it as in a plain drag.
+Nothing else happens in this mode: no balance, no step, no lift-off, and the arms and head are not re-posed for you. The joint limits, the floor and the body still hold, so the chain stops where it would collide. Pulled beyond the chain's reach, the part points toward the cursor and rests there. A joint you pinned below the chain holds: pin a hand and Ctrl-drag the chest, and the hand stays where it is while the arm folds or straightens to keep it there — when the arm runs out, the pin stops the chest. Each Ctrl-drag is one undo step, and the wheel's depth control works during it as in a plain drag.
 
-## Moving the whole figure: Ctrl + drag the body
+## Moving the whole figure: Ctrl + drag the hips
 
-**Ctrl + left-drag the body itself** — the hips, the belly, the chest — and the whole figure follows the cursor exactly as she is posed. Nothing is anchored to the floor: her feet, or a knee or a hand she has on the floor, come along. No joint turns, she does not balance or step. Use it to lift a posed figure, carry her across the scene, or set her down somewhere else.
+**Ctrl + left-drag the hips** and the whole figure follows the cursor exactly as she is posed. Nothing is anchored to the floor: her feet, or a knee or a hand she has on the floor, come along. No joint turns, she does not balance or step. Use it to lift a posed figure, carry her across the scene, or set her down somewhere else.
 
 - **Up and across**: she goes where the cursor goes; roll the wheel while dragging to move her toward or away from the camera.
 - **Down**: the floor stops her. She comes down until the lowest part of her pose rests on it and no further.
@@ -82,7 +84,7 @@ Nothing else happens in this mode: no balance, no step, no lift-off, and the arm
 - A figure left in the air stays in the air. Press the [Ground button](#the-ground-button) to drop her onto the floor.
 - The move is one undo step, like any drag.
 
-To *pose* the torso — lean, bow, crouch, walk — drag it without `Ctrl`.
+To pose the torso with the whole body answering — lean, bow, crouch, walk — drag it without `Ctrl`; with `Ctrl` the torso bends alone over a still pelvis (above).
 
 ## Moving several joints together: Shift
 
@@ -91,7 +93,7 @@ Some poses are made with two hands at once — hands on a bar, a push against a 
 - The selected joints light up together. The one you press is the one the drag plane passes through and the one the body's policy is read from; the others keep their offset from it.
 - Both hands raised rise together with the body standing; both hands pushed forward lean her and walk her; both hands brought down fold her at the hips; both knees pushed forward swing over their planted feet.
 - A plain click on any joint, or on empty space, selects one joint alone again. A Shift + click on a finger or a toe selects that digit alone (digits are posed on their own), and a click on the face stands for the head.
-- `Ctrl` + drag is not a group gesture: it moves the pressed joint's chain, or the figure, as described above.
+- `Ctrl` + drag is not a group gesture: it moves the pressed joint's chain, or (by the hips) the figure, as described above.
 - A group drag is one undo step, and the wheel's depth control works during it.
 
 ## Turning a joint with the mouse: B, S, T
@@ -194,7 +196,7 @@ Everything the body does comes from the figure you imported, not from PoseStudio
 ## Tips
 
 - Orbit to a **side view** (`3`) before pushing a figure down onto the floor or forward onto her hands — you can see the depth, and the drag plane is the one you want.
-- To move a whole figure, drag the hips: they walk her across the floor. To move her without changing her pose, [Ctrl + drag the body](#moving-the-whole-figure-ctrl--drag-the-body).
+- To move a whole figure, drag the hips: they walk her across the floor. To move her without changing her pose, [Ctrl + drag the hips](#moving-the-whole-figure-ctrl--drag-the-hips).
 - If a drag does not go where you expect, look at where the feet are: a planted foot is an anchor, and a pull the body cannot follow without stepping ends in a lean. Take the hips there instead, or lift a foot first.
 - A figure left kneeling, sitting or lying starts the next drag from that pose — pull the hips or the chest up to get her up again (a kneeler's feet roll back onto their toes as she rises, and her knees come up with them).
 - Reset Pose is always one step away when a pose gets away from you.

@@ -997,12 +997,25 @@ void realPhases(Report& report, const std::vector<ArmatureBone>& bones) {
                        gateMax("steps", static_cast<double>(r.stepsTaken), 0.0),
                        gateMax("worst single-tick jump (mm)", jump(r), 40.0)}, r);
         }
-        // THE FIGURE MOVE (2026-09-28; IkScope::Figure): Ctrl + the BODY itself — the hips, the
-        // abdomen, the chest — moves the whole figure as she is posed: no floor contact is planted,
-        // no joint turns, and the user's pins hold. (Until then the chest bent the spine over a
-        // still pelvis and the hips took the legs over planted feet: the scoped chain's, which the
-        // landing bounce still drives.) "No joint turned" reads the worst channel of any bone;
-        // "not rigid" the worst any joint strayed from the grabbed point's own travel.
+        // THE FIGURE MOVE (2026-09-28; IkScope::Figure): Ctrl + the HIPS moves the whole figure as she
+        // is posed: no floor contact is planted, no joint turns, and the user's pins hold. (From
+        // 2026-09-28 to 2026-10-28 the abdomen and the chest moved her too; since then a spine joint
+        // under Ctrl bends the TRUNK ALONE — CTRL ON THE TORSO, the two chest phases here — as it
+        // had from 2026-09-26, and the hips alone move her.) "No joint turned" reads the worst
+        // channel of any bone; "not rigid" the worst any joint strayed from the grabbed point's own
+        // travel; "turned among" the worst channel of the named bones.
+        const auto turnedAmong = [&](const RunResult& r, std::initializer_list<const char*> names) {
+            double worst = 0.0;
+            for (const char* name : names) {
+                const int b = resolveBone(probe, name);
+                if (b >= 0 && static_cast<std::size_t>(b) < r.endEuler.size() && static_cast<std::size_t>(b) < r.startEuler.size()) {
+                    worst = std::max(worst, static_cast<double>(glm::length(r.endEuler[static_cast<std::size_t>(b)] -
+                                                                           r.startEuler[static_cast<std::size_t>(b)])));
+                }
+            }
+            return worst;
+        };
+        const auto grabTravel = [](const RunResult& r) { return static_cast<double>(glm::length(r.grabEnd - r.grabStart)) * 1000.0; };
         const auto turned = [](const RunResult& r) {
             double worst = 0.0;
             for (std::size_t i = 0; i < r.endEuler.size() && i < r.startEuler.size(); ++i) {
@@ -1029,13 +1042,33 @@ void realPhases(Report& report, const std::vector<ArmatureBone>& bones) {
             return worst;
         };
         {
-            // The upper chest pulled 20cm forward and 30cm up: she is lifted off the floor as posed.
+            // CTRL ON THE TORSO (2026-10-28): the upper chest pulled 20cm forward under Ctrl bends the
+            // TRUNK ALONE — the spine from the pelvis, coupled as one — and nothing below the hips
+            // moves: the pelvis, the legs and the feet at 0.0000, no step, no balance; the arms and
+            // the head ride the chest. (This phase was the figure move's "lifted off the floor as
+            // posed" from 2026-09-28 to this day; the hips' lift below is that gesture now.)
             Scenario sc;
             sc.grab = "chest_2";
             sc.scoped = true;
-            sc.path = pullPath(glm::vec3(0.0f, 0.30f, 0.20f), 50, 40);
+            sc.path = pullPath(glm::vec3(0.0f, 0.0f, 0.20f), 50, 40);
             const RunResult r = run(sc);
-            phaseLegs("[real] ctrl: the upper chest pulled 20cm forward and 30cm up — the figure, moved as posed",
+            phaseLegs("[real] ctrl: the upper chest pulled 20cm forward — the trunk alone, from the pelvis",
+                      {gateMin("the chest moved (mm)", grabTravel(r), 80.0),
+                       gateMax("the hips and feet moved (mm)", still(r), 0.01),
+                       gateMax("a leg turned (deg)", turnedAmong(r, {"lThigh", "rThigh", "lShin", "rShin", "lFoot", "rFoot"}), 0.0),
+                       gateMax("steps", static_cast<double>(r.stepsTaken), 0.0),
+                       gateMax("worst single-tick jump (mm)", jump(r), 40.0),
+                       gateMax("hold oscillation (mm)", holdOsc(r), 1.0)}, r);
+        }
+        {
+            // The hips pulled 30cm up under Ctrl: she is lifted off the floor as posed (the figure
+            // move, the hips' own gesture since 2026-10-28).
+            Scenario sc;
+            sc.grab = "hip";
+            sc.scoped = true;
+            sc.path = pullPath(glm::vec3(0.0f, 0.30f, 0.0f), 50, 40);
+            const RunResult r = run(sc);
+            phaseLegs("[real] ctrl: the hips pulled 30cm up — the figure, lifted as posed",
                       {gateMax("grab-to-cursor at rest (mm)", r.restingMiss * 1000.0, 0.1),
                        gateMin("the feet rose (mm)", static_cast<double>(r.endPos[static_cast<std::size_t>(lFoot)].y -
                                                                          r.startPos[static_cast<std::size_t>(lFoot)].y) * 1000.0, 299.0),
@@ -1044,6 +1077,134 @@ void realPhases(Report& report, const std::vector<ArmatureBone>& bones) {
                        gateMax("steps", static_cast<double>(r.stepsTaken), 0.0),
                        gateMax("mean drag lag (mm)", r.phases[0].lagMean() * 1000.0, 8.0),
                        gateMax("hold oscillation (mm)", holdOsc(r), 0.1)}, r);
+        }
+        // The pelvis GIRDLE under Ctrl (2026-10-28, the user's report that the upper abdomen did not
+        // bend the trunk): the first and second spine bones are girdle grabs the rig promotes to the
+        // hips, and promoted they were the figure move; a spine joint keeps its own effector under a
+        // scoped drag now, while the pelvis bone (a foot below it) still goes to the hips. Found by
+        // structure, as the girdle-grab phases find them.
+        int girdlePelvisBone = -1, girdleSpine1 = -1, girdleSpine2 = -1;
+        {
+            const auto under = [&](int node, int ancestor) {
+                for (int cur = node; cur >= 0; cur = bones[static_cast<std::size_t>(cur)].parent) {
+                    if (cur == ancestor) {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            for (std::size_t i = 0; i < bones.size() && hip >= 0; ++i) {
+                if (bones[i].parent == hip && under(lFoot, static_cast<int>(i))) {
+                    girdlePelvisBone = static_cast<int>(i);
+                }
+                if (bones[i].parent == hip && under(head, static_cast<int>(i))) {
+                    girdleSpine1 = static_cast<int>(i);
+                }
+            }
+            for (std::size_t i = 0; i < bones.size() && girdleSpine1 >= 0; ++i) {
+                if (bones[i].parent == girdleSpine1 && under(head, static_cast<int>(i))) {
+                    girdleSpine2 = static_cast<int>(i);
+                }
+            }
+        }
+        if (girdleSpine2 >= 0) {
+            // The second spine bone (the upper abdomen) pulled 10cm forward under Ctrl: the lower
+            // spine alone bends, down to the pelvis; the hips and the legs stay.
+            Scenario sc;
+            sc.grab = bones[static_cast<std::size_t>(girdleSpine2)].name;
+            sc.scoped = true;
+            sc.path = pullPath(glm::vec3(0.0f, 0.0f, 0.10f), 50, 40);
+            const RunResult r = run(sc);
+            phaseLegs("[real] ctrl: the second spine bone pulled 10cm forward — the lower spine alone, from the pelvis",
+                      {gateMin("the grab moved (mm)", grabTravel(r), 40.0),
+                       gateMax("the hips and feet moved (mm)", still(r), 0.01),
+                       gateMax("a leg turned (deg)", turnedAmong(r, {"lThigh", "rThigh", "lShin", "rShin", "lFoot", "rFoot"}), 0.0),
+                       gateMax("steps", static_cast<double>(r.stepsTaken), 0.0),
+                       gateMax("worst single-tick jump (mm)", jump(r), 40.0),
+                       gateMax("hold oscillation (mm)", holdOsc(r), 1.0)}, r);
+        } else {
+            report.skip("[real] ctrl: the second spine bone pulled 10cm forward — the lower spine alone, from the pelvis", "bone not found");
+        }
+        {
+            // A COLLAR pulled 15cm forward under Ctrl (2026-10-28, the user's "ctrl+click drag on
+            // chest_2 does nothing": the upper chest's skin above the breast line picks a collar, whose
+            // own chain is one bone that cannot move its joint): the collar is the trunk's under Ctrl,
+            // promoted to the spine joint it hangs from — the trunk bends, the hips and legs stay.
+            // Found by structure: the ancestor of the hand whose parent is the upper chest.
+            int collar = -1;
+            for (int cur = resolveBone(probe, "lHand"); cur >= 0 && chest >= 0; cur = bones[static_cast<std::size_t>(cur)].parent) {
+                if (bones[static_cast<std::size_t>(cur)].parent == chest) {
+                    collar = cur;
+                    break;
+                }
+            }
+            if (collar >= 0) {
+                Scenario sc;
+                sc.grab = bones[static_cast<std::size_t>(collar)].name;
+                sc.scoped = true;
+                sc.path = pullPath(glm::vec3(0.0f, 0.0f, 0.15f), 50, 40);
+                const RunResult r = run(sc);
+                phaseLegs("[real] ctrl: a collar pulled 15cm forward — the trunk, through the collar, from the pelvis",
+                          {gateMin("the grab moved (mm)", grabTravel(r), 80.0),
+                           gateMin("the chest moved (mm)", moved(r, chest), 60.0),
+                           gateMax("the hips and feet moved (mm)", still(r), 0.01),
+                           gateMax("a leg turned (deg)", turnedAmong(r, {"lThigh", "rThigh", "lShin", "rShin", "lFoot", "rFoot"}), 0.0),
+                           gateMax("steps", static_cast<double>(r.stepsTaken), 0.0),
+                           gateMax("worst single-tick jump (mm)", jump(r), 40.0),
+                           gateMax("hold oscillation (mm)", holdOsc(r), 1.0)}, r);
+            } else {
+                report.skip("[real] ctrl: a collar pulled 15cm forward — the trunk, through the collar, from the pelvis", "bone not found");
+            }
+        }
+        {
+            // The NECK'S LOWEST joint pulled 15cm forward under Ctrl (2026-10-28, the user's third
+            // report: the lit upper chest runs up the throat, a click there picks the neck's base,
+            // and its own chain — one bone — moved nothing): it is the chest's under Ctrl, promoted
+            // to the spine joint it hangs from, like a collar. Found by structure: the ancestor of
+            // the head whose parent is the upper chest.
+            int neckBase = -1;
+            for (int cur = head; cur >= 0 && chest >= 0; cur = bones[static_cast<std::size_t>(cur)].parent) {
+                if (bones[static_cast<std::size_t>(cur)].parent == chest) {
+                    neckBase = cur;
+                    break;
+                }
+            }
+            if (neckBase >= 0 && neckBase != head) {
+                Scenario sc;
+                sc.grab = bones[static_cast<std::size_t>(neckBase)].name;
+                sc.scoped = true;
+                sc.path = pullPath(glm::vec3(0.0f, 0.0f, 0.15f), 50, 40);
+                const RunResult r = run(sc);
+                phaseLegs("[real] ctrl: the neck's lowest joint pulled 15cm forward — the trunk, from the pelvis",
+                          // (80-87mm on six rigs; 60-62 on the two T-pose generations, whose neck base
+                          // stands further over the chest joint.)
+                          {gateMin("the grab moved (mm)", grabTravel(r), 80.0),
+                           gateMin("the chest moved (mm)", moved(r, chest), 50.0),
+                           gateMax("the hips and feet moved (mm)", still(r), 0.01),
+                           gateMax("a leg turned (deg)", turnedAmong(r, {"lThigh", "rThigh", "lShin", "rShin", "lFoot", "rFoot"}), 0.0),
+                           gateMax("steps", static_cast<double>(r.stepsTaken), 0.0),
+                           gateMax("worst single-tick jump (mm)", jump(r), 40.0),
+                           gateMax("hold oscillation (mm)", holdOsc(r), 1.0)}, r);
+            } else {
+                report.skip("[real] ctrl: the neck's lowest joint pulled 15cm forward — the trunk, from the pelvis", "bone not found");
+            }
+        }
+        if (girdlePelvisBone >= 0) {
+            // The pelvis bone pulled 20cm up under Ctrl: a click on the hips' flesh finds it, and it
+            // still moves the figure as posed.
+            Scenario sc;
+            sc.grab = bones[static_cast<std::size_t>(girdlePelvisBone)].name;
+            sc.scoped = true;
+            sc.path = pullPath(glm::vec3(0.0f, 0.20f, 0.0f), 50, 40);
+            const RunResult r = run(sc);
+            phaseLegs("[real] ctrl: the pelvis bone pulled 20cm up — the figure, lifted as posed",
+                      {gateMin("the feet rose (mm)", static_cast<double>(r.endPos[static_cast<std::size_t>(lFoot)].y -
+                                                                         r.startPos[static_cast<std::size_t>(lFoot)].y) * 1000.0, 199.0),
+                       gateMax("a joint turned (deg)", turned(r), 0.0),
+                       gateMax("a joint of the body strayed from its travel (mm)", notRigid(r), 0.01),
+                       gateMax("steps", static_cast<double>(r.stepsTaken), 0.0)}, r);
+        } else {
+            report.skip("[real] ctrl: the pelvis bone pulled 20cm up — the figure, lifted as posed", "bone not found");
         }
         {
             // The hips carried 40cm sideways along the floor: no step, no lean — she slides as posed.
@@ -1072,11 +1233,12 @@ void realPhases(Report& report, const std::vector<ArmatureBone>& bones) {
                        gateMax("floor penetration (mm)", r.penetrationMax * 1000.0, 0.5)}, r);
         }
         {
-            // A hand PINNED, the chest carried 10cm toward it and 5cm up: the body goes, the pinned
-            // hand stays where it is pinned and its arm gives (it folds: the shoulder comes nearer
-            // the hand); nothing else turns. (Lifted straight up the hanging arm, all but straight,
-            // runs out after 5-6cm and the pin stops the body there, 44-54mm short: as designed —
-            // the second run below.)
+            // A hand PINNED, the chest carried 10cm toward it and 5cm up under Ctrl: the trunk bends
+            // toward the hand, the pinned hand stays where it is pinned and its arm gives (it folds:
+            // the shoulder comes nearer the hand); the hips, the legs and the other arm do not move.
+            // (From 2026-09-28 to 2026-10-28 this phase carried the whole figure toward the hand.)
+            // Pulled 30cm straight UP instead the trunk gives what its extension allows and the pin
+            // holds the hand to a hair — the second run.
             Scenario sc;
             sc.grab = "chest_2";
             sc.scoped = true;
@@ -1086,23 +1248,19 @@ void realPhases(Report& report, const std::vector<ArmatureBone>& bones) {
             Scenario up = sc;
             up.path = pullPath(glm::vec3(0.0f, 0.30f, 0.0f), 50, 40);
             const RunResult taut = run(up);
-            double legsTurned = 0.0;
-            for (const char* name : {"lThigh", "rThigh", "lShin", "rShin", "lFoot", "rFoot", "abdomenLower", "chest", "lShldr", "lForeArm"}) {
-                const int b = resolveBone(probe, name);
-                if (b >= 0 && static_cast<std::size_t>(b) < r.endEuler.size()) {
-                    legsTurned = std::max(legsTurned, static_cast<double>(glm::length(r.endEuler[static_cast<std::size_t>(b)] -
-                                                                                     r.startEuler[static_cast<std::size_t>(b)])));
-                }
-            }
-            phaseLegs("[real] ctrl: the chest carried 10cm with a hand pinned — the pin holds, its arm gives",
-                      {gateMax("grab-to-cursor at rest (mm)", r.restingMiss * 1000.0, 1.0),
+            const std::initializer_list<const char*> legsAndOtherArm = {"lThigh", "rThigh", "lShin", "rShin", "lFoot", "rFoot", "lShldr", "lForeArm"};
+            phaseLegs("[real] ctrl: the chest carried 10cm with a hand pinned — the trunk alone, the pin holds, its arm gives",
+                      // (73-76mm of the 100 asked on six rigs; 49-51 on the two T-pose generations, whose pinned
+                      // hand stands out at arm's length and whose trunk side-bends less.)
+                      {gateMin("the chest moved (mm)", grabTravel(r), 40.0),
                        gateMax("the pinned hand moved (mm)", r.userPinDistMax * 1000.0, 0.05),
-                       gateMin("the feet went along (mm)", moved(r, lFoot), 110.0),
-                       gateMax("the legs, the spine or the other arm turned (deg)", legsTurned, 0.0),
+                       gateMax("the hips and feet moved (mm)", still(r), 0.01),
+                       gateMax("the legs or the other arm turned (deg)", turnedAmong(r, legsAndOtherArm), 0.0),
                        gateMax("steps", static_cast<double>(r.stepsTaken), 0.0),
-                       gateMax("lifted 30cm, beyond the pinned arm: the pinned hand moved (mm)", taut.userPinDistMax * 1000.0, 0.5),
-                       // (89-164mm of the 300 asked on the eight rigs: what the arm and its collar give.)
-                       gateMax("... and the body rose no further than the arm gives (mm)", moved(taut, chest), 200.0),
+                       gateMax("worst single-tick jump (mm)", jump(r), 40.0),
+                       gateMax("lifted 30cm, beyond the trunk's reach: the pinned hand moved (mm)", taut.userPinDistMax * 1000.0, 0.5),
+                       gateMax("... the hips and feet moved (mm)", still(taut), 0.01),
+                       gateMax("... the legs or the other arm turned (deg)", turnedAmong(taut, legsAndOtherArm), 0.0),
                        gateMax("... hold: worst single-tick jump (mm)", taut.phases.size() > 1 ? taut.phases[1].maxJump * 1000.0 : 0.0, 1.0)}, r);
         }
         {
@@ -4623,6 +4781,20 @@ void realPhases(Report& report, const std::vector<ArmatureBone>& bones) {
                 const RunResult r = run(sc);
                 phaseLegs("[real] digit: a finger pulled 60cm up — the finger alone",
                           {gateMin("the finger's joint is a digit's, its hand is not", lHand >= 0 && probe.boneClass(lHand) == pose::BoneClass::Body ? 1.0 : 0.0, 1.0),
+                           // (A CARPAL SELECTS THE HAND, 2026-10-28: every bone below the wrist that is
+                           // neither the wrist nor a digit is a Carpal, and its selection is the hand's.)
+                           gateMin("carpals under the hand (each selecting the hand)", [&] {
+                               int count = 0;
+                               for (int i = 0; i < nBones; ++i) {
+                                   if (under(i, lHand) && probe.boneClass(i) == pose::BoneClass::Carpal) {
+                                       if (probe.posingBone(i) != lHand) {
+                                           return 0.0;
+                                       }
+                                       ++count;
+                                   }
+                               }
+                               return static_cast<double>(count);
+                           }(), 1.0),
                            gateMax("everything outside the finger moved (mm)", outsideMoved(r, top), 0.001),
                            // (27-58mm on the eight rigs: the finger turns to its limits after the cursor.)
                            gateMin("the grabbed joint travelled (mm)", travelled(r), 20.0),

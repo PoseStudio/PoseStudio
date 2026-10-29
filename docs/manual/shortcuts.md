@@ -9,10 +9,10 @@ Every control in one place. "Viewport focus" means you have clicked in the 3D vi
 | Left-drag | on a joint | Full-body IK: the point you grabbed follows the cursor, the body follows anatomically. |
 | Left-drag | on a finger or a toe | That digit alone bends toward the cursor; the hand, the foot and the body stay (with or without Ctrl). |
 | Left-drag | on empty space or a model's body | Orbit the camera. |
-| Ctrl + left-drag | on a limb or the head | Scoped IK: only the chain the joint belongs to follows — a limb up to the body, the head and neck. Nothing else moves. |
-| Ctrl + left-drag | on the body (hips, belly, chest) | Moves the whole figure as she is posed: nothing is anchored to the floor, no joint turns. Pinned joints stay where they are pinned. |
+| Ctrl + left-drag | on a limb, the head or the torso | Scoped IK: only the chain the joint belongs to follows — a limb up to the body, the head and neck, the torso down to the pelvis. Nothing else moves; pinned joints below the chain stay where they are pinned. |
+| Ctrl + left-drag | on the hips | Moves the whole figure as she is posed: nothing is anchored to the floor, no joint turns. Pinned joints stay where they are pinned. |
 | Left-click | on a model | Select it (blue outline); on empty space, deselect. |
-| Left-click | on a joint | Select the joint (and make its figure the active one). A click on the face selects the head. |
+| Left-click | on a joint | Select the joint (and make its figure the active one). A click on the face selects the head; a click on the palm or the back of the hand selects the hand. |
 | Shift + left-click | on a joint | Add the joint to the selection, or take a selected joint out of it again. |
 | Shift + left-drag | on a selected joint | Move all the selected joints together, by the same amount; the body follows as in a plain drag. |
 | Middle-drag | anywhere | Pan. |

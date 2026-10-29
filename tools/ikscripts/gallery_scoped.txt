@@ -1,9 +1,10 @@
-# CTRL + DRAG (2026-09-26/28). On a limb or the head it is SCOPED: the grabbed chain alone follows
-# the cursor — a hand pulled forward moves its arm and nothing else, the head bends the neck, a knee
-# swings over its planted foot — and the numbers a user would see are what did NOT move: the hips,
-# the feet, the chest, the other hand — 0.0mm, since a bone none of the solve's unknowns move does
-# not move at all. On the BODY itself (the chest, the abdomen, the hips) it MOVES THE FIGURE as she
-# is posed, off the floor's contacts, the user's pins holding.
+# CTRL + DRAG (2026-09-26/28, the torso 2026-10-28). On a limb, the head or the TORSO it is SCOPED:
+# the grabbed chain alone follows the cursor — a hand pulled forward moves its arm and nothing else,
+# the head bends the neck, the chest bends the spine down to the pelvis, a knee swings over its
+# planted foot — and the numbers a user would see are what did NOT move: the hips, the feet, the
+# chest, the other hand — 0.0mm, since a bone none of the solve's unknowns move does not move at
+# all. On the HIPS it MOVES THE FIGURE as she is posed, off the floor's contacts, the user's pins
+# holding.
 #
 # In `view right` the camera looks from +X: screen-left is her front.
 
@@ -48,22 +49,103 @@ shot 61_scoped_head_side
 release
 reset
 
-# THE FIGURE MOVE (2026-09-28): Ctrl + the BODY itself — the chest, the abdomen, the hips — moves
-# the whole figure as she is posed: nothing is planted on the floor, no joint turns. The chest
-# pulled forward and up: she is lifted off the floor and carried, feet and all.
+# CTRL ON THE TORSO (2026-10-28): the upper chest pulled forward and a little down bends the spine
+# from the pelvis — the trunk alone; the pelvis and the legs stay, the arms and the head ride.
 view right
 cpress chest_2
-dragv -0.20 0.30 60 30
+dragv -0.20 -0.05 60 30
+report scoped_chest
+expect moved.chest_2 > 80
+expect hips < 0.5
+expect moved.lFoot < 0.5
+expect euler.lThigh.x == 0
+expect euler.lShin.x == 0
+expect steps < 1
+shot 62_scoped_chest_side
+release
+reset
+
+# The upper abdomen under Ctrl bends the LOWER spine alone, down to the pelvis (a pelvis-girdle grab
+# to the rig, it moved the whole figure until 2026-10-28): the hips and the legs stay. (Front view:
+# she faces the camera, so screen-right is her left.)
+view front
+cpress abdomen2
+dragv 0.15 0 60 30
+report scoped_abdomen
+expect moved.abdomen2 > 15
+expect head > 100
+expect hips < 0.5
+expect moved.lFoot < 0.5
+expect euler.lThigh.x == 0
+expect euler.lShin.x == 0
+expect steps < 1
+shot 62d_scoped_abdomen_front
+release
+reset
+
+# A COLLAR under Ctrl is the trunk's (a click on the upper chest above the breast line picks a
+# collar bone in every view, and alone its chain could move nothing): the trunk bends from the
+# pelvis through it; the hips and the legs stay.
+view front
+cpress lCollar
+dragv 0.15 0 60 30
+report scoped_collar
+expect moved.lCollar > 60
+expect head > 100
+expect hips < 0.5
+expect moved.lFoot < 0.5
+expect euler.lThigh.x == 0
+expect steps < 1
+shot 62e_scoped_collar_front
+release
+reset
+
+# The base of the NECK under Ctrl is the chest's too (the lit upper chest runs up the throat, and a
+# click there picks the neck's lowest joint, whose own chain could move nothing): the trunk bends;
+# the upper neck and the head still bend the neck alone.
+view home
+cpress neck
+dragv -0.15 -0.05 60 30
+report scoped_neck_base
+expect moved.neck > 60
+expect head > 100
+expect hips < 0.5
+expect moved.lFoot < 0.5
+expect euler.lThigh.x == 0
+expect steps < 1
+shot 62f_scoped_neck_base_home
+release
+reset
+
+# ... while the PELVIS bone under Ctrl — what a click on the hips' flesh finds — still moves the figure.
+view front
+cpress pelvis
+dragv 0 0.20 60 30
+report figure_by_pelvis
+expect hips > 199
+expect moved.lFoot > 199
+expect euler.lShin.x == 0
+expect euler.abdomenLower.x == 0
+expect steps < 1
+release
+reset
+
+# THE FIGURE MOVE (2026-09-28; the HIPS alone since 2026-10-28): Ctrl + the hips moves the whole
+# figure as she is posed: nothing is planted on the floor, no joint turns. The hips pulled up: she
+# is lifted off the floor, feet and all.
+view right
+cpress hip
+dragv 0 0.30 60 30
 report figure_lifted
 expect grab < 1
-expect hips > 300
-expect moved.lFoot > 300
-expect moved.rFoot > 300
+expect hips > 299
+expect moved.lFoot > 299
+expect moved.rFoot > 299
 expect euler.lShin.x == 0
 expect euler.abdomenLower.x == 0
 expect euler.lShldr.z == 0
 expect steps < 1
-shot 62_ctrl_chest_lifted_side
+shot 62c_ctrl_hips_lifted_side
 release
 
 # ... and the Ground button brings her back down (onto her feet: with the landing's bounce).
@@ -105,15 +187,17 @@ expect meshlow > -1
 release
 reset
 
-# A pinned hand HOLDS under the move: the body is carried toward it, the hand stays, its arm gives.
+# A pinned hand HOLDS under a Ctrl chest drag: the trunk bends toward it, the hand stays, its arm
+# gives; the hips and the legs do not move.
 view front
 pin rHand
 cpress chest_2
 dragv -0.10 0.05 60 30
-report figure_pinned_hand
-expect grab < 2
+report scoped_pinned_hand
+expect moved.chest_2 > 50
 expect moved.rHand < 0.1
-expect moved.lFoot > 100
+expect hips < 0.5
+expect moved.lFoot < 0.5
 expect euler.lShin.x == 0
 expect steps < 1
 shot 63b_ctrl_pinned_hand_front
