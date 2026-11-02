@@ -610,6 +610,7 @@ void Armature::findWeightShift() {
     m_jsWeightLift = 0.0f;
     m_jsWeightEased = glm::vec2(0.0f);
     m_jsWeightEasing = false;
+    m_jsStrideSplitStart = -1.0e9f; // (THE STRIDE TURNS THE HIPS: the split is re-read at the first tick)
     const IkRig& rig = *m_ikRig;
     const int    effector = rig.dragEffector();
     const bool effectorIsFoot = effector != rig.rootNode() && rig.isFootClass(effector);

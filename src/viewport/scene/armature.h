@@ -742,6 +742,9 @@ private:
         /// the arm's BASE hang (`wants`), which is remembered across drags (m_hangBase): a turn the
         /// stop or a limit cut short does not corrupt the next drag's home.
         bool hasSwing = false;
+        /// IDLE ELBOWS SOFTEN (hangIdleArms): the elbow is the hang's to bend -- at the bind at the
+        /// press, or where the hang itself left it (m_hangElbowDeg). A posed elbow keeps its bend.
+        bool elbowOurs = false;
     };
     std::vector<HangArm>          m_jsHangArms;
     bool                          m_jsHangArmsFound = false;
@@ -756,7 +759,15 @@ private:
     /// to carry its stance's swing (a loaded stride pose keeps its arms until the stance changes).
     std::vector<float>            m_hangSwingDeg;
     std::vector<char>             m_hangBaseValid;
-    void clearHangBases() { m_hangBaseValid.assign(m_hangBaseValid.size(), 0); }
+    /// Per socket: the elbow's fold channel where the hang LEFT it (IDLE ELBOWS SOFTEN), and whether
+    /// it did -- an elbow found there at the next press is still the hang's to bend; forgotten with
+    /// the swing bases (clearHangBases) and for an arm found posed.
+    std::vector<float>            m_hangElbowDeg;
+    std::vector<char>             m_hangElbowValid;
+    void clearHangBases() {
+        m_hangBaseValid.assign(m_hangBaseValid.size(), 0);
+        m_hangElbowValid.assign(m_hangElbowValid.size(), 0);
+    }
     /// Per bone: where a POST-STEP (the arms' hang, the head's righting) last left it, and whether
     /// one has turned it this drag. When such a bone becomes one of the SOLVE's unknowns — a hanging
     /// hand comes down on the floor and is a contact, the body is lifted and every segment is the
@@ -872,6 +883,10 @@ private:
     float                         m_jsWeightLift = 0.0f;       ///< The shift's share applied this tick (0-1): the traces, the harness.
     glm::vec2                     m_jsWeightEased{0.0f};       ///< The shift the root's home carries this tick, approached at the pins' pace (kPinEaseStep).
     bool                          m_jsWeightEasing = false;    ///< ... and still on its way (the settle waits for it, as for a pin).
+    /// THE STRIDE TURNS THE HIPS (ikPosturePolicy): the stance's fore-aft split as the drag FOUND it
+    /// (the left foot ahead of the right, metres; read at the first tick), the yaw's baseline — a pose
+    /// found striding is taken to carry its stance's turn, as the arm swing's base is. Unread below -1e8.
+    float                         m_jsStrideSplitStart = -1.0e9f;
     glm::vec3                     m_jsHold{0.0f};         ///< The released joint's hold (settle).
     /// The damped follower's state (see ikDamping): the target the solve is given and
     /// its velocity per second; seeded at the first tick of a drag from the raw target.

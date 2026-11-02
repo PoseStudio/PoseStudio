@@ -867,6 +867,34 @@ void RealPhases::armPhases() {
         const auto swingGained = [&](const RunResult& r, int socket, int elbow) {
             return swingAt(r.endPos, socket, elbow) - swingAt(r.startPos, socket, elbow);
         };
+        // THE STRIDE TURNS THE HIPS (2026-11-02; ikPosturePolicy, kStrideYawPerMetre): the pelvis
+        // yaws toward the lead leg — the lead side's thigh socket comes AHEAD of the other's — while
+        // the chest keeps its heading (the collars' line stays square). Sign-free across the rigs
+        // (the root's heading channel is not): read off the sockets and the collars, the rigs facing +z.
+        const int lThighSw = resolveBone(probe, "lThigh");
+        const int rThighSw = resolveBone(probe, "rThigh");
+        const int lCollarSw = resolveBone(probe, "lCollar");
+        const int rCollarSw = resolveBone(probe, "rCollar");
+        const bool pelvisReadable = lThighSw >= 0 && rThighSw >= 0 && lCollarSw >= 0 && rCollarSw >= 0;
+        const auto leftAhead = [&](const std::vector<glm::vec3>& pos, int a, int b) {
+            return (a >= 0 && b >= 0) ? static_cast<double>(pos[static_cast<std::size_t>(a)].z - pos[static_cast<std::size_t>(b)].z) : 0.0;
+        };
+        const auto lineHeading = [&](const std::vector<glm::vec3>& pos, int a, int b) {
+            if (a < 0 || b < 0) {
+                return 0.0;
+            }
+            const glm::vec3 d = pos[static_cast<std::size_t>(a)] - pos[static_cast<std::size_t>(b)];
+            return static_cast<double>(glm::degrees(std::atan2(d.z, d.x)));
+        };
+        const auto pelvisLeadGained = [&](const RunResult& r) {
+            return (leftAhead(r.endPos, lThighSw, rThighSw) - leftAhead(r.startPos, lThighSw, rThighSw)) * 1000.0;
+        };
+        const auto chestTurned = [&](const RunResult& r) {
+            return std::abs(lineHeading(r.endPos, lCollarSw, rCollarSw) - lineHeading(r.startPos, lCollarSw, rCollarSw));
+        };
+        const auto gateIf = [&](bool readable, const char* name, double value, double limit, bool isMin) {
+            return !readable ? info(name, value) : (isMin ? gateMin(name, value, limit) : gateMax(name, value, limit));
+        };
         {
             // A 50cm stride by the left foot: the left arm swings back, the right forward, alike.
             Scenario sc;
@@ -878,6 +906,8 @@ void RealPhases::armPhases() {
             phaseLegs("[real] arm swing: a 50cm stride swings the arms against the legs",
                       {gateMax("the leading side's arm swung BACK (deg, + forward)", left, -12.0),
                        gateMin("the trailing side's arm swung FORWARD (deg)", right, 12.0),
+                       gateIf(pelvisReadable, "the pelvis turned toward the lead leg: the left socket ahead of the right, gained (mm)", pelvisLeadGained(r), 12.0, true),
+                       gateIf(pelvisReadable, "the shoulders stay square: the collars' line turned (deg)", chestTurned(r), 4.0, false),
                        // (The oldest generation's left shoulder ends on its 25-degree limit 13 degrees
                        // back, the right swinging 21 forward within its 75: a shoulder at its limit
                        // makes the mismatch the rig's, and the row informational.)
@@ -898,6 +928,8 @@ void RealPhases::armPhases() {
             const RunResult r = run(sc);
             phaseLegs("[real] arm swing: the stride closed again brings the arms home",
                       {gateMax("the left arm off its standing hang at the end (deg)", std::abs(swingAt(r.endPos, lShldr, lElbow) - swingAt(r.restPos, lShldr, lElbow)), 3.0),
+                       gateIf(pelvisReadable, "the pelvis square again: the sockets' lead off its standing value (mm)", std::abs(leftAhead(r.endPos, lThighSw, rThighSw) - leftAhead(r.restPos, lThighSw, rThighSw)) * 1000.0, 6.0, false),
+                       gateIf(pelvisReadable, "the shoulders square again: the collars' line off its standing heading (deg)", std::abs(lineHeading(r.endPos, lCollarSw, rCollarSw) - lineHeading(r.restPos, lCollarSw, rCollarSw)), 3.0, false),
                        gateMax("the right arm off its standing hang at the end (deg)", std::abs(swingAt(r.endPos, rShldr, rElbow) - swingAt(r.restPos, rShldr, rElbow)), 3.0),
                        gateMax("foot-to-cursor at rest (mm)", r.restingMiss * 1000.0, 3.0),
                        gateMax("steps", static_cast<double>(r.stepsTaken), 0.0),
@@ -2560,7 +2592,12 @@ void RealPhases::kneelPhases() {
                       // residuals — and on the character rig, whose back knee lands before the hip is where
                       // it was asked, the over-deep press rolls the pelvis 7.3 degrees where it rolled 3.2.)
                       gateMax("pelvis roll (deg)", static_cast<double>(std::abs(pelvisTurn.z)), 8.0),
-                      gateMax("pelvis heading (deg)", static_cast<double>(std::abs(pelvisTurn.y)), 6.0),
+                      // (12 since THE STRIDE TURNS THE HIPS, 2026-11-02: the foot slid 60cm back turns the
+                      // pelvis 7.5-9 degrees toward the front leg, and the lunge keeps the stride's turn —
+                      // a lunge made from a stride has its hips a little open, as an untrained one does;
+                      // it read 0.0-0.9 with a square pelvis. The gate is still the lunge's own: a pelvis
+                      // turned to find depth reads far past it.)
+                      gateMax("pelvis heading (deg)", static_cast<double>(std::abs(pelvisTurn.y)), 12.0),
                       gateMax("the front knee off its foot, sideways (mm)",
                               static_cast<double>(std::abs(at(lShin).x - at(lFoot).x)) * 1000.0, 140.0),
                       info("the back knee over the floor (mm)", static_cast<double>(at(rShin).y) * 1000.0),
@@ -5176,18 +5213,27 @@ void RealPhases::tailPhases() {
                 probeHs.endIkDrag();
             }
         }
+        // (... and the IDLE ARM's ELBOW SOFTENS under any drag too — IDLE ELBOWS SOFTEN, 2026-11-02 —
+        // so what hangs below the idle arm's elbow (the forearm, the hand, its fingers) is motion by
+        // design as well, and is read apart from the real-mass drift: the right arm idles here.)
+        const int idleElbow = indexOf("rForeArm");
         double worst = 0.0;
         double worstToken = 0.0;
+        double worstIdleArm = 0.0;
         for (std::size_t i = 0; i < r.endPos.size(); ++i) {
             const double d = static_cast<double>(glm::length(r.endPos[i] - r.startPos[i]));
+            const bool idleArm = idleElbow >= 0 && static_cast<int>(i) != idleElbow && under(static_cast<int>(i), idleElbow);
             const bool token = i < masses.size() && masses[i] < 0.005f;
-            (token ? worstToken : worst) = std::max(token ? worstToken : worst, d);
+            double& slot = idleArm ? worstIdleArm : (token ? worstToken : worst);
+            slot = std::max(slot, d);
         }
         phaseLegs("[real] hold still (no cursor motion)",
-                     {gateMax("worst joint drift (mm; the real-mass joints)", worst * 1000.0, 2.0),
-                      // (An idle hand's fingers RELAX under any drag, IDLE HANDS RELAX in hangIdleArms:
-                      // 39mm at a fingertip on the base rig. Gated low, as "the relax happened".)
-                      gateMin("an idle hand's fingers relaxed: worst token-joint move (mm)", worstToken * 1000.0, 15.0)}, r);
+                     {gateMax("worst joint drift (mm; the real-mass joints outside the idle arm)", worst * 1000.0, 2.0),
+                      gateMax("worst token-joint drift outside the idle arm (mm)", worstToken * 1000.0, 2.0),
+                      // (The idle arm RELAXES under any drag — its elbow softens 12 degrees and its hand's
+                      // fingers curl, hangIdleArms: 39mm at a fingertip from the fingers alone on the base
+                      // rig, ~9cm with the elbow. Gated low, as "the relax happened".)
+                      gateMin("the idle arm relaxed: worst move below its elbow (mm)", worstIdleArm * 1000.0, 15.0)}, r);
     }
 }
 void realPhases(Report& report, const std::vector<ArmatureBone>& bones) {

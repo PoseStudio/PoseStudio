@@ -230,19 +230,89 @@ void Armature::ikPosturePolicy(IkSolveScratch& s) {
     static const bool kNoContrapposto = std::getenv("IK_JS_NO_CONTRAPPOSTO") != nullptr; // A/B probe
     static const double kTiltDeg = envOr("IK_JS_CONTRAPPOSTO", kContrappostoDeg);
     s.contrapposto = 0.0f;
-    if (!kNoContrapposto && !rootTurns && glm::dot(m_jsWeightShift, m_jsWeightShift) > 0.0f &&
-        !rig.suspended() && static_cast<std::size_t>(root) < m_jsStartRot.size() && kTiltDeg > 0.0) {
+    // THE STRIDE TURNS THE HIPS (2026-11-02; IK_JS_NO_STRIDE_YAW, IK_JS_STRIDEYAW_DEG, IK_JS_STRIDE_TRACE):
+    // a foot slid AHEAD of the other along the floor turns the pelvis toward the lead leg — the lead
+    // hip forward, the trailing hip back, as a walker's is — and the shoulders stay square. The
+    // pelvis's HEADING channel joins the unknowns under a foot drag from a two-footed stance (the
+    // weight shift's own gate: no live contact, no seat, not on her knees) with a REFERENCE yawed by
+    // kStrideYawPerMetre of the stance's fore-aft split, saturating toward kStrideYawMaxDeg, by the
+    // CHANGE since the press (a pose found striding carries its stance's turn, the arm swing's rule)
+    // and scaled by the slide (a lifted foot is no stance: the turn unwinds as the foot lifts and
+    // comes back as it lands); the chest's heading is held as found (ikCursorRows' sway row, its
+    // heading axis) and the spine's TWIST channels take the turn up (ikPostureDofs). A price alone
+    // could not do it — a price only ever prefers LESS travel — so what a walker's pelvis does is
+    // given, as the contrapposto's roll and the reach-down fold are. Every stride, step back and walk
+    // had stood with the pelvis dead square, the mannequin's.
+    static const bool kNoStrideYaw = std::getenv("IK_JS_NO_STRIDE_YAW") != nullptr; // A/B probe
+    static const double kYawMaxDeg = envOr("IK_JS_STRIDEYAW_DEG", kStrideYawMaxDeg);
+    static const bool kStrideTrace = std::getenv("IK_JS_STRIDE_TRACE") != nullptr;
+    s.strideYaw = 0.0f;
+    s.strideYawDeg = 0.0;
+    const bool oneLegStance = !rootTurns && glm::dot(m_jsWeightShift, m_jsWeightShift) > 0.0f &&
+                              !rig.suspended() && static_cast<std::size_t>(root) < m_jsStartRot.size();
+    const bool contrappostoOn = !kNoContrapposto && oneLegStance && kTiltDeg > 0.0;
+    bool  strideOn = false;
+    float yawTheta = 0.0f;
+    if (!kNoStrideYaw && oneLegStance && legDrag && goalPoint != nullptr && kYawMaxDeg > 0.0 &&
+        static_cast<std::size_t>(effector) < m_jsStartPos.size()) {
+        // The OTHER standing foot: the one foot-class pin that is not live and not under the effector
+        // (the weight shift's reading counted exactly one).
+        int other = -1;
+        int others = 0;
+        for (std::size_t p = 0; p < pins.size(); ++p) {
+            const int node = pins[p].node;
+            if (node < 0 || rig.pinIsLive(p) || !rig.isFootClass(node) || rig.pinUnderEffector(p)) {
+                continue;
+            }
+            other = static_cast<int>(p);
+            ++others;
+        }
+        const float effSide = m_ikBindPos[static_cast<std::size_t>(effector)].x - m_ikBindPos[static_cast<std::size_t>(root)].x;
+        if (others == 1 && std::abs(effSide) >= 0.01f * rig.sizeScale()) {
+            const glm::vec3& fore = s.fore;
+            const float     sideSign = effSide > 0.0f ? 1.0f : -1.0f; // (+1: the dragged foot is her LEFT)
+            const glm::vec3 otherAt = pins[static_cast<std::size_t>(other)].target;
+            // The split: the LEFT foot ahead of the right along the heading (metres), from the target
+            // (a function of the target, like every reference) and as the drag found it.
+            const float splitNow = glm::dot(*goalPoint - otherAt, fore) * sideSign;
+            if (m_jsStrideSplitStart < -1.0e8f) {
+                m_jsStrideSplitStart = glm::dot(m_jsStartPos[static_cast<std::size_t>(effector)] - otherAt, fore) * sideSign;
+            }
+            const float cap = glm::radians(static_cast<float>(kYawMaxDeg));
+            const auto  yawOf = [&](float split) {
+                const float beyond = std::max(0.0f, std::abs(split) - kStrideYawDeadZone * rig.sizeScale()) * (split < 0.0f ? -1.0f : 1.0f);
+                return cap * std::tanh(static_cast<float>(kStrideYawPerMetre) * beyond / cap);
+            };
+            // (A positive turn about the world's up takes the +lateral — LEFT — hip BACK: lateral' =
+            // lateral cos - fore sin. The left foot ahead turns the pelvis the other way, its hip forward.)
+            yawTheta = -(yawOf(splitNow) - yawOf(m_jsStrideSplitStart)) * slide;
+            strideOn = true;
+            s.strideYaw = std::max(slide, kContrappostoFloor); // (the price's share: frozen at the floor while the foot is in the air)
+            s.strideYawDeg = glm::degrees(yawTheta);
+            if (kStrideTrace) {
+                std::fprintf(stderr, "[stride] split now %.4f start %.4f (m, left ahead) slide %.3f yaw %.2f deg\n", splitNow,
+                             m_jsStrideSplitStart, slide, s.strideYawDeg);
+            }
+        }
+    }
+    if (contrappostoOn || strideOn) {
         const glm::vec3& lateral = s.lateral;
         const glm::vec3& fore = s.fore;
-        // (The standing foot's side along the figure's lateral axis: the shift points at it. A
-        // positive turn about the fore axis raises the +lateral side, so the standing side comes
-        // UP and the free side goes down.)
-        const float side = glm::dot(glm::vec2(lateral.x, lateral.z), m_jsWeightShift) >= 0.0f ? 1.0f : -1.0f;
-        const float theta = glm::radians(static_cast<float>(kTiltDeg)) * m_jsWeightLift * side;
         const Bone& rb = m_bones[static_cast<std::size_t>(root)];
-        const glm::mat3 roll(glm::mat4_cast(glm::angleAxis(theta, fore)));
+        glm::mat3   turn(1.0f); // the world-frame turn on top of the rotation the drag began with
+        if (contrappostoOn) {
+            // (The standing foot's side along the figure's lateral axis: the shift points at it. A
+            // positive turn about the fore axis raises the +lateral side, so the standing side comes
+            // UP and the free side goes down.)
+            const float side = glm::dot(glm::vec2(lateral.x, lateral.z), m_jsWeightShift) >= 0.0f ? 1.0f : -1.0f;
+            const float theta = glm::radians(static_cast<float>(kTiltDeg)) * m_jsWeightLift * side;
+            turn = glm::mat3(glm::mat4_cast(glm::angleAxis(theta, fore)));
+        }
+        if (strideOn) {
+            turn = glm::mat3(glm::mat4_cast(glm::angleAxis(yawTheta, glm::vec3(0.0f, 1.0f, 0.0f)))) * turn;
+        }
         const glm::mat3 parentRot = rb.parent >= 0 ? glm::mat3(m_poseGlobal[static_cast<std::size_t>(rb.parent)]) : glm::mat3(1.0f);
-        const glm::mat3 local = glm::mat3(rb.invOrient) * glm::transpose(parentRot) * roll * m_jsStartRot[static_cast<std::size_t>(root)] * glm::mat3(rb.orient);
+        const glm::mat3 local = glm::mat3(rb.invOrient) * glm::transpose(parentRot) * turn * m_jsStartRot[static_cast<std::size_t>(root)] * glm::mat3(rb.orient);
         swayEuler = eulerFromMatrix(local, rb.rotationOrder);
         for (int a = 0; a < 3; ++a) {
             while (swayEuler[a] - m_ikStartEuler[static_cast<std::size_t>(root)][a] > 180.0f) {
@@ -253,7 +323,9 @@ void Armature::ikPosturePolicy(IkSolveScratch& s) {
             }
         }
         swayValid = true;
-        s.contrapposto = std::max(m_jsWeightLift, kContrappostoFloor); // (the price's share: frozen at the floor until the lift)
+        if (contrappostoOn) {
+            s.contrapposto = std::max(m_jsWeightLift, kContrappostoFloor); // (the price's share: frozen at the floor until the lift)
+        }
         dofBone[static_cast<std::size_t>(root)] = 1;
         s.swayChest = m_jsSpineChain.size() > 1 ? m_jsSpineChain.back() : -1;
         for (std::size_t k = 1; k < m_jsSpineChain.size(); ++k) {
@@ -483,6 +555,22 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
     bool& swayValid = s.swayValid;
     glm::vec3& swayEuler = s.swayEuler;
     const float& contrapposto = s.contrapposto;
+    const float& strideYaw = s.strideYaw; // THE STRIDE TURNS THE HIPS: the pelvis's heading channel's share (0: no stride)
+    const double strideYawDeg = s.strideYawDeg; // ... and the yaw itself (degrees): the planted thigh's and the spine's twist references go with it
+    // THE STRIDE TURNS THE HIPS: the spine's twist channels counter the pelvis's yaw by their share of the
+    // chain's twist range, so the shoulders stay square (below); the chain's total twist range, once a tick.
+    double spineTwistRangeSum = 0.0;
+    if (strideYaw > 1.0e-3f) {
+        for (std::size_t k = 1; k < m_jsSpineChain.size(); ++k) {
+            const Bone& link = m_bones[static_cast<std::size_t>(m_jsSpineChain[k])];
+            for (int a = 0; a < 3; ++a) {
+                const float range = link.rotMax[a] - link.rotMin[a];
+                if ((!link.rotLimited[a] || range >= kLockedRangeDeg) && std::abs(glm::vec3(link.orient[a]).y) >= 0.7f) {
+                    spineTwistRangeSum += link.rotLimited[a] ? static_cast<double>(range) : kFreeRangeDeg;
+                }
+            }
+        }
+    }
     std::vector<char>& cls = s.cls;
     std::vector<char>& twistPriced = s.twistPriced;
     std::vector<char>& landedArm = s.landedArm;
@@ -604,9 +692,15 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
             // taken up; with its flexion and twist in too, the balance row had the whole trunk as a
             // lever under a knee drag, and as the foot came back down and the support regrew it
             // pitched the trunk 9 degrees in one tick — 131mm at the brow, 91 at a shoulder.)
-            if (contrapposto > 1.0e-3f && inSpine[b] && !active[b] &&
-                std::abs(glm::dot(glm::vec3(bone.orient[a]), glm::vec3(0.0f, 0.0f, 1.0f))) < 0.7f) {
-                continue;
+            if ((contrapposto > 1.0e-3f || strideYaw > 1.0e-3f) && inSpine[b] && !active[b]) {
+                const glm::vec3 axis(bone.orient[a]);
+                const bool      sideBend = contrapposto > 1.0e-3f && std::abs(axis.z) >= 0.7f;
+                // (THE STRIDE TURNS THE HIPS: the TWIST channels too — about the vertical — so that
+                // the chest can keep its heading over a turned pelvis; the flexion never, under either.)
+                const bool      twist = strideYaw > 1.0e-3f && std::abs(axis.y) >= 0.7f;
+                if (!sideBend && !twist) {
+                    continue;
+                }
             }
             const double rangeDeg =
                 bone.rotLimited[a] ? std::max(static_cast<double>(range), kMinRangeDeg) : kFreeRangeDeg;
@@ -657,6 +751,14 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
                 // prices (pitch cheap, as under a pelvis drag) the balance row pitched the pelvis
                 // 12 degrees back under a knee raise and every lifted-foot phase popped 100-190mm.
                 s = kRootRot * kRootSquare / static_cast<double>(contrapposto);
+            } else if (static_cast<int>(b) == root && !rootTurns && strideYaw > 1.0e-3f &&
+                       std::abs(glm::vec3(bone.orient[a]).y) >= 0.9f) {
+                // THE STRIDE TURNS THE HIPS: the pelvis's HEADING — the channel about the vertical — at
+                // kStrideYawStiffness over the slide's share, following its reference (swayEuler: the
+                // yaw toward the lead leg). Frozen at the floor's share while the foot is in the air;
+                // under every other drag the branch below leaves it out, as before.
+                static const double kYawS = envOr("IK_JS_STRIDEYAW", kStrideYawStiffness);
+                s = kYawS / static_cast<double>(strideYaw);
             } else if (static_cast<int>(b) == root && !rootTurns) {
                 // (The bow's hinge alone: the pelvis's PITCH, and nothing else of its rotation — and
                 // only while a hinge is ON: the root is marked an unknown by CONTRAPPOSTO too, whose
@@ -797,6 +899,36 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
             }
             if (static_cast<int>(b) == root && swayValid) {
                 dof.reference = swayEuler[a]; // the hip sway's roll (above)
+            }
+            // THE STRIDE TURNS THE HIPS: the planted leg's THIGH rotates in its socket by the pelvis's
+            // turn — femoral rotation, a walker's — so its twist channel's REFERENCE goes with the yaw:
+            // the leg stays where it is in the world while the pelvis turns over it, and nothing is
+            // asked of the ankle's heading channel. Fourteen times cheaper than the thigh's twist (x256),
+            // the ankle had taken the turn — the whole straight leg turning about the vertical through
+            // the planted foot, the knee swinging 15mm off its foot's line in every stride — and on the
+            // male rig a knee hinge turned 4 degrees off the pelvis let the solver's fold retry carry
+            // the hips 13mm sideways to their home on a 16-degree fold: a 67mm pop in a step back.
+            // (The PRICE stood down instead for an hour: freed by the slide's share, the planted thigh
+            // twisted 13-14 degrees under a foot carried sideways and set down, where no turn was
+            // asked — a reference moves its own channel and nothing else.)
+            // ... and the SPINE counters it, link by link, each twist channel by its share of the chain's
+            // twist range (the coupling rows' own split, ikSpineCoupling), so the chest keeps the heading
+            // the drag found it at: the shoulders stay square to the way she faces while the pelvis turns
+            // under them. A heading ROW on the chest (1000/rad^2) did the same to a quarter of a degree and
+            // tipped the male rig's standing knee off its saddle in a step back (a 67mm pop); a reference
+            // moves its own channels and nothing else.
+            if (strideYaw > 1.0e-3f && inSpine[b] && !active[b] && std::abs(strideYawDeg) > 1.0e-6 && spineTwistRangeSum > 0.0 &&
+                std::abs(glm::vec3(bone.orient[a]).y) >= 0.7f) {
+                const double share = (bone.rotLimited[a] ? static_cast<double>(range) : kFreeRangeDeg) / spineTwistRangeSum;
+                dof.reference += static_cast<float>(-strideYawDeg * share) * (glm::vec3(bone.orient[a]).y > 0.0f ? 1.0f : -1.0f);
+            }
+            if (strideYaw > 1.0e-3f && cls[b] == 2 && twistPriced[b] && m_jsTwistAxis[b] == a && std::abs(strideYawDeg) > 1.0e-6) {
+                const int  par = m_bones[b].parent;
+                const bool thighSegment = plantedThigh[b] || (par >= 0 && plantedThigh[static_cast<std::size_t>(par)] && isTwistBone(b));
+                const float along = glm::vec3(bone.orient[a]).y; // the twist axis's share along the vertical at bind (a thigh hangs down)
+                if (thighSegment && std::abs(along) > 0.5f) {
+                    dof.reference += static_cast<float>(-strideYawDeg) * (along > 0.0f ? 1.0f : -1.0f);
+                }
             }
             // AKIMBO (the hand lay, ikHandLayRows): a hand laid on the HIP refers the shoulder's abduction
             // channel to where the upper arm stands kHandLayElbowOutDeg out, at kHandLayElbowStiffness x

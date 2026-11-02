@@ -114,6 +114,8 @@ struct IkSolveScratch {
     // --- Set by ikPostureModel ---
     float                           weightLift{};  ///< THE WEIGHT LIFT this tick: a foot drag's 1 - slide, a knee drag's 1 - plant (the raw share, before the drag-start reference).
     float                           contrapposto{};  ///< CONTRAPPOSTO's share (0-1): the pelvis rolls the free side down under the weight shift, the chest kept level.
+    float                           strideYaw{};  ///< THE STRIDE TURNS THE HIPS: the pelvis's heading channel's share (the slide, floored; 0 = no stride: the channel is no unknown), its reference the yaw toward the lead leg (swayEuler).
+    double                          strideYawDeg{};  ///< ... and the yaw itself this tick (degrees; the traces, the harness).
     JointSolver::Problem            problem;  ///< THE PROBLEM handed to the solver: DoFs with their stiffness and references, then every row.
     bool                            trunkDrag{};  ///< A trunk-class joint's drag that is not the root's, a knee's, an elbow's or a foot's.
     std::vector<char>               inSpine;  ///< Per bone: a link of the spine chain (m_jsSpineChain), coupled channel by channel.

@@ -150,6 +150,22 @@ constexpr double kContrappostoDeg = 8.0;
 /// ... and the share the roll's price is divided by while nothing is lifted (the pelvis frozen at
 /// kRootRotationStiffness x kRootSquareness / this): the roll is an unknown from the drag's first tick.
 constexpr float  kContrappostoFloor = 0.02f;
+/// THE STRIDE TURNS THE HIPS (ikPosturePolicy, 2026-11-02): a foot slid AHEAD of the other along the
+/// floor turns the pelvis toward the lead leg — the lead hip forward, as a walker's is — by a REFERENCE
+/// on the root's heading channel (the contrapposto's idiom: built on the drag-start rotation, the
+/// change in the stance's fore-aft split since the press, scaled by the slide so a lifted foot turns
+/// nothing), while the CHEST keeps its heading (the sway row's heading axis) and the spine's twist
+/// channels take the turn up: the shoulders stay square to the way she faces. A walker's pelvis
+/// rotates 4-5 degrees each way at a normal step and more at a long one; a static stride with the
+/// pelvis square reads as a mannequin's.
+constexpr double kStrideYawPerMetre = 0.35;        ///< radians of pelvis yaw per metre of split beyond the dead zone (a 50cm stride: ~7 degrees)
+constexpr double kStrideYawMaxDeg = 10.0;          ///< ... saturating toward this (tanh)
+constexpr float  kStrideYawDeadZone = 0.04f;       ///< of split (figure-scaled), the arm swing's: a hair of split turns nothing
+constexpr double kStrideYawStiffness = 1000.0;     ///< the heading channel's price over the slide's share: firm enough that the reference decides the turn (the foot's bounded pull could buy 6 degrees more at full stretch), frozen at kContrappostoFloor while the foot is in the air
+/// (The chest's heading is held by REFERENCE, not by a row: each spine link's twist channel counters the yaw by its share
+/// of the chain's twist range. A 1000/rad^2 heading row on the chest tipped the male rig's standing knee off its
+/// saddle in a step back — the solver's fold retry found a 16-degree fold cheaper under it, a 67mm pop — where the
+/// references, which the coupling rows already expect, hold the shoulders square to a quarter of a degree.)
 /// A sliding foot's SOLE: pitch, heading, level (per rad^2, x the slide). Soft next to the
 /// cursor's pull (200), two decades over the foot's own posture term — the sole stays on the floor
 /// as the leg swings out under it, and gives way before the cursor does.

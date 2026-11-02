@@ -81,6 +81,14 @@ constexpr float kFingerRelaxStepDeg = 3.0f;   // ... this fast (per channel, per
 constexpr float kFingerRelaxMinRangeDeg = 30.0f; // ... on the joints that span at least this (the carpals do not)
 constexpr float kFingerUnposedDeg = 0.5f;     // a hand whose finger channels all lie within this of the bind at the press is UNPOSED
 constexpr float kFingerOpenHeight = 0.15f;    // a hand this close to the floor (its lowest part, figure-scaled) OPENS before it lands
+// IDLE ELBOWS SOFTEN (2026-11-02): a hanging arm whose elbow the hang OWNS bends this much at the
+// elbow -- a relaxed arm hangs with a soft elbow, never ramrod straight -- at this pace (a fingertip
+// 4mm a tick: under every jump gate); an elbow within kArmIdleElbowUnposedDeg of the bind at the
+// press, or of where the hang itself left it last (m_hangElbowDeg), is OURS. A posed elbow is not.
+constexpr float kArmIdleElbowDeg = 12.0f;
+constexpr float kArmIdleElbowStepDeg = 0.5f;
+constexpr float kArmIdleElbowUnposedDeg = 0.5f;
+constexpr float kArmIdleElbowClear = 0.01f;    // the bend stops this far SHORT of touching anything (the other forearm, the hip): a cosmetic bend makes no contact
 constexpr float kArmHangSettle = 0.0015f;    // the stop lets a hanging arm settle this much deeper into a volume than the press had it
 // THE STRIDE SWING (2026-10-27): a hanging arm swings AGAINST the stance — forward on the side of
 // the trailing foot, back on the side of the leading one, as a walker's do — by the standing feet's
@@ -170,6 +178,15 @@ std::vector<glm::vec3> Armature::balancePositions() const {
         static const bool kLandedWeighed = std::getenv("IK_ARM_LANDED_WEIGHED") != nullptr; // A/B probe
         if (!hangArmHeld(arm) || (arm.landed && !kLandedWeighed)) {
             mark(arm.socket);
+            // (... and its ELBOW, where the soften has turned it — IDLE ELBOWS SOFTEN, 2026-11-02: the
+            // idle bend carries both forearms and hands 5cm forward, 2-3mm of centre of mass, and
+            // weighed it leaned every hip hinge 13mm less at the head. The arms are for the eye.
+            // IK_ARM_HANG_ELBOW_WEIGHED.)
+            static const bool kElbowWeighed = std::getenv("IK_ARM_HANG_ELBOW_WEIGHED") != nullptr; // A/B probe
+            if (!kElbowWeighed && arm.elbow >= 0 && static_cast<std::size_t>(arm.elbow) < m_jsPostStepTurned.size() &&
+                m_jsPostStepTurned[static_cast<std::size_t>(arm.elbow)]) {
+                mark(arm.elbow);
+            }
         }
     }
     static const bool kHeadSeen = std::getenv("IK_HEAD_RIGHT_NOT_BLIND") != nullptr; // A/B probe
@@ -603,6 +620,9 @@ void Armature::findHangArms() {
             }
             if (!seatedTrunkDrag && !hung) {
                 m_hangBaseValid[static_cast<std::size_t>(socket)] = 0; // (posed: its swing base is forgotten)
+                if (static_cast<std::size_t>(socket) < m_hangElbowValid.size()) {
+                    m_hangElbowValid[static_cast<std::size_t>(socket)] = 0; // (... and its elbow's)
+                }
                 continue; // not hanging: a raised arm, a hand on a hip — posed, and it rides
             }
             HangArm arm{socket, static_cast<int>(e), offset / length, offset / length};
@@ -610,6 +630,17 @@ void Armature::findHangArms() {
             arm.handLandedAtPress = landedAtPress;
             arm.depthAtPress = rig.bodyVolumes().empty() ? 0.0f : fkVolumeDepth(socket);
             arm.foldSign = -bone.rotMin[foldAxis] > bone.rotMax[foldAxis] ? -1.0f : 1.0f;
+            {
+                // IDLE ELBOWS SOFTEN: the elbow is OURS when the press finds it at the bind (every
+                // figure imports with straight arms), or where the hang itself left it at the last
+                // drag (m_hangElbowDeg: the idle bend, the stride's, the landing's). An elbow the
+                // user turned, or the solve left bent, is a posed elbow and keeps its bend.
+                const std::size_t si = static_cast<std::size_t>(socket);
+                const float       atPress = e < m_ikStartEuler.size() ? m_ikStartEuler[e][foldAxis] : 1.0e9f;
+                arm.elbowOurs = std::abs(atPress) < kArmIdleElbowUnposedDeg ||
+                                (si < m_hangElbowValid.size() && m_hangElbowValid[si] != 0 &&
+                                 std::abs(atPress - m_hangElbowDeg[si]) < kArmIdleElbowUnposedDeg);
+            }
             ensureHandMaps();
             for (std::size_t i = e + 1; i < n && arm.hand < 0 && m_jsWristOf.size() == n; ++i) {
                 if (m_jsWristOf[i] == static_cast<int>(i) && boneUnder(static_cast<int>(i), static_cast<int>(e))) {
@@ -708,6 +739,23 @@ bool Armature::softenHangElbows(const std::vector<float>& swings) {
     // hand comes away again. (... and the FORWARD-swung arm's elbow flexes with its swing, up to
     // kArmSwingElbowDeg: a walker's leading arm is bent, the trailing one straight.)
     static const bool kNoSoften = std::getenv("IK_ARM_HANG_NO_SOFTEN") != nullptr; // A/B probe
+    // IDLE ELBOWS SOFTEN (kArmIdleElbowDeg, 2026-11-02; IK_ARM_HANG_NO_IDLE_ELBOW): an arm the hang
+    // OWNS (HangArm::elbowOurs) bends kArmIdleElbowDeg at the elbow, at kArmIdleElbowStepDeg a
+    // tick, the way an idle hand's fingers curl -- a relaxed arm hangs with a soft elbow, and every
+    // hanging arm in every gallery shot was dead straight, a mannequin's. The landing's soften and
+    // the stride's bend still win where they ask MORE; and for an owned elbow the flexion the drag
+    // found is NO floor, so the stride's 18 degrees relax back to the idle bend as the stance
+    // closes (a posed elbow keeps its bend, as ever). Balance is blind to it as to the whole hang.
+    static const bool kNoIdleElbow = std::getenv("IK_ARM_HANG_NO_IDLE_ELBOW") != nullptr; // A/B probe
+    struct ElbowSoft {
+        const HangArm* arm;
+        std::size_t    e;           // the elbow bone
+        float          before;      // its fold channel as the solve left it
+        float          delta;       // the soften's whole ask (channel units)
+        float          fraction;    // how much of it the stop lets through
+        float          depthBefore; // how deep the forearm stood in the volumes before
+    };
+    std::vector<ElbowSoft> softs;
     for (const HangArm& arm : m_jsHangArms) {
         if (arm.hand < 0 || hangArmHeld(arm)) {
             continue;
@@ -715,7 +763,8 @@ bool Armature::softenHangElbows(const std::vector<float>& swings) {
         const std::size_t ai = static_cast<std::size_t>(&arm - m_jsHangArms.data());
         const float       swingShare = ai < swings.size() ? glm::clamp(swings[ai] / kArmSwingMaxDeg, 0.0f, 1.0f) : 0.0f;
         const float       swingWanted = kArmSwingElbowDeg * swingShare;
-        if (kNoSoften && swingWanted <= 0.0f) {
+        const float       idleWanted = (kNoIdleElbow || !arm.elbowOurs) ? 0.0f : kArmIdleElbowDeg;
+        if (kNoSoften && swingWanted <= 0.0f && idleWanted <= 0.0f) {
             continue;
         }
         float lowest = 1.0e9f;
@@ -726,24 +775,109 @@ bool Armature::softenHangElbows(const std::vector<float>& swings) {
         }
         const float       scale = rig.sizeScale();
         const float       landWanted = kNoSoften ? 0.0f : kArmLandSoftenDeg * (1.0f - glm::smoothstep(0.02f * scale, kArmLandSoftenFrom * scale, lowest));
-        const float       wanted = std::max(landWanted, swingWanted);
+        const float       wanted = std::max({landWanted, swingWanted, idleWanted});
         const std::size_t e = static_cast<std::size_t>(arm.elbow);
         // (The flexion the drag FOUND is the floor of the goal for an arm that hung at the press; an
         // arm that stood on its hand — handLandedAtPress — found its bend on the floor, a strut's,
         // and once the hand lifts it hangs straight: folded back to the strut's 71 degrees at the
         // soften's pace, a figure kneeling up off a sphinx hung her forearms up like paws.)
-        const float       found = arm.handLandedAtPress ? 0.0f : m_ikStartEuler[e][arm.foldAxis] * arm.foldSign; // (its flexion as the drag found it)
+        // (... and NO floor at all for an elbow the hang owns: what the hang bent, the hang may
+        // straighten -- the stride's bend relaxes back to the idle one as the stance closes.)
+        const float       found = (arm.handLandedAtPress || arm.elbowOurs) ? 0.0f : m_ikStartEuler[e][arm.foldAxis] * arm.foldSign; // (its flexion as the drag found it)
         const float       now = m_boneEuler[e][arm.foldAxis] * arm.foldSign;
         const float       goal = std::max(found, wanted);
-        const float       next = now + glm::clamp(goal - now, -kArmLandSoftenStepDeg, kArmLandSoftenStepDeg);
+        // (The idle bend comes in at its own gentle pace; the landing's and the stride's bends come at
+        // theirs, and so does every STRAIGHTENING -- a released strut arm straightens toward the idle
+        // bend as fast as it straightened to nothing before: at the gentle pace two hands released
+        // a few ticks apart were still 40mm lopsided at the end of the third generation's rise.)
+        const float       pace = (goal < now || wanted > idleWanted) ? kArmLandSoftenStepDeg : kArmIdleElbowStepDeg;
+        const float       next = now + glm::clamp(goal - now, -pace, pace);
         if (std::abs(next - now) > 1.0e-3f) {
-            m_boneEuler[e][arm.foldAxis] = next * arm.foldSign;
-            applyBoneEuler(arm.elbow);
-            if (e < m_jsPostStepEuler.size()) {
-                m_jsPostStepEuler[e] = m_boneEuler[e];
-                m_jsPostStepTurned[e] = 1;
+            softs.push_back({&arm, e, m_boneEuler[e][arm.foldAxis], next * arm.foldSign - m_boneEuler[e][arm.foldAxis], 1.0f, 0.0f});
+        }
+    }
+    // THE STOP (2026-11-02): the soften is FK of the forearm and stops at the body volumes as every FK
+    // turn does (the hang's turn, a Transform dial) -- ORDER-INDEPENDENTLY, the hang stop's way: each
+    // arm's fraction is measured against the pose as the solve left it (the arm put back before the
+    // next is measured), all are applied, and two forearms that have turned INTO each other give way
+    // together. Unstopped, the released arms of the third generation's all-fours rise bent their
+    // forearms into each other under the chest, and the hang's own stop then blocked one arm's
+    // swing and not the other's: 40mm lopsided at the hands (the symmetry gate's catch).
+    const bool volumes = !rig.bodyVolumes().empty();
+    const auto softTo = [&](const ElbowSoft& sft, float fraction) {
+        m_boneEuler[sft.e][sft.arm->foldAxis] = sft.before + sft.delta * fraction;
+        applyBoneEuler(sft.arm->elbow);
+    };
+    // (The bend may come no nearer than kArmIdleElbowClear of touching -- and no nearer than it stands,
+    // where that is nearer already. Allowed to TOUCH, the third generation's released forearms met
+    // under the chest after its all-fours rise, each hand inside the other forearm's capsule, and the
+    // hang's own stop then jittered in a two-cycle at the contact whose outward turns resolved one
+    // arm out and the other not: 40mm lopsided at the hands. A cosmetic bend makes no contact.)
+    const auto allowOf = [](const ElbowSoft& sft) { return std::max(sft.depthBefore, -kArmIdleElbowClear); };
+    for (ElbowSoft& sft : softs) {
+        if (!volumes) {
+            continue;
+        }
+        sft.depthBefore = fkVolumeDepth(sft.arm->elbow);
+        softTo(sft, 1.0f);
+        if (fkVolumeDepth(sft.arm->elbow) > allowOf(sft)) {
+            float lo = 0.0f;
+            float hi = 1.0f;
+            for (int k = 0; k < 8; ++k) {
+                const float mid = 0.5f * (lo + hi);
+                softTo(sft, mid);
+                (fkVolumeDepth(sft.arm->elbow) > allowOf(sft) ? hi : lo) = mid;
             }
-            changed = true;
+            sft.fraction = lo;
+        }
+        softTo(sft, 0.0f); // (put back: the next arm is measured against the solve's pose)
+    }
+    if (!softs.empty()) {
+        const auto together = [&](float share) {
+            for (const ElbowSoft& sft : softs) {
+                softTo(sft, sft.fraction * share);
+            }
+            if (!volumes) {
+                return true;
+            }
+            for (const ElbowSoft& sft : softs) {
+                if (fkVolumeDepth(sft.arm->elbow) > allowOf(sft)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        if (!together(1.0f) && softs.size() > 1) {
+            float lo = 0.0f;
+            float hi = 1.0f;
+            for (int k = 0; k < 6; ++k) {
+                const float mid = 0.5f * (lo + hi);
+                (together(mid) ? lo : hi) = mid;
+            }
+            together(lo);
+            for (ElbowSoft& sft : softs) {
+                sft.fraction *= lo;
+            }
+        }
+        for (const ElbowSoft& sft : softs) {
+            if (std::abs(sft.delta * sft.fraction) > 1.0e-4f) {
+                if (sft.e < m_jsPostStepEuler.size()) {
+                    m_jsPostStepEuler[sft.e] = m_boneEuler[sft.e];
+                    m_jsPostStepTurned[sft.e] = 1;
+                }
+                changed = true;
+            }
+        }
+    }
+    for (const HangArm& arm : m_jsHangArms) {
+        if (arm.hand < 0 || hangArmHeld(arm)) {
+            continue;
+        }
+        if (arm.elbowOurs && static_cast<std::size_t>(arm.socket) < m_hangElbowValid.size()) {
+            // (Where the hang leaves an elbow it owns is what the next press reads as still ours.)
+            const std::size_t e = static_cast<std::size_t>(arm.elbow);
+            m_hangElbowDeg[static_cast<std::size_t>(arm.socket)] = m_boneEuler[e][arm.foldAxis];
+            m_hangElbowValid[static_cast<std::size_t>(arm.socket)] = 1;
         }
     }
     return changed;
@@ -1307,6 +1441,10 @@ bool Armature::hangIdleArms() {
     if (m_hangSwingDeg.size() != n) {
         m_hangSwingDeg.assign(n, 0.0f);
         m_hangBaseValid.assign(n, 0);
+    }
+    if (m_hangElbowValid.size() != n) {
+        m_hangElbowDeg.assign(n, 0.0f);
+        m_hangElbowValid.assign(n, 0);
     }
     findHangArms();
     m_jsHangHeld.resize(m_jsHangArms.size());

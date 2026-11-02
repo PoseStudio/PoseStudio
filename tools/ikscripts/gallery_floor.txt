@@ -125,8 +125,11 @@ expect grab < 70
 # (Both hands on the floor at the end, the arms straight: all fours.)
 # (98 and 36 since the prone of 2026-10-29: the far hand, walked forward from beside the hip, lands
 # on its fingertips under its shoulder and the near one flat — looked at; the gate was 90.)
+# (Since IDLE ELBOWS SOFTEN (2026-11-02) the two hands' basins swapped: the near hand's walk reaches its
+# target by straightening the softened elbow alone, nothing else moving, and lands on its fingertips (106)
+# while the far hand lands flatter (79) - a hand on its fingertips under its shoulder, either side.)
 expect y.lHand < 110
-expect y.rHand < 90
+expect y.rHand < 110
 expect y.lShin < 90
 # (16mm. With the hips taken 15cm back instead the hands let go, and that read 219 on 2026-10-27:
 # the hand's hold had been a SWITCH on the arm's slack, thrown with the body's rise already

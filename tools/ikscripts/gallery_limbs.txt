@@ -69,6 +69,20 @@ expect swing.rShldr > 10
 release
 reset
 
+# THE STRIDE TURNS THE HIPS (2026-11-02): the same stride from the Home view - the pelvis turns
+# toward the lead leg (the hip's heading channel reads the turn) and the shoulders stay square.
+# (dragw moves the WORLD target, so the stride is the same whatever the view.)
+view home
+press lFoot
+dragw 0 0 0.45 50 40
+shot 25b_home_stride
+expect grab < 5
+expect steps == 0
+expect euler.hip.y < -4
+release
+reset
+view right
+
 # A lunge: a foot slid a stride back and let go of, then the hips taken down.
 press lFoot
 dragv 0.55 0 50 30

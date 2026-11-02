@@ -3043,7 +3043,9 @@ void Armature::ikCursorRows(IkSolveScratch& s) {
         problem.positions.push_back(task);
     }
 
-    // The hip sway's CHEST: level (its roll about the fore axis), as the drag found it.
+    // The hip sway's CHEST: level (its roll about the fore axis), as the drag found it. (Its HEADING
+    // under THE STRIDE TURNS THE HIPS is held by the spine's twist REFERENCES, ikPostureDofs — not by
+    // a row here: a 1000/rad^2 heading row tipped a standing knee off its saddle, a 67mm pop.)
     if (swayChest >= 0 && static_cast<std::size_t>(swayChest) < m_jsStartRot.size()) {
         static const double kChestLevel = envOr("IK_JS_SWAYCHEST", kSwayChestLevelWeight);
         const glm::dvec3 lateral(std::cos(m_jsRootHeading), 0.0, -std::sin(m_jsRootHeading));

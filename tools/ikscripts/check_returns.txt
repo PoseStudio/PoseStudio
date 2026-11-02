@@ -9,7 +9,8 @@ dragv 0.10 0 40 20
 dragv -0.10 0 40 30
 expect grab < 1
 expect head < 2
-expect moved.lHand < 3
+# (the idle arm's ELBOW joint: its hand relaxes 5cm by design — IDLE ELBOWS SOFTEN, 2026-11-02)
+expect moved.lForeArm < 3
 expect gaze > -1
 expect gaze < 1
 release
@@ -23,7 +24,7 @@ dragv 0.18 0.08 50 40
 expect grab < 1
 expect steps == 0
 expect head < 3
-expect moved.lHand < 5
+expect moved.lForeArm < 5
 expect gaze > -1.5
 expect gaze < 1.5
 release

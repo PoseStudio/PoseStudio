@@ -97,7 +97,9 @@ dragv 0.22 -0.24 60 20
 release
 pin hip
 press rHand
-dragw 0.41 -0.22 0.29 60 40
+# (the offsets are from the hand as the press finds it, and since IDLE ELBOWS SOFTEN (2026-11-02) a hanging
+# hand rests 5cm further forward and 1.4cm higher at the press than the bind's: 0.41 -0.22 0.29 before)
+dragw 0.39 -0.23 0.24 60 40
 report seated_hand_on_knee
 expect palm.rHand.y < -0.55
 expect grab < 5
