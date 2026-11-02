@@ -20,6 +20,7 @@
 #include "simulator.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1433,12 +1434,52 @@ void RealPhases::armPhases() {
                 sc.path = pullPath(rThigh + glm::vec3(outward * 0.04f, 0.06f, 0.0f) - h, 50, 40);
                 sc.idleJoints = kIdleForHandDrag;
                 const RunResult r = run(sc);
+                // AKIMBO (2026-11-02): the upper arm comes OUT as the hand lies on the hip — the shoulder's
+                // abduction reference of the lay (kHandLayElbow*); it read 8-15 degrees from straight down
+                // before (the arm hanging straight with the hand pressed to the hip's side), 26-38 with it.
+                // The reference asks no more than the FOREARM can give with the hand where it is (the law of
+                // cosines about the socket, the solve's own rule): on a broad-shouldered, narrow-hipped body
+                // the hand lies under the socket and the arm can stand 13-15 degrees out at most (the two
+                // heavy characters of the sweep; the trunk leaned 50-70mm to buy more before), where the base
+                // rigs allow 35-45 — the gate is the base rigs', informational where the reach reads under 30.
+                const int shldrP = resolveBone(posedProbe, "rShldr");
+                const int elbowP = resolveBone(posedProbe, "rForeArm");
+                double    upperOutDeg = -1.0;
+                double    reachOutDeg = -1.0;
+                if (shldrP >= 0 && elbowP >= 0 && static_cast<std::size_t>(elbowP) < r.endPos.size() && static_cast<std::size_t>(handP) < r.endPos.size()) {
+                    const glm::vec3 socketAt = r.endPos[static_cast<std::size_t>(shldrP)];
+                    const glm::vec3 elbowAt = r.endPos[static_cast<std::size_t>(elbowP)];
+                    const glm::vec3 handAt = r.endPos[static_cast<std::size_t>(handP)];
+                    const glm::vec3 up = elbowAt - socketAt;
+                    if (glm::length(up) > 1.0e-4f) {
+                        upperOutDeg = glm::degrees(std::acos(glm::clamp(glm::dot(glm::normalize(up), glm::vec3(0.0f, -1.0f, 0.0f)), -1.0f, 1.0f)));
+                    }
+                    const float U = glm::length(up);
+                    const float F = glm::length(handAt - elbowAt);
+                    const glm::vec3 d = handAt - socketAt;
+                    const float R = glm::length(d);
+                    if (U > 1.0e-3f && F > 1.0e-3f && R > 1.0e-3f) {
+                        const float cosAlpha = glm::clamp((U * U + R * R - F * F) / (2.0f * U * R), -1.0f, 1.0f);
+                        const float a = d.x * outward / R; // (the lateral-down plane: + outboard)
+                        const float b = -d.y / R;
+                        const float hyp = std::sqrt(a * a + b * b);
+                        if (hyp > 1.0e-4f && cosAlpha <= hyp) {
+                            reachOutDeg = glm::degrees(glm::pi<float>() - std::asin(glm::clamp(cosAlpha / hyp, -1.0f, 1.0f)) - std::atan2(b, a));
+                        }
+                    }
+                }
+                const bool reachBound = reachOutDeg >= 0.0 && reachOutDeg < 30.0;
                 phaseLegs("[real] hand laid on the hip: the palm faces the hip",
                              {gateMax("palm off the hip's inward normal at the end (deg; edge-on it read 90)", palmOff(r, glm::vec3(-outward, 0.0f, 0.0f)), 35.0),
+                              (upperOutDeg < 0.0 || reachBound)
+                                  ? info("the upper arm out from straight down (deg; akimbo — informational: the forearm's reach of the hand on this body allows under 30)", upperOutDeg)
+                                  : gateMin("the upper arm out from straight down (deg; akimbo — it read 8-15 with the arm straight; 26-35 with the reach-bound reference)", upperOutDeg, 20.0),
+                              info("the most abduction the forearm's reach of the hand allows (deg)", reachOutDeg),
                               gateMax("steps", static_cast<double>(r.stepsTaken), 0.0),
                               gateMax("worst single-tick joint move, drag (mm)", jumpOf(r, 0), 40.0),
                               gateMax("worst single-tick joint move, hold (mm)", jumpOf(r, 1), 25.0),
-                              gateMax("head displacement (mm)", r.headDisp * 1000.0, 30.0),
+                              // (40 since the akimbo: the arm swung out shifts the trunk 3cm on the base rig, 32.)
+                              gateMax("head displacement (mm)", r.headDisp * 1000.0, 40.0),
                               // (The cursor sits inside the wrist's clearance of the hip: the clamp holds the hand off.)
                               info("hand-to-cursor at rest (mm)", r.restingMiss * 1000.0)}, r);
             }
@@ -1631,8 +1672,34 @@ void RealPhases::liftPhases() {
         sc.path = pullPath(glm::vec3(0.0f, 1.35f, 0.0f), 60, 120);
         sc.release = false;
         const RunResult r = run(sc);
+        // THE DANGLE (2026-11-02): a suspended body HANGS — the legs together and plumb from the hips
+        // (the thighs a little forward), the knees soft, the feet pointed, the free arm plumb. Before
+        // it she kept her standing pose in the air: the thighs at the stance's splay (7-13 degrees
+        // from plumb on the main family), the knees and feet at 0, the free arm at the A-pose's 46.
+        const auto fromDown = [&](const char* from, const char* to) {
+            const int a = indexOf(from), b = indexOf(to);
+            if (a < 0 || b < 0 || static_cast<std::size_t>(std::max(a, b)) >= r.endPos.size()) {
+                return -1.0;
+            }
+            const glm::vec3 d = r.endPos[static_cast<std::size_t>(b)] - r.endPos[static_cast<std::size_t>(a)];
+            return glm::length(d) > 1.0e-4f ? static_cast<double>(glm::degrees(std::acos(glm::clamp(glm::dot(glm::normalize(d), glm::vec3(0.0f, -1.0f, 0.0f)), -1.0f, 1.0f)))) : -1.0;
+        };
+        const auto kneeFlex = [&](const char* shin) {
+            const int b = indexOf(shin);
+            if (b < 0 || static_cast<std::size_t>(b) >= r.endEuler.size()) {
+                return -1.0;
+            }
+            const glm::vec3 e = r.endEuler[static_cast<std::size_t>(b)];
+            return static_cast<double>(std::max({std::abs(e.x), std::abs(e.y), std::abs(e.z)}));
+        };
         phaseLegs("[real] suspension (lHand +135cm y, beyond reach)",
                      {gateMin("suspended", r.suspended ? 1.0 : 0.0, 1.0),
+                      // (3.5-5 on the reference rigs: kDangleThighForwardDeg of forward lean; 7-13 before)
+                      gateMax("dangle: the left thigh from plumb (deg)", fromDown("lThigh", "lShin"), 8.0),
+                      gateMax("dangle: the right thigh from plumb (deg)", fromDown("rThigh", "rShin"), 8.0),
+                      gateMin("dangle: the left knee's flexion (deg; kDangleKneeDeg 10)", kneeFlex("lShin"), 5.0),
+                      // (6.8 on every reference rig — the hang's 0.12 of outward lean; 46 before, the A-pose)
+                      gateMax("dangle: the free arm from plumb (deg)", fromDown("rShldr", "rForeArm"), 15.0),
                       gateMin("feet height at the end (m)", r.feetMinY, 0.20),
                       gateMin("hip rise (m)", r.hipDispY, 0.10),
                       // (The LIFT-OFF itself: by the time the rig decides she hangs from the hand
@@ -2257,7 +2324,7 @@ void RealPhases::kneelPhases() {
             // from the knee, the shin folded up behind, and the hip joint sits a hand past the
             // thigh's far end. Short of that the hips cannot come down: a thigh's length forward the
             // thigh stood at 45 degrees with the hips 30cm up, whatever the cursor asked.)
-            sc.path = pullPath(glm::vec3(0.0f, -(hipOnAllFours - hipProne), 1.25f * thighLength), 140, 60);
+            sc.path = pullPath(glm::vec3(0.0f, -(hipOnAllFours - hipProne), (std::getenv("IK_HARNESS_PRONE_SHARE") ? static_cast<float>(std::atof(std::getenv("IK_HARNESS_PRONE_SHARE"))) : 1.25f) * thighLength), 140, 60);
             sc.asymmetryGateMm = -1.0; // (informational: the oldest rig's arms fold under the chest and meet)
             const RunResult r = run(sc);
             const auto endY = [&](int b) { return b >= 0 ? static_cast<double>(r.endPos[static_cast<std::size_t>(b)].y) : 0.0; };
@@ -2270,12 +2337,16 @@ void RealPhases::kneelPhases() {
             // the height is informational; elsewhere it is GATED (2026-09-23) — it had been
             // informational everywhere, and the slack hands' ceiling of round 77 stopped the descent
             // dead on every rig for nine rounds (the hips 45cm up) with no gate to say so.
+            // (SINCE THE PRONE OF 2026-10-29 the hands let go BY DESIGN — trailing leashes released by
+            // the target's share — so a lift-off no longer says the arms stood as struts, and the hip's
+            // height is GATED on every rig: the body rests on its own flesh (the thigh's, the belly's).
+            // The lift-off and the wrist's limit stay as information.)
             const bool handsLifted = r.liveLiftOffs > 0;
             const bool wristBound = limitBoundEnd(r, "lHand");
-            const bool armsStrut = handsLifted || wristBound;
+            const bool armsStrut = false;
             phaseLegs("[real] prone: from all fours, the hips taken forward and down",
                       {info("hip to the cursor at rest (mm; 110-200 on her belly; the arms as struts, 300-450)", r.restingMiss * 1000.0),
-                       info("the hands lifted off (1) or the wrist ended limit-bound (2): the arms as struts", (handsLifted ? 1.0 : 0.0) + (wristBound ? 2.0 : 0.0)),
+                       info("the hands lifted off (1) or the wrist ended limit-bound (2); by design since 2026-10-29", (handsLifted ? 1.0 : 0.0) + (wristBound ? 2.0 : 0.0)),
                        armsStrut ? info("the hip joint over the floor at the end (mm; the arms as struts: informational)", endY(hip) * 1000.0)
                                  : gateMax("the hip joint over the floor at the end (mm; on her belly: 130-200; on all fours, 450)",
                                            endY(hip) * 1000.0, static_cast<double>(hipProne + 0.12f) * 1000.0),

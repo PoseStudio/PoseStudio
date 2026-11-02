@@ -241,6 +241,9 @@ public:
     }
     /// Per bone: its anatomical parent (-1 at the root) — the Armature's own, as the rig was built.
     const std::vector<int>& parents() const { return m_parents; }
+    /// @p node rests ON THE FLOOR in @p positions: its lowest riding part within the seed band of its
+    /// clearance — what seedPoseContacts plants at a press, read off the pose whether or not it has.
+    bool restsOnFloor(int node, const std::vector<glm::vec3>& positions) const;
 
     /// Which nodes the current drag's solve moves (paths between effector, pins, pelvis, and the
     /// anchor root); everything else keeps its local pose and rides along.
@@ -373,6 +376,10 @@ public:
     /// A hand contact whose unload by the rise is still EASING IN (the solve's kHandUnloadStep): not yet
     /// taut for the lift-off, whatever the junction's reach reads.
     bool riseUnloading(int node) const;
+    /// ... and a hand the solve has released UNDER A DESCENT — the trailing hand of a prone, a leash the
+    /// body slid forward over (the live-contact block, 2026-10-29): the no-lift-off-under-a-descent rule
+    /// stands down for it.
+    bool trailReleased(int node) const;
     /// A SCOPED drag (Armature's IkScope::Chain — the app's Ctrl+drag): the rig reads no intent,
     /// tests no suspension and begins no step; the chain alone answers the cursor. Set by the
     /// Armature BEFORE beginDrag() — whose user-pin rule reads it: a pin below a scoped TRUNK

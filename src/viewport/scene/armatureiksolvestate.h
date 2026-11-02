@@ -67,6 +67,9 @@ struct IkSolveScratch {
     std::vector<glm::dvec3>         fleshTaken;     ///< ... the ones taken as rows ...
     std::vector<int>                fleshTakenIndex; ///< ... and their indices
     std::vector<int>                subtreeBuf;     ///< Armature::collectSubtree's output, wherever a stage walks a subtree (cleared before each use)
+    // --- Set by ikChooseUnknowns, read by ikPostureDofs ---
+    std::vector<char>               neckLift;       ///< Per bone: a neck-chain bone freed for THE FACE LIFT (a pelvis drag going down, the trunk tilted)
+    float                           neckLiftShare{}; ///< ... and how far the tilt has freed it (0..1; its price is the trunk's over this)
     // --- Set by ikPosturePolicy, read by ikPostureDofs / ikPostureRoot ---
     std::vector<char>               plantedThigh; ///< Per bone: a planted foot's THIGH (its abduction is boxed: kThighAbductBoxDeg).
     std::vector<int>                abductAxis;   ///< ... its abduction channel (the free one about the fore axis, neither twist nor flexion).
@@ -125,6 +128,7 @@ struct IkSolveScratch {
     std::vector<JointOrientationTask> palmRows;  ///< (... and their palms' pulls, added once the contact's fade is known)
     std::vector<JointPositionTask>  tipRows;  ///< (... and their fingertips' heights)
     std::vector<char>               footFreed;  ///< (see THE FEET COME UP: their floor rows return)
+    std::vector<char>               hangArmDof; ///< a RELEASED hang arm's bones, unknowns under the prone at the limb's price (ikChooseUnknowns; the floor's rows bend the arm, not the body)
     std::vector<char>               footLying;  ///< (A KNEELING FOOT LIES FLAT: the ankle's and mid-foot's floor rows read standing heights, and are off; the ball's and toes' stay)
     std::vector<std::tuple<int, float, float>> handCeilings;  ///< (a slack-armed hand, a loaded knee may not rise off the floor: node, height, weight share — a one-sided row, see the plane source)
     std::vector<std::tuple<std::size_t, int, float>> kneeCeilings;  ///< (a loaded knee may not rise either: pin, node, height — added to the ceilings below by its hold)

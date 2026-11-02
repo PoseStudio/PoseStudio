@@ -688,6 +688,9 @@ private:
     /// The bind length of the chain from @p from up to, not including, @p upTo (or the root): each
     /// bone's local bind offset, summed child-first.
     float chainLength(int from, int upTo) const;
+    /// The upper arm's joint of @p hand's arm — the bone below the collar on the hand's path to its limb
+    /// junction (the shoulder socket), or the hand's parent on a rig with no such chain.
+    int   armSocketOf(int hand) const;
     /// The child a limb continues through: the one with the biggest subtree (-1 for a leaf).
     int  mainChild(int bone) const;
     /// The rigid limb segment @p bone belongs to: its near joint (up past any twist bones) and
@@ -721,6 +724,11 @@ private:
         /// Its hand came down on the floor DURING this drag: the solve has the arm from then on,
         /// and balance stays blind to it (balancePositions).
         bool landed = false;
+        /// Its hand's contact LIFTED during this drag (held, then not): the arm is the hang's, held off
+        /// the floor by it, and keeps NO floor rows in the solve (ikPlaneRows) — rows only the body
+        /// could answer, and a prop: the heavy male's released arms rested along his body with the
+        /// thumbs on the floor, and the thumbs' rows held his chest up (2026-10-29).
+        bool released = false;
         /// Its hand was ON THE FLOOR when the drag began (a contact): once that contact is unloaded
         /// or lifted the wrist RELAXES toward neutral (hangIdleArms) — riding its posture reference,
         /// a hand lifted off all fours stayed bent back 80 degrees, flat, held out like a paw.
@@ -764,6 +772,7 @@ private:
     /// drag the solve bends the neck and the righting has the head bone alone). Balance is blind
     /// to these, and to these only.
     std::vector<int>              m_jsHeadFree;
+    std::vector<char>             m_jsNeckLift;           ///< Per bone: the neck chain the solve has for THE FACE LIFT this tick (the righting leaves those)
     int                           m_jsHeadBase = -1;
     glm::mat3                     m_jsHeadIntrinsic{1.0f}; ///< The drag-start righting, in the chest's frame (see rightIdleHead).
     float                         m_jsHeadIntrinsicHang = 0.0f; ///< How far the righting was faded at the press (0-1): that share of the intrinsic relaxes with the rise.
@@ -983,6 +992,7 @@ private:
     /// taken down onto all fours and back up in one drag kept both hands on the floor - the trunk
     /// folding at the hips to leave them there - on the five rigs whose arms could reach.
     float                         m_jsContactRise = 0.0f;
+    float                         m_jsProneLie = 0.0f;     ///< THE PRONE: a kneel-start pelvis drag's target ahead of a planted knee and down toward the belly's lying height (ikChooseUnknowns; a function of the target, kept through the settle)
     float                         m_jsProneShare = 0.0f;   ///< a pelvis drag's hips AHEAD of a planted knee (solveIk): the pelvis's tilt price and the feet's rows fade with it
     float                         m_jsKneelUpRise = 0.0f;  ///< a kneel-start TRUNK drag's upward travel (smoothstep 5-20cm): it unloads the HAND contacts, whose arms cannot always make the rise that would (dragIkTick)
     float                         m_jsKneelHold = 0.0f;    ///< a kneel-start TRUNK drag's hold of the knees DOWN (a ceiling): 1 while the trunk can give what is asked, or for the whole drag when it began folded (dragIkTick)
@@ -1045,6 +1055,14 @@ private:
     /// lay's band (re-captured whenever it leaves and returns).
     glm::mat3                     m_jsHandLayFrom{1.0f};
     float                         m_jsHandLayEase = 0.0f;
+    int                           m_jsAkimboBone = -1;    ///< AKIMBO (the hand lay): the shoulder whose abduction channel is referred OUT while a hand lies on the hip
+    int                           m_jsAkimboAxis = 0;
+    float                         m_jsAkimboRefDeg = 0.0f; ///< the channel value that stands the upper arm kHandLayElbowOutDeg out
+    float                         m_jsAkimboShare = 0.0f;  ///< the lay x the surface's lateral share x the hips' band x the ease (0 = off)
+    float                         m_jsAkimboEase = 0.0f;   ///< the time ease (kHandLayElbowEaseStep a tick, decaying when the lay lets go)
+    float                         m_jsDangle = 0.0f;       ///< THE DANGLE: how far the suspended body has gone over to hanging (kDangleStep a tick while suspended, back on landing)
+    std::vector<glm::vec3>        m_jsDangleRef;           ///< per bone, the hanging references (the thighs plumb, the knees soft, the feet pointed) — ikPostureDofs
+    std::vector<unsigned char>    m_jsDangleValid;         ///< per bone, a bit per channel that has one
     bool                          m_jsHandLayValid = false;
     /// ... and which SIDE of the hand lies on it: +1 the palm, -1 its BACK — whichever needed the
     /// least turn where the target entered the band (a hand behind the back rests on its back: the
@@ -1240,6 +1258,7 @@ private:
         glm::vec3      fore{0.0f};    // the trunk's fore axis now, or zero
         float          swingAsked = 0.0f; // the swing the tilt asked (degrees, + forward)
         float          depthBefore = 0.0f;
+        float          floorDepthBefore = 0.0f; // the arm's depth under the floor alone (negative = clear)
         float          fraction = 1.0f;
     };
     /// ... IDLE ARMS HANG in parts (armatureikpost.cpp), in the order hangIdleArms calls them:
@@ -1248,14 +1267,15 @@ private:
     bool               softenHangElbows(const std::vector<float>& swings);      ///< the elbow softens near the floor, bends with the swing
     bool               relaxLiftedWrists();                                     ///< a lifted hand's wrist eases to neutral
     bool               relaxIdleFingers();                                      ///< IDLE HANDS RELAX; a hand coming down opens
-    void               findHangTurns(const std::vector<float>& swings, std::vector<HangTurn>& turns) const; ///< each arm's wanted direction and turn
+    void               findHangTurns(const std::vector<float>& swings, std::vector<HangTurn>& turns);       ///< each arm's wanted direction and turn
     void               stopHangTurns(std::vector<HangTurn>& turns);             ///< THE STOP: at the volumes and the floor, order-independent, outward where blocked
     bool               applyHangTurns(const std::vector<HangTurn>& turns);      ///< the turns applied; the carried swing remembered
     bool               hangStanceSplit(float armSide, const glm::vec3& fore, float& split) const; ///< the stance's fore-aft split for an arm's side
     float              hangSwingDegOf(float split) const;                       ///< the swing a split gives (degrees, + forward)
     bool               hangHandLifted(const HangArm& arm) const;                ///< no pin but a shadow stands in the arm
-    bool               hangTurnFor(const HangArm& arm, const glm::vec3& wanted, HangTurn& turn) const; ///< the least swing that points the arm at `wanted`
+    bool hangTurnFor(const HangArm& arm, const glm::vec3& wanted, HangTurn& turn, float stepDeg = -1.0f) const; // (stepDeg <= 0: the hang's pace, kArmHangStepDeg; a large value = the whole turn) ///< the least swing that points the arm at `wanted`
     float              hangTurnDepth(const HangTurn& t) const;                  ///< how deep the arm stands in the volumes / under the floor
+    float              hangTurnFloorDepth(const HangTurn& t) const;             ///< ... under the floor alone (negative = clear by that much)
     void               hangTurnTo(const HangTurn& t, float fraction);           ///< the shoulder turned that far along the turn
     static float       hangTurnAllow(const HangTurn& t);                        ///< how deep a turn may leave its arm
     void               hangStopFraction(HangTurn& t);                           ///< one turn stopped at the volumes and the floor

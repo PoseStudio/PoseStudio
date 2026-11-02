@@ -234,6 +234,11 @@ bool IkRig::computeDescendsFromPelvis(int node) const {
     return false;
 }
 
+bool IkRig::restsOnFloor(int node, const std::vector<glm::vec3>& positions) const {
+    return node >= 0 && static_cast<std::size_t>(node) < positions.size() &&
+           contactHeight(node, positions) <= kSeedContactBand * m_sizeScale;
+}
+
 float IkRig::contactHeight(int node, const std::vector<glm::vec3>& positions) const {
     const std::size_t i = static_cast<std::size_t>(node);
     float h = positions[i].y - m_floorClearance[i];
@@ -244,19 +249,29 @@ float IkRig::contactHeight(int node, const std::vector<glm::vec3>& positions) co
     return h - m_groundOffsetY;
 }
 
+// (The solve's per-node unload state: 1 = unloaded, 2 = outright, 3 = still easing in — in the low two
+// bits — and the 4 bit set where the DESCENT let a trailing hand go: trailReleased.)
 bool IkRig::riseUnloaded(int node) const {
-    return !kLiftTautOnly && node >= 0 && static_cast<std::size_t>(node) < m_riseUnloaded.size() &&
-           (m_riseUnloaded[static_cast<std::size_t>(node)] == 1 || m_riseUnloaded[static_cast<std::size_t>(node)] == 2);
+    if (kLiftTautOnly || node < 0 || static_cast<std::size_t>(node) >= m_riseUnloaded.size()) {
+        return false;
+    }
+    const int state = m_riseUnloaded[static_cast<std::size_t>(node)] & 3;
+    return state == 1 || state == 2;
 }
 
 bool IkRig::riseUnloading(int node) const {
     return !kLiftTautOnly && node >= 0 && static_cast<std::size_t>(node) < m_riseUnloaded.size() &&
-           m_riseUnloaded[static_cast<std::size_t>(node)] == 3;
+           (m_riseUnloaded[static_cast<std::size_t>(node)] & 3) == 3;
 }
 
 bool IkRig::riseUnloadedOutright(int node) const {
     static const bool kWaits = std::getenv("IK_LIFT_UNLOADED_WAITS") != nullptr; // A/B probe: the 2cm / three ticks as before
-    return !kWaits && riseUnloaded(node) && m_riseUnloaded[static_cast<std::size_t>(node)] >= 2;
+    return !kWaits && riseUnloaded(node) && (m_riseUnloaded[static_cast<std::size_t>(node)] & 3) >= 2;
+}
+
+bool IkRig::trailReleased(int node) const {
+    return !kLiftTautOnly && node >= 0 && static_cast<std::size_t>(node) < m_riseUnloaded.size() &&
+           (m_riseUnloaded[static_cast<std::size_t>(node)] & 4) != 0;
 }
 
 float IkRig::liveContactStretch(std::size_t pin, const std::vector<glm::vec3>& positions) const {
@@ -510,6 +525,13 @@ void IkRig::seedPoseContacts(const std::vector<glm::vec3>& positions) {
         }
         if (m_effector == m_pelvis && isGirdleJoint(c)) {
             continue; // (the pelvis's own girdle is no contact of a pelvis drag: see updateContacts)
+        }
+        // (... nor a SPINE joint, 2026-10-29: a chest that comes down onto the floor under a prone
+        // descent rests and slides as the hips are taken on — pinned in place it stretched the trunk
+        // between itself and the moving hips, and the head whipped 90mm a tick over it. The floor's
+        // rows keep the trunk on the floor; a trunk is no support under its own pelvis's drag.)
+        if (m_effector == m_pelvis && isSpineJoint(c)) {
+            continue;
         }
         // (... nor is her head, or her neck — see updateContacts: a face on the floor rests, it props
         // nothing, and seeded here under a hip drag up off her belly it held her head down.)
@@ -876,7 +898,9 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
         // (A hand whose unload is still EASING IN — riseUnloading, 2026-10-27 — is not taut by its
         // reach yet: released on the reach alone with its hold at 1e5, the trunk it had held down
         // sprang 83mm at the brow in the tick the pin went. It is taut once the solve says so.)
-        lifting[p] = !descending && (kLiftNoDefer || !liftOffDeferred(node)) &&
+        // (... and the descent's rule stands down for a TRAILING hand the solve is letting go of —
+        // trailReleased, 2026-10-29: a leash the body slid forward over, not a support it comes down onto.)
+        lifting[p] = (!descending || trailReleased(node)) && (kLiftNoDefer || !liftOffDeferred(node)) &&
                      ((((reach > kLiveContactTaut * m_liveSpan[p] && !riseUnloading(node)) || riseUnloaded(node)) &&
                        liveContactRise(p, solved) > kLiveContactLift * scale && m_liveErrTicks[p] + 1 >= kLiveContactReleaseTicks) ||
                       // (A hold the rise has taken OUTRIGHT holds nothing: let go of at once, whatever
@@ -923,7 +947,7 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
         const float reach = glm::length(solved[static_cast<std::size_t>(junction)] - pin.target);
         const bool  taut = (p < m_liveSpan.size() && reach > kLiveContactTaut * m_liveSpan[p] && !riseUnloading(node)) || riseUnloaded(node);
         const bool  outright = riseUnloadedOutright(node); // (a hold the rise took outright: let go of now — see lifting[] above)
-        if (!descending && (kLiftNoDefer || !liftOffDeferred(node)) && (outright || (taut && liveContactRise(p, solved) > kLiveContactLift * scale))) {
+        if ((!descending || trailReleased(node)) && (kLiftNoDefer || !liftOffDeferred(node)) && (outright || (taut && liveContactRise(p, solved) > kLiveContactLift * scale))) {
             if (++m_liveErrTicks[p] >= kLiveContactReleaseTicks || outright) {
                 // In the air. Is the body still LEANING on it? Removed the tick it lifts, a
                 // kneeling figure's support went from knees-and-feet to the feet alone in one
@@ -1089,6 +1113,9 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
             if (headChain) {
                 continue;
             }
+        }
+        if (m_effector == m_pelvis && isSpineJoint(c)) {
+            continue; // (nor a SPINE joint under a pelvis drag: a chest lying down rests and slides — see seedPoseContacts)
         }
         // (A figure seated on the floor, her trunk dragged: her arms are no supports — see
         // seedPoseContacts.)

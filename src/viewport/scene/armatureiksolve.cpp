@@ -227,6 +227,23 @@ void Armature::ikSolve(IkSolveScratch& s) {
         // made "jumped" 1e-7 and the ceiling TWO pieces — a solve to a target halfway back from a
         // cursor held out of reach, every tick, and the real one from wherever that left the pose:
         // on one rig a folded-over crouch answered with a 2-tick limit cycle, 45mm at the face.)
+        static const bool kTaskTrace = std::getenv("IK_JS_TASK_TRACE") != nullptr; // the problem's rows by task, before the solve
+        if (kTaskTrace) {
+            for (std::size_t i = 0; i < problem.positions.size(); ++i) {
+                const JointPositionTask& pt = problem.positions[i];
+                std::fprintf(stderr, "[js-task] position %zu bone %d (%s) weight %.3g huber %.3g axes(%.0f %.0f %.0f)", i, pt.bone,
+                             pt.bone >= 0 && static_cast<std::size_t>(pt.bone) < m_boneNames.size() ? m_boneNames[static_cast<std::size_t>(pt.bone)].c_str() : "?",
+                             pt.weight, pt.huber, pt.axisScale.x, pt.axisScale.y, pt.axisScale.z);
+                std::fputc(10, stderr);
+            }
+            for (std::size_t i = 0; i < problem.orientations.size(); ++i) {
+                const JointOrientationTask& ot = problem.orientations[i];
+                std::fprintf(stderr, "[js-task] orientation %zu bone %d (%s) weight %.3g perAxis %d axisWeights(%.3g %.3g %.3g)", i, ot.bone,
+                             ot.bone >= 0 && static_cast<std::size_t>(ot.bone) < m_boneNames.size() ? m_boneNames[static_cast<std::size_t>(ot.bone)].c_str() : "?",
+                             ot.weight, ot.perAxis ? 1 : 0, ot.axisWeights.x, ot.axisWeights.y, ot.axisWeights.z);
+                std::fputc(10, stderr);
+            }
+        }
         const int pieces = std::clamp(
             static_cast<int>(std::ceil(std::min(dist, jumped + kTargetSubstep) / kTargetSubstep - 0.01f)), 1, 12);
         for (int k = 1; k <= pieces; ++k) {
@@ -812,6 +829,16 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
         m_jsLiftDeficit = glm::vec3(0.0f);
         m_jsHangDeficit = glm::vec3(0.0f);
     }
+    // THE DANGLE (kDangle*, 2026-11-02): how far the suspended body has gone over to HANGING — the legs
+    // plumb from the hips, the knees soft, the feet pointed, the free arm plumb (ikPostureDofs makes
+    // the references, the hang reads the share). It eases in over half a second of suspension and out
+    // again at the same pace once she lands, so nothing pops either way; a figure lifted and kept her
+    // standing pose in the air before (the legs apart in the stance, the free arm out at the A-pose
+    // angle), a mannequin on a hook. IK_JS_NO_DANGLE is the A/B.
+    {
+        static const bool kNoDangle = std::getenv("IK_JS_NO_DANGLE") != nullptr; // A/B probe
+        m_jsDangle = kNoDangle ? 0.0f : glm::clamp(m_jsDangle + (rig.suspended() ? kDangleStep : -kDangleStep), 0.0f, 1.0f);
+    }
     m_jsSolveGoal = goal;
     bool moved = solveIk(&goal, nullptr);
     m_jsPostStepMoving = false;
@@ -875,7 +902,13 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
     // A contact that has just formed in an arm that HUNG is an accident of the pose, not a hand the
     // user put down: remembered across drags (m_incidentalContact; IkRig::setIncidentalContacts).
     for (std::size_t a = 0; a < m_jsHangArms.size(); ++a) {
-        if (heldBefore[a] || !hangArmHeld(m_jsHangArms[a])) {
+        // (An arm the hang admitted THIS tick — its hand a live contact already — was held before it.)
+        const bool before = a < heldBefore.size() ? heldBefore[a] != 0 : true;
+        const bool now = hangArmHeld(m_jsHangArms[a]);
+        if (before && !now) {
+            m_jsHangArms[a].released = true; // (its contact lifted: the hang's, and no floor rows — HangArm::released)
+        }
+        if (before || !now) {
             continue;
         }
         m_jsHangArms[a].landed = true;

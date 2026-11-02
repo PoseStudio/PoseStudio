@@ -282,7 +282,18 @@ void Armature::ikPosturePolicy(IkSolveScratch& s) {
         // also keeps the spine OUT of the solve until then: unloaded to 400/m2 but still pinned, the
         // hands let the trunk come up a little and the pins' going released the rest at once.)
         const bool  handsHold = m_jsHandsPlanted;
-        const float want = (kNoRiseTrunkHome || rising <= 0.0f) ? 0.0f : (handsHold ? m_jsTrunkHomeShare : risen);
+        const float wantRise = (kNoRiseTrunkHome || rising <= 0.0f) ? 0.0f : (handsHold ? m_jsTrunkHomeShare : risen);
+        // THE TRUNK LIES DOWN (2026-10-29): under a prone descent — THE FACE LIFT's share, a pelvis drag
+        // going down with the trunk tilted past the righting's fade — the spine's references turn home
+        // the same way, to the bind's straight back, at the same pace and frozen on planted hands:
+        // with the belly and the face on the floor nothing else asked the all-fours HUMP to flatten
+        // (the spine curled 20 degrees a joint, the chest 7cm above the hips in the air), and the
+        // heavy male lay on his belly with his chest 24cm up.
+        // (NOT frozen on planted hands, 2026-10-29: under the prone the hands are trailing leashes let
+        // go by their own eased fade, and the trunk's re-base paces what they stored — frozen, the
+        // trunk never lay down while they held, and the root's reference was left at its dive.)
+        const float wantProne = s.neckLiftShare;
+        const float want = std::max(wantRise, wantProne);
         static const float kStep = envOr<float>("IK_JS_TRUNKHOMESTEP", kTrunkHomeStep); // (A/B lever)
         m_jsTrunkHomeShare = glm::clamp(want, m_jsTrunkHomeShare - kStep, m_jsTrunkHomeShare + kStep);
         static const bool kHomeTrace = std::getenv("IK_JS_TRUNK_HOME_TRACE") != nullptr; // the share, the rise and what holds it
@@ -431,7 +442,23 @@ void Armature::ikPosturePolicy(IkSolveScratch& s) {
             m_jsProneShare = std::max(m_jsProneShare, glm::smoothstep(kProneFootFreeFrom * rig.sizeScale(),
                                                                     kProneFootFreeFull * rig.sizeScale(), glm::dot(hips - knee, fore)));
         }
-        const double wanted = glm::mix(1.0, kTiltScale, static_cast<double>(landedMost) * (1.0 - static_cast<double>(m_jsProneShare)));
+        // (... AND COMES BACK AS THE TRUNK LIES DOWN, 2026-10-29: the fade let the pelvis pitch face-down
+        // when its reference was the all-fours value; under THE PRONE (ikChooseUnknowns) the reference
+        // turns to LYING at the trunk's home share, and faded to the limb's price the pelvis DIVED past
+        // flat to chase a cursor beyond the thighs' reach from the planted knees — the whole 35 degrees
+        // of hip hyperextension and the pelvis bone's 25 spent for a few centimetres forward, root and
+        // pelvis bone 130-147 degrees, the spine arched off it. Dear, she rests where her thighs stop
+        // her, flat.)
+        // (... AND BY THE TARGET, 2026-10-29 — m_jsProneLie, THE PRONE's own share: read off the hips'
+        // travel ahead of the knee alone it was a DEADLOCK on the third generation. Its kneel lies the
+        // feet flat on their tops, and a lying foot's ankle is held at its place; the hips go ahead of
+        // the knees only as the shins straighten, the shins straighten only once the feet are let go,
+        // and the feet are let go only once the hips are 8-25cm ahead: she stood dead at 13cm with the
+        // knees still bent 89 degrees until the hands' release broke it, 112mm in a tick.)
+        m_jsProneShare = std::max(m_jsProneShare, m_jsProneLie);
+        static const double kLieTilt = envOr("IK_JS_PRONE_TILT_SHARE", 1.0); // (A/B lever: how much of the fade the lie withholds; 0 = the fade as before)
+        const double lie = (s.neckLiftShare > 0.0f ? static_cast<double>(m_jsTrunkHomeShare) : 0.0) * kLieTilt;
+        const double wanted = glm::mix(1.0, kTiltScale, static_cast<double>(landedMost) * (1.0 - static_cast<double>(m_jsProneShare) * (1.0 - lie)));
         static const double kTiltEase = envOr("IK_JS_KNEELTILTEASE", 1.15);
         m_jsKneelTilt = glm::clamp(wanted, m_jsKneelTilt / kTiltEase, m_jsKneelTilt * kTiltEase);
         kneelTilt = m_jsKneelTilt;
@@ -442,6 +469,9 @@ void Armature::ikPosturePolicy(IkSolveScratch& s) {
 /// and rolls, the rise home, the lying foot, the fold bounds, the collar's and the thigh's boxes.
 void Armature::ikPostureDofs(IkSolveScratch& s) {
     IkRig& rig = s.rig;
+    const std::vector<char>& neckLift = s.neckLift;
+    const float neckLiftShare = s.neckLiftShare;
+    const std::vector<char>& hangArmDof = s.hangArmDof; // (a released hang arm's bones under the prone: the limb's price)
     const std::size_t n = s.n;
     const int root = s.root;
     const int effector = s.effector;
@@ -475,6 +505,90 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
     std::vector<int>& abductAxis = s.abductAxis;
     std::vector<int>& flexAxis = s.flexAxis;
 
+    // THE DANGLE (kDangle*, 2026-11-02; m_jsDangle eases in dragIkTick): a body lifted off the floor
+    // hangs from the held hand — the legs come together and hang PLUMB from the hips, a little
+    // forward (kDangleThighForwardDeg), the knees soften (kDangleKneeDeg), the feet point
+    // (kDangleFootDeg); the free arm hangs plumb through the hang's own plumb share. REFERENCES, at
+    // kDangleStiffness x the share (what a dangling body does is given, as the kneeling foot's lie
+    // is): a THIGH's two swing dials — the Side-Side and the Bend, found by structure like the
+    // akimbo's — are referred to the channel values that stand the thigh plumb and a little
+    // forward, read off its direction and each dial's sweep this tick (an iterated reference toward
+    // a fixed world direction: the error shrinks tick by tick); a KNEE's fold channel to
+    // kDangleKneeDeg of flexion, an ANKLE's Bend dial to kDangleFootDeg pointed (the dial's positive
+    // side is "pointed" on every generation). Before it she kept her STANDING pose in the air — the
+    // legs apart in the stance, the free arm out at the A-pose angle, the feet level: a mannequin on
+    // a hook. The thigh is the bone with a foot below it hanging from the solve root or the pelvis
+    // bone (the rig's legOf names it for every bone of a leg); the knee a leg joint above the foot
+    // with a fold channel; the ankle the foot-class joint whose parent is none.
+    m_jsDangleRef.assign(n, glm::vec3(0.0f));
+    m_jsDangleValid.assign(n, 0);
+    if (m_jsDangle > 0.0f) {
+        const glm::vec3 rootAt(m_poseGlobal[static_cast<std::size_t>(root)][3]);
+        // (The rig's legOf names the bone BELOW the thigh socket — the socket is a girdle joint to the
+        // rig, and has no leg of its own: the twist bone where a generation cuts the thigh's twist
+        // out, the shin where the twist helpers hang beside it — so the THIGH is that bone's parent,
+        // unless the leg hangs straight off the root or the pelvis bone.)
+        std::vector<char> isThigh(n, 0);
+        for (std::size_t b = 0; b < n; ++b) {
+            const int leg = rig.legOf(static_cast<int>(b));
+            if (leg < 0) {
+                continue;
+            }
+            const int legParent = m_bones[static_cast<std::size_t>(leg)].parent;
+            const int thigh = (legParent >= 0 && legParent != root && !rig.isPelvisBone(legParent)) ? legParent : leg;
+            isThigh[static_cast<std::size_t>(thigh)] = 1;
+        }
+        for (std::size_t b = 0; b < n; ++b) {
+            const int bi = static_cast<int>(b);
+            const int parent = m_bones[b].parent;
+            if (parent < 0 || (!isThigh[b] && rig.legOf(bi) < 0)) {
+                continue;
+            }
+            if (isThigh[b]) {
+                // The THIGH: plumb laterally, kDangleThighForwardDeg forward.
+                const glm::vec3 socketAt(m_poseGlobal[b][3]);
+                const float     side = glm::dot(socketAt - rootAt, s.lateral) >= 0.0f ? 1.0f : -1.0f;
+                const glm::vec3 outDir = s.lateral * side;
+                for (int k = 0; k < 2; ++k) {
+                    const JointDial dial = jointDial(bi, k == 0 ? JointDialKind::BendSideways : JointDialKind::BendForward);
+                    JointDialSweep  sweep;
+                    if (!dial.valid() || dial.bone != bi || std::abs(dial.fullDeg) < 1.0e-3f || !jointDialSweep(dial, sweep)) {
+                        continue;
+                    }
+                    const glm::vec3 d = sweep.tip - socketAt;
+                    const float     len = glm::length(d);
+                    if (len < 1.0e-4f) {
+                        continue;
+                    }
+                    const glm::vec3 axisDir = k == 0 ? outDir : s.fore;
+                    const float     nowDeg = glm::degrees(std::asin(glm::clamp(glm::dot(d / len, axisDir), -1.0f, 1.0f)));
+                    const float     wantDeg = k == 0 ? 0.0f : kDangleThighForwardDeg;
+                    const float     perDeg = glm::dot(sweep.tipPerDegree, axisDir); // metres per degree of the dial's positive side, along the axis
+                    if (std::abs(perDeg) < 1.0e-5f) {
+                        continue;
+                    }
+                    const float chanSign = (perDeg > 0.0f ? 1.0f : -1.0f) * (dial.fullDeg < 0.0f ? -1.0f : 1.0f);
+                    m_jsDangleRef[b][dial.axis] = m_boneEuler[b][dial.axis] + chanSign * (wantDeg - nowDeg);
+                    m_jsDangleValid[b] |= static_cast<unsigned char>(1u << dial.axis);
+                }
+            } else if (rig.isFootClass(bi)) {
+                if (!rig.isFootClass(parent)) { // the ANKLE: pointed
+                    const JointDial dial = jointDial(bi, JointDialKind::BendForward);
+                    if (dial.valid() && dial.bone == bi && std::abs(dial.fullDeg) > 1.0e-3f) {
+                        m_jsDangleRef[b][dial.axis] = kDangleFootDeg * (dial.fullDeg < 0.0f ? -1.0f : 1.0f);
+                        m_jsDangleValid[b] |= static_cast<unsigned char>(1u << dial.axis);
+                    }
+                }
+            } else if (rig.isLegJointAboveFoot(bi) && foldAxisOf(bi) >= 0) { // the KNEE: soft
+                const JointDial dial = jointDial(bi, JointDialKind::BendForward);
+                if (dial.valid() && dial.bone == bi && dial.axis == foldAxisOf(bi) && std::abs(dial.fullDeg) > 1.0e-3f) {
+                    m_jsDangleRef[b][dial.axis] = kDangleKneeDeg * (dial.fullDeg < 0.0f ? -1.0f : 1.0f);
+                    m_jsDangleValid[b] |= static_cast<unsigned char>(1u << dial.axis);
+                }
+            }
+        }
+    }
+
     for (std::size_t b = 0; b < n; ++b) {
         if (!dofBone[b]) {
             continue;
@@ -499,6 +613,12 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
             const double rangeRad = rangeDeg * kPi / 180.0;
             double s = 1.0 / (rangeRad * rangeRad);
             s *= cls[b] == 1 ? kLimbStiffness : cls[b] == 2 ? kPinLimbPrice : kTrunkPrice;
+            if (b < hangArmDof.size() && hangArmDof[b]) { // (A RELEASED ARM UNDER THE PRONE: the limb's price, whatever its class)
+                s = kLimbStiffness / (rangeRad * rangeRad);
+            }
+            if (b < neckLift.size() && neckLift[b]) { // (THE FACE LIFT: the neck, frozen until the trunk has tilted)
+                s /= static_cast<double>(std::max(neckLiftShare, kFaceLiftFloor));
+            }
             // (The PELVIS BONE — the girdle joint between the root and the thigh sockets, no spine
             // bone — is locked with the spine: it is the trunk's other way out of the plane. A sit-up
             // dragged past what a seated trunk can reach, both thighs at their flexion limit, bought
@@ -642,6 +762,25 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
                 // spine unfolding with it — 105mm at the brow, 271 at a fingertip.)
                 dof.reference = glm::mix(homeBase, m_jsRootUprightEuler[a], kNoRiseTrunkHome ? risen : m_jsTrunkHomeShare);
             }
+            // THE TRUNK LIES DOWN (2026-10-29): under a prone descent (THE FACE LIFT's share) the root's
+            // PITCH reference turns to LYING FACE DOWN — upright pitched a right angle forward, the way
+            // the drag found it pitched — at the trunk's paced home share, as the spine's references
+            // turn straight. Without a weight nothing lays a trunk on the floor: with the belly and
+            // the face resting and the spine straightened, the chest stood 24cm up in the air on a
+            // pelvis 4 degrees short of flat. The floor's rows on the belly and the chest keep the
+            // reference honest (the pelvis bone's own flexion stays), and the hips' cursor does the rest.
+            if (static_cast<int>(b) == root && rising <= 0.0f && neckLiftShare > 0.0f && m_jsTrunkHomeShare > 0.0f &&
+                std::abs(glm::vec3(bone.orient[a]).x) >= 0.9f) {
+                const float forward = homeBase >= m_jsRootUprightEuler[a] ? 1.0f : -1.0f;
+                dof.reference = glm::mix(homeBase, m_jsRootUprightEuler[a] + 90.0f * forward, m_jsTrunkHomeShare);
+                static const bool kLyingTrace = std::getenv("IK_JS_LYING_TRACE") != nullptr;
+                if (kLyingTrace) {
+                    std::fprintf(stderr, "[lying] root (bone %d) axis %d: value %.2f homeBase %.2f (rebased %d) upright %.2f forward %.0f share %.3f -> ref %.2f sway %d seatRoll %.1f", static_cast<int>(b), a,
+                                 m_boneEuler[b][a], homeBase, (b < m_jsPostStepTurned.size() && m_jsPostStepTurned[b]) ? 1 : 0,
+                                 m_jsRootUprightEuler[a], forward, m_jsTrunkHomeShare, dof.reference, swayValid ? 1 : 0, seatRollDeg);
+                    std::fputc(10, stderr);
+                }
+            }
             // THE TRUNK COMES UP WITH THE RISE (2026-10-28): the spine chain's references turn from
             // the fold the drag found to the bind — upright — by the rise's progress, as the root's
             // own does. Left at the drag-start values, a figure stood up by the hips off all fours
@@ -650,8 +789,22 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
             if (m_jsTrunkHomeShare > 0.0f && static_cast<int>(b) != root && inSpine[b]) {
                 dof.reference = glm::mix(homeBase, 0.0f, m_jsTrunkHomeShare);
             }
+            // (... and the PELVIS BONE's under THE PRONE, 2026-10-29: the lumbar joint below the root
+            // is no link of the spine chain, and left at its all-fours value it bent to its 25-degree
+            // limit to chase the cursor with the root's dive.)
+            if (m_jsTrunkHomeShare > 0.0f && neckLiftShare > 0.0f && rig.isPelvisBone(static_cast<int>(b))) {
+                dof.reference = glm::mix(homeBase, 0.0f, m_jsTrunkHomeShare);
+            }
             if (static_cast<int>(b) == root && swayValid) {
                 dof.reference = swayEuler[a]; // the hip sway's roll (above)
+            }
+            // AKIMBO (the hand lay, ikHandLayRows): a hand laid on the HIP refers the shoulder's abduction
+            // channel to where the upper arm stands kHandLayElbowOutDeg out, at kHandLayElbowStiffness x
+            // the lay's share — a reference, which moves its own channel and nothing else (a position
+            // row on the elbow leaned the trunk 9-18cm toward it).
+            if (m_jsAkimboShare > 1.0e-3f && static_cast<int>(b) == m_jsAkimboBone && a == m_jsAkimboAxis) {
+                dof.reference = dof.reference + (static_cast<double>(m_jsAkimboRefDeg) - static_cast<double>(dof.reference)) * static_cast<double>(m_jsAkimboShare);
+                dof.stiffness = std::max(dof.stiffness, kHandLayElbowStiffness * static_cast<double>(m_jsAkimboShare));
             }
             if (static_cast<int>(b) == root && seatRollDeg != 0.0 && std::abs(glm::vec3(bone.orient[a]).x) >= 0.9f) {
                 // (THE SEAT ROLLS, above: the pitch channel's reference goes with the target.)
@@ -689,6 +842,11 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
                     static const double kRiseHome = envOr("IK_JS_RISEHOME", kRiseHomeStiffness);
                     dof.stiffness += kRiseHome * static_cast<double>(risen);
                 }
+            }
+            // THE DANGLE (above): the hanging references over the dangle's share.
+            if (m_jsDangle > 0.0f && b < m_jsDangleValid.size() && (m_jsDangleValid[b] & (1u << a)) != 0) {
+                dof.reference = dof.reference + (static_cast<double>(m_jsDangleRef[b][a]) - dof.reference) * static_cast<double>(m_jsDangle);
+                dof.stiffness = std::max(dof.stiffness, kDangleStiffness * static_cast<double>(m_jsDangle));
             }
             // A KNEELING FOOT LIES FLAT (the pin rows set m_jsFootFlat / m_jsFootFlatRef, one tick
             // before): the ankle's pitch channel is REFERRED to full plantar flexion over the
@@ -1156,6 +1314,12 @@ void Armature::ikSpineCoupling(IkSolveScratch& s) {
             const std::size_t b = static_cast<std::size_t>(dof.bone);
             const double previous = dof.axis < 3 ? static_cast<double>(m_boneEuler[b][dof.axis])
                                                  : static_cast<double>(m_boneTranslation[b][dof.axis - 3]);
+            static const bool kLyingTrace2 = std::getenv("IK_JS_LYING_TRACE") != nullptr;
+            if (kLyingTrace2 && dof.bone == m_ikRig->rootNode() && dof.axis == 0) {
+                std::fprintf(stderr, "[lying-ease] root axis 0: ref %.2f previous %.2f kappa %.2f -> ref %.2f stiffness %.1f", dof.reference, previous, kappa,
+                             (dof.reference + kappa * previous) / (1.0 + kappa), dof.stiffness * (1.0 + kappa));
+                std::fputc(10, stderr);
+            }
             dof.reference = (dof.reference + kappa * previous) / (1.0 + kappa);
             dof.stiffness *= 1.0 + kappa;
         }

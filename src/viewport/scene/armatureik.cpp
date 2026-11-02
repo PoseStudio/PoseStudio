@@ -239,6 +239,21 @@ bool Armature::boneUnder(int node, int ancestor) const {
     return false;
 }
 
+int Armature::armSocketOf(int hand) const {
+    if (!m_ikRig || hand < 0 || static_cast<std::size_t>(hand) >= m_bones.size()) {
+        return -1;
+    }
+    const int junction = m_ikRig->limbJunction(hand);
+    int cur = hand;
+    int below = -1; // the bone below `cur` on the path
+    while (cur >= 0 && m_bones[static_cast<std::size_t>(cur)].parent != junction) {
+        below = cur;
+        cur = m_bones[static_cast<std::size_t>(cur)].parent;
+    }
+    // (`cur` is the collar — the junction's child; `below` the bone hanging from it: the upper arm)
+    return below >= 0 ? below : m_bones[static_cast<std::size_t>(hand)].parent;
+}
+
 float Armature::chainLength(int from, int upTo) const {
     float length = 0.0f;
     for (int cur = from; cur >= 0 && cur != upTo; cur = m_bones[static_cast<std::size_t>(cur)].parent) {
@@ -661,6 +676,11 @@ void Armature::resetFootAndHandState() {
     m_jsLyingHangYValid = 0;
     m_jsFootAllowValid = 0;
     m_jsTargetDown = 0.0f;
+    m_jsProneLie = 0.0f;
+    m_jsAkimboBone = -1;
+    m_jsAkimboShare = 0.0f;
+    m_jsAkimboEase = 0.0f;
+    m_jsDangle = 0.0f;
     m_jsHandSlideEase = 0.0f;
     m_jsHandLayValid = false;
     m_jsHandLayEase = 0.0f;

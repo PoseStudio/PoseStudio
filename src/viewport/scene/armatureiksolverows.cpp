@@ -921,6 +921,7 @@ void Armature::ikPinRowLiveContact(IkSolveScratch& s, IkPinRowState& st) {
     std::vector<std::tuple<int, float, float>>& handCeilings = s.handCeilings;
     std::vector<std::tuple<std::size_t, int, float>>& kneeCeilings = s.kneeCeilings;
     std::vector<glm::vec3>& risePositions = s.risePositions;
+    const glm::vec3& fore = s.fore;
     const std::size_t p = st.p;
     const IkEffector& pin = *st.pin;
     const std::size_t node = st.node;
@@ -971,6 +972,26 @@ void Armature::ikPinRowLiveContact(IkSolveScratch& s, IkPinRowState& st) {
         // and the pre-posed all-fours rise ended with the trunk still curled, the hands 18cm up where
         // they hang at 40; un-rebased it springs back to the drag-start fold as it always did.)
         static const bool kNoTrunkRebase = std::getenv("IK_JS_HAND_UNLOAD_NO_TRUNK_REBASE") != nullptr; // A/B probe
+        // (... and while the trunk LIES DOWN under a prone descent — THE FACE LIFT's share, which gives
+        // the trunk its way home as the rise does, 2026-10-29: the hands had held the chest BACK as a
+        // leash, and when their trailing release let go the strain the spine and the root had stored
+        // against it sprang in one tick — the root pitched 5 degrees, a brow 77mm, the solve out of
+        // iterations.)
+        // (THE HOME IS RE-BASED, NOT THIS TICK'S REFERENCE, 2026-10-29: the trunk's reference is
+        // mix(home, upright-or-lying, the paced share), and the home — m_jsPostStepEuler, read by the
+        // posture model at the NEXT tick — is where the hands leave the trunk; overwriting the
+        // reference with the current value as well, as this did for a day, left the trunk with no
+        // reference at all for as long as a hand's hold was fading, which under the prone is the
+        // whole drag: the trailing hands' unload never ends while they stand, so the root's lying
+        // reference never reached the solver and the pelvis dived 32 degrees past flat after the
+        // cursor. The rise's hands are unloaded with the share frozen at zero, so there the stale
+        // home is the current value to within one tick's move, as it was.)
+        // (... and NOT under the prone, 2026-10-29: the re-base's FIRST tick moves the home from the
+        // drag-start value to the current one — on the base rig from 56 to 77 degrees of pelvis
+        // pitch, the lying reference with it by 16 at a share of 0.29 — and the posture term took
+        // 8 of them in one tick, 93mm at the brow. The trailing hands' leash is let go of through
+        // its own eased unload (the fade block), and the lying references take the trunk from
+        // where the leash leaves it at the posture term's pace.)
         if (!kNoTrunkRebase && effector == root && s.rising > 0.0f) {
             const auto rebase = [&](int bone) {
                 if (bone < 0 || static_cast<std::size_t>(bone) >= n) {
@@ -980,11 +1001,6 @@ void Armature::ikPinRowLiveContact(IkSolveScratch& s, IkPinRowState& st) {
                 if (b < m_jsPostStepEuler.size() && b < m_jsPostStepTurned.size()) {
                     m_jsPostStepEuler[b] = m_boneEuler[b];
                     m_jsPostStepTurned[b] = 1;
-                }
-                for (JointSolverDof& dof : problem.dofs) {
-                    if (dof.bone == bone && dof.axis < 3) { // (the root's translation keeps its home)
-                        dof.reference = m_boneEuler[b][dof.axis];
-                    }
                 }
             };
             for (std::size_t k = 1; k < m_jsSpineChain.size(); ++k) {
@@ -1409,6 +1425,48 @@ void Armature::ikPinRowLiveContact(IkSolveScratch& s, IkPinRowState& st) {
             // instead of snapping it back toward the fold the drag began in: 219mm at a thumb, the
             // collar 13 degrees, the shoulder 15 and the forearm 20 in one tick — the prone-up's pop.)
             float unloadRise = riseSince * handTaut;
+            // THE TRAILING HAND LETS GO UNDER A DESCENT (2026-10-29; kHandTrailFrom/Full): under a
+            // pelvis drag going down, a hand the body has slid forward OVER — its arm taut, its
+            // wrist behind its shoulder along the heading by that share of the arm's span — is a
+            // leash, not a support (the prone's arms: straight, horizontal, the chest held back
+            // against the cursor by their length), and is unloaded as the rise unloads a taut hand:
+            // the same eased fade, the arm re-based, the rig's lift-off — which the descent's
+            // no-lift-off rule stands down for (the 4 bit below: IkRig::trailReleased).
+            static const bool kNoHandTrail = std::getenv("IK_JS_NO_HAND_TRAIL") != nullptr; // A/B probe
+            bool trailing = false;
+            float trailRead = 0.0f; // (the trace's)
+            glm::vec3 socketRead(0.0f);
+            if (!kNoHandTrail && effector == root && m_jsTargetDown > 0.0f && m_jsWristOf.size() == n && m_jsWristOf[node] >= 0 &&
+                rig.liveSpan(p) > 0.0f) {
+                const int socket = armSocketOf(static_cast<int>(node));
+                if (socket >= 0) {
+                    const glm::vec3 behind = glm::vec3(m_poseGlobal[static_cast<std::size_t>(socket)][3]) - glm::vec3(m_poseGlobal[node][3]);
+                    const float trail = glm::dot(behind, fore) / rig.liveSpan(p);
+                    trailRead = trail;
+                    socketRead = glm::vec3(m_poseGlobal[static_cast<std::size_t>(socket)][3]);
+                    // (By the trail alone, not the arm's taut share: a hand 0.75 of its span behind the
+                    // shoulder is a leash whatever the elbow reads — by the share the base rig's release
+                    // stalled at 0.28 with the elbow straight and the hand 0.9 spans behind.)
+                    const float unloadTrail = m_jsTargetDown * glm::smoothstep(kHandTrailFrom, kHandTrailFull, trail);
+                    if (unloadTrail > unloadRise) {
+                        unloadRise = unloadTrail;
+                        trailing = true;
+                    }
+                }
+            }
+            // ... AND UNDER THE PRONE THE HANDS ARE LEASHES BY THE SHARE (2026-10-29; m_jsProneLie, a
+            // function of the target: a kneel-start pelvis drag's target ahead of the planted knees and
+            // down toward the belly). The trail alone read the base rig's arms but not the third
+            // generation's: its hands stood 22cm behind the shoulders and 41cm below them at the
+            // press, the arms folded back to the shoulder's extension limit, and the hips stuck
+            // dead for thirty ticks (0.3mm a tick against a cursor 27cm ahead) at a trail of 0.32,
+            // then paid the backlog off in 5cm jumps as the hold fell six decades — a leash released
+            // by weight releases geometrically. By the share the hands let go as the body lies down
+            // — through the same eased unload — before any backlog forms.
+            if (!kNoHandTrail && effector == root && m_jsProneLie > unloadRise && m_jsWristOf.size() == n && m_jsWristOf[node] >= 0) {
+                unloadRise = m_jsProneLie;
+                trailing = true;
+            }
             if (m_jsWristOf.size() == n && m_jsWristOf[node] >= 0 && node < m_jsHandUnload.size()) {
                 // (EASED IN TIME, kHandUnloadStep a tick — a hand's hold fades over ten ticks however
                 // fast its arm crosses the taut band: at a drag's pace the band is two ticks, and the
@@ -1423,7 +1481,13 @@ void Armature::ikPinRowLiveContact(IkSolveScratch& s, IkPinRowState& st) {
             }
             unloadRise *= kneeHoldRelease; // (a held knee's unload comes in with the release: the knee-hold block)
             if (!kNoRiseUnload && (!kneeBelowHips || kneeHoldRelease > 1.0e-4f) && unloadRise > 1.0e-4f) {
-                gone = std::max(gone, unloadRise);
+                // (A TRAILING hand's hold goes at the trail's EASED pace and no faster, 2026-10-29: its
+                // rise is the leash's own doing — held in x/z, free in y, a hand behind a shoulder
+                // moving away is lifted by the arm's length the moment the arm is taut, and the
+                // joint's own two-centimetre fade let the leash go in three ticks: the trunk sprang
+                // into its lying reference, 90mm at the brow. The leash is let go of through the
+                // unload, which is eased for exactly this.)
+                gone = trailing ? unloadRise : std::max(gone, unloadRise);
                 if (m_jsWristOf.size() == n && m_jsWristOf[node] >= 0) {
                     rebaseContactArm(node);
                 }
@@ -1443,9 +1507,10 @@ void Armature::ikPinRowLiveContact(IkSolveScratch& s, IkPinRowState& st) {
                 // the hold to fade. Released on the reach alone with the hold still at 1e5, the trunk
                 // the hand had been holding down sprang 83mm at the brow in the tick the pin went.)
                 if (m_jsWristOf.size() == n && m_jsWristOf[node] >= 0 && node < m_jsContactRiseUnloaded.size()) {
-                    m_jsContactRiseUnloaded[node] = unloadRise >= kRiseUnloadedOutrightShare ? 2
-                                                    : unloadRise >= kRiseUnloadedShare       ? 1
-                                                                                             : 3;
+                    m_jsContactRiseUnloaded[node] = static_cast<char>((unloadRise >= kRiseUnloadedOutrightShare ? 2
+                                                                       : unloadRise >= kRiseUnloadedShare       ? 1
+                                                                                                                : 3) |
+                                                                      (trailing ? 4 : 0)); // (4: the descent lets it go — IkRig::trailReleased)
                 }
             }
             // (The six decades end at 100/m2 — `gone` eases toward 1 and never reaches it — and a
@@ -1457,10 +1522,23 @@ void Armature::ikPinRowLiveContact(IkSolveScratch& s, IkPinRowState& st) {
             // arm was thrown 140-238mm (two rigs' prone failing). What the phantom spring strains is
             // answered where it is stored instead — see rebaseContactArm.)
             task.weight *= gone >= 1.0f ? 0.0 : std::pow(10.0, -6.0 * static_cast<double>(gone));
+            // A TRAILING HAND IS A FRICTION CONTACT (2026-10-29; kHandTrailPull): its pull is BOUNDED
+            // while its weight fades. Released by weight alone the leash let go GEOMETRICALLY — the
+            // third generation's hips stood dead for thirty ticks against a cursor 29cm ahead (the
+            // arm folded back to its limits, the hold still 1e5) and paid the backlog off in one
+            // 112mm tick when the weight fell below what the pull could stretch. Bounded, the hand
+            // slides along the floor behind the body by what the cursor's pull exceeds the bound,
+            // from the trail's first tick, and the fade takes the rest.
+            // (... and the BOUND fades with the unload — kHandTrailPull x (1 - gone): kept at 300 while the
+            // weight fell six decades, the leash was as strong at gone 0.99 as at 0.1 and went in the one
+            // tick the weight reached zero — 140mm at a shoulder on the third generation.)
+            if (trailing && task.weight > 0.0) {
+                task.huber = kHandTrailPull * static_cast<double>(1.0f - gone) / (2.0 * task.weight);
+            }
             contactGone = gone;
             static const bool kFadeTrace = std::getenv("IK_JS_CONTACT_FADE_TRACE") != nullptr; // which contact is letting go, and why
-            if (kFadeTrace && gone > 1.0e-3f) {
-                std::fprintf(stderr, "[fade] node=%zu hard=%d rise=%.4f gone=%.3f rootRise=%.2f contactRise=%.2f kneelUp=%.2f armSlack=%d kneeBelowHips=%d y=%.4f target.y=%.4f", node, pin.hard ? 1 : 0, rise, gone, m_jsRootRise, m_jsContactRise, m_jsKneelUpRise, armSlack ? 1 : 0, kneeBelowHips ? 1 : 0, m_poseGlobal[node][3].y, pin.target.y);
+            if (kFadeTrace && (gone > 1.0e-3f || trailRead > 0.0f)) {
+                std::fprintf(stderr, "[fade] node=%zu hard=%d rise=%.4f gone=%.3f rootRise=%.2f contactRise=%.2f kneelUp=%.2f armSlack=%d kneeBelowHips=%d trailing=%d trail=%.2f span=%.3f socket(%.3f %.3f %.3f) hand(%.3f %.3f %.3f) hips(%.3f %.3f %.3f) target.y=%.4f", node, pin.hard ? 1 : 0, rise, gone, m_jsRootRise, m_jsContactRise, m_jsKneelUpRise, armSlack ? 1 : 0, kneeBelowHips ? 1 : 0, trailing ? 1 : 0, trailRead, rig.liveSpan(p), socketRead.x, socketRead.y, socketRead.z, m_poseGlobal[node][3].x, m_poseGlobal[node][3].y, m_poseGlobal[node][3].z, m_poseGlobal[static_cast<std::size_t>(root)][3].x, m_poseGlobal[static_cast<std::size_t>(root)][3].y, m_poseGlobal[static_cast<std::size_t>(root)][3].z, pin.target.y);
                 std::fputc(10, stderr);
             }
             // (The KNEEL-UP's unload only: a hand's rows fade to nothing for a tick as it bobs
@@ -1501,6 +1579,18 @@ void Armature::ikPinRowLiveContact(IkSolveScratch& s, IkPinRowState& st) {
         for (JointPositionTask& tipDown : tipRows) {
             static const double kTipHold = envOr("IK_JS_FINGERTIPHOLD", kFingertipHold);
             tipDown.weight = std::min(task.weight, kTipHold); // (soft, and gone with the contact's fade)
+            // (... and NOT a TRAILING hand's, 2026-10-29: held down by its fingertips while its arm was
+            // JAMMED — the third generation's collar at two of its limits, its wrist at 80 — the hand
+            // was a strut from the floor to the chest that no bound on its x/z hold could shorten (a
+            // hand may slide, but sliding lowers nothing): the hips stood dead for thirty ticks and
+            // dropped 11cm when the row had faded to 4e4 and the hand popped up. A leash's hand lifts
+            // as its arm pivots.)
+            // (BOUNDED, not cut: cut at the trail's onset the hands popped up at once — 158-165mm on
+            // two rigs. A friction contact's hold on the fingertips is the hand's weight on the floor,
+            // kHandTrailPull as the x/z hold's: the hand lifts as the body's pull exceeds it.)
+            if (node < m_jsContactRiseUnloaded.size() && (m_jsContactRiseUnloaded[node] & 4) != 0 && tipDown.weight > 0.0) { // (the fade block's `trailing`)
+                tipDown.huber = kHandTrailPull * static_cast<double>(1.0f - contactGone) / (2.0 * tipDown.weight);
+            }
             problem.positions.push_back(tipDown);
         }
         tipRows.clear();
@@ -2457,6 +2547,12 @@ void Armature::ikHandLayRows(IkSolveScratch& s) {
     // unlock its elbow for a cursor 13cm away (the suspension-lower phase: the hand 133mm off).
     static const bool kNoHandLay = std::getenv("IK_JS_NO_HAND_LAY") != nullptr; // A/B probe
     static const bool kHandLayTrace = std::getenv("IK_JS_HAND_LAY_TRACE") != nullptr;
+    // (The akimbo's share is THIS tick's lay's: set only inside the lay block, it stayed at its last
+    // value once the lay dropped — the hand leaving the hip or moving on — and the shoulder's reference
+    // followed the hand through the rest of the drag: the all-fours route's hands pass the hips.)
+    m_jsAkimboShare = 0.0f;
+    const float akimboEaseBefore = m_jsAkimboEase; // (the ease decays unless the lay re-engages it below)
+    m_jsAkimboEase = std::max(0.0f, akimboEaseBefore - kHandLayElbowEaseStep);
     bool              handLaid = false;
     if (!kNoHandLay && dragTarget != nullptr && effector != root && m_jsWristOf.size() == n &&
         m_jsWristOf[static_cast<std::size_t>(effector)] == effector && m_jsHandTip[static_cast<std::size_t>(effector)] >= 0) {
@@ -2582,6 +2678,107 @@ void Armature::ikHandLayRows(IkSolveScratch& s) {
                 palm = glm::normalize(palm);
                 const glm::mat3 now(m_poseGlobal[hnode]);
                 const glm::vec3 nOut = bestNormal;
+                // AKIMBO — A HAND LAID ON THE HIP TAKES ITS ELBOW OUT (2026-11-02; kHandLayElbow*): the lay
+                // turns the palm to the hip, and the arm's redundancy — the elbow — stayed where the
+                // posture terms left it, hanging straight beside the body: a hand pressed to the hip's
+                // side on a straight arm, which nobody does. Where the laid surface's normal is LATERAL
+                // (the hip's side, not the belly: the belly's normal is forward) and the hand lies at the
+                // hips' height, the SHOULDER'S ABDUCTION channel — the socket's Side-Side dial — gets a
+                // REFERENCE that stands the upper arm kHandLayElbowOutDeg from straight down on the side
+                // that takes the elbow OUT (the dial's sweep says which), at kHandLayElbowStiffness x the
+                // lay (ikPostureDofs, the next tick): a reference moves its own channel and nothing else.
+                // (A soft POSITION row on the elbow was the first cut: the trunk answered it as readily
+                // as the shoulder — at 300/m2 the head moved 90-185mm on four rigs as the body leaned
+                // toward the elbow's target; at 100 the arm came out only 23-32 degrees.) IK_JS_NO_AKIMBO.
+                static const bool kNoAkimbo = std::getenv("IK_JS_NO_AKIMBO") != nullptr; // A/B probe
+                {
+                    const glm::vec3 rootAt(m_poseGlobal[static_cast<std::size_t>(root)][3]);
+                    const float     lateralShare = std::abs(glm::dot(nOut, s.lateral));
+                    // (2) The surface must be the BODY's — the pelvis, the belly's side, a thigh — not the
+                    // other ARM's: a hand laid on the other forearm hanging beside the hip reads a lateral
+                    // normal at the hips' height too, and took its elbow out.
+                    bool armSurface = false;
+                    for (std::size_t w = 0; w < n && !armSurface; ++w) {
+                        if (m_jsWristOf[w] != static_cast<int>(w)) {
+                            continue;
+                        }
+                        const int sock = armSocketOf(static_cast<int>(w));
+                        armSurface = sock >= 0 && (bestA == sock || boneUnder(bestA, sock));
+                    }
+                    const float     hipBand = 1.0f - glm::smoothstep(0.5f * kHandLayHipBand * scale, kHandLayHipBand * scale, std::abs(T.y - rootAt.y));
+                    const int       socket = armSocketOf(effector);
+                    const JointDial dial = socket >= 0 ? jointDial(socket, JointDialKind::BendSideways) : JointDial{};
+                    JointDialSweep  sweep;
+                    if (!kNoAkimbo && !armSurface && lateralShare > 0.7f && hipBand > 1.0e-3f && dial.valid() && dial.bone == socket &&
+                        jointDialSweep(dial, sweep) && std::abs(dial.fullDeg) > 1.0e-3f) {
+                        const glm::vec3 socketAt(m_poseGlobal[static_cast<std::size_t>(socket)][3]);
+                        const float     side = glm::dot(socketAt - rootAt, s.lateral) >= 0.0f ? 1.0f : -1.0f; // the arm's own side
+                        const glm::vec3 outDir = s.lateral * side;
+                        // The upper arm's angle from straight down now, and how a degree of the dial's
+                        // positive side moves its far end: + takes it out, - in.
+                        const glm::vec3 upper = sweep.tip - socketAt;
+                        const float     upperLen = glm::length(upper);
+                        const float     outNowDeg = upperLen > 1.0e-4f ? glm::degrees(std::acos(glm::clamp(glm::dot(upper / upperLen, glm::vec3(0.0f, -1.0f, 0.0f)), -1.0f, 1.0f))) : 0.0f;
+                        const float     outPerDialDeg = glm::dot(sweep.tipPerDegree, outDir); // metres per degree of the channel, outward
+                        // WHAT THE ARM CAN REACH (kHandLayElbowReachMarginDeg): with the hand held on the hip, the
+                        // upper arm may stand out only as far as the FOREARM still reaches the hand's target -
+                        // the elbow on the upper arm's sphere about the socket, within the forearm's length of
+                        // the target: the law of cosines gives the half-angle of that cap about the socket->
+                        // target direction, and the outboard edge of the cap, in the lateral-down plane the
+                        // dial swings in, is the most abduction there is. A fixed 45 asked 3cm more than the
+                        // forearm had on a broad-shouldered, narrow-hipped body (the hand 2cm INBOARD of the
+                        // socket), and the solve paid it with the trunk: the body leaned and sank toward the
+                        // hand (head 71mm, hips 18mm down, knees 25 degrees).
+                        int elbow = -1;
+                        for (int cur = m_bones[hnode].parent; cur >= 0 && cur != socket && elbow < 0; cur = m_bones[static_cast<std::size_t>(cur)].parent) {
+                            if (foldAxisOf(cur) >= 0) {
+                                elbow = cur;
+                            }
+                        }
+                        float reachOutDeg = kHandLayElbowOutDeg;
+                        bool  reachable = true;
+                        if (elbow >= 0) {
+                            const glm::vec3 elbowAt(m_poseGlobal[static_cast<std::size_t>(elbow)][3]);
+                            const glm::vec3 handAt(m_poseGlobal[hnode][3]);
+                            const float     U = glm::length(elbowAt - socketAt); // the upper arm, socket to elbow
+                            const float     F = glm::length(handAt - elbowAt);   // the forearm, elbow to wrist
+                            const glm::vec3 d = T - socketAt;
+                            const float     R = glm::length(d);
+                            if (U > 1.0e-3f && F > 1.0e-3f && R > 1.0e-3f) {
+                                const float cosAlpha = glm::clamp((U * U + R * R - F * F) / (2.0f * U * R), -1.0f, 1.0f);
+                                // u(theta) = out sin(theta) - up cos(theta); cos(beta) = u . d/R = a sin + b cos
+                                const float a = glm::dot(d, outDir) / R;
+                                const float b = -d.y / R;
+                                const float hyp = std::sqrt(a * a + b * b);
+                                if (hyp > 1.0e-4f && cosAlpha <= hyp) {
+                                    const float psi = std::atan2(b, a);
+                                    const float thetaMax = glm::pi<float>() - std::asin(glm::clamp(cosAlpha / hyp, -1.0f, 1.0f)) - psi;
+                                    reachOutDeg = std::min(kHandLayElbowOutDeg, glm::degrees(thetaMax) - kHandLayElbowReachMarginDeg);
+                                } else {
+                                    reachable = false; // (no abduction in that plane reaches the target: leave the arm alone)
+                                }
+                            }
+                        }
+                        if (reachable && reachOutDeg > 0.0f && std::abs(outPerDialDeg) > 1.0e-5f && upperLen > 1.0e-4f) {
+                            // (The dial's positive side is the channel moving by sign(fullDeg): the channel's
+                            // direction that takes the elbow OUT is that sign times the sweep's; a degree of
+                            // channel is a degree of arm, as near as the swing is a rotation about the socket.)
+                            const float chanSign = (outPerDialDeg > 0.0f ? 1.0f : -1.0f) * (dial.fullDeg < 0.0f ? -1.0f : 1.0f);
+                            const float needDeg = reachOutDeg - outNowDeg; // more out (+) or less (-)
+                            m_jsAkimboBone = socket;
+                            m_jsAkimboAxis = dial.axis;
+                            m_jsAkimboRefDeg = m_boneEuler[static_cast<std::size_t>(socket)][dial.axis] + chanSign * needDeg;
+                            m_jsAkimboEase = std::min(1.0f, akimboEaseBefore + kHandLayElbowEaseStep);
+                            m_jsAkimboShare = lay * lateralShare * hipBand * m_jsAkimboEase;
+                            if (kHandLayTrace) {
+                                std::fprintf(stderr, "[js-lay] akimbo: %s's %s axis %d at %.1f (upper arm %.1f deg out, reach %.1f, %+.4f m/deg out) -> ref %.1f, share %.2f (ease %.2f)",
+                                             m_boneNames[hnode].c_str(), m_boneNames[static_cast<std::size_t>(socket)].c_str(), dial.axis,
+                                             m_boneEuler[static_cast<std::size_t>(socket)][dial.axis], outNowDeg, reachOutDeg, outPerDialDeg, m_jsAkimboRefDeg, m_jsAkimboShare, m_jsAkimboEase);
+                                std::fputc(10, stderr);
+                            }
+                        }
+                    }
+                }
                 // The fingers' heading ACROSS the surface: where they point now, projected onto it
                 // (pointing straight into or out of it, the palm's own direction across instead; a
                 // hand that is degenerate both ways takes any tangent).
@@ -3404,6 +3601,20 @@ void Armature::ikPlaneRows(IkSolveScratch& s) {
                 // and the floor's rows on it, which only the BODY can answer, stand down: a little
                 // finger 16mm low, the tick the hang fell behind, shoved the whole figure 3cm up
                 // the floor as she was laid down.)
+                // (A RELEASED arm — HangArm::released — keeps its rows: the hang keeps it clear of the
+                // floor (its avoid probes the real turn, 2026-10-29), and exempted, an arm the lying
+                // trunk carried down went 27mm through the floor at a thumb.)
+                // (... AND A RELEASED ARM UNDER THE PRONE, 2026-11-02 — HangArm::released with the prone's
+                // share up: its hand let go of the floor, the hang has it, and its floor rows in the solve
+                // are rows only the BODY can answer. On a heavy character lying down from all fours the
+                // released arms propped the chest into a cobra — the spine at its extension limits, the
+                // head 45cm up — until the hang found a clearing direction, and the trunk then dropped 40cm
+                // in one tick. The hang keeps the arm clear of the floor by its own probe (the avoid);
+                // what it cannot clear lies on the floor by a finger's thickness, which the plane trace
+                // and the penetration gate watch. IK_JS_RELEASED_ARM_ROWS keeps the rows.)
+                // (The exemption was tried for the released arm under the prone, 2026-11-02, and put the
+                // arms 3-8cm through the floor on four rigs: the released arm's bones are the SOLVE's
+                // there instead — ikChooseUnknowns' hangArmDof — and its rows bend the arm.)
                 if (m_jsSeatRolls) {
                     floorExempt[static_cast<std::size_t>(b)] = 1;
                 }

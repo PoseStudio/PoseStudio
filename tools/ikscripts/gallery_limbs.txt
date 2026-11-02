@@ -133,4 +133,20 @@ press lHand
 dragv -0.10 1.30 70 60
 shot 28_side_lifted_by_hand
 release
+reset
+view front
+
+# ... and from the front she DANGLES (2026-11-02): the legs together and plumb from the hips, the knees
+# soft, the feet pointed, the free arm hanging - not the standing stance in mid-air (the legs apart,
+# the free arm out at the A-pose angle) she kept before.
+press lHand
+dragv 0 1.30 70 60
+report lifted_front
+expect hang.lThigh < 10
+expect hang.rThigh < 10
+expect hang.rShldr < 25
+expect euler.lShin.x > 5
+expect euler.rFoot.x > 15
+shot 28b_front_lifted_by_hand
+release
 quit

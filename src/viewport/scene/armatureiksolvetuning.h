@@ -444,6 +444,34 @@ constexpr float kHandLayEngage = 0.05f;
 /// off the sacrum was laid palm-in by the forearm twisted to its -90 limit — and the forearm's neutral
 /// palm is the same coin (the wrist is unturned at entry). IK_JS_HANDLAYBACKMARGIN.
 constexpr double kHandLayBackMarginDeg = 15.0;
+/// AKIMBO: a hand laid on the HIP (the laid surface's normal lateral, the hand at the hips' height) asks
+/// its ELBOW out — to where the upper arm stands kHandLayElbowOutDeg from straight down, out to the
+/// side, at its own length from the socket — at kHandLayElbowWeight (per m^2) x the lay. A hand pressed
+/// to the hip's side with the arm hanging straight is what the lay made before; nobody stands so.
+constexpr double kHandLayElbowStiffness = 20.0; ///< per rad^2 x the lay, on the shoulder's abduction channel (a REFERENCE: a position row on the elbow leaned the trunk 9-18cm)
+constexpr float  kHandLayElbowOutDeg = 45.0f;
+constexpr float  kHandLayHipBand = 0.15f; ///< the laid hand within this of the hips' height (m, figure-scaled)
+/// The reference never asks more abduction than the FOREARM can give with the hand on the hip: the
+/// upper arm may stand out as far as the forearm still reaches the hand's target (the law of cosines
+/// about the socket), less this margin. A fixed 45 on a broad-shouldered, narrow-hipped body - the hand
+/// under the socket - was 3cm beyond the forearm, and the TRUNK paid it (head 71mm, knees 25 degrees).
+constexpr float  kHandLayElbowReachMarginDeg = 5.0f;
+/// The akimbo's share eases in time (a tick's step; it decays at the same pace when the lay lets go):
+/// a hand grabbed beside the hip at rest is in the lay's band for a tick or two before it moves.
+constexpr float  kHandLayElbowEaseStep = 0.05f;
+
+/// THE DANGLE (2026-11-02): a figure lifted off the floor by a hand hangs from it — the legs come
+/// together and hang plumb from the hips (the thighs kDangleThighForwardDeg ahead of plumb), the
+/// knees soften to kDangleKneeDeg, the feet point kDangleFootDeg, the free arm hangs plumb (the hang's
+/// plumb share reads the dangle). References at kDangleStiffness x the share, which eases in at
+/// kDangleStep a tick while the rig has her suspended and out again at the same pace once she lands.
+/// Before it she kept her STANDING pose in the air: the legs apart in the stance, the free arm out at
+/// the A-pose angle, the feet level — a mannequin on a hook (`28_side_lifted_by_hand` from the front).
+constexpr float  kDangleStep = 0.03f;
+constexpr double kDangleStiffness = 20.0;
+constexpr float  kDangleThighForwardDeg = 5.0f;
+constexpr float  kDangleKneeDeg = 10.0f;
+constexpr float  kDangleFootDeg = 25.0f;
 /// ... and the hold of the FINGERTIP's height on the floor, per m^2: the contact's own, faded as
 /// the contact is. (Softened to 2000 for a day so that a figure taken back up off all fours in the
 /// same drag would let go of the floor - which was the contact's UNLOAD being read over the height
@@ -472,6 +500,42 @@ constexpr float kHandTautReachBand = 0.03f;
 /// release: at a tenth a tick the brow still moved 83mm in one tick, at a twentieth 77, at a
 /// thirtieth 31 (m_jsHandUnload; IK_JS_HANDUNLOADSTEP is the lever, the switch probe disables it).
 constexpr float kHandUnloadStep = 0.03f;
+/// THE TRAILING HAND LETS GO UNDER A DESCENT (2026-10-29; the live-contact block): under a pelvis drag
+/// going DOWN (m_jsTargetDown), a hand contact whose arm is TAUT and whose wrist lies BEHIND its
+/// shoulder along the figure's heading — the body slid forward OVER it — is a leash, not a support: in
+/// the prone from all fours both arms ended dead straight and horizontal, trailing the shoulders by
+/// their whole length, and held the chest back (the hips 109mm from their cursor on the base rig,
+/// 235 on the heavy male with the hips 10cm above his belly; the hands hovering at hip height). It is
+/// released as a rise releases a taut hand — the eased unload, the arm re-based, the rig's lift-off,
+/// the descent's no-lift-off rule standing down for it — and the arm hangs along the body. The
+/// unload's share rises over the wrist's trail behind the shoulder, as a share of the arm's span.
+/// IK_JS_NO_HAND_TRAIL is the A/B.
+constexpr float kHandTrailFrom = 0.45f;
+constexpr float kHandTrailFull = 0.75f;
+/// THE FACE LIFTS OFF THE FLOOR (2026-10-29; ikChooseUnknowns, ikPostureDofs): under a pelvis drag going
+/// DOWN, the NECK chain joins the unknowns as the trunk tilts past the head righting's fade (the same
+/// 70-110 degrees: on all fours or lying down the neck is not held up against the trunk), priced as the
+/// trunk over the tilt's share and frozen (the floor below) under it — no lever for the balance row in
+/// a crouch. A prone trunk came down onto its FACE: the brow's floor rows held the chest up by the
+/// neck's length — the body on its face, its knees and its toes, the hips 19-22cm up on three rigs —
+/// since nothing in the solve could turn the neck. Freed, the neck extends as the chest comes down:
+/// the chin up, the chest on the floor. IK_JS_NO_FACE_LIFT is the A/B.
+/// A TRAILING hand's hold under a pelvis descent is a FRICTION contact: its pull is bounded at this
+/// (per metre of miss over the Huber knee, the cursor's units; a pelvis drag pulls at 1000) while
+/// its weight fades. Released by weight alone the leash let go geometrically — the third
+/// generation's hips stood dead for thirty ticks against a cursor 29cm ahead and paid the backlog
+/// off in one 112mm tick. Bounded, the hand slides along the floor behind the body from the
+/// trail's first tick and no backlog forms.
+constexpr double kHandTrailPull = 300.0;
+/// THE PRONE's share (ikChooseUnknowns): a kneel-start pelvis drag's target this far of the way from
+/// the hips at the press down to the hip joint's lying clearance (none .. all), while ahead of the
+/// planted knees (kProneFootFreeFrom/Full). From 0.4-0.8 the hands' release came after the body
+/// had stuck against the pelvis's dear tilt price, and the backlog went in one tick: 139mm on the
+/// third generation, 101 on the base's variant; at 0.2-0.5 they read 98 and 80 with the lying
+/// pose unchanged (0.1-0.5 and 0.15-0.45 measure alike: the `ahead` share saturates first).
+constexpr float kProneLieFrom = 0.20f;
+constexpr float kProneLieFull = 0.50f;
+constexpr float kFaceLiftFloor = 0.02f;
 /// ... and a hand the RISE has unloaded (its arm not slack) is TAUT to the rig's lift-off once the rise
 /// term has faded its hold this far along the six-decade fade (0.9: 1e8 x 10^-5.4 = 400/m^2, under the
 /// pelvis's own price — a spring that holds nothing; m_jsContactRiseUnloaded, IK_LIFT_TAUT_ONLY). At

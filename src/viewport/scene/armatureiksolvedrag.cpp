@@ -674,7 +674,13 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
     bool& swayValid = s.swayValid;
     s.swayEuler = glm::vec3(0.0f);
     glm::vec3& swayEuler = s.swayEuler;
-    if (!kNoSway && effector == root && rootTurns && dragTarget != nullptr && rising <= 0.0f &&
+    // (A STANDING stance's, 2026-10-29: never for a drag that began on her knees. The sway reads the
+    // standing feet's legs for their straight heights, and a kneeling figure's feet are planted
+    // standing-foot pins too — lying down from all fours on a heavy character, the sway rolled her
+    // pelvis 12 degrees and twisted a thigh 40 to "keep a leg from being longer than it is",
+    // the prone skewed to one side. IK_JS_SWAY_ON_KNEES is the A/B.)
+    static const bool kSwayOnKnees = std::getenv("IK_JS_SWAY_ON_KNEES") != nullptr; // A/B probe
+    if (!kNoSway && effector == root && rootTurns && dragTarget != nullptr && rising <= 0.0f && (kSwayOnKnees || !m_jsKneelStart) &&
         static_cast<std::size_t>(root) < m_jsStartPos.size()) {
         const glm::vec3& lateral = s.lateral;
         const glm::vec3& fore = s.fore;
@@ -838,6 +844,105 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
         if (node >= 0 && static_cast<std::size_t>(node) < n && m_jsWristOf.size() == n && m_jsWristOf[static_cast<std::size_t>(node)] == node &&
             rig.pinIsLive(p) && !rig.pinIsShadow(p)) {
             m_jsHandsPlanted = true;
+        }
+    }
+    // THE PRONE — THE FACE LIFTS OFF THE FLOOR AND THE TRUNK LIES DOWN (2026-10-29; kProneLieFrom/Full):
+    // under a KNEEL-START pelvis drag whose target goes AHEAD of a planted knee (kProneFootFreeFrom/Full
+    // past the knee's pin, along the heading) and DOWN toward the belly (kProneLieFrom/Full of the way
+    // from the hips at the press to the hip joint's clearance lying prone — the pelvis's flesh along
+    // its fore axis), the NECK chain and the SPINE join the unknowns: priced as the trunk over the
+    // share in ikPostureDofs, the neck frozen below it (no lever for the balance row in a crouch),
+    // and the trunk's home turns to LYING (ikPostureDofs: the spine straight, the root's pitch a right
+    // angle forward) at the paced share. A prone trunk came down onto its FACE with the spine riding
+    // the root as one rigid piece — the brow's floor rows held the chest up by the neck's length, the
+    // hips 19-22cm up on three rigs — since nothing in the solve could turn the neck or the back. The
+    // righting leaves these bones to the solve (m_jsNeckLift). IK_JS_NO_FACE_LIFT is the A/B.
+    // (A FUNCTION OF THE TARGET, kept through the settle — m_jsProneLie. Read off the CHEST-TOP's live
+    // tilt, as it was for a day, the share was a mode read off the thing it changes: it rose to 1 on
+    // the way down, the root's reference was left at its over-pitched dive when the hands let go, the
+    // spine arched backward to lift the chest off a pelvis asked nose-down, the chest-top's tilt fell
+    // back under the band and the share went to zero — the trunk arched to its extension limits, the
+    // head 34cm up.)
+    s.neckLift.assign(n, 0);
+    s.neckLiftShare = 0.0f;
+    m_jsNeckLift.assign(n, 0);
+    static const bool kNoFaceLift = std::getenv("IK_JS_NO_FACE_LIFT") != nullptr; // A/B probe
+    if (!kNoFaceLift && effector == root && m_jsKneelStart && rig.neckBase() >= 0 && rig.headNode() >= 0 &&
+        static_cast<std::size_t>(rig.neckBase()) < n && static_cast<std::size_t>(rig.headNode()) < n) {
+        if (dragTarget != nullptr && static_cast<std::size_t>(root) < m_jsStartPos.size()) {
+            const glm::vec3 hipsAtPress = m_jsStartPos[static_cast<std::size_t>(root)];
+            // The hip joint's height lying on her belly: its clearance were the world's down the
+            // pelvis's FORE axis (the seat roll reads the back's the same way).
+            const float lyingY = -m_transform[3][1] + rig.floorClearanceAlong(root, glm::vec3(0.0f, 0.0f, 1.0f));
+            const float toLying = hipsAtPress.y - lyingY;
+            const float depth = toLying > 1.0e-3f ? (hipsAtPress.y - dragTarget->y) / toLying : 0.0f;
+            float ahead = 0.0f; // the target ahead of a planted knee (the knee's pin target: a constant)
+            for (std::size_t p = 0; p < rig.pins().size(); ++p) {
+                const IkEffector& pin = rig.pins()[p];
+                if (!rig.pinIsLive(p) || pin.node < 0 || rig.isGirdleJoint(pin.node) || !rig.isLegJointAboveFoot(pin.node)) {
+                    continue;
+                }
+                ahead = std::max(ahead, glm::smoothstep(kProneFootFreeFrom * rig.sizeScale(), kProneFootFreeFull * rig.sizeScale(),
+                                                        glm::dot(*dragTarget - pin.target, s.fore)));
+            }
+            static const float kLieFrom = envOr<float>("IK_JS_PRONELIE_FROM", kProneLieFrom); // (A/B levers)
+            static const float kLieFull = envOr<float>("IK_JS_PRONELIE_FULL", kProneLieFull);
+            m_jsProneLie = ahead * glm::smoothstep(kLieFrom, kLieFull, depth);
+            static const bool kFaceLiftTrace = std::getenv("IK_JS_FACE_LIFT_TRACE") != nullptr;
+            if (kFaceLiftTrace) {
+                std::fprintf(stderr, "[prone-lie] target %.3f of the way to lying (hips %.3f -> lying %.3f), ahead %.3f -> share %.3f",
+                             depth, hipsAtPress.y, lyingY, ahead, m_jsProneLie);
+                std::fputc(10, stderr);
+            }
+        }
+        s.neckLiftShare = m_jsProneLie;
+        if (s.neckLiftShare > 0.0f) {
+            for (int cur = rig.headNode(); cur >= 0; cur = m_bones[static_cast<std::size_t>(cur)].parent) {
+                dofBone[static_cast<std::size_t>(cur)] = 1;
+                s.neckLift[static_cast<std::size_t>(cur)] = 1;
+                m_jsNeckLift[static_cast<std::size_t>(cur)] = 1;
+                if (cur == rig.neckBase()) {
+                    break;
+                }
+            }
+            m_jsTrunkInSolve = true; // (the spine with it: see above)
+        }
+    }
+    // A RELEASED ARM JOINS THE SOLVE UNDER THE PRONE (2026-11-02): a hanging arm whose hand has let go
+    // of the floor is none of the solve's unknowns, and its floor rows are rows only the BODY can answer
+    // — on a heavy character lying down from all fours the released arms propped the chest into a
+    // cobra (the spine at its extension limits, the head 45cm up) until the hang found a clearing
+    // direction, and the trunk dropped 40cm in one tick; on three reference rigs they held the hips
+    // 2-3cm up. Exempting the rows instead (tried first) put the arms 3-8cm through the floor on four
+    // rigs: the hang alone cannot keep an arm clear of a floor the trunk is carrying it down onto. The
+    // arm's channels, socket to hand, are unknowns at the limb's price while the prone's share is up
+    // (ikPostureDofs), referred to where the hang left them each tick (m_jsPostStepEuler), so the
+    // floor's rows bend the ARM; the hang goes on turning it toward its hang as a post-step.
+    // IK_JS_NO_HANG_ARM_DOFS is the A/B.
+    s.hangArmDof.assign(n, 0);
+    static const bool kNoHangArmDofs = std::getenv("IK_JS_NO_HANG_ARM_DOFS") != nullptr; // A/B probe
+    if (!kNoHangArmDofs && effector == root && m_jsProneLie > 0.0f) {
+        ensureHandMaps();
+        for (const HangArm& arm : m_jsHangArms) {
+            if (!arm.released || arm.socket < 0 || static_cast<std::size_t>(arm.socket) >= n) {
+                continue;
+            }
+            int hand = -1;
+            for (std::size_t b = 0; b < n && hand < 0; ++b) {
+                if (m_jsWristOf.size() == n && m_jsWristOf[b] == static_cast<int>(b) && boneUnder(static_cast<int>(b), arm.socket)) {
+                    hand = static_cast<int>(b);
+                }
+            }
+            if (hand < 0) {
+                continue;
+            }
+            for (int cur = hand; cur >= 0; cur = m_bones[static_cast<std::size_t>(cur)].parent) {
+                dofBone[static_cast<std::size_t>(cur)] = 1;
+                s.hangArmDof[static_cast<std::size_t>(cur)] = 1;
+                if (cur == arm.socket) {
+                    break;
+                }
+            }
         }
     }
     m_jsTrunkInSolve = m_jsTrunkInSolve || swayValid || pelvisBalance > 0.0f || (!kNoRiseTrunkHome && rising > 0.0f && !m_jsHandsPlanted);

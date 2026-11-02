@@ -1120,6 +1120,16 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                 }
                 const double costTrial =
                     residuals(trial, trialFrames, problem, *judgedBy, com, rTrial) + postureCost(trial, problem);
+                static const bool kBlockedTrace = std::getenv("IK_JS_BLOCKED_TRACE") != nullptr; // the active set, once per descent
+                if (kBlockedTrace && it == 0 && attempt == 0 && halving == 0) {
+                    for (std::size_t j = 0; j < blocked.size(); ++j) {
+                        if (blocked[j]) {
+                            std::fprintf(stderr, "[js-blocked] bone %d axis %d [%.1f, %.1f]", problem.dofs[j].bone, problem.dofs[j].axis,
+                                         problem.dofs[j].minDeg, problem.dofs[j].maxDeg);
+                            std::fputc(10, stderr);
+                        }
+                    }
+                }
                 if (kLmTrace) {
                     int nBlocked = 0;
                     for (const char b : blocked) {
