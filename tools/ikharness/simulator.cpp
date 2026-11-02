@@ -85,7 +85,7 @@ double volumePenetration(const Armature& arm, int* worstNode, int* worstVolume, 
                 continue;
             }
             const glm::vec3 P = pos(i);
-            const float t = ax.ab2 > 1e-12f ? glm::clamp(glm::dot(P - ax.A, ax.ab) / ax.ab2, 0.0f, 1.0f) : 0.0f;
+            const float t = volumeAxisParam(ax, P);
             const float d = glm::length(P - (ax.A + ax.ab * t));
             double depth;
             if (applies == kVolumeAppliesRider) {

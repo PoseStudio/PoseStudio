@@ -2,6 +2,9 @@
  * @file realphases.h
  * @brief The real-skeleton phases: every user-reported FBIK behaviour, reproduced on a dumped
  *        figure skeleton through the simulator and gated on the measurements that once failed.
+ *        realphases.cpp holds them as the RealPhases class — the state every phase shares, the
+ *        helpers, and sixteen phase families run in order; `--only <key>` picks phases by the
+ *        key each `if (report.wants("key"))` block names.
  */
 
 #ifndef IKHARNESS_REALPHASES_H
