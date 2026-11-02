@@ -16,6 +16,7 @@
 #include "armature.h"
 #include "balancecontroller.h"
 #include "ikrig.h"
+#include "rigroles.h"
 #include "report.h"
 #include "simulator.h"
 
@@ -198,6 +199,7 @@ private:
     void findRestPose();
     void sizeFloorScenarios();
     // --- The families, in the order runAll runs them ---
+    void rigPhases();             ///< rig-roles
     void handPhases();            ///< bench, gentle, depth
     void utilityPhases();         ///< utilities, transform-dials
     void armPhases();             ///< arm-raise, tiptoe, arm-swing, group, scoped, hand-lay, girdle
@@ -223,6 +225,7 @@ RealPhases::RealPhases(Report& report_, const std::vector<ArmatureBone>& bones_)
 
 void RealPhases::runAll() {
     findRestPose();
+    rigPhases();
     handPhases();
     utilityPhases();
     armPhases();
@@ -300,6 +303,108 @@ void RealPhases::findRestPose() {
                     {"rShldr", glm::vec3(0.0f, 0.0f, 65.0f)}};
         std::printf("[info] T-pose rest: arms lowered by a shoulder pre-pose in every phase\n");
     }
+}
+
+/// THE RIG STANDARD'S ROLES (rigroles.h, 2026-11-02): this rig conforms — every required role is
+/// found, every side role has its twin, the roles agree with the names the tests speak for this
+/// rig (the alias table's, name first), and no bone of the body is left without a role. The
+/// chain lengths and the part counts are reported.
+void RealPhases::rigPhases() {
+    if (!report.wants("rig-roles")) {
+        return;
+    }
+    Armature arm;
+    arm.build(bones);
+    applyBodyMesh(arm, 1.0f);
+    (void)arm.boneClass(0); // (the public path that builds the rig: the bone classes need it)
+    const pose::IkRig* rig = arm.ikRig();
+    if (rig == nullptr || !rig->roles().built()) {
+        report.skip("[real] rig roles: the standard's roles on this rig", "no rig");
+        return;
+    }
+    const pose::RigRoles& roles = rig->roles();
+    // The canonical names whose role the standard knows, resolved by NAME (the alias table, which
+    // never reaches the roles while a name or an alias fits) and by ROLE: they must agree.
+    static const char* const kNamed[] = {"hip",      "pelvis",  "abdomenLower", "chest_2", "neck",    "head",     "lowerJaw",
+                                         "lCollar",  "rCollar", "lShldr",       "rShldr",  "lForeArm", "rForeArm", "lHand",
+                                         "rHand",    "lThigh",  "rThigh",       "lShin",   "rShin",    "lFoot",    "rFoot",
+                                         "lEye",     "rEye",    "lPectoral",    "rPectoral", "lThighTwist", "rThighTwist",
+                                         "lIndex3",  "lMid3",   "lThumb3",      "lBigToe"};
+    int    named = 0;
+    int    disagree = 0;
+    for (const char* canonical : kNamed) {
+        const int byName = arm.boneIndex(canonical) >= 0 ? arm.boneIndex(canonical) : -1;
+        // (The alias table's own answer, name first — the roles never consulted while it fits.)
+        const int byAlias = resolveBone(arm, canonical);
+        const pose::RigRoleTag tag = roles.canonicalTag(canonical);
+        if (byAlias < 0 || tag.role == pose::RigRole::None) {
+            continue;
+        }
+        const int byRole = roles.find(tag.role, tag.side, tag.index, tag.joint);
+        ++named;
+        if (byRole != byAlias) {
+            ++disagree;
+            if (v) {
+                std::printf("[rig-roles] %s: by name %s, by role %s\n", canonical,
+                            arm.boneName(static_cast<std::size_t>(byAlias)).c_str(),
+                            byRole >= 0 ? arm.boneName(static_cast<std::size_t>(byRole)).c_str() : "(none)");
+            }
+        }
+        (void)byName;
+    }
+    int unpaired = 0;
+    int bodyBones = 0;
+    int standardNamed = 0;
+    int roundTripFailed = 0;
+    for (std::size_t i = 0; i < bones.size(); ++i) {
+        const pose::RigRoleTag& t = roles.tag(static_cast<int>(i));
+        if (t.role == pose::RigRole::None) {
+            continue;
+        }
+        ++bodyBones;
+        // THE STANDARD'S NAME of the bone reads back as the same tag (the two grammars agree).
+        const std::string standard = pose::RigRoles::standardName(t);
+        if (!standard.empty()) {
+            ++standardNamed;
+            const pose::RigRoleTag back = roles.canonicalTag(standard);
+            if (back.role != t.role || back.side != t.side || back.index != t.index || back.joint != t.joint) {
+                ++roundTripFailed;
+                if (v) {
+                    std::printf("[rig-roles] %s: standard name %s reads back as %s\n", bones[i].name.c_str(), standard.c_str(),
+                                pose::RigRoles::roleName(back.role));
+                }
+            }
+        }
+        if (t.side != pose::RigSide::Centre && t.role != pose::RigRole::Face && t.role != pose::RigRole::Helper &&
+            roles.find(t.role, pose::RigRoles::mirrored(t.side), t.index, t.joint) < 0) {
+            ++unpaired;
+            if (v) {
+                std::printf("[rig-roles] %s (%s %s %d j%d) has no twin\n", bones[i].name.c_str(),
+                            pose::RigRoles::roleName(t.role), pose::RigRoles::sideName(t.side), t.index, t.joint);
+            }
+        }
+    }
+    const auto count = [&](pose::RigRole role) { return static_cast<double>(roles.all(role).size()); };
+    report.phase("[real] rig roles: the standard's roles on this rig",
+                 {gateMax("required roles missing", static_cast<double>(roles.missing().size()), 0.0),
+                  gateMax("roles disagreeing with the rig's own names", static_cast<double>(disagree), 0.0),
+                  gateMin("canonical names checked by name and by role", static_cast<double>(named), 15.0),
+                  gateMax("side roles without a twin on the other side", static_cast<double>(unpaired), 0.0),
+                  gateMax("bones of the body with no role", count(pose::RigRole::Other), 0.0),
+                  gateMax("standard names that do not read back as their role", static_cast<double>(roundTripFailed), 0.0),
+                  gateMin("bones with a standard name", static_cast<double>(standardNamed), 40.0),
+                  info("bones of the body", static_cast<double>(bodyBones)),
+                  info("spine links", static_cast<double>(roles.spineLinks())),
+                  info("neck links", static_cast<double>(roles.neckLinks())),
+                  info("twist helpers", count(pose::RigRole::UpperArmTwist) + count(pose::RigRole::ForearmTwist) +
+                                            count(pose::RigRole::ThighTwist) + count(pose::RigRole::ShinTwist)),
+                  info("carpals", count(pose::RigRole::Carpal)),
+                  info("finger joints", count(pose::RigRole::Finger)),
+                  info("metatarsals and heels", count(pose::RigRole::Metatarsal) + count(pose::RigRole::Heel)),
+                  info("toe joints", count(pose::RigRole::Toe)),
+                  info("pectorals", count(pose::RigRole::Pectoral)),
+                  info("face bones", count(pose::RigRole::Face) + count(pose::RigRole::Eye) + count(pose::RigRole::Jaw)),
+                  info("helpers", count(pose::RigRole::Helper))});
 }
 
 /// The hand gestures the bench path, a gentle pull and the wheel's depth notches measure.

@@ -35,6 +35,7 @@
 
 #include "bodymesh.h"
 #include "bodyvolume.h"
+#include "rigroles.h"
 #include "ikeffector.h"
 #include "skeletongraph.h"
 
@@ -408,10 +409,16 @@ public:
         return -1;
     }
 
-    /// The head joint and the first neck bone (found by name while the body volumes are built;
-    /// -1 on a rig without them). The Armature's head righting turns the chain between them.
+    /// The head joint and the first neck bone (the rig standard's roles, roles(); -1 on a rig
+    /// without them). The Armature's head righting turns the chain between them.
     int headNode() const { return m_headNode; }
     int neckBase() const { return m_neckBase; }
+    /// THE RIG STANDARD'S ROLES of this skeleton (rigroles.h): what each bone is — the hips, the
+    /// spine links, the collars, the limbs' joints and twist helpers, the hands' and feet's parts,
+    /// the face — inferred from the bind skeleton's structure at build. Every rule of the rig that
+    /// used to read a bone's NAME for its part (the body volumes' limb roots, the head and the neck,
+    /// the helpers) reads this; a rig whose names match nothing conforms the same way.
+    const RigRoles& roles() const { return m_roles; }
     /// The node of the foot currently mid-STEP (its pin target swinging to its new spot), or -1.
     int steppingPin() const {
         return m_stepPin >= 0 ? m_pins[static_cast<std::size_t>(m_stepPin)].node : -1;
@@ -520,6 +527,7 @@ private:
     bool                    m_girdleGrab = false; ///< See girdleGrab().
     int                     m_seatPin = -1;       ///< See seatPin().
     bool                    m_scoped = false;     ///< See setScoped().
+    RigRoles                m_roles;              ///< See roles().
     int                     m_headNode = -1;      ///< See headNode().
     mutable int             m_pelvisBoneNode = -2; ///< See isPelvisBone(): -2 = not looked for yet, -1 = none.
     int                     m_neckBase = -1;      ///< See neckBase().

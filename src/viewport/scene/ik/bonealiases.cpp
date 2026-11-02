@@ -7,6 +7,8 @@
 #include "bonealiases.h"
 
 #include "armature.h"
+#include "ikrig.h"
+#include "rigroles.h"
 
 #include <cstddef>
 
@@ -66,6 +68,20 @@ int aliasedBoneIndex(const Armature& arm, const std::string& canonical) {
         }
         for (const char* alt : alias.alternates) {
             if (alt != nullptr && (idx = arm.boneIndex(alt)) >= 0) {
+                return idx;
+            }
+        }
+    }
+    // Neither the name nor an alias: THE ROLE the canonical name denotes (rigroles.h — the
+    // reference generation's names are the standard's first convention), on a rig whose roles
+    // have been built. A rig that names its bones in a convention this table never saw resolves
+    // the same canonical names the same way.
+    const IkRig* rig = arm.ikRig();
+    if (rig != nullptr && rig->roles().built()) {
+        const RigRoleTag tag = rig->roles().canonicalTag(canonical);
+        if (tag.role != RigRole::None) {
+            idx = rig->roles().find(tag.role, tag.side, tag.index, tag.joint);
+            if (idx >= 0) {
                 return idx;
             }
         }

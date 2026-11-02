@@ -14,11 +14,9 @@
 #include "ikrig_constants.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -34,57 +32,16 @@ void IkRig::buildBodyVolumes(const std::vector<std::string>& names, const std::v
     if (n == 0 || names.size() != n) {
         return;
     }
-    const auto norm = [](const std::string& name) {
-        std::string out;
-        for (const char c : name) {
-            if (std::isalpha(static_cast<unsigned char>(c))) {
-                out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-            }
-        }
-        return out;
-    };
-    const auto has = [](const std::string& s, std::initializer_list<const char*> frags) {
-        for (const char* f : frags) {
-            if (s.find(f) != std::string::npos) {
-                return true;
-            }
-        }
-        return false;
-    };
-    const auto sideOf = [](const std::string& s) -> int {
-        if (s.rfind("left", 0) == 0) return 0;
-        if (s.rfind("right", 0) == 0) return 1;
-        if (!s.empty() && s[0] == 'l') return 0;
-        if (!s.empty() && s[0] == 'r') return 1;
-        return -1;
-    };
-    std::vector<std::string> nn(n);
-    for (std::size_t i = 0; i < n; ++i) {
-        nn[i] = norm(names[i]);
-    }
-    const auto isArm = [&](int i) { return has(nn[static_cast<std::size_t>(i)], {"shldr", "shoulder", "upperarm"}); };
-    const auto isThigh = [&](int i) { return has(nn[static_cast<std::size_t>(i)], {"thigh"}); };
-    const auto isShin = [&](int i) { return has(nn[static_cast<std::size_t>(i)], {"shin", "calf"}); };
-    const auto isNeck = [&](int i) { return has(nn[static_cast<std::size_t>(i)], {"neck"}); };
-    // Limb roots: the first arm / thigh-class body node of each side whose parent is not of
-    // that class (the shoulder bend bone under the collar; the thigh under the pelvis).
+    // The body's parts by their ROLES (rigroles.h; until 2026-11-02 by tolerant name fragments):
+    // the limb roots — the upper arms and the thighs — and, per limb, its joints.
+    const RigRoles& roles = m_roles;
+    const auto      isHelperBone = [&](std::size_t i) { return roles.role(static_cast<int>(i)) == RigRole::Helper; };
+    const RigSide   sides[2] = {RigSide::Left, RigSide::Right}; // (0 = left, 1 = right throughout)
     int armRoot[2] = {-1, -1};
     int thighRoot[2] = {-1, -1};
-    for (std::size_t i = 0; i < n; ++i) {
-        if (!m_bodyNode[i] || has(nn[i], {"anchor"})) {
-            continue;
-        }
-        const int side = sideOf(nn[i]);
-        if (side < 0) {
-            continue;
-        }
-        const int p = m_parents[i];
-        if (isArm(static_cast<int>(i)) && (p < 0 || !isArm(p)) && armRoot[side] < 0) {
-            armRoot[side] = static_cast<int>(i);
-        }
-        if (isThigh(static_cast<int>(i)) && (p < 0 || !isThigh(p)) && thighRoot[side] < 0) {
-            thighRoot[side] = static_cast<int>(i);
-        }
+    for (int side = 0; side < 2; ++side) {
+        armRoot[side] = roles.find(RigRole::UpperArm, sides[side]);
+        thighRoot[side] = roles.find(RigRole::Thigh, sides[side]);
     }
     // Limb membership: 0/1 = the arms, 2/3 = the legs (the root included; excluded from the
     // tested set below).
@@ -101,49 +58,20 @@ void IkRig::buildBodyVolumes(const std::vector<std::string>& names, const std::v
     int ankle[2] = {-1, -1};
     int elbow[2] = {-1, -1};
     int hand[2] = {-1, -1};
-    int upperArm[2] = {-1, -1}; // a node NAMED upperarm (the newest generation's arm root
-                                // is its collar, "shoulder"); else the arm root
-    for (std::size_t i = 0; i < n; ++i) {
-        if (!m_bodyNode[i] || has(nn[i], {"anchor"})) {
-            continue;
-        }
-        const int leg = limbOf[i] >= 2 ? limbOf[i] - 2 : -1;
-        const int arm = (limbOf[i] == 0 || limbOf[i] == 1) ? limbOf[i] : -1;
-        if (leg >= 0 && isShin(static_cast<int>(i)) && knee[leg] < 0) knee[leg] = static_cast<int>(i);
-        if (leg >= 0 && has(nn[i], {"foot"}) && ankle[leg] < 0) ankle[leg] = static_cast<int>(i);
-        if (arm >= 0 && has(nn[i], {"forearm", "elbow"}) && !has(nn[i], {"twist"}) && elbow[arm] < 0) {
-            elbow[arm] = static_cast<int>(i);
-        }
-        if (arm >= 0 && has(nn[i], {"hand"}) && hand[arm] < 0) hand[arm] = static_cast<int>(i);
-        if (arm >= 0 && has(nn[i], {"upperarm"}) && !has(nn[i], {"twist"}) && upperArm[arm] < 0) {
-            upperArm[arm] = static_cast<int>(i);
-        }
-    }
+    int upperArm[2] = {-1, -1};
     for (int side = 0; side < 2; ++side) {
-        if (upperArm[side] < 0) {
-            upperArm[side] = armRoot[side];
-        }
+        knee[side] = roles.find(RigRole::Shin, sides[side]);
+        ankle[side] = roles.find(RigRole::Foot, sides[side]);
+        elbow[side] = roles.find(RigRole::Forearm, sides[side]);
+        hand[side] = roles.find(RigRole::Hand, sides[side]);
+        upperArm[side] = armRoot[side];
     }
-    int neckBase = -1;
-    int headNode = -1;
-    for (std::size_t i = 0; i < n; ++i) {
-        if (!m_bodyNode[i] || limbOf[i] >= 0) {
-            continue;
-        }
-        const int p = m_parents[i];
-        if (neckBase < 0 && isNeck(static_cast<int>(i)) && (p < 0 || !isNeck(p))) {
-            neckBase = static_cast<int>(i);
-        }
-        if (headNode < 0 && has(nn[i], {"head"})) {
-            headNode = static_cast<int>(i);
-        }
-    }
-    m_headNode = headNode;
-    m_neckBase = neckBase;
+    const int neckBase = m_neckBase; // (the roles', set at build before the volumes)
+    const int headNode = m_headNode;
     // Hands and feet carry their fingers and toes outside the joint: a wider clearance.
     for (std::size_t i = 0; i < n; ++i) {
-        if (m_bodyNode[i] && !has(nn[i], {"anchor"}) &&
-            (has(nn[i], {"hand"}) || has(nn[i], {"foot"}))) {
+        const RigRole r = roles.role(static_cast<int>(i));
+        if (m_bodyNode[i] && (r == RigRole::Hand || r == RigRole::Foot)) {
             m_volumeClearance[i] = 0.02f * m_sizeScale;
         }
     }
@@ -407,7 +335,7 @@ void IkRig::buildBodyVolumes(const std::vector<std::string>& names, const std::v
         int applied = 0;
         int ridersApplied = 0;
         for (std::size_t i = 0; i < n; ++i) {
-            if (!m_bodyNode[i] || limbOf[i] < 0 || has(nn[i], {"anchor"})) {
+            if (!m_bodyNode[i] || limbOf[i] < 0 || isHelperBone(i)) {
                 continue;
             }
             const int limb = limbOf[i];

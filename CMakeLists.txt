@@ -387,6 +387,8 @@ add_executable(
     src/viewport/scene/ik/skeletongraph.cpp   # undirected joint graph, dynamically re-rootable
     src/viewport/scene/ik/bonealiases.cpp     # the bone-alias table the two posing test tools share
     src/viewport/scene/ik/bonealiases.h
+    src/viewport/scene/ik/rigroles.cpp        # the rig standard's roles: what each bone is, by structure
+    src/viewport/scene/ik/rigroles.h
     src/viewport/scene/ik/skeletongraph.h
     src/viewport/scene/ik/balancecontroller.cpp # CoM + support polygon + pelvis correction
     src/viewport/scene/ik/balancecontroller.h
@@ -601,6 +603,7 @@ add_executable(PoseStudioIkHarness
     src/viewport/scene/ik/ikmath.cpp
     src/viewport/scene/ik/skeletongraph.cpp
     src/viewport/scene/ik/bonealiases.cpp
+    src/viewport/scene/ik/rigroles.cpp
     src/viewport/scene/ik/balancecontroller.cpp
     src/viewport/scene/ik/ikrig.cpp
     src/viewport/scene/ik/ikrigdrag.cpp

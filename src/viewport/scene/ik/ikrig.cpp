@@ -26,8 +26,6 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
-#include <initializer_list>
-#include <cctype>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -136,16 +134,10 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
     // name-class table gave each a third of the thigh — enough "off-path mass" at the thigh
     // for limbJunction to end the foot's limb chain at the knee, cutting the leg's stiffness
     // class (and a limb's reach measure) in half. A pass-through twist bone (the earlier generations') keeps its
-    // share — it is on the chain and its share is harmless there.
+    // share — it is on the chain and its share is harmless there. (A twist helper by STRUCTURE —
+    // IkRigBone::helper, Armature::isTwistBone — not by its name, since 2026-11-02.)
     for (std::size_t i = 0; i < n; ++i) {
-        if (!m_children[i].empty()) {
-            continue;
-        }
-        std::string lower;
-        for (const char c : names[i]) {
-            lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-        }
-        if (lower.find("twist") != std::string::npos) {
+        if (m_children[i].empty() && m_helperNode[i]) {
             m_masses[i] = std::min(m_masses[i], 0.0015f);
         }
     }
@@ -185,9 +177,37 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
         m_floorClearance[i] = bindY < kContactHeight * m_sizeScale ? std::max(bindY, 0.0f)
                                                                    : kFleshRadius * m_sizeScale;
     }
-    // BODY VOLUMES (see bodyVolumes()): the trunk and the limb roots by tolerant NAME (the
-    // fragments the mass table uses), the radii from the hip-socket spacing so they scale with
-    // the rig, each volume applied to the other limbs' joints below their roots.
+    // THE RIG STANDARD'S ROLES (rigroles.h): what each bone is, from the structure settled above
+    // — the root, the body tree, the masses, the helpers, the foot class — and the mesh sample.
+    // Everything below that asks for a part of the body by name asks the roles instead.
+    {
+        std::vector<char> footClass(n, 0);
+        for (std::size_t i = 0; i < n; ++i) {
+            footClass[i] = m_bodyNode[i] && isFootClass(static_cast<int>(i)) ? 1 : 0;
+        }
+        RigRoles::Input in;
+        in.parents = &m_parents;
+        in.children = &m_children;
+        in.bindPos = &m_bindPos;
+        in.names = &names;
+        in.bodyNode = &m_bodyNode;
+        in.subtreeMass = &m_subtreeMass;
+        in.helper = &m_helperNode;
+        in.footClass = &footClass;
+        in.mesh = mesh;
+        in.root = m_pelvis;
+        in.sizeScale = m_sizeScale;
+        m_roles.build(in);
+        m_headNode = m_roles.find(RigRole::Head);
+        m_neckBase = m_roles.find(RigRole::Neck, RigSide::Centre, 1);
+        static const bool kRolesTrace = std::getenv("POSESTUDIO_RIG_ROLES_TRACE") != nullptr;
+        if (kRolesTrace) {
+            std::fputs(m_roles.report().c_str(), stderr);
+        }
+    }
+    // BODY VOLUMES (see bodyVolumes()): the trunk and the limb roots by their ROLES, the radii
+    // from the hip-socket spacing so they scale with the rig, each volume applied to the other
+    // limbs' joints below their roots.
     buildBodyVolumes(names, mesh);
     static const bool kNoMeshFloor = std::getenv("IK_FLOOR_NO_MESH") != nullptr; // A/B probe
     if (mesh != nullptr && !mesh->empty() && !kNoMeshFloor) {
