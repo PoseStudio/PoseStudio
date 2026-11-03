@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The release pipeline's actions moved to their Node 24 majors (`actions/checkout@v7`, `softprops/action-gh-release@v3`, `actions/upload-artifact@v7`): the 0.4.0 build warned that the Node 20 ones it used are deprecated.
+
 ## [0.4.0] - 2026-11-03
 
 Rigged characters from FBX files, with a rig standard behind them — and the posing rounds since 0.3.16: several joints dragged together, strides that swing the arms and turn the hips, hands that rest naturally, a figure that hangs when lifted, and the posing engine refactored inside with the same poses to the last bit.

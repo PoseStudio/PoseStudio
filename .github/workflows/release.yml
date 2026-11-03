@@ -44,7 +44,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Determine version
         id: version
@@ -260,7 +260,7 @@ jobs:
 
       - name: Publish GitHub Release
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: PoseStudio ${{ steps.version.outputs.version }}
           body_path: dist/release-body.md
@@ -271,7 +271,7 @@ jobs:
 
       - name: Upload build artifacts (manual test runs)
         if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PoseStudio-windows-${{ steps.version.outputs.version }}
           path: dist/out/*
