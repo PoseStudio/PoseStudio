@@ -86,7 +86,9 @@ int aliasedBoneIndex(const Armature& arm, const std::string& canonical) {
     // reference rigs — the third generation's big toe is its Ball by role, and "lBigToe" then
     // grabbed another toe (r79 against r76: 36-94 rows moved on every rig). The names are the
     // standard's first convention; the roles are an inference, and where the two disagree on a
-    // reference rig the NAME is right.
+    // reference rig the NAME is right. (A conformed rig carries the standard's names since the
+    // same day — its hips ARE `hips`, its pelvis leaf `pelvis` — so the swap serves the dumps of
+    // un-renamed rigs alone; it stays for them.)
     const IkRig* rig = arm.ikRig();
     if (idx < 0 && rig == nullptr && arm.hasSkeleton()) {
         // The rig is a cache of the bind skeleton (built at the first drag, pick or import): a

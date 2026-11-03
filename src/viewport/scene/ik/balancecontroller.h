@@ -37,6 +37,10 @@ public:
     /// name classification, split among same-class same-side bones. Unclassified bones (face,
     /// fingers, helper joints) get a token mass so they perturb, not dominate.
     static std::vector<float> assignMasses(const std::vector<std::string>& names);
+    /// The name table's biomechanical mass fraction for one of its fragments ("thigh", "chest",
+    /// "toe"), 0 for a fragment it has no row for: the ONE definition of the segment fractions,
+    /// which the rig's masses by role read too (IkRig::assignMassesByRole).
+    static float segmentMassFraction(const char* fragment);
     /// The token mass assignMasses gives a bone whose name matches no segment class (IkRig fills
     /// such bones' masses from the rig standard's roles where the role is a real segment).
     static float unclassifiedMass();

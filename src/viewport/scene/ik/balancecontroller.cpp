@@ -11,9 +11,9 @@
  * Qt-free (std + GLM).
  */
 #include "balancecontroller.h"
+#include "namerules.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <iterator>
 
@@ -45,69 +45,15 @@ constexpr float kUnclassifiedMass = 0.0015f; // face/finger/helper bones: pertur
 // point/line would make the balance controller correct forever and fight the drag/pins.
 constexpr float kDegenerateSupportRadius = 0.05f;
 
-std::string normalizedName(const std::string& name) {
-    std::string out;
-    out.reserve(name.size());
-    for (const char c : name) {
-        if (std::isalpha(static_cast<unsigned char>(c))) {
-            out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-        }
-    }
-    return out;
-}
-
-// Side for share-splitting: 'l'/'r' when the name starts with one (lShin, r_foot, leftFoot),
-// 'c' (center) otherwise — read off the RAW name's side TOKENS first (2026-11-03, the rule
-// Armature::mirroredBoneName reads: a lone l/r bounded by `_ . - :` or the name's ends, Left/Right
-// bounded likewise or by a change of case, wherever it stands), then the old prefix rule on the
-// letters alone. A game-engine export puts the side LAST (`thigh_r`, `calf_twist_01_l`), and read
-// by the first letter every thigh of such a rig was a CENTRE thigh: the class's share split six
-// ways over both sides and their helpers, a leg's subtree read 3.5% of the body, and a thigh
-// socket was no girdle grab (its drag left the hips where they stood). `lowerarm_r` read as LEFT
-// and `ring_01_l` as RIGHT the same way. The reference generations' names carry the prefix, so
-// the token rule and the old one agree there bone for bone.
-bool isSideBoundary(char c) {
-    return c == '_' || c == '.' || c == '-' || c == ':';
-}
-
-char sideOfRaw(const std::string& raw) {
-    const std::size_t n = raw.size();
-    const auto lower = [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); };
-    const auto isUpper = [](char c) { return std::isupper(static_cast<unsigned char>(c)) != 0; };
-    const auto isLower = [](char c) { return std::islower(static_cast<unsigned char>(c)) != 0; };
-    for (std::size_t i = 0; i < n; ++i) {
-        const char c = lower(raw[i]);
-        if (c != 'l' && c != 'r') {
-            continue;
-        }
-        // "left" / "right": bounded by a boundary, the ends, or a change of case (LeftArm, armLeft).
-        const char* word = c == 'l' ? "left" : "right";
-        const std::size_t len = c == 'l' ? 4 : 5;
-        if (i + len <= n) {
-            bool match = true;
-            for (std::size_t k = 0; k < len && match; ++k) {
-                match = lower(raw[i + k]) == word[k];
-            }
-            const bool before = i == 0 || isSideBoundary(raw[i - 1]) || (isLower(raw[i - 1]) && isUpper(raw[i]));
-            const bool after = i + len == n || isSideBoundary(raw[i + len]) || isUpper(raw[i + len]) ||
-                               std::isdigit(static_cast<unsigned char>(raw[i + len]));
-            if (match && before && after) {
-                return c;
-            }
-        }
-        // A lone l/r: at the start before an uppercase letter or an underscore (lShin, l_thigh),
-        // or bounded on both sides by a boundary or an end (thigh_r, DEF-thigh1.L, cc_base_l_x).
-        const bool before = i == 0 || isSideBoundary(raw[i - 1]);
-        const bool after = i + 1 == n || isSideBoundary(raw[i + 1]) || (i == 0 && isUpper(raw[i + 1]));
-        if (before && after) {
-            return c;
-        }
-    }
-    return 0;
-}
-
+// Side for share-splitting: the side the RAW name's token says (namerules::sideOf — a lone l/r
+// or Left/Right wherever it stands, since 2026-11-03: a game-engine export puts the side LAST,
+// `thigh_r`, and read by the first letter every thigh of such a rig was a CENTRE thigh, the
+// class's share split six ways over both sides and their helpers, a leg's subtree 3.5% of the
+// body), else the old prefix rule on the letters alone ('l'/'r' when the name starts with one:
+// lShin, leftFoot), 'c' (centre) otherwise. The reference generations' names carry the prefix,
+// so the token rule and the old one agree there bone for bone.
 char sideOf(const std::string& normalized, const std::string& raw) {
-    if (const char token = sideOfRaw(raw)) {
+    if (const char token = namerules::sideOf(raw)) {
         return token;
     }
     if (normalized.rfind("left", 0) == 0) return 'l';
@@ -158,6 +104,15 @@ float BalanceController::unclassifiedMass() {
     return kUnclassifiedMass;
 }
 
+float BalanceController::segmentMassFraction(const char* fragment) {
+    for (const SegmentClass& c : kSegmentTable) {
+        if (std::string(c.fragment) == fragment) {
+            return c.massFraction;
+        }
+    }
+    return 0.0f;
+}
+
 std::vector<float> BalanceController::assignMasses(const std::vector<std::string>& names) {
     const std::size_t n = names.size();
     std::vector<float> masses(n, kUnclassifiedMass);
@@ -169,7 +124,7 @@ std::vector<float> BalanceController::assignMasses(const std::vector<std::string
     auto slotOf = [](char side) { return side == 'l' ? 0 : (side == 'r' ? 1 : 2); };
     std::vector<char> side(n, 'c');
     for (std::size_t i = 0; i < n; ++i) {
-        const std::string norm = normalizedName(names[i]);
+        const std::string norm = namerules::lettersLower(names[i]);
         classOf[i] = classify(norm);
         side[i] = sideOf(norm, names[i]);
         if (classOf[i] >= 0) {

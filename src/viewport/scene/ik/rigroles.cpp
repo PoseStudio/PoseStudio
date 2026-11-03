@@ -38,12 +38,11 @@
 #include "rigroles.h"
 
 #include "bodymesh.h"
+#include "namerules.h"
 
 #include <algorithm>
 #include <cctype>
-#include <cstdio>
-#include <cstdlib>
-#include <functional>
+#include <cstddef>
 #include <limits>
 #include <sstream>
 
@@ -67,33 +66,6 @@ constexpr int kCarpalChainLength = 4;
 /// nearer, is the THUMB (its chain begins at the carpus; a finger's at the knuckle, a palm's
 /// length out: 0.27 of the index's on the reference generation, 0.44 on a biped rig).
 constexpr float kThumbNearShare = 0.8f;
-
-std::string lowerAlpha(const std::string& name) {
-    std::string out;
-    out.reserve(name.size());
-    for (const char c : name) {
-        if (std::isalpha(static_cast<unsigned char>(c))) {
-            out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-        }
-    }
-    return out;
-}
-
-bool hasToken(const std::string& normalized, const char* token) {
-    return normalized.find(token) != std::string::npos;
-}
-
-/// The digit a finger's or a toe's name says it is (1..5), or 0 where the name says nothing. The
-/// tokens are the universal ones; "small" is deliberately none (one generation numbers its four
-/// small toes 1-4, which only their places across the foot can order).
-int digitByToken(const std::string& normalized, bool toe) {
-    if (hasToken(normalized, toe ? "big" : "thumb")) return 1;
-    if (hasToken(normalized, "index") || hasToken(normalized, "second")) return 2;
-    if (hasToken(normalized, "mid") || hasToken(normalized, "third")) return 3;
-    if (hasToken(normalized, "ring") || hasToken(normalized, "fourth")) return 4;
-    if (hasToken(normalized, "pinky") || hasToken(normalized, "little") || hasToken(normalized, "fifth")) return 5;
-    return 0;
-}
 
 } // namespace
 
@@ -310,101 +282,109 @@ std::string RigRoles::standardName(const RigRoleTag& tag) {
     return out;
 }
 
-void RigRoles::build(const Input& in) {
-    m_tags.clear();
-    m_names.clear();
-    m_missing.clear();
-    m_spineLinks = 0;
-    m_neckLinks = 0;
-    if (in.parents == nullptr || in.children == nullptr || in.bindPos == nullptr) {
-        return;
+/**
+ * @brief The inference's working state and its steps, one per rule of the file comment, run in
+ *        that order by run(). A nested type of RigRoles (declared private in the header), so it
+ *        writes the table directly; defined here alone. Every step reads only what the steps
+ *        before it settled, and what one step hands the next (the spine, the chest top, the
+ *        neck, the collars) is a member. Written as one 675-line function until the IK
+ *        refactoring round of 2026-11-03; the steps are its blocks verbatim.
+ */
+struct RigRoles::Builder {
+    RigRoles&                            out;   ///< The table being built (m_tags, m_names, m_missing, the chain lengths).
+    const Input&                         in;
+    const std::vector<int>&              par;   ///< in.parents
+    const std::vector<std::vector<int>>& ch;    ///< in.children
+    const std::vector<glm::vec3>&        pos;   ///< in.bindPos
+    const int                            n;     ///< The bone count.
+    const int                            root;  ///< The hips.
+    const float                          scale; ///< The figure's size scale (1 when the input gives none).
+    float                                rootX = 0.0f; ///< The hips' bind x: the sagittal plane.
+
+    // Derived once, in prepare().
+    std::vector<char> underRoot; ///< Per bone: descends from the root (the root itself included).
+    std::vector<int>  size;      ///< Per bone: its subtree's bone count (the spine rule reads them).
+    std::vector<char> hasFoot;   ///< Per bone: a foot-class joint below it, or is one.
+    std::vector<int>  skin;      ///< Per bone: the body mesh sample's points it dominates.
+    bool              haveMesh = false;
+
+    // What one step hands the next.
+    std::vector<int> spine;                ///< The spine links, hips upward (spineChain()).
+    int              top = -1;             ///< The chest top: the last spine link, or the root with no spine.
+    int              neck = -1;            ///< The neck's first link (chestTop()), -1 if none.
+    int              collar[2] = {-1, -1}; ///< The collars, left then right (chestTop()).
+
+    Builder(RigRoles& table, const Input& input)
+        : out(table),
+          in(input),
+          par(*input.parents),
+          ch(*input.children),
+          pos(*input.bindPos),
+          n(static_cast<int>(input.parents->size())),
+          root(input.root),
+          scale(input.sizeScale > 0.0f ? input.sizeScale : 1.0f) {}
+
+    /// Every rule in order (see the file comment).
+    void run() {
+        prepare();
+        set(root, RigRole::Hips, RigSide::Centre);
+        legs();
+        spineChain();
+        chestTop();
+        neckAndHead();
+        leftovers();
+        required();
     }
-    const std::vector<int>&              par = *in.parents;
-    const std::vector<std::vector<int>>& ch = *in.children;
-    const std::vector<glm::vec3>&        pos = *in.bindPos;
-    const int                            n = static_cast<int>(par.size());
-    if (n == 0 || static_cast<int>(ch.size()) != n || static_cast<int>(pos.size()) != n) {
-        return;
-    }
-    m_tags.assign(static_cast<std::size_t>(n), RigRoleTag{});
-    m_names.assign(static_cast<std::size_t>(n), std::string());
-    if (in.names != nullptr && static_cast<int>(in.names->size()) == n) {
-        m_names = *in.names;
-    }
-    const int root = in.root;
-    if (root < 0 || root >= n) {
-        m_missing.push_back("hips");
-        return;
-    }
-    const float scale = in.sizeScale > 0.0f ? in.sizeScale : 1.0f;
-    const auto  idx = [](int b) { return static_cast<std::size_t>(b); };
-    const auto  isBody = [&](int b) { return b >= 0 && b < n && (in.bodyNode == nullptr || (*in.bodyNode)[idx(b)] != 0); };
-    const auto  isHelper = [&](int b) { return in.helper != nullptr && b >= 0 && b < n && (*in.helper)[idx(b)] != 0; };
-    const auto  isFoot = [&](int b) { return in.footClass != nullptr && b >= 0 && b < n && (*in.footClass)[idx(b)] != 0; };
-    const auto  mass = [&](int b) { return in.subtreeMass != nullptr && b >= 0 && b < n ? (*in.subtreeMass)[idx(b)] : 1.0f; };
-    const auto  roleOf = [&](int b) { return m_tags[idx(b)].role; };
-    const auto  set = [&](int b, RigRole role, RigSide side, int index = 0, int joint = 0) {
-        RigRoleTag& t = m_tags[idx(b)];
+
+    // ---- The readers every step shares.
+    static std::size_t idx(int b) { return static_cast<std::size_t>(b); }
+    bool  isBody(int b) const { return b >= 0 && b < n && (in.bodyNode == nullptr || (*in.bodyNode)[idx(b)] != 0); }
+    bool  isHelper(int b) const { return in.helper != nullptr && b >= 0 && b < n && (*in.helper)[idx(b)] != 0; }
+    bool  isFoot(int b) const { return in.footClass != nullptr && b >= 0 && b < n && (*in.footClass)[idx(b)] != 0; }
+    float mass(int b) const { return in.subtreeMass != nullptr && b >= 0 && b < n ? (*in.subtreeMass)[idx(b)] : 1.0f; }
+    RigRole            roleOf(int b) const { return out.m_tags[idx(b)].role; }
+    const std::string& name(int b) const { return out.m_names[idx(b)]; }
+    void               set(int b, RigRole role, RigSide side, int index = 0, int joint = 0) {
+        RigRoleTag& t = out.m_tags[idx(b)];
         t.role = role;
         t.side = side;
         t.index = static_cast<unsigned char>(std::max(0, std::min(255, index)));
         t.joint = static_cast<unsigned char>(std::max(0, std::min(255, joint)));
-    };
-    // Descent from the root, subtree sizes (bone counts: the spine rule reads them), feet below.
-    std::vector<char> underRoot(idx(n), 0);
-    std::vector<int>  size(idx(n), 1);
-    std::vector<char> hasFoot(idx(n), 0);
-    for (int i = 0; i < n; ++i) {
-        for (int cur = i; cur >= 0; cur = par[idx(cur)]) {
-            if (cur == root) {
-                underRoot[idx(i)] = 1;
-            }
-        }
-        for (int cur = par[idx(i)]; cur >= 0; cur = par[idx(cur)]) {
-            ++size[idx(cur)];
-            if (isFoot(i)) {
-                hasFoot[idx(cur)] = 1;
-            }
-        }
-        if (isFoot(i)) {
-            hasFoot[idx(i)] = 1;
-        }
     }
-    // The skin each bone dominates (the body mesh sample): a leaf no skin follows is a helper.
-    std::vector<int> skin(idx(n), 0);
-    const bool       haveMesh = in.mesh != nullptr && !in.mesh->empty();
-    if (haveMesh) {
-        for (const BodyMeshPoint& pt : *in.mesh) {
-            if (pt.bone >= 0 && pt.bone < n) {
-                ++skin[idx(pt.bone)];
-            }
-        }
-    }
-    const auto skinlessLeaf = [&](int b) {
+    /// A leaf no skin follows (with no mesh sample: the one such bone seen, by its name).
+    bool skinlessLeaf(int b) const {
         if (!ch[idx(b)].empty()) {
             return false;
         }
         if (haveMesh) {
             return skin[idx(b)] == 0;
         }
-        return hasToken(lowerAlpha(m_names[idx(b)]), "anchor"); // (no sample: the one such bone seen, by its name)
-    };
-    const float rootX = pos[idx(root)].x;
-    const auto  sideByX = [&](int b) {
+        return namerules::hasToken(namerules::lettersLower(name(b)), "anchor");
+    }
+    /// The bone's side by its bind x against the hips' (Centre within kSideOffPlane).
+    RigSide sideByX(int b) const {
         const float dx = pos[idx(b)].x - rootX;
         if (std::abs(dx) < kSideOffPlane * scale) {
             return RigSide::Centre;
         }
         return dx > 0.0f ? RigSide::Left : RigSide::Right;
-    };
-    // The child with the most mass below it (ties: the bigger subtree, then the lower index) —
-    // a twist helper never, while a real child exists (a helper chain hanging off a thigh can
-    // carry as much name-table mass as the shin, and it is not the leg).
-    const auto heavier = [&](int c, int best) {
+    }
+    /// How many of the bone's children are of the body and no skinless leaf.
+    int realKidCount(int b) const {
+        int kids = 0;
+        for (const int g : ch[idx(b)]) {
+            kids += isBody(g) && !skinlessLeaf(g) ? 1 : 0;
+        }
+        return kids;
+    }
+    /// The child with the most mass below it (ties: the bigger subtree, then the lower index) —
+    /// a twist helper never, while a real child exists (a helper chain hanging off a thigh can
+    /// carry as much name-table mass as the shin, and it is not the leg).
+    bool heavier(int c, int best) const {
         return best < 0 || mass(c) > mass(best) + 1.0e-9f || (std::abs(mass(c) - mass(best)) <= 1.0e-9f && size[idx(c)] > size[idx(best)]);
-    };
-    const auto mainChild = [&](int b) {
-        int best = -1;
+    }
+    int mainChild(int b) const {
+        int  best = -1;
         bool bestHelper = true;
         for (const int c : ch[idx(b)]) {
             if (!isBody(c)) {
@@ -417,9 +397,9 @@ void RigRoles::build(const Input& in) {
             }
         }
         return best;
-    };
-    // A segment's twist helpers: every helper hanging off it, and the helpers hanging off those.
-    const auto tagHelperChains = [&](int segment, RigRole twistRole, RigSide side, int& count) {
+    }
+    /// A segment's twist helpers: every helper hanging off it, and the helpers hanging off those.
+    void tagHelperChains(int segment, RigRole twistRole, RigSide side, int& count) {
         std::vector<int> queue; // (child order: the first helper listed is twist 1)
         for (const int h : ch[idx(segment)]) {
             if (isBody(h) && roleOf(h) == RigRole::None && isHelper(h)) {
@@ -439,48 +419,89 @@ void RigRoles::build(const Input& in) {
                 }
             }
         }
-    };
+    }
 
-    set(root, RigRole::Hips, RigSide::Centre);
+    // ---- The steps.
 
-    // ---- THE LEGS.
-    std::vector<int> thighs;
-    for (const int c : ch[idx(root)]) {
-        if (!isBody(c) || !hasFoot[idx(c)]) {
-            continue;
-        }
-        int legs = 0;
-        for (const int g : ch[idx(c)]) {
-            legs += isBody(g) && hasFoot[idx(g)] ? 1 : 0;
-        }
-        if (legs >= 2 && roleOf(c) == RigRole::None && find(RigRole::Pelvis) < 0) {
-            set(c, RigRole::Pelvis, RigSide::Centre);
-            for (const int g : ch[idx(c)]) {
-                if (isBody(g) && hasFoot[idx(g)]) {
-                    thighs.push_back(g);
+    /// Descent from the root, subtree sizes, feet below, the skin each bone dominates.
+    void prepare() {
+        underRoot.assign(idx(n), 0);
+        size.assign(idx(n), 1);
+        hasFoot.assign(idx(n), 0);
+        for (int i = 0; i < n; ++i) {
+            for (int cur = i; cur >= 0; cur = par[idx(cur)]) {
+                if (cur == root) {
+                    underRoot[idx(i)] = 1;
                 }
             }
-        } else {
-            thighs.push_back(c);
+            for (int cur = par[idx(i)]; cur >= 0; cur = par[idx(cur)]) {
+                ++size[idx(cur)];
+                if (isFoot(i)) {
+                    hasFoot[idx(cur)] = 1;
+                }
+            }
+            if (isFoot(i)) {
+                hasFoot[idx(i)] = 1;
+            }
+        }
+        // The skin each bone dominates (the body mesh sample): a leaf no skin follows is a helper.
+        skin.assign(idx(n), 0);
+        haveMesh = in.mesh != nullptr && !in.mesh->empty();
+        if (haveMesh) {
+            for (const BodyMeshPoint& pt : *in.mesh) {
+                if (pt.bone >= 0 && pt.bone < n) {
+                    ++skin[idx(pt.bone)];
+                }
+            }
+        }
+        rootX = pos[idx(root)].x;
+    }
+
+    /// THE LEGS: the hips' children with a foot below them — directly (a thigh each) or one
+    /// child carrying both (the PELVIS bone); then each side's heaviest thigh down its chain.
+    void legs() {
+        std::vector<int> thighs;
+        for (const int c : ch[idx(root)]) {
+            if (!isBody(c) || !hasFoot[idx(c)]) {
+                continue;
+            }
+            int legCount = 0;
+            for (const int g : ch[idx(c)]) {
+                legCount += isBody(g) && hasFoot[idx(g)] ? 1 : 0;
+            }
+            if (legCount >= 2 && roleOf(c) == RigRole::None && out.find(RigRole::Pelvis) < 0) {
+                set(c, RigRole::Pelvis, RigSide::Centre);
+                for (const int g : ch[idx(c)]) {
+                    if (isBody(g) && hasFoot[idx(g)]) {
+                        thighs.push_back(g);
+                    }
+                }
+            } else {
+                thighs.push_back(c);
+            }
+        }
+        int thigh[2] = {-1, -1};
+        for (const int t : thighs) {
+            const RigSide s = sideByX(t);
+            if (s == RigSide::Centre) {
+                continue;
+            }
+            int& slot = thigh[s == RigSide::Left ? 0 : 1];
+            if (slot < 0 || mass(t) > mass(slot)) {
+                slot = t;
+            }
+        }
+        for (int k = 0; k < 2; ++k) {
+            if (thigh[k] >= 0) {
+                leg(thigh[k], k == 0 ? RigSide::Left : RigSide::Right);
+            }
         }
     }
-    int thigh[2] = {-1, -1};
-    for (const int t : thighs) {
-        const RigSide s = sideByX(t);
-        if (s == RigSide::Centre) {
-            continue;
-        }
-        int& slot = thigh[s == RigSide::Left ? 0 : 1];
-        if (slot < 0 || mass(t) > mass(slot)) {
-            slot = t;
-        }
-    }
-    for (int k = 0; k < 2; ++k) {
-        const int t = thigh[k];
-        if (t < 0) {
-            continue;
-        }
-        const RigSide s = k == 0 ? RigSide::Left : RigSide::Right;
+
+    /// One leg down its main chain: the helpers before the first real joint are THIGH TWISTS,
+    /// that joint the SHIN, the helpers after it SHIN TWISTS, the first foot-class joint the
+    /// FOOT; leaf helpers beside the chain are the segment's twists too.
+    void leg(int t, RigSide s) {
         set(t, RigRole::Thigh, s);
         int thighTwists = 0;
         int c = mainChild(t);
@@ -506,10 +527,17 @@ void RigRoles::build(const Input& in) {
         }
         tagHelperChains(t, RigRole::ThighTwist, s, thighTwists);
         if (ankle < 0 || !isFoot(ankle)) {
-            continue;
+            return;
         }
         set(ankle, RigRole::Foot, s);
-        // ---- THE FOOT. Its bones by depth; the ball; the mid-foot chain; the toes; the heel.
+        foot(ankle, s);
+    }
+
+    /// THE FOOT under its ankle: its bones by depth; the BALL (the first bone with two real
+    /// children or more, else the ankle's main child); the chain to it METATARSAL; the toes;
+    /// what is left a helper (skinless), the HEEL (a leaf behind the ankle, or named so at it)
+    /// or a metatarsal.
+    void foot(int ankle, RigSide s) {
         std::vector<int> order; // the descendants of the ankle, parents before children
         std::vector<int> depth(idx(n), 0);
         for (std::size_t q = 0; q <= order.size(); ++q) {
@@ -521,16 +549,9 @@ void RigRoles::build(const Input& in) {
                 }
             }
         }
-        const auto realKids = [&](int d) {
-            int kids = 0;
-            for (const int g : ch[idx(d)]) {
-                kids += isBody(g) && !skinlessLeaf(g) ? 1 : 0;
-            }
-            return kids;
-        };
         int ball = -1;
         for (const int d : order) {
-            if (realKids(d) >= 2 && (ball < 0 || depth[idx(d)] < depth[idx(ball)])) {
+            if (realKidCount(d) >= 2 && (ball < 0 || depth[idx(d)] < depth[idx(ball)])) {
                 ball = d;
             }
         }
@@ -551,57 +572,7 @@ void RigRoles::build(const Input& in) {
             for (std::size_t q = between.size(); q-- > 0;) {
                 set(between[q], RigRole::Metatarsal, s, ++metatarsals);
             }
-            // The toes: each real child of the ball starts one; the digit by token, else by place.
-            struct ToeBase {
-                int   bone;
-                int   digit;
-                float across;
-            };
-            std::vector<ToeBase> bases;
-            bool anyChain = false;
-            for (const int c0 : ch[idx(ball)]) {
-                anyChain = anyChain || (isBody(c0) && realKids(c0) > 0);
-            }
-            for (const int c0 : ch[idx(ball)]) {
-                if (!isBody(c0)) {
-                    continue;
-                }
-                if (skinlessLeaf(c0)) {
-                    set(c0, RigRole::Helper, s);
-                    continue;
-                }
-                const int digit = digitByToken(lowerAlpha(m_names[idx(c0)]), true);
-                // A childless, nameless stub in a fan whose other children carry toe chains is
-                // no toe (the third generation's `lToe` sits among its five toes under the
-                // mid-foot bone they all fan from); where no child has a chain every one is a toe.
-                if (anyChain && realKids(c0) == 0 && digit == 0) {
-                    continue;
-                }
-                bases.push_back({c0, digit, pos[idx(c0)].x - pos[idx(ball)].x});
-            }
-            bool allTokens = !bases.empty();
-            for (const ToeBase& b : bases) {
-                allTokens = allTokens && b.digit > 0;
-            }
-            if (!allTokens) {
-                // Inner (the big toe, nearest the body's midline) to outer: on the left foot
-                // ascending x, on the right descending.
-                std::sort(bases.begin(), bases.end(), [&](const ToeBase& a, const ToeBase& b) {
-                    return s == RigSide::Left ? a.across < b.across : a.across > b.across;
-                });
-                for (std::size_t q = 0; q < bases.size(); ++q) {
-                    bases[q].digit = static_cast<int>(q) + 1;
-                }
-            }
-            for (const ToeBase& b : bases) {
-                int joint = 0;
-                for (int cur = b.bone; cur >= 0 && roleOf(cur) == RigRole::None && !skinlessLeaf(cur); cur = mainChild(cur)) {
-                    set(cur, RigRole::Toe, s, b.digit, ++joint);
-                    if (ch[idx(cur)].empty()) {
-                        break;
-                    }
-                }
-            }
+            toes(ball, s);
         }
         // What is left under the ankle: a skinless leaf a helper; a leaf behind the ankle (or one
         // named so at it) the heel; anything else mid-foot.
@@ -613,7 +584,7 @@ void RigRoles::build(const Input& in) {
                 set(d, RigRole::Helper, s);
             } else if (ch[idx(d)].empty() &&
                        (pos[idx(d)].z < pos[idx(ankle)].z - kHeelBehind * scale ||
-                        (hasToken(lowerAlpha(m_names[idx(d)]), "heel") && pos[idx(d)].z < pos[idx(ankle)].z + kHeelBehind * scale))) {
+                        (namerules::hasToken(namerules::lettersLower(name(d)), "heel") && pos[idx(d)].z < pos[idx(ankle)].z + kHeelBehind * scale))) {
                 set(d, RigRole::Heel, s);
             } else {
                 set(d, RigRole::Metatarsal, s, ++metatarsals);
@@ -621,113 +592,172 @@ void RigRoles::build(const Input& in) {
         }
     }
 
-    // ---- THE SPINE: the largest foot-free subtree up from the hips, link by link, to the first
-    // link with side children of real size on both sides — the collars' link, the chest top.
-    std::vector<int> spine;
-    for (int cur = root, guard = 0; guard < 32; ++guard) {
-        int next = -1;
-        for (const int c : ch[idx(cur)]) {
-            if (!isBody(c) || hasFoot[idx(c)] || roleOf(c) != RigRole::None || isHelper(c)) {
+    /// The TOES: each real child of the ball starts one; the digit by its name's token, else by
+    /// its place across the foot (the big toe nearest the midline).
+    void toes(int ball, RigSide s) {
+        struct ToeBase {
+            int   bone;
+            int   digit;
+            float across;
+        };
+        std::vector<ToeBase> bases;
+        bool                 anyChain = false;
+        for (const int c0 : ch[idx(ball)]) {
+            anyChain = anyChain || (isBody(c0) && realKidCount(c0) > 0);
+        }
+        for (const int c0 : ch[idx(ball)]) {
+            if (!isBody(c0)) {
                 continue;
             }
-            if (next < 0 || size[idx(c)] > size[idx(next)]) {
-                next = c;
-            }
-        }
-        if (next < 0) {
-            break;
-        }
-        spine.push_back(next);
-        bool left = false;
-        bool right = false;
-        for (const int c : ch[idx(next)]) {
-            if (!isBody(c) || size[idx(c)] < 2) {
+            if (skinlessLeaf(c0)) {
+                set(c0, RigRole::Helper, s);
                 continue;
             }
-            const RigSide sd = sideByX(c);
-            left = left || sd == RigSide::Left;
-            right = right || sd == RigSide::Right;
+            const int digit = namerules::digitByToken(namerules::lettersLower(name(c0)), true);
+            // A childless, nameless stub in a fan whose other children carry toe chains is
+            // no toe (the third generation's `lToe` sits among its five toes under the
+            // mid-foot bone they all fan from); where no child has a chain every one is a toe.
+            if (anyChain && realKidCount(c0) == 0 && digit == 0) {
+                continue;
+            }
+            bases.push_back({c0, digit, pos[idx(c0)].x - pos[idx(ball)].x});
         }
-        if (left && right) {
-            break;
+        bool allTokens = !bases.empty();
+        for (const ToeBase& b : bases) {
+            allTokens = allTokens && b.digit > 0;
         }
-        cur = next;
+        if (!allTokens) {
+            // Inner (the big toe, nearest the body's midline) to outer: on the left foot
+            // ascending x, on the right descending.
+            std::sort(bases.begin(), bases.end(), [&](const ToeBase& a, const ToeBase& b) {
+                return s == RigSide::Left ? a.across < b.across : a.across > b.across;
+            });
+            for (std::size_t q = 0; q < bases.size(); ++q) {
+                bases[q].digit = static_cast<int>(q) + 1;
+            }
+        }
+        for (const ToeBase& b : bases) {
+            int joint = 0;
+            for (int cur = b.bone; cur >= 0 && roleOf(cur) == RigRole::None && !skinlessLeaf(cur); cur = mainChild(cur)) {
+                set(cur, RigRole::Toe, s, b.digit, ++joint);
+                if (ch[idx(cur)].empty()) {
+                    break;
+                }
+            }
+        }
     }
-    for (std::size_t k = 0; k < spine.size(); ++k) {
-        set(spine[k], RigRole::Spine, RigSide::Centre, static_cast<int>(k) + 1);
-    }
-    m_spineLinks = static_cast<int>(spine.size());
-    const int top = spine.empty() ? root : spine.back();
 
-    // ---- AT THE TOP: the NECK is the real child nearest the midline; of the rest, each side's
-    // heaviest child is the COLLAR; every other side child of a spine link is a PECTORAL, its
-    // subtree with it (a skinless leaf a helper).
-    int neck = -1;
-    for (const int c : ch[idx(top)]) {
-        if (!isBody(c) || roleOf(c) != RigRole::None || skinlessLeaf(c) || isHelper(c) || hasFoot[idx(c)]) {
-            continue;
-        }
-        // The nearest the midline — and of two there, the one with MORE below it (2026-11-03: a
-        // biped export hangs a skinned leaf, its last spine link, beside the neck at the top,
-        // both on the midline to 1e-8; the neck carries the head).
-        const bool nearer = neck < 0 || std::abs(pos[idx(c)].x - rootX) < std::abs(pos[idx(neck)].x - rootX) - kSideOffPlane * scale;
-        const bool level = neck >= 0 && std::abs(std::abs(pos[idx(c)].x - rootX) - std::abs(pos[idx(neck)].x - rootX)) <= kSideOffPlane * scale;
-        if (nearer || (level && size[idx(c)] > size[idx(neck)])) {
-            neck = c;
-        }
-    }
-    int collar[2] = {-1, -1};
-    for (const int c : ch[idx(top)]) {
-        if (!isBody(c) || roleOf(c) != RigRole::None || skinlessLeaf(c) || c == neck || isHelper(c)) {
-            continue;
-        }
-        RigSide sd = sideByX(c);
-        if (sd == RigSide::Centre) {
-            sd = pos[idx(c)].x - rootX >= 0.0f ? RigSide::Left : RigSide::Right; // (a collar at the midline: by its sign)
-        }
-        int& slot = collar[sd == RigSide::Left ? 0 : 1];
-        if (slot < 0 || mass(c) > mass(slot)) {
-            slot = c;
-        }
-    }
-    std::vector<int> links = spine;
-    if (spine.empty()) {
-        links.push_back(root);
-    }
-    for (const int link : links) {
-        for (const int c : ch[idx(link)]) {
-            if (!isBody(c) || roleOf(c) != RigRole::None || c == collar[0] || c == collar[1] || c == neck) {
-                continue;
-            }
-            const RigSide sd = sideByX(c);
-            if (sd == RigSide::Centre && (!ch[idx(c)].empty() || skinlessLeaf(c) || isHelper(c))) {
-                continue; // (a centre child with anything below it is no rider: the neck was taken above)
-            }
-            // (A skinned centre LEAF off a spine link — a biped export's last spine link, hung
-            // beside the neck with the upper chest's skin — rides the link as a pectoral does,
-            // 2026-11-03: classed "other" it was a selectable joint with no limits.)
-            std::vector<int> stack{c};
-            while (!stack.empty()) {
-                const int b = stack.back();
-                stack.pop_back();
-                if (!isBody(b) || roleOf(b) != RigRole::None) {
+    /// THE SPINE: the largest foot-free subtree up from the hips, link by link, to the first
+    /// link with side children of real size on both sides — the collars' link, the chest top.
+    void spineChain() {
+        for (int cur = root, guard = 0; guard < 32; ++guard) {
+            int next = -1;
+            for (const int c : ch[idx(cur)]) {
+                if (!isBody(c) || hasFoot[idx(c)] || roleOf(c) != RigRole::None || isHelper(c)) {
                     continue;
                 }
-                set(b, skinlessLeaf(b) ? RigRole::Helper : RigRole::Pectoral, sd);
-                stack.insert(stack.end(), ch[idx(b)].begin(), ch[idx(b)].end());
+                if (next < 0 || size[idx(c)] > size[idx(next)]) {
+                    next = c;
+                }
+            }
+            if (next < 0) {
+                break;
+            }
+            spine.push_back(next);
+            bool left = false;
+            bool right = false;
+            for (const int c : ch[idx(next)]) {
+                if (!isBody(c) || size[idx(c)] < 2) {
+                    continue;
+                }
+                const RigSide sd = sideByX(c);
+                left = left || sd == RigSide::Left;
+                right = right || sd == RigSide::Right;
+            }
+            if (left && right) {
+                break;
+            }
+            cur = next;
+        }
+        for (std::size_t k = 0; k < spine.size(); ++k) {
+            set(spine[k], RigRole::Spine, RigSide::Centre, static_cast<int>(k) + 1);
+        }
+        out.m_spineLinks = static_cast<int>(spine.size());
+        top = spine.empty() ? root : spine.back();
+    }
+
+    /// AT THE TOP: the NECK is the real child nearest the midline; of the rest, each side's
+    /// heaviest child is the COLLAR; every other side child of a spine link is a PECTORAL, its
+    /// subtree with it (a skinless leaf a helper); then each arm from its collar.
+    void chestTop() {
+        for (const int c : ch[idx(top)]) {
+            if (!isBody(c) || roleOf(c) != RigRole::None || skinlessLeaf(c) || isHelper(c) || hasFoot[idx(c)]) {
+                continue;
+            }
+            // The nearest the midline — and of two there, the one with MORE below it (2026-11-03: a
+            // biped export hangs a skinned leaf, its last spine link, beside the neck at the top,
+            // both on the midline to 1e-8; the neck carries the head).
+            const bool nearer = neck < 0 || std::abs(pos[idx(c)].x - rootX) < std::abs(pos[idx(neck)].x - rootX) - kSideOffPlane * scale;
+            const bool level = neck >= 0 && std::abs(std::abs(pos[idx(c)].x - rootX) - std::abs(pos[idx(neck)].x - rootX)) <= kSideOffPlane * scale;
+            if (nearer || (level && size[idx(c)] > size[idx(neck)])) {
+                neck = c;
+            }
+        }
+        for (const int c : ch[idx(top)]) {
+            if (!isBody(c) || roleOf(c) != RigRole::None || skinlessLeaf(c) || c == neck || isHelper(c)) {
+                continue;
+            }
+            RigSide sd = sideByX(c);
+            if (sd == RigSide::Centre) {
+                sd = pos[idx(c)].x - rootX >= 0.0f ? RigSide::Left : RigSide::Right; // (a collar at the midline: by its sign)
+            }
+            int& slot = collar[sd == RigSide::Left ? 0 : 1];
+            if (slot < 0 || mass(c) > mass(slot)) {
+                slot = c;
+            }
+        }
+        std::vector<int> links = spine;
+        if (spine.empty()) {
+            links.push_back(root);
+        }
+        for (const int link : links) {
+            for (const int c : ch[idx(link)]) {
+                if (!isBody(c) || roleOf(c) != RigRole::None || c == collar[0] || c == collar[1] || c == neck) {
+                    continue;
+                }
+                const RigSide sd = sideByX(c);
+                if (sd == RigSide::Centre && (!ch[idx(c)].empty() || skinlessLeaf(c) || isHelper(c))) {
+                    continue; // (a centre child with anything below it is no rider: the neck was taken above)
+                }
+                // (A skinned centre LEAF off a spine link — a biped export's last spine link, hung
+                // beside the neck with the upper chest's skin — rides the link as a pectoral does,
+                // 2026-11-03: classed "other" it was a selectable joint with no limits.)
+                std::vector<int> stack{c};
+                while (!stack.empty()) {
+                    const int b = stack.back();
+                    stack.pop_back();
+                    if (!isBody(b) || roleOf(b) != RigRole::None) {
+                        continue;
+                    }
+                    set(b, skinlessLeaf(b) ? RigRole::Helper : RigRole::Pectoral, sd);
+                    stack.insert(stack.end(), ch[idx(b)].begin(), ch[idx(b)].end());
+                }
+            }
+        }
+        for (int k = 0; k < 2; ++k) {
+            if (collar[k] >= 0) {
+                arm(collar[k], k == 0 ? RigSide::Left : RigSide::Right);
             }
         }
     }
-    for (int k = 0; k < 2; ++k) {
-        const int col = collar[k];
-        if (col < 0) {
-            continue;
-        }
-        const RigSide s = k == 0 ? RigSide::Left : RigSide::Right;
+
+    /// One arm from its collar, down the main chain: UPPER ARM, its twists, FOREARM, its
+    /// twists, HAND — the twist helpers as on the legs.
+    void arm(int col, RigSide s) {
         set(col, RigRole::Collar, s);
         const int upper = mainChild(col);
         if (upper < 0) {
-            continue;
+            return;
         }
         set(upper, RigRole::UpperArm, s);
         int upperTwists = 0;
@@ -737,7 +767,7 @@ void RigRoles::build(const Input& in) {
             c = mainChild(c);
         }
         const int forearm = c;
-        int       hand = -1;
+        int       wrist = -1;
         int       forearmTwists = 0;
         if (forearm >= 0) {
             set(forearm, RigRole::Forearm, s);
@@ -746,47 +776,54 @@ void RigRoles::build(const Input& in) {
                 set(c, RigRole::ForearmTwist, s, ++forearmTwists);
                 c = mainChild(c);
             }
-            hand = c;
+            wrist = c;
             tagHelperChains(forearm, RigRole::ForearmTwist, s, forearmTwists);
         }
         tagHelperChains(upper, RigRole::UpperArmTwist, s, upperTwists);
-        if (hand < 0) {
-            continue;
+        if (wrist < 0) {
+            return;
         }
-        set(hand, RigRole::Hand, s);
-        // ---- THE HAND: skinless leaves are helpers; a bone carrying two chains or more is a
-        // carpal; a chain's LAST three real bones are a finger (the joints from the hand), the
-        // ones above it carpals; a finger's digit by its token, else by its place across the hand.
+        set(wrist, RigRole::Hand, s);
+        hand(wrist, s);
+    }
+
+    /// The real children of a hand bone, with its skinless leaves tagged helpers on the way.
+    std::vector<int> realHandChildren(int b, RigSide s) {
+        std::vector<int> result;
+        for (const int g : ch[idx(b)]) {
+            if (!isBody(g) || roleOf(g) != RigRole::None) {
+                continue;
+            }
+            if (skinlessLeaf(g)) {
+                set(g, RigRole::Helper, s);
+            } else {
+                result.push_back(g);
+            }
+        }
+        return result;
+    }
+
+    /// THE HAND: skinless leaves are helpers; a bone carrying two chains or more is a CARPAL; a
+    /// chain's LAST three real bones are a FINGER (the joints from the hand), the ones above it
+    /// carpals; a finger's digit by its token, else by its place across the hand — the thumb
+    /// the digit whose first joint sits nearest the wrist, then the rest foremost first.
+    void hand(int wrist, RigSide s) {
         struct FingerBase {
             int   bone;
             int   digit;
             float across;
-            float near; ///< The base's distance from the wrist (the thumb's is the least).
+            float wristDistance; ///< The base's distance from the wrist (the thumb's is the least). (Not `near`: a Windows SDK macro.)
         };
         std::vector<FingerBase> bases;
         int                     carpals = 0;
-        const auto realChildren = [&](int b) {
-            std::vector<int> out;
-            for (const int g : ch[idx(b)]) {
-                if (!isBody(g) || roleOf(g) != RigRole::None) {
-                    continue;
-                }
-                if (skinlessLeaf(g)) {
-                    set(g, RigRole::Helper, s);
-                } else {
-                    out.push_back(g);
-                }
-            }
-            return out;
-        };
-        std::vector<int> work = realChildren(hand);
-        std::size_t      next = 0;
+        std::vector<int>        work = realHandChildren(wrist, s);
+        std::size_t             next = 0;
         while (next < work.size()) {
             const int b = work[next++];
             if (roleOf(b) != RigRole::None) {
                 continue;
             }
-            std::vector<int> kids = realChildren(b);
+            std::vector<int> kids = realHandChildren(b, s);
             if (kids.size() >= 2) {
                 set(b, RigRole::Carpal, s, ++carpals);
                 work.insert(work.end(), kids.begin(), kids.end());
@@ -800,7 +837,7 @@ void RigRoles::build(const Input& in) {
             std::vector<int> chain{b};
             while (kids.size() == 1) {
                 chain.push_back(kids[0]);
-                kids = realChildren(kids[0]);
+                kids = realHandChildren(kids[0], s);
                 if (kids.size() >= 2) {
                     break; // (a carpal deeper down: its chains join the work)
                 }
@@ -810,8 +847,8 @@ void RigRoles::build(const Input& in) {
             for (std::size_t q = 0; q < fingerFrom; ++q) {
                 set(chain[q], RigRole::Carpal, s, ++carpals);
             }
-            bases.push_back({chain[fingerFrom], digitByToken(lowerAlpha(m_names[idx(chain[fingerFrom])]), false),
-                             pos[idx(chain[fingerFrom])].z - pos[idx(hand)].z, glm::length(pos[idx(chain[fingerFrom])] - pos[idx(hand)])});
+            bases.push_back({chain[fingerFrom], namerules::digitByToken(namerules::lettersLower(name(chain[fingerFrom])), false),
+                             pos[idx(chain[fingerFrom])].z - pos[idx(wrist)].z, glm::length(pos[idx(chain[fingerFrom])] - pos[idx(wrist)])});
             for (std::size_t q = fingerFrom; q < chain.size(); ++q) {
                 set(chain[q], RigRole::Finger, s, 0, static_cast<int>(q - fingerFrom) + 1); // (the digit is filled below)
             }
@@ -838,17 +875,17 @@ void RigRoles::build(const Input& in) {
             if (bases.size() >= 2) {
                 std::size_t nearest = 0;
                 for (std::size_t q = 1; q < bases.size(); ++q) {
-                    if (bases[q].near < bases[nearest].near) {
+                    if (bases[q].wristDistance < bases[nearest].wristDistance) {
                         nearest = q;
                     }
                 }
                 float second = std::numeric_limits<float>::max();
                 for (std::size_t q = 0; q < bases.size(); ++q) {
                     if (q != nearest) {
-                        second = std::min(second, bases[q].near);
+                        second = std::min(second, bases[q].wristDistance);
                     }
                 }
-                if (bases[nearest].near < kThumbNearShare * second) {
+                if (bases[nearest].wristDistance < kThumbNearShare * second) {
                     std::rotate(bases.begin(), bases.begin() + static_cast<std::ptrdiff_t>(nearest),
                                 bases.begin() + static_cast<std::ptrdiff_t>(nearest) + 1); // (the thumb first, the rest as they were)
                 }
@@ -859,7 +896,7 @@ void RigRoles::build(const Input& in) {
         }
         for (const FingerBase& b : bases) {
             for (int cur = b.bone; cur >= 0 && roleOf(cur) == RigRole::Finger; cur = mainChild(cur)) {
-                m_tags[idx(cur)].index = static_cast<unsigned char>(std::max(0, std::min(255, b.digit)));
+                out.m_tags[idx(cur)].index = static_cast<unsigned char>(std::max(0, std::min(255, b.digit)));
                 if (ch[idx(cur)].empty()) {
                     break;
                 }
@@ -867,17 +904,16 @@ void RigRoles::build(const Input& in) {
         }
     }
 
-    // ---- THE NECK AND THE HEAD, from the neck found at the top.
-    {
+    /// THE NECK AND THE HEAD from the neck found at the top: NECK links while a bone has one
+    /// real child, the first with two or more (or named so) the HEAD — a chain that ends in a
+    /// leaf ends in the head.
+    void neckAndHead() {
         int head = -1;
         int links = 0;
         for (int cur = neck; cur >= 0;) {
-            int kids = 0;
-            for (const int g : ch[idx(cur)]) {
-                kids += isBody(g) && !skinlessLeaf(g) ? 1 : 0;
-            }
-            const std::string nm = lowerAlpha(m_names[idx(cur)]);
-            if (kids >= 2 || (hasToken(nm, "head") && !hasToken(nm, "top") && !hasToken(nm, "end"))) {
+            const int         kids = realKidCount(cur);
+            const std::string nm = namerules::lettersLower(name(cur));
+            if (kids >= 2 || (namerules::hasToken(nm, "head") && !namerules::hasToken(nm, "top") && !namerules::hasToken(nm, "end"))) {
                 head = cur; // (two real children — the face rig — or a bone that says it is the head)
                 break;
             }
@@ -891,100 +927,132 @@ void RigRoles::build(const Input& in) {
         }
         if (head >= 0) {
             set(head, RigRole::Head, RigSide::Centre);
-            // The face rig: everything under the head; the eyes and the jaw named for the tests.
-            std::vector<int> stack(ch[idx(head)].begin(), ch[idx(head)].end());
-            while (!stack.empty()) {
-                const int f = stack.back();
-                stack.pop_back();
-                if (!isBody(f) || roleOf(f) != RigRole::None) {
-                    continue;
+            face(head);
+        }
+        out.m_neckLinks = links;
+    }
+
+    /// THE FACE RIG: everything under the head; the EYES (a direct child named so, by side) and
+    /// the JAW (the lower one) named for the tests, the rest FACE.
+    void face(int head) {
+        std::vector<int> stack(ch[idx(head)].begin(), ch[idx(head)].end());
+        while (!stack.empty()) {
+            const int f = stack.back();
+            stack.pop_back();
+            if (!isBody(f) || roleOf(f) != RigRole::None) {
+                continue;
+            }
+            const std::string nm = namerules::lettersLower(name(f));
+            if (par[idx(f)] == head && namerules::hasToken(nm, "eye") && !namerules::hasToken(nm, "lid") && !namerules::hasToken(nm, "brow") && sideByX(f) != RigSide::Centre) {
+                set(f, RigRole::Eye, sideByX(f));
+            } else if (par[idx(f)] == head && namerules::hasToken(nm, "jaw") && namerules::hasToken(nm, "lower")) {
+                set(f, RigRole::Jaw, RigSide::Centre);
+            } else {
+                set(f, RigRole::Face, sideByX(f));
+            }
+            stack.insert(stack.end(), ch[idx(f)].begin(), ch[idx(f)].end());
+        }
+        // The eyes and the jaw hang under a facial root bone on some rigs (not off the head
+        // itself, as the reference generations' do): where a side has no eye, or there is no
+        // jaw, the first face bone in bone order that carries the token takes the role.
+        for (int k = 0; k < 2; ++k) {
+            const RigSide side = k == 0 ? RigSide::Left : RigSide::Right;
+            if (out.find(RigRole::Eye, side) >= 0) {
+                continue;
+            }
+            for (int f = 0; f < n; ++f) {
+                const std::string nm = namerules::lettersLower(name(f));
+                if (roleOf(f) == RigRole::Face && sideByX(f) == side && namerules::hasToken(nm, "eye") && !namerules::hasToken(nm, "lid") &&
+                    !namerules::hasToken(nm, "brow") && !namerules::hasToken(nm, "socket")) {
+                    set(f, RigRole::Eye, side);
+                    break;
                 }
-                const std::string nm = lowerAlpha(m_names[idx(f)]);
-                if (par[idx(f)] == head && hasToken(nm, "eye") && !hasToken(nm, "lid") && !hasToken(nm, "brow") && sideByX(f) != RigSide::Centre) {
-                    set(f, RigRole::Eye, sideByX(f));
-                } else if (par[idx(f)] == head && hasToken(nm, "jaw") && hasToken(nm, "lower")) {
+            }
+        }
+        if (out.find(RigRole::Jaw) < 0) {
+            for (int f = 0; f < n; ++f) {
+                const std::string nm = namerules::lettersLower(name(f));
+                if (roleOf(f) == RigRole::Face && namerules::hasToken(nm, "jaw") && !namerules::hasToken(nm, "upper")) {
                     set(f, RigRole::Jaw, RigSide::Centre);
-                } else {
-                    set(f, RigRole::Face, sideByX(f));
-                }
-                stack.insert(stack.end(), ch[idx(f)].begin(), ch[idx(f)].end());
-            }
-            // The eyes and the jaw hang under a facial root bone on some rigs (not off the head
-            // itself, as the reference generations' do): where a side has no eye, or there is no
-            // jaw, the first face bone in bone order that carries the token takes the role.
-            for (int s = 0; s < 2; ++s) {
-                const RigSide side = s == 0 ? RigSide::Left : RigSide::Right;
-                if (find(RigRole::Eye, side) >= 0) {
-                    continue;
-                }
-                for (int f = 0; f < n; ++f) {
-                    const std::string nm = lowerAlpha(m_names[idx(f)]);
-                    if (roleOf(f) == RigRole::Face && sideByX(f) == side && hasToken(nm, "eye") && !hasToken(nm, "lid") &&
-                        !hasToken(nm, "brow") && !hasToken(nm, "socket")) {
-                        set(f, RigRole::Eye, side);
-                        break;
-                    }
-                }
-            }
-            if (find(RigRole::Jaw) < 0) {
-                for (int f = 0; f < n; ++f) {
-                    const std::string nm = lowerAlpha(m_names[idx(f)]);
-                    if (roleOf(f) == RigRole::Face && hasToken(nm, "jaw") && !hasToken(nm, "upper")) {
-                        set(f, RigRole::Jaw, RigSide::Centre);
-                        break;
-                    }
+                    break;
                 }
             }
         }
-        m_neckLinks = links;
     }
 
-    // ---- WHAT IS LEFT of the body: a skinless leaf is a helper; so is a bone with next to no
-    // skin (under kHelperSkinShare of the body's) and no real child — a game rig's corrective
-    // bones beside a knee or an elbow; anything else is listed.
-    std::size_t totalSkin = 0;
-    for (int i = 0; i < n; ++i) {
-        if (underRoot[idx(i)] && isBody(i)) {
-            totalSkin += static_cast<std::size_t>(skin[idx(i)]);
+    /// WHAT IS LEFT of the body: a skinless leaf is a HELPER; so is a bone with next to no skin
+    /// (under kHelperSkinShare of the body's) and no real child — a game rig's corrective bones
+    /// beside a knee or an elbow; a skinned leaf AT the hips' joint on a rig with no pelvis bone
+    /// is the PELVIS; anything else is OTHER, and listed.
+    void leftovers() {
+        std::size_t totalSkin = 0;
+        for (int i = 0; i < n; ++i) {
+            if (underRoot[idx(i)] && isBody(i)) {
+                totalSkin += static_cast<std::size_t>(skin[idx(i)]);
+            }
         }
-    }
-    for (int i = 0; i < n; ++i) {
-        if (!underRoot[idx(i)] || !isBody(i) || roleOf(i) != RigRole::None) {
-            continue;
+        for (int i = 0; i < n; ++i) {
+            if (!underRoot[idx(i)] || !isBody(i) || roleOf(i) != RigRole::None) {
+                continue;
+            }
+            const int  realKids = realKidCount(i);
+            const bool scrap = haveMesh && realKids == 0 && totalSkin > 0 &&
+                               static_cast<double>(skin[idx(i)]) < kHelperSkinShare * static_cast<double>(totalSkin);
+            // ... and a SKINNED leaf lying AT the hips' joint, where no bone carries both legs, is the
+            // PELVIS's flesh without its joint: a game-engine export re-parents the thighs to the hips
+            // and leaves the pelvis bone as such a leaf. It keeps the pelvis's role — the seat a floor
+            // sit rests on, the girdle a click on the hips finds — where a helper (no contact) left
+            // the sitter with no seat, and Other left it listed.
+            const bool atHips = realKids == 0 && par[idx(i)] == root && !skinlessLeaf(i) && !scrap &&
+                                out.find(RigRole::Pelvis) < 0 &&
+                                glm::length(pos[idx(i)] - pos[idx(par[idx(i)])]) < kSideOffPlane * scale;
+            set(i, atHips ? RigRole::Pelvis : skinlessLeaf(i) || scrap ? RigRole::Helper : RigRole::Other, atHips ? RigSide::Centre : sideByX(i));
         }
-        int realKids = 0;
-        for (const int g : ch[idx(i)]) {
-            realKids += isBody(g) && !skinlessLeaf(g) ? 1 : 0;
-        }
-        const bool scrap = haveMesh && realKids == 0 && totalSkin > 0 &&
-                           static_cast<double>(skin[idx(i)]) < kHelperSkinShare * static_cast<double>(totalSkin);
-        // ... and a SKINNED leaf lying AT the hips' joint, where no bone carries both legs, is the
-        // PELVIS's flesh without its joint: a game-engine export re-parents the thighs to the hips
-        // and leaves the pelvis bone as such a leaf. It keeps the pelvis's role — the seat a floor
-        // sit rests on, the girdle a click on the hips finds — where a helper (no contact) left
-        // the sitter with no seat, and Other left it listed.
-        const bool atHips = realKids == 0 && par[idx(i)] == in.root && !skinlessLeaf(i) && !scrap &&
-                            find(RigRole::Pelvis) < 0 &&
-                            glm::length(pos[idx(i)] - pos[idx(par[idx(i)])]) < kSideOffPlane * scale;
-        set(i, atHips ? RigRole::Pelvis : skinlessLeaf(i) || scrap ? RigRole::Helper : RigRole::Other, atHips ? RigSide::Centre : sideByX(i));
     }
 
-    // ---- THE REQUIRED ROLES.
-    const auto require = [&](RigRole role, RigSide side, const char* what) {
-        if (find(role, side) < 0) {
-            m_missing.push_back(std::string(what) + (side == RigSide::Centre ? "" : side == RigSide::Left ? " L" : " R"));
+    /// THE REQUIRED ROLES: what missing() names.
+    void require(RigRole role, RigSide side, const char* what) {
+        if (out.find(role, side) < 0) {
+            out.m_missing.push_back(std::string(what) + (side == RigSide::Centre ? "" : side == RigSide::Left ? " L" : " R"));
         }
-    };
-    require(RigRole::Spine, RigSide::Centre, "spine");
-    require(RigRole::Head, RigSide::Centre, "head");
-    for (const RigSide s : {RigSide::Left, RigSide::Right}) {
-        require(RigRole::UpperArm, s, "upper arm");
-        require(RigRole::Forearm, s, "forearm");
-        require(RigRole::Hand, s, "hand");
-        require(RigRole::Thigh, s, "thigh");
-        require(RigRole::Shin, s, "shin");
-        require(RigRole::Foot, s, "foot");
     }
+    void required() {
+        require(RigRole::Spine, RigSide::Centre, "spine");
+        require(RigRole::Head, RigSide::Centre, "head");
+        for (const RigSide s : {RigSide::Left, RigSide::Right}) {
+            require(RigRole::UpperArm, s, "upper arm");
+            require(RigRole::Forearm, s, "forearm");
+            require(RigRole::Hand, s, "hand");
+            require(RigRole::Thigh, s, "thigh");
+            require(RigRole::Shin, s, "shin");
+            require(RigRole::Foot, s, "foot");
+        }
+    }
+};
+
+void RigRoles::build(const Input& in) {
+    m_tags.clear();
+    m_names.clear();
+    m_missing.clear();
+    m_spineLinks = 0;
+    m_neckLinks = 0;
+    if (in.parents == nullptr || in.children == nullptr || in.bindPos == nullptr) {
+        return;
+    }
+    const int n = static_cast<int>(in.parents->size());
+    if (n == 0 || static_cast<int>(in.children->size()) != n || static_cast<int>(in.bindPos->size()) != n) {
+        return;
+    }
+    m_tags.assign(static_cast<std::size_t>(n), RigRoleTag{});
+    m_names.assign(static_cast<std::size_t>(n), std::string());
+    if (in.names != nullptr && static_cast<int>(in.names->size()) == n) {
+        m_names = *in.names;
+    }
+    if (in.root < 0 || in.root >= n) {
+        m_missing.push_back("hips");
+        return;
+    }
+    Builder(*this, in).run();
 }
 
 std::string RigRoles::report() const {

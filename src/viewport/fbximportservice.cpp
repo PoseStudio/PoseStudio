@@ -51,6 +51,9 @@ bool FbxImportService::importInto(VulkanRenderer& renderer, const QString& path,
                 for (const std::string& m : rep.missing) {
                     qWarning("[fbx]   required role missing: %s", m.c_str());
                 }
+                for (const std::string& c : rep.collisions) {
+                    qInfo("[fbx]   the standard's name was not applied — %s (those bones keep their file's names)", c.c_str());
+                }
                 if (std::getenv("POSESTUDIO_RIG_ROLES_TRACE") != nullptr) {
                     qInfo("%s", rep.roles.c_str());
                 }

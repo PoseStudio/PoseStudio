@@ -9,6 +9,7 @@
 #include "ikmath.h" // eulerMatrix (the pose composition)
 #include "ikrig.h"  // complete type for the unique_ptr
 #include "jointsolver.h" // likewise
+#include "namerules.h"   // mirroredName (the mirror pairing)
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -35,74 +36,6 @@ Armature::Armature() = default;
 Armature::~Armature() = default;
 Armature::Armature(Armature&&) noexcept = default;
 Armature& Armature::operator=(Armature&&) noexcept = default;
-
-namespace {
-
-/// The other side's name for a left/right-prefixed bone name, or "" for a centre/unpaired one.
-/// Figures prefix `l`/`r` before an uppercase letter or underscore (`lShin`, `l_thigh`); a few
-/// use `Left`/`Right`. A plain lowercase continuation (`lowerJaw`, `rectus`) is not a side.
-/// Other rigs carry the side as a TOKEN anywhere in the name — `CC_Base_L_Thigh`, `DEF-thigh.L`,
-/// `thigh_l`, `rig:LeftUpLeg`: a lone `L`/`R` (either case) bounded by `_ . - :` or the
-/// name's ends, or `Left`/`Right` (any case) bounded likewise or by a change of case; the first
-/// such token is swapped. (Until 2026-11-03 only the prefixes were read, and an FBX rig's toes
-/// and twist helpers paired with themselves — 474mm "lopsided" at rest to the harness, and
-/// Mirror Pose flipped them in place like centre bones.)
-std::string mirroredBoneName(const std::string& name) {
-    if (name.size() >= 2 && (name[0] == 'l' || name[0] == 'r')) {
-        const char next = name[1];
-        if ((next >= 'A' && next <= 'Z') || next == '_') {
-            std::string other = name;
-            other[0] = name[0] == 'l' ? 'r' : 'l';
-            return other;
-        }
-    }
-    static const char* const kWords[][2] = {{"Left", "Right"}, {"Right", "Left"},
-                                            {"left", "right"}, {"right", "left"}};
-    for (const auto& pair : kWords) {
-        const std::string from(pair[0]);
-        if (name.size() > from.size() && name.compare(0, from.size(), from) == 0) {
-            return pair[1] + name.substr(from.size());
-        }
-    }
-    const auto isSep = [](char c) { return c == '_' || c == '.' || c == '-' || c == ':' || c == ' '; };
-    const auto isUpper = [](char c) { return c >= 'A' && c <= 'Z'; };
-    const auto isLowerOrDigit = [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); };
-    // A lone letter token.
-    for (std::size_t i = 0; i < name.size(); ++i) {
-        const char c = name[i];
-        if (c != 'L' && c != 'R' && c != 'l' && c != 'r') {
-            continue;
-        }
-        const bool startOk = i == 0 || isSep(name[i - 1]);
-        const bool endOk = i + 1 == name.size() || isSep(name[i + 1]);
-        if (startOk && endOk) {
-            std::string other = name;
-            other[i] = c == 'L' ? 'R' : c == 'R' ? 'L' : c == 'l' ? 'r' : 'l';
-            return other;
-        }
-    }
-    // A word token: bounded by a separator, the name's ends, or a change of case (`LeftArm`).
-    static const char* const kSideWords[][2] = {{"Left", "Right"}, {"Right", "Left"}, {"left", "right"},
-                                                {"right", "left"}, {"LEFT", "RIGHT"}, {"RIGHT", "LEFT"}};
-    for (std::size_t i = 0; i < name.size(); ++i) {
-        for (const auto& pair : kSideWords) {
-            const std::string from(pair[0]);
-            if (name.compare(i, from.size(), from) != 0) {
-                continue;
-            }
-            const std::size_t end = i + from.size();
-            const bool startOk = i == 0 || isSep(name[i - 1]) || (isLowerOrDigit(name[i - 1]) && isUpper(from[0]));
-            const bool endOk = end == name.size() || isSep(name[end]) || (isUpper(name[end]) && !isUpper(from.back())) ||
-                               (isLowerOrDigit(name[end]) && isUpper(from.back()));
-            if (startOk && endOk) {
-                return name.substr(0, i) + pair[1] + name.substr(end);
-            }
-        }
-    }
-    return {};
-}
-
-} // namespace
 
 void Armature::build(const std::vector<ArmatureBone>& bones) {
     // Start from a fresh armature: EVERY member — skeleton, pose, selection, pins, transform,
@@ -181,7 +114,7 @@ void Armature::build(const std::vector<ArmatureBone>& bones) {
         if (m_bones[i].parent >= 0) {
             m_children[static_cast<std::size_t>(m_bones[i].parent)].push_back(static_cast<int>(i));
         }
-        const std::string other = mirroredBoneName(m_boneNames[i]);
+        const std::string other = namerules::mirroredName(m_boneNames[i]);
         const int j = other.empty() ? -1 : boneIndex(other);
         m_mirrorBone[i] = j >= 0 ? j : static_cast<int>(i);
     }

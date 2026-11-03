@@ -126,8 +126,6 @@ public:
     /// The chains: the number of spine links (the chest top is link spineLinks()) and of neck links.
     int spineLinks() const { return m_spineLinks; }
     int neckLinks() const { return m_neckLinks; }
-    /// The chest top: the last spine link, the one the collars and the neck leave (-1 if none).
-    int spineTop() const { return m_spineLinks > 0 ? find(RigRole::Spine, RigSide::Centre, m_spineLinks) : -1; }
 
     /// Every REQUIRED role was found: the hips, a spine, the head, and on both sides the upper
     /// arm, the forearm, the hand, the thigh, the shin and the foot. missing() names the rest.
@@ -167,6 +165,8 @@ public:
     RigRoleTag canonicalTag(const std::string& canonical) const;
 
 private:
+    struct Builder; ///< The inference's working state and steps (rigroles.cpp).
+
     std::vector<RigRoleTag>  m_tags;
     std::vector<std::string> m_names;
     std::vector<std::string> m_missing;

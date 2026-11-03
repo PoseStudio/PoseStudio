@@ -687,11 +687,6 @@ private:
     /// A TWIST bone: two locked swing channels and the free one ALONG the bone (a thigh's or a
     /// forearm's twist helper) — part of its limb's rigid segment, never a joint of its own.
     bool isTwistBone(int bone) const;
-    /// Whether @p bone's pose is DRIVEN by another's (ArmatureBone::drivenBy): a rig helper the
-    /// conformer gave a driver; never posed by hand or by a solve.
-    bool isDrivenBone(int bone) const {
-        return bone >= 0 && static_cast<std::size_t>(bone) < m_bones.size() && m_bones[static_cast<std::size_t>(bone)].drivenBy >= 0;
-    }
     /// The mirror twins the names and the places left unpaired, by the rig standard's roles
     /// (armatureik.cpp; after the rig is built).
     void pairMirrorsByRole();

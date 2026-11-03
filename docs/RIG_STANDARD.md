@@ -101,13 +101,14 @@ beside the reference generation's.
 
 **The names are applied on import** (2026-11-03): the FBX conformer's last step renames every bone
 the standard names to that name and leaves the rest — the face rig, the helpers, a bone no role was
-found for — as the file had them (a standard name a kept name already uses is not applied). The
-skin and the drivers bind by index, so nothing moves; what changes is what a pose file carries:
+found for — as the file had them (a standard name a kept name already uses is not applied, and one
+that two bones would carry — two riders of a side both read as a pectoral — is applied to neither;
+the import log lists such collisions). The skin and the drivers bind by index, so nothing moves; what changes is what a pose file carries:
 every conformed rig shares the standard's frames, rotation orders and ranges, so with its names a
 pose saved on one imported character loads on every other. The native figures are never renamed —
 their correctives, pose files and the content around them are keyed to their own names, which the
 standard reads as its first convention. A **standard-named rig** (every bone the standard names
-carrying that name) is also weighed **by role**: the balance masses come from each bone's role —
+carrying that name, a name two bones share excepted) is also weighed **by role**: the balance masses come from each bone's role —
 the class's share split among the bones of that class on that side, the spine's lower half the
 abdomen's fraction and its upper half the chest's — where the name table, classing by fragments of
 the reference's names, put every `spineN` in one class and gave a conformed rig a third of the

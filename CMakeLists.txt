@@ -403,6 +403,8 @@ add_executable(
     src/viewport/scene/ik/bonealiases.h
     src/viewport/scene/ik/rigroles.cpp        # the rig standard's roles: what each bone is, by structure
     src/viewport/scene/ik/rigroles.h
+    src/viewport/scene/ik/namerules.cpp       # the one reading of a bone name: its side token, a digit's token, the twist and segment words
+    src/viewport/scene/ik/namerules.h
     src/viewport/scene/ik/skeletongraph.h
     src/viewport/scene/ik/balancecontroller.cpp # CoM + support polygon + pelvis correction
     src/viewport/scene/ik/balancecontroller.h
@@ -621,6 +623,7 @@ add_executable(PoseStudioIkHarness
     src/viewport/scene/ik/skeletongraph.cpp
     src/viewport/scene/ik/bonealiases.cpp
     src/viewport/scene/ik/rigroles.cpp
+    src/viewport/scene/ik/namerules.cpp
     src/viewport/scene/ik/balancecontroller.cpp
     src/viewport/scene/ik/ikrig.cpp
     src/viewport/scene/ik/ikrigdrag.cpp

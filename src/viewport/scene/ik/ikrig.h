@@ -419,9 +419,6 @@ public:
     /// used to read a bone's NAME for its part (the body volumes' limb roots, the head and the neck,
     /// the helpers) reads this; a rig whose names match nothing conforms the same way.
     const RigRoles& roles() const { return m_roles; }
-    /// True when every bone the standard names carries that name (the FBX conformer's rigs): the
-    /// balance masses are then the roles', not the name table's.
-    bool standardNamed() const { return m_standardNamed; }
     /// The node of the foot currently mid-STEP (its pin target swinging to its new spot), or -1.
     int steppingPin() const {
         return m_stepPin >= 0 ? m_pins[static_cast<std::size_t>(m_stepPin)].node : -1;
@@ -582,8 +579,9 @@ private:
     std::vector<glm::vec3>  m_lastApplied;
     float                   m_suspendHang = 0.0f; ///< Grab-point→root chain length (root hangs here).
     /// Builds m_bodyVolumes / m_volumeClearance from the bone names and the bind pose (build()),
-    /// fitted to the body mesh sample when there is one.
+    /// fitted to the body mesh sample when there is one (ikrigvolumes.cpp).
     void buildBodyVolumes(const std::vector<std::string>& names, const std::vector<BodyMeshPoint>* mesh);
+    struct VolumeFitter; ///< The fit's working state and parts (ikrigvolumes.cpp).
     /// The balance masses of the bones the name table left at the token mass, by their roles (see ikrig.cpp).
     void fillMassesByRole();
     /// The balance masses of a STANDARD-NAMED rig, every real bone by its role (see ikrig.cpp).

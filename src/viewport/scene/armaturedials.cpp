@@ -177,8 +177,16 @@ glm::vec3 Armature::limbDirection(int bone) const {
 }
 
 JointDial Armature::jointDial(int bone, JointDialKind kind) const {
-    JointDial   dial;
-    const int   joint = dialJoint(bone);
+    JointDial dial;
+    // A dial reads the joint's ROLE (a finger's Bend is its flexion, below), and the rig that
+    // carries the roles is a cache of the bind skeleton (see aliasedBoneIndex): a dial read
+    // before the first drag builds it, as the alias layer does, so the same joint never reads
+    // one dial without the rig and another with it (2026-11-03; a body mesh arriving later
+    // rebuilds it, setBodyMesh).
+    if (!m_ikRig && hasSkeleton()) {
+        const_cast<Armature*>(this)->prepareIkRig();
+    }
+    const int joint = dialJoint(bone);
     if (joint < 0) {
         return dial;
     }

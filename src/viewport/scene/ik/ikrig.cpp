@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pose {
@@ -138,7 +139,7 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
     // IkRigBone::helper, Armature::isTwistBone — not by its name, since 2026-11-02.)
     for (std::size_t i = 0; i < n; ++i) {
         if (m_children[i].empty() && m_helperNode[i]) {
-            m_masses[i] = std::min(m_masses[i], 0.0015f);
+            m_masses[i] = std::min(m_masses[i], BalanceController::unclassifiedMass());
         }
     }
     // Per-node subtree mass (own + all descendants): the token-limb promotion and the
@@ -208,7 +209,9 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
         // with a pelvis bone (that bone is the seat there); on these it is the one joint a
         // sitting figure rests on, and excluded she had no seat: reclined by the chest she leaned
         // on nothing, and laid down by it she arched her spine to its limits 15cm off the floor.
-        m_rootIsSeat = m_roles.built() && m_roles.find(RigRole::Pelvis) < 0;
+        // (... and only on a rig the roles could place — every required role found: a figure
+        // whose inference failed, a leg with no foot, must not turn its hips into a contact.)
+        m_rootIsSeat = m_roles.built() && m_roles.complete() && m_roles.find(RigRole::Pelvis) < 0;
         m_headNode = m_roles.find(RigRole::Head);
         m_neckBase = m_roles.find(RigRole::Neck, RigSide::Centre, 1);
         static const bool kRolesTrace = std::getenv("POSESTUDIO_RIG_ROLES_TRACE") != nullptr;
@@ -222,10 +225,21 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
         // the reference's trunk (the game-engine export's known short bow); by role the lower
         // links share the abdomen's fraction and the upper the chest's, as the table splits the
         // reference. The reference rigs carry their own names and keep the table, bit for bit.
+        // A standard name that TWO bones of the rig would carry (two riders of a side tagged
+        // pectoral) is applied to neither by the conformer: such bones keep their file names and
+        // do not unmake a standard-named rig (read strictly, three of five conformed rigs read
+        // as NOT standard-named for a day and fell back to the name table).
+        std::unordered_map<std::string, int> uses;
+        for (std::size_t i = 0; i < n; ++i) {
+            const std::string standard = RigRoles::standardName(m_roles.tag(static_cast<int>(i)));
+            if (!standard.empty()) {
+                ++uses[standard];
+            }
+        }
         m_standardNamed = m_roles.built();
         for (std::size_t i = 0; i < n && m_standardNamed; ++i) {
             const std::string standard = RigRoles::standardName(m_roles.tag(static_cast<int>(i)));
-            m_standardNamed = standard.empty() || standard == names[i];
+            m_standardNamed = standard.empty() || standard == names[i] || uses[standard] > 1;
         }
         if (m_standardNamed) {
             assignMassesByRole();
@@ -324,24 +338,26 @@ bool spineUpperHalf(int spineIndex, int spineLinks) {
     return spineIndex * 2 > spineLinks;
 }
 
-/// A class's share of the body's mass — the name table's biomechanical fractions (balancecontroller.cpp),
-/// the spine's lower half the abdomen's, its upper half the chest's; 0 for a class with none.
+/// A class's share of the body's mass — the name table's biomechanical fractions, read from the
+/// table itself (BalanceController::segmentMassFraction: one definition of each number), the
+/// spine's lower half the abdomen's, its upper half the chest's; 0 for a class with none.
 float massShareOf(RigRole cls, int spineIndex, int spineLinks) {
+    const auto of = [](const char* fragment) { return BalanceController::segmentMassFraction(fragment); };
     switch (cls) {
-    case RigRole::Hips: return 0.050f;
-    case RigRole::Pelvis: return 0.112f;
-    case RigRole::Spine: return spineUpperHalf(spineIndex, spineLinks) ? 0.170f : 0.100f;
-    case RigRole::Neck: return 0.012f;
-    case RigRole::Head: return 0.081f;
-    case RigRole::Collar: return 0.021f;
-    case RigRole::UpperArm: return 0.028f;
-    case RigRole::Forearm: return 0.016f;
-    case RigRole::Hand: return 0.006f;
-    case RigRole::Thigh: return 0.100f;
-    case RigRole::Shin: return 0.0465f;
-    case RigRole::Foot: return 0.0137f;
-    case RigRole::Metatarsal: return 0.005f;
-    case RigRole::Ball: return 0.004f;
+    case RigRole::Hips: return of("hip");
+    case RigRole::Pelvis: return of("pelvis");
+    case RigRole::Spine: return spineUpperHalf(spineIndex, spineLinks) ? of("chest") : of("abdomen");
+    case RigRole::Neck: return of("neck");
+    case RigRole::Head: return of("head");
+    case RigRole::Collar: return of("collar");
+    case RigRole::UpperArm: return of("upperarm");
+    case RigRole::Forearm: return of("forearm");
+    case RigRole::Hand: return of("hand");
+    case RigRole::Thigh: return of("thigh");
+    case RigRole::Shin: return of("shin");
+    case RigRole::Foot: return of("foot");
+    case RigRole::Metatarsal: return of("metatarsal");
+    case RigRole::Ball: return of("toe");
     default: return 0.0f;
     }
 }
@@ -377,6 +393,14 @@ void IkRig::assignMassesByRole() {
             continue;
         }
         m_masses[i] = token;
+        // (A LEAF twist helper joins its class's group and then loses its share to the clamp
+        // below, as it does under the name table — a thigh with two leaf helpers weighs a third
+        // of the class's fraction. Giving the segment the whole share was TRIED in the IK
+        // refactoring round of 2026-11-03 and put back: physically right, it moved the
+        // character-creation rig 141 → 132 and its Blender export 136 → 126 of 157 — the knee
+        // drags, the kneels and the seated leans, whose rules and gates are calibrated on the
+        // reference rigs' effective masses, the newest generation's with the same drop. A tuning
+        // round with the masses re-gated on every rig, not a refactor's change.)
         const RigRoleTag& t = m_roles.tag(static_cast<int>(i));
         const RigRole     cls = massClassOf(t.role);
         const float       share = massShareOf(cls, t.index, m_roles.spineLinks());
@@ -414,7 +438,7 @@ void IkRig::assignMassesByRole() {
     }
     for (std::size_t i = 0; i < n; ++i) {
         if (m_children[i].empty() && m_helperNode[i]) {
-            m_masses[i] = std::min(m_masses[i], 0.0015f);
+            m_masses[i] = std::min(m_masses[i], BalanceController::unclassifiedMass());
         }
     }
     m_subtreeMass = m_masses;
@@ -502,7 +526,7 @@ void IkRig::fillMassesByRole() {
     }
     for (std::size_t i = 0; i < n; ++i) {
         if (m_children[i].empty() && m_helperNode[i]) {
-            m_masses[i] = std::min(m_masses[i], 0.0015f);
+            m_masses[i] = std::min(m_masses[i], BalanceController::unclassifiedMass());
         }
     }
     m_subtreeMass = m_masses;

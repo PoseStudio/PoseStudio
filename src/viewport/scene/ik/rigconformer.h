@@ -19,7 +19,13 @@
  *      least rotation that takes that world axis onto the bone, the right side mirrored), its
  *      rotation order, and its limits (the reference generation's anatomical ranges per role,
  *      the right side mirrored; a twist helper's two cross channels locked; a segment whose rig has
- *      no twist helper keeps the twist on the bone itself).
+ *      no twist helper keeps the twist on the bone itself);
+ *   3. gives the rig's helper bones their DRIVERS (ModelBone::drivenBy): a share bone at a knee or
+ *      an elbow takes half of that joint's rotation, a leaf twist helper the share of its
+ *      segment's twist that its place along the segment says;
+ *   4. gives every bone the standard names its NAME (RigRoles::standardName) — the face rig, the
+ *      helpers and the unplaced keep the file's — so a pose saved on one conformed character
+ *      loads on any other.
  * The mesh is untouched: the bind stays translation-only, so the figure renders exactly as read;
  * only what the pose channels MEAN changes. Qt-free (std + GLM).
  */
@@ -46,6 +52,7 @@ struct RigConformReport {
     int                      unplaced = 0;      ///< Bones of the body the standard has no role for.
     int                      drivenHelpers = 0; ///< Helper bones given a driver (half a joint's bend, a share of a segment's twist).
     int                      renamed = 0;       ///< Bones given the standard's name (the face rig and the helpers keep their file's).
+    std::vector<std::string> collisions;        ///< Standard names NOT applied, each with why: two bones would carry it, or a kept name does.
     int                      spineLinks = 0;
     int                      neckLinks = 0;
     std::vector<std::string> missing;           ///< The required roles not found.
