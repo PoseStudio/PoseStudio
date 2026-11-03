@@ -1,12 +1,12 @@
 # Importing Content
 
-PoseStudio reads two kinds of content today: static models in the Wavefront `.obj` format, and rigged character figures in their native scene format (`.duf` presets backed by `.dsf` data files). The other formats in the File → Import menu are placeholders for planned importers.
+PoseStudio reads three kinds of content today: static models in the Wavefront `.obj` format, rigged character figures in their native scene format (`.duf` presets backed by `.dsf` data files), and rigged characters in `.fbx` files. The other formats in the File → Import menu are placeholders for planned importers.
 
 There are four ways to import, and they all do the same thing:
 
-- **File → Import → .OBJ (Wavefront)** or **File → Import → .DUF (DUF File)** — a file dialog, opening in the folder you imported from last time.
-- **Double-click** an `.obj`, `.duf` or `.dsf` asset in the [Asset Manager](asset-manager.md) grid.
-- **Open with** PoseStudio, or **drag files onto** `PoseStudio.exe`: every `.obj`, `.duf` and `.dsf` on the command line is imported in order, and a `.pose` file after a figure is applied to it.
+- **File → Import → .OBJ (Wavefront)**, **File → Import → .DUF (DUF File)** or **File → Import → .FBX (FBX File)** — a file dialog, opening in the folder you imported from last time.
+- **Double-click** an `.obj`, `.duf`, `.dsf` or `.fbx` asset in the [Asset Manager](asset-manager.md) grid.
+- **Open with** PoseStudio, or **drag files onto** `PoseStudio.exe`: every `.obj`, `.duf`, `.dsf` and `.fbx` on the command line is imported in order, and a `.pose` file after a figure is applied to it.
 
 Every import lands a new object in the scene, selected (outlined in blue) and framed by the camera. Imports run one at a time on the main thread: the application is busy until the object appears.
 
@@ -35,6 +35,29 @@ Import takes a few seconds for a fully textured character. The progress dialog n
 
 Pose, material, light and other presets share the `.duf` extension. Importing one of those shows *"This file may be a pose, material, or other preset rather than a figure"* — pick the character's own preset instead. (Pose presets in this format are not readable yet; PoseStudio has its own [pose files](pose-files.md).)
 
+## Characters from FBX files (.fbx)
+
+An `.fbx` file carries everything in itself (or beside itself), so there is no content folder to locate. Importing one brings in:
+
+- **The meshes** with their materials — the base colour, the normal or bump map, the roughness, metalness and opacity where the file links them — and their textures, embedded in the file or found by the path the file gives, relative to the `.fbx`, or by name anywhere under the file's folder or the folder above it (exports commonly keep their textures in a folder beside the file).
+- **The skeleton** with its skin weights. Skinless end markers at the tips of the chains are left out of the skeleton (they still tell PoseStudio which way a fingertip or a single-bone toe points).
+- **The pose it was saved in** is discarded in favour of the bind pose, so a file saved mid-animation imports at rest.
+
+The figure lands in metres, standing on the floor over the origin, turned to face the camera's default view with her left at the viewer's right — whatever axes and units the file was written in.
+
+### Posing an FBX character
+
+An `.fbx` file carries no anatomy: no joint limits, no notion of which bone is a knee. PoseStudio reads that off the skeleton's structure — the hips, the spine, the neck and head, each arm and leg with their twist helpers, the hands and fingers, the feet and toes — and gives every joint the standard rotation frame and the anatomical range the native figures author for that part of the body. From then on the character poses like any other: the full-body IK, the Transform tab's dials, `B` / `S` / `T`, pins, the Ground button and pose files all work, and a click on a helper bone (a corrective bone beside a knee or an elbow, an anchor) selects the joint it belongs to.
+
+What to expect, compared with a native figure:
+
+- **A T-pose character** imports with her arms out, and the posing engine reads arms held out as *posed* (see [Posing](posing.md)): lower them first, with the dials or the mouse mode, and the idle-arm behaviour follows. An A-pose character (arms down, a little out) needs nothing.
+- **Skinning and helper bones.** A rig authored for linear blend skinning is skinned linearly, as in its authoring tool. Its helper bones — the twist helpers along a limb, the corrective bones at a knee or an elbow — are driven from the joints they serve (the file carries no driver expressions), so a twist spreads along the limb and a knee folds in two steps. There are no pose correctives, as a native figure has, so a very deep fold is the rig's own.
+- **The face** is not posed (a face rig, where the file has one, lights with the head as the native figures' does).
+- A rig whose structure PoseStudio cannot read completely — no arms found, say — still imports and poses joint by joint with the dials; the import log names the roles it could not place.
+
+A static `.fbx` (no skeleton) imports as a model, like an `.obj`.
+
 ## When the figure's data cannot be found
 
 A preset only works together with its content folder — the folder that directly contains a `data` folder. PoseStudio finds it by walking up from the file you imported. Content is often split, though: a folder of character presets may not contain the `data` folder they refer to. Then the import stops with the message *"PoseStudio couldn't find the geometry and morph data for…"* and the button **Locate Content Folder…**:
@@ -51,6 +74,7 @@ Every folder you locate this way is remembered, so you only do this once per con
 | *This file may be a pose, material, or other preset rather than a figure.* | The `.duf` does not describe a figure. Import the character preset. |
 | *The figure's geometry and morph data (its "data" folder) couldn't be found.* | Locate the content folder as described above. |
 | *Could not import a character figure from… Details: …* | Something in the files could not be read; the details line names it. |
+| *Could not import "….fbx"* | The file could not be read as FBX (a damaged file, or one older than the FBX 6 series), or it holds no mesh. The second line names the cause. |
 | Nothing happens after choosing a file | The file's format is not supported, or (for `.obj`) it could not be parsed. |
 
 A materials preset a figure lists for one of its followers is applied to every follower it addresses by name, so eyelashes and tears that share one preset both receive their maps.

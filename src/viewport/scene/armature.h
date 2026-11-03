@@ -62,6 +62,10 @@ struct ArmatureBone {
     glm::vec3   rotationMin{0.0f};
     glm::vec3   rotationMax{0.0f};
     glm::bvec3  rotationLimited{false, false, false};
+    /// A DRIVEN bone (ModelBone::drivenBy): its Euler = driveFactor * the driver's, re-derived at
+    /// every pose change (computeSkinMatrices). -1: not driven.
+    int         drivenBy = -1;
+    glm::vec3   driveFactor{0.0f};
 };
 
 /**
@@ -448,8 +452,13 @@ public:
     bool settleIkTick();
     /// Ends the FBIK drag (the solved pose stays).
     void endIkDrag();
-    /// The rig (null until the first IK drag built it) — diagnostics and the harness.
+    /// The rig (null until built: by prepareIkRig, the first IK drag or the first pick) —
+    /// diagnostics and the harness.
     const IkRig* ikRig() const { return m_ikRig.get(); }
+    /// Builds the rig now (the roles of the rig standard with it): a figure's import does, so that
+    /// the test tools' bone-name fallback (bonealiases.h) can resolve a name through the roles from
+    /// the first command, and the first click pays nothing. A static model (no bones) builds none.
+    void prepareIkRig() { ensureIkRig(); }
     /// True when the two bones are pieces of ONE rigid limb segment (a bend bone and its twist
     /// bones: a thigh from socket to knee), or the same bone. The scripted in-app test asks it:
     /// a pick that lands on a thigh's twist bone HAS found the thigh.
@@ -546,6 +555,8 @@ private:
         glm::vec3   rotMin{0.0f};
         glm::vec3   rotMax{0.0f};
         glm::bvec3  rotLimited{false, false, false};
+        int         drivenBy = -1;        ///< See ArmatureBone::drivenBy.
+        glm::vec3   driveFactor{0.0f};
     };
 
     /// Re-poses bone @p index from its accumulated Euler (m_boneEuler) in its oriented frame, then
@@ -676,6 +687,14 @@ private:
     /// A TWIST bone: two locked swing channels and the free one ALONG the bone (a thigh's or a
     /// forearm's twist helper) — part of its limb's rigid segment, never a joint of its own.
     bool isTwistBone(int bone) const;
+    /// Whether @p bone's pose is DRIVEN by another's (ArmatureBone::drivenBy): a rig helper the
+    /// conformer gave a driver; never posed by hand or by a solve.
+    bool isDrivenBone(int bone) const {
+        return bone >= 0 && static_cast<std::size_t>(bone) < m_bones.size() && m_bones[static_cast<std::size_t>(bone)].drivenBy >= 0;
+    }
+    /// The mirror twins the names and the places left unpaired, by the rig standard's roles
+    /// (armatureik.cpp; after the rig is built).
+    void pairMirrorsByRole();
     /// True when channel @p axis of bone @p b is a FOLD channel (kFoldRangeDeg, kFoldNarrowFraction).
     bool isFoldChannel(int b, int axis) const;
     /// The first fold channel of bone @p b, or -1: a knee's or an elbow's bend.

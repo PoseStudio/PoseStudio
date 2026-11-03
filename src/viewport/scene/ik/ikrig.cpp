@@ -204,6 +204,7 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
         if (kRolesTrace) {
             std::fputs(m_roles.report().c_str(), stderr);
         }
+        fillMassesByRole();
     }
     // BODY VOLUMES (see bodyVolumes()): the trunk and the limb roots by their ROLES, the radii
     // from the hip-socket spacing so they scale with the rig, each volume applied to the other
@@ -256,6 +257,129 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
     m_legOfNode.assign(n, -1);
     for (std::size_t i = 0; i < n; ++i) {
         m_legOfNode[i] = computeLegOf(static_cast<int>(i));
+    }
+}
+
+// THE BALANCE MASSES OF A RIG THE NAME TABLE DOES NOT KNOW (2026-11-03): a bone left at the token
+// mass whose ROLE is a real segment takes the role's share — the name table's own biomechanical
+// fraction for that segment, split among the bones of that role class on that side as the name
+// table splits a class (a thigh and its twist helpers are one thigh; the spine's lower half takes
+// the abdomen's share, its upper half the chest's; the ball and the toes are one). A rig whose names
+// the table knows (the reference generations: every real bone named) is untouched and bit-identical;
+// a rig in another convention gets a centre of mass instead of a hundred token masses. The leaf
+// twist helpers' clamp is re-applied after, the subtree masses recomputed.
+void IkRig::fillMassesByRole() {
+    static const bool kNoRoleMasses = std::getenv("IK_NO_ROLE_MASSES") != nullptr; // A/B probe
+    if (kNoRoleMasses) {
+        return;
+    }
+    const std::size_t n = m_masses.size();
+    const float       token = BalanceController::unclassifiedMass();
+    const auto classOf = [](RigRole r) {
+        switch (r) {
+        case RigRole::UpperArmTwist: return RigRole::UpperArm;
+        case RigRole::ForearmTwist: return RigRole::Forearm;
+        case RigRole::ThighTwist: return RigRole::Thigh;
+        case RigRole::ShinTwist: return RigRole::Shin;
+        case RigRole::Toe: return RigRole::Ball;
+        default: return r;
+        }
+    };
+    const auto upperHalf = [&](int spineIndex) { return spineIndex * 2 > m_roles.spineLinks(); };
+    const auto shareOf = [&](RigRole cls, int spineIndex) -> float {
+        switch (cls) {
+        case RigRole::Hips: return 0.050f;
+        case RigRole::Pelvis: return 0.112f;
+        case RigRole::Spine: return upperHalf(spineIndex) ? 0.170f : 0.100f;
+        case RigRole::Neck: return 0.012f;
+        case RigRole::Head: return 0.081f;
+        case RigRole::Collar: return 0.021f;
+        case RigRole::UpperArm: return 0.028f;
+        case RigRole::Forearm: return 0.016f;
+        case RigRole::Hand: return 0.006f;
+        case RigRole::Thigh: return 0.100f;
+        case RigRole::Shin: return 0.0465f;
+        case RigRole::Foot: return 0.0137f;
+        case RigRole::Metatarsal: return 0.005f;
+        case RigRole::Ball: return 0.004f;
+        default: return 0.0f;
+        }
+    };
+    // Only a class the name table gave NO mass to at all is filled: a class with one bone named
+    // (the reference generations' forearm beside its twist helper named like a wrist) keeps the
+    // table's books, so the reference rigs stay bit-identical.
+    const auto keyOf = [&](const RigRoleTag& t, RigRole cls) {
+        const int half = cls == RigRole::Spine && upperHalf(t.index) ? 1 : 0;
+        return (static_cast<int>(cls) * 3 + static_cast<int>(t.side)) * 2 + half;
+    };
+    std::vector<int> namedKeys; // the (class, side, half) groups the name table already massed
+    for (std::size_t i = 0; i < n; ++i) {
+        const RigRoleTag& t = m_roles.tag(static_cast<int>(i));
+        if (!m_bodyNode[i] || m_masses[i] == token || t.role == RigRole::None) {
+            continue;
+        }
+        namedKeys.push_back(keyOf(t, classOf(t.role)));
+    }
+    std::vector<int>   group(n, -1);
+    std::vector<int>   keys;
+    std::vector<int>   groupCount;
+    std::vector<float> groupShare;
+    for (std::size_t i = 0; i < n; ++i) {
+        const RigRoleTag& t = m_roles.tag(static_cast<int>(i));
+        if (!m_bodyNode[i] || m_masses[i] != token || t.role == RigRole::None) {
+            continue;
+        }
+        const RigRole cls = classOf(t.role);
+        const float   share = shareOf(cls, t.index);
+        if (share <= 0.0f) {
+            continue;
+        }
+        const int key = keyOf(t, cls);
+        if (std::find(namedKeys.begin(), namedKeys.end(), key) != namedKeys.end()) {
+            continue; // (the table knows this class on this rig: its books stand)
+        }
+        int g = -1;
+        for (std::size_t k = 0; k < keys.size(); ++k) {
+            if (keys[k] == key) {
+                g = static_cast<int>(k);
+                break;
+            }
+        }
+        if (g < 0) {
+            keys.push_back(key);
+            groupCount.push_back(0);
+            groupShare.push_back(share);
+            g = static_cast<int>(keys.size()) - 1;
+        }
+        group[i] = g;
+        ++groupCount[static_cast<std::size_t>(g)];
+    }
+    if (keys.empty()) {
+        return;
+    }
+    int filled = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (group[i] >= 0) {
+            const std::size_t g = static_cast<std::size_t>(group[i]);
+            m_masses[i] = groupShare[g] / static_cast<float>(std::max(1, groupCount[g]));
+            ++filled;
+        }
+    }
+    static const bool kRolesTrace = std::getenv("POSESTUDIO_RIG_ROLES_TRACE") != nullptr;
+    if (kRolesTrace) {
+        std::fprintf(stderr, "[rig-roles] %d balance mass(es) filled by role (the name table knew none of their classes)\n", filled);
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        if (m_children[i].empty() && m_helperNode[i]) {
+            m_masses[i] = std::min(m_masses[i], 0.0015f);
+        }
+    }
+    m_subtreeMass = m_masses;
+    for (std::size_t i = n; i-- > 1;) {
+        const int p = m_parents[i];
+        if (p >= 0) {
+            m_subtreeMass[static_cast<std::size_t>(p)] += m_subtreeMass[i];
+        }
     }
 }
 

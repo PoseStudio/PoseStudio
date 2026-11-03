@@ -34,9 +34,14 @@ layout(location = 7) in uint inCorrectiveRange; // (first delta entry << 8) | co
 
 void main() {
     vec3 bindPos = applyCorrectives(inPos, inCorrectiveRange);
-    vec4 rAcc;
-    vec4 dAcc;
-    blendDualQuat(inJoints, inWeights, rAcc, dAcc);
-    vec3 skinnedPos = dualQuatTransform(rAcc, dAcc, bindPos);
+    vec3 skinnedPos;
+    if (linearSkinning()) { // (the model's rig was authored for it: see skinning.glsl)
+        skinnedPos = linearSkinPoint(inJoints, inWeights, bindPos);
+    } else {
+        vec4 rAcc;
+        vec4 dAcc;
+        blendDualQuat(inJoints, inWeights, rAcc, dAcc);
+        skinnedPos = dualQuatTransform(rAcc, dAcc, bindPos);
+    }
     gl_Position = pc.viewProj * pc.model * vec4(skinnedPos, 1.0);
 }

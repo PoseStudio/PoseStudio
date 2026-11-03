@@ -84,6 +84,10 @@ struct MeshData {
     // exists only in the mask).
     TextureSource         opacityMask;
     bool                  hasOpacityMask = false; // set by the decode layer once the bake succeeds
+    /// Blend the skin LINEARLY (the rig was authored for linear blend skinning: every FBX export
+    /// seen) instead of by dual quaternions (the native figures' authoring). A per-model choice,
+    /// set on every mesh of the model by its importer; false for the native figures and OBJs.
+    bool                  linearSkinning = false;
 
     // Specular parameter maps (both LINEAR, sampled .r): the roughness map multiplies the scalar
     // roughness per texel; the spec-mask map multiplies specularWeight per texel (the decode layer
@@ -196,6 +200,19 @@ struct ModelBone {
     glm::vec3   rotationMin{0.0f};
     glm::vec3   rotationMax{0.0f};
     glm::bvec3  rotationLimited{false, false, false};
+    /// Where the bone's TIP lies (bind world space) when the file said so — an exporter's end
+    /// marker, a skinless leaf the importer left out of the skeleton: the direction of a bone with
+    /// no joint below it (a single-bone toe, a fingertip). Read by the rig standard's conformer;
+    /// the native figure importer leaves it unset.
+    glm::vec3   tip{0.0f};
+    bool        hasTip = false;
+    /// A DRIVEN bone: its pose rotation is driveFactor * the driver's, channel by channel (the
+    /// two share a frame and a rotation order), re-derived after every pose change — a rig's
+    /// helper bone whose driver expression the file could not carry (a knee's "share" bone that
+    /// takes half the bend, a twist helper that takes its share of the segment's twist). Never
+    /// posed by hand or by a solve. -1: not driven (every native figure bone).
+    int         drivenBy = -1;
+    glm::vec3   driveFactor{0.0f};
 };
 
 /// One imported model: its material groups, plus an optional skeleton. An empty `bones` list means a

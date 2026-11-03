@@ -14,6 +14,7 @@
 #include "vulkanwindow.h"
 
 #include "figureimportservice.h"
+#include "fbximportservice.h"
 #include "ikdiagnostics.h"
 #include "ikscript.h"
 #include "modelimportservice.h"
@@ -225,7 +226,11 @@ bool VulkanWindow::runImport(const PendingImport& import, bool showProgress) {
         ok = ModelImportService::importInto(*m_renderer, import.path, showProgress);
         break;
     case PendingImport::Kind::Figure:
-        ok = FigureImportService::importInto(*m_renderer, import.path, showProgress);
+        // (By extension: a native figure file, or a rigged character in an FBX file — conformed
+        // to the rig standard on the way in, see fbximportservice.h.)
+        ok = import.path.endsWith(QStringLiteral(".fbx"), Qt::CaseInsensitive)
+                 ? FbxImportService::importInto(*m_renderer, import.path, showProgress)
+                 : FigureImportService::importInto(*m_renderer, import.path, showProgress);
         break;
     }
     if (ok) {

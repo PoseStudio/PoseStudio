@@ -103,6 +103,10 @@ glm::vec2 closestOnSegment(const glm::vec2& a, const glm::vec2& b, const glm::ve
 
 } // namespace
 
+float BalanceController::unclassifiedMass() {
+    return kUnclassifiedMass;
+}
+
 std::vector<float> BalanceController::assignMasses(const std::vector<std::string>& names) {
     const std::size_t n = names.size();
     std::vector<float> masses(n, kUnclassifiedMass);

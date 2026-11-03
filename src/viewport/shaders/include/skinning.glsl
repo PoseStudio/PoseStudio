@@ -58,3 +58,25 @@ vec3 dualQuatTransform(vec4 rAcc, vec4 dAcc, vec3 p) {
     return quatRotate(rAcc, p) +
            2.0 * (rAcc.w * dAcc.xyz - dAcc.w * rAcc.xyz + cross(rAcc.xyz, dAcc.xyz));
 }
+
+// LINEAR blend skinning (2026-11-03): a rig authored for it — every FBX export seen — bulges at
+// the outside of a bend under dual quaternions, which its weights were never painted for. Each
+// joint's dual quaternion IS a rigid transform; the linear blend is the weighted sum of the
+// transformed point (and of the rotated normal), from the same joint buffer. Chosen per model by
+// the joint buffer's second half, entry 0's .y (Model::uploadJointsIfDirty); the native figures
+// keep the dual-quaternion blend.
+bool linearSkinning() {
+    return joints.dq[joints.dq.length() / 2].real.y > 0.5;
+}
+vec3 linearSkinPoint(uvec4 inJoints, vec4 inWeights, vec3 p) {
+    return inWeights.x * dualQuatTransform(joints.dq[inJoints.x].real, joints.dq[inJoints.x].dual, p) +
+           inWeights.y * dualQuatTransform(joints.dq[inJoints.y].real, joints.dq[inJoints.y].dual, p) +
+           inWeights.z * dualQuatTransform(joints.dq[inJoints.z].real, joints.dq[inJoints.z].dual, p) +
+           inWeights.w * dualQuatTransform(joints.dq[inJoints.w].real, joints.dq[inJoints.w].dual, p);
+}
+vec3 linearSkinVector(uvec4 inJoints, vec4 inWeights, vec3 v) {
+    return inWeights.x * quatRotate(joints.dq[inJoints.x].real, v) +
+           inWeights.y * quatRotate(joints.dq[inJoints.y].real, v) +
+           inWeights.z * quatRotate(joints.dq[inJoints.z].real, v) +
+           inWeights.w * quatRotate(joints.dq[inJoints.w].real, v);
+}

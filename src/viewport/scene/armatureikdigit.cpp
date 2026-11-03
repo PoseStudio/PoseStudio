@@ -118,6 +118,31 @@ void Armature::classifyBones() {
             ++carpals;
         }
     }
+    // A HELPER by the rig standard's roles (rigroles.h) that is no twist bone — a game rig's
+    // corrective "share" bone beside a knee or an elbow, a control, a skinless leaf — is the
+    // flesh of the JOINT IT HANGS FROM, not a joint to pose: a click on one selects that joint
+    // (the first non-helper ancestor), as a click on a carpal selects the hand, and it lights
+    // with it. Left a Body bone, a click on the knee grabbed the share bone, whose token mass
+    // the rig promoted to the limb's END — the foot — and a knee raise moved the hips 0.000.
+    int helpers = 0;
+    if (rig.roles().built()) {
+        for (std::size_t b = 0; b < n; ++b) {
+            if (m_boneClass[b] != static_cast<char>(BoneClass::Body) || rig.roles().role(static_cast<int>(b)) != RigRole::Helper ||
+                isTwistBone(static_cast<int>(b))) {
+                continue;
+            }
+            int joint = m_bones[b].parent;
+            while (joint >= 0 && rig.roles().role(joint) == RigRole::Helper) {
+                joint = m_bones[static_cast<std::size_t>(joint)].parent;
+            }
+            if (joint < 0) {
+                continue;
+            }
+            m_boneClass[b] = static_cast<char>(BoneClass::Carpal);
+            m_boneLimbEnd[b] = joint;
+            ++helpers;
+        }
+    }
     static const bool kTrace = std::getenv("POSESTUDIO_BONE_CLASS_TRACE") != nullptr;
     if (kTrace) {
         std::fprintf(stderr, "[bone-class] head %s: %d face-rig bones; %d digit joints:",
@@ -130,7 +155,7 @@ void Armature::classifyBones() {
         std::fputc(10, stderr);
         // (... and what below a wrist or an ankle is NOT a digit: the hand's and the foot's own —
         // the CARPALS, each selecting its limb end.)
-        std::fprintf(stderr, "[bone-class] %d carpals, of the hands and feet themselves:", carpals);
+        std::fprintf(stderr, "[bone-class] %d carpals, of the hands and feet themselves, and %d helpers of their joints:", carpals, helpers);
         for (std::size_t b = 0; b < n; ++b) {
             if (m_boneClass[b] == static_cast<char>(BoneClass::Carpal)) {
                 std::fprintf(stderr, " %s->%s", m_boneNames[b].c_str(),

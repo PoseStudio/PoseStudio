@@ -41,6 +41,12 @@ namespace {
 /// The other side's name for a left/right-prefixed bone name, or "" for a centre/unpaired one.
 /// Figures prefix `l`/`r` before an uppercase letter or underscore (`lShin`, `l_thigh`); a few
 /// use `Left`/`Right`. A plain lowercase continuation (`lowerJaw`, `rectus`) is not a side.
+/// Other rigs carry the side as a TOKEN anywhere in the name — `CC_Base_L_Thigh`, `DEF-thigh.L`,
+/// `thigh_l`, `rig:LeftUpLeg`: a lone `L`/`R` (either case) bounded by `_ . - :` or the
+/// name's ends, or `Left`/`Right` (any case) bounded likewise or by a change of case; the first
+/// such token is swapped. (Until 2026-11-03 only the prefixes were read, and an FBX rig's toes
+/// and twist helpers paired with themselves — 474mm "lopsided" at rest to the harness, and
+/// Mirror Pose flipped them in place like centre bones.)
 std::string mirroredBoneName(const std::string& name) {
     if (name.size() >= 2 && (name[0] == 'l' || name[0] == 'r')) {
         const char next = name[1];
@@ -56,6 +62,41 @@ std::string mirroredBoneName(const std::string& name) {
         const std::string from(pair[0]);
         if (name.size() > from.size() && name.compare(0, from.size(), from) == 0) {
             return pair[1] + name.substr(from.size());
+        }
+    }
+    const auto isSep = [](char c) { return c == '_' || c == '.' || c == '-' || c == ':' || c == ' '; };
+    const auto isUpper = [](char c) { return c >= 'A' && c <= 'Z'; };
+    const auto isLowerOrDigit = [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); };
+    // A lone letter token.
+    for (std::size_t i = 0; i < name.size(); ++i) {
+        const char c = name[i];
+        if (c != 'L' && c != 'R' && c != 'l' && c != 'r') {
+            continue;
+        }
+        const bool startOk = i == 0 || isSep(name[i - 1]);
+        const bool endOk = i + 1 == name.size() || isSep(name[i + 1]);
+        if (startOk && endOk) {
+            std::string other = name;
+            other[i] = c == 'L' ? 'R' : c == 'R' ? 'L' : c == 'l' ? 'r' : 'l';
+            return other;
+        }
+    }
+    // A word token: bounded by a separator, the name's ends, or a change of case (`LeftArm`).
+    static const char* const kSideWords[][2] = {{"Left", "Right"}, {"Right", "Left"}, {"left", "right"},
+                                                {"right", "left"}, {"LEFT", "RIGHT"}, {"RIGHT", "LEFT"}};
+    for (std::size_t i = 0; i < name.size(); ++i) {
+        for (const auto& pair : kSideWords) {
+            const std::string from(pair[0]);
+            if (name.compare(i, from.size(), from) != 0) {
+                continue;
+            }
+            const std::size_t end = i + from.size();
+            const bool startOk = i == 0 || isSep(name[i - 1]) || (isLowerOrDigit(name[i - 1]) && isUpper(from[0]));
+            const bool endOk = end == name.size() || isSep(name[end]) || (isUpper(name[end]) && !isUpper(from.back())) ||
+                               (isLowerOrDigit(name[end]) && isUpper(from.back()));
+            if (startOk && endOk) {
+                return name.substr(0, i) + pair[1] + name.substr(end);
+            }
         }
     }
     return {};
@@ -78,6 +119,8 @@ void Armature::build(const std::vector<ArmatureBone>& bones) {
     std::vector<glm::vec3> bindGlobal(bones.size(), glm::vec3(0.0f));
     for (std::size_t i = 0; i < bones.size(); ++i) {
         const ArmatureBone& src = bones[i];
+        m_bones[i].drivenBy = src.drivenBy >= 0 && src.drivenBy < static_cast<int>(bones.size()) && src.drivenBy != static_cast<int>(i) ? src.drivenBy : -1;
+        m_bones[i].driveFactor = src.driveFactor;
         Bone& bone = m_bones[i];
         const bool hasParent = src.parent >= 0 && static_cast<std::size_t>(src.parent) < i;
         bone.parent = hasParent ? src.parent : -1;
@@ -366,6 +409,24 @@ void Armature::computeSkinMatrices() {
         dst[0] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f); // static model: one identity joint
         dst[1] = glm::vec4(0.0f);
         return;
+    }
+    // THE DRIVEN BONES (ArmatureBone::drivenBy, 2026-11-03): a rig's helper whose driver
+    // expression the file could not carry — a knee's "share" bone taking half the bend, a twist
+    // helper taking its share of the segment's twist — is re-derived from its driver here, the
+    // one place every pose change passes through, before the hierarchy walk. It is never an
+    // unknown of a solve (not on any active path, or locked) and never a dial; a pose file's
+    // value for it is overwritten on load. The drivers' Eulers are read, never written, so the
+    // bone order between the two does not matter.
+    for (std::size_t i = 0; i < m_bones.size(); ++i) {
+        const Bone& bone = m_bones[i];
+        if (bone.drivenBy < 0 || static_cast<std::size_t>(bone.drivenBy) >= m_bones.size()) {
+            continue;
+        }
+        const glm::vec3 driven = bone.driveFactor * m_boneEuler[static_cast<std::size_t>(bone.drivenBy)];
+        if (driven != m_boneEuler[i]) {
+            m_boneEuler[i] = driven;
+            recomposePoseLocal(i);
+        }
     }
     // Accumulate each bone's posed global transform down the hierarchy (parents precede children),
     // then convert the rigid skinTransform = poseGlobal · inverseBind into a unit dual quaternion

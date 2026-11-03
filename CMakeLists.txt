@@ -133,7 +133,15 @@ FetchContent_Declare(tinyexr
     GIT_TAG        v1.0.13
     SOURCE_SUBDIR  headers-only-do-not-configure
 )
-FetchContent_MakeAvailable(glm vma tinyobjloader nlohmann_json miniz stb tinyexr)
+# ufbx: the FBX reader (binary and ASCII FBX from version 3000, skinning, blend shapes, the whole
+# node transform stack, axis and unit conversion, embedded textures). Single-source C (ufbx.c +
+# ufbx.h), MIT or public domain; compiled into the target like miniz. Pinned to a release tag.
+FetchContent_Declare(ufbx
+    GIT_REPOSITORY https://github.com/ufbx/ufbx.git
+    GIT_TAG        v0.23.1
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(glm vma tinyobjloader nlohmann_json miniz stb tinyexr ufbx)
 
 # ==============================================================================
 # [ TARGET DEFINITION & SOURCE FILES ]
@@ -286,6 +294,12 @@ add_executable(
     src/viewport/import/vertex.h
     src/viewport/import/modeldata.h
     src/viewport/import/meshimporter.h
+    src/viewport/import/fbx/fbxfigureimporter.cpp   # the FBX figure reader (ufbx -> the skinned ModelData + its raw skeleton)
+    src/viewport/import/fbx/fbxfigureimporter.h
+    src/viewport/scene/ik/rigconformer.cpp          # the rig standard's conformer: frames, orders and limits per role
+    src/viewport/scene/ik/rigconformer.h
+    src/viewport/fbximportservice.cpp               # the Qt-facing FBX import (textures, progress, upload)
+    src/viewport/fbximportservice.h
     src/viewport/import/importerregistry.cpp
     src/viewport/import/importerregistry.h
     src/viewport/import/obj/objimporter.cpp   # single TINYOBJLOADER_IMPLEMENTATION TU
@@ -503,6 +517,8 @@ target_include_directories(PoseStudio PRIVATE
     src/viewport/import
     src/viewport/import/obj
     src/viewport/import/figure
+    src/viewport/import/fbx
+    ${ufbx_SOURCE_DIR}                       # so <ufbx.h> resolves
     ${glm_SOURCE_DIR}                        # so <glm/glm.hpp> resolves
     ${vma_SOURCE_DIR}/include                # so <vk_mem_alloc.h> resolves
     ${tinyobjloader_SOURCE_DIR}             # so <tiny_obj_loader.h> resolves
@@ -521,6 +537,7 @@ target_sources(PoseStudio PRIVATE
     ${miniz_SOURCE_DIR}/miniz_tinfl.c
     ${miniz_SOURCE_DIR}/miniz_tdef.c
     ${miniz_SOURCE_DIR}/miniz_zip.c
+    ${ufbx_SOURCE_DIR}/ufbx.c
 )
 
 # GLM must be told, project-wide, to match Vulkan conventions: angles in radians and a

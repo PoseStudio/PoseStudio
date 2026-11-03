@@ -402,8 +402,12 @@ bool IkRig::servedByHandBelow(int c, const std::vector<glm::vec3>& positions) co
 
 bool IkRig::helperNode(int node) const {
     static const bool kHelperContacts = std::getenv("IK_HELPER_CONTACTS") != nullptr; // A/B probe: twist helpers as contacts, as before
-    return !kHelperContacts && node >= 0 && static_cast<std::size_t>(node) < m_helperNode.size() &&
-           m_helperNode[static_cast<std::size_t>(node)] != 0;
+    if (kHelperContacts || node < 0 || static_cast<std::size_t>(node) >= m_helperNode.size()) {
+        return false;
+    }
+    // A twist helper (IkRigBone::helper), or a bone the rig standard reads as a HELPER — an anchor,
+    // a control, a skinless leaf (rigroles.h): no joint a body rests on either.
+    return m_helperNode[static_cast<std::size_t>(node)] != 0 || m_roles.role(node) == RigRole::Helper;
 }
 
 bool IkRig::servedByPinAbove(int c) const {

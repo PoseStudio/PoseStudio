@@ -109,7 +109,7 @@ void MenuManager::setupMenus() {
         {".BVH (Biovision Hierarchy)",        nullptr},
         {".DAE (Collada)",                    nullptr},
         {".DUF (DUF File)",                   &MenuManager::importFigureFile},
-        {".FBX (FBX File)",                   nullptr},
+        {".FBX (FBX File)",                   &MenuManager::importFbxFile},
         {".GLB (GL Transmission Format .glTF)", nullptr},
         {".OBJ (Wavefront)",                  &MenuManager::importObjFile},
         {".PLY (Polygon File Format)",        nullptr},
@@ -439,6 +439,22 @@ void MenuManager::importFigureFile() {
         mainWindow, tr("Import Character Figure"),
         rememberedStartDir(Constants::PREF_LAST_IMPORT_DIR),
         tr("Figure Files (*.duf *.dsf)"));
+    if (path.isEmpty()) return; // user cancelled
+
+    PreferencesManager::instance().setValue(Constants::PREF_LAST_IMPORT_DIR,
+                                            QFileInfo(path).absolutePath());
+    viewportWidget->importFigure(path);
+}
+
+void MenuManager::importFbxFile() {
+    if (!viewportWidget) return;
+    // A rigged character in an FBX file: imported through the figure route (VulkanWindow dispatches
+    // by extension), conformed to the rig standard on the way in. A static FBX mesh imports too, as
+    // a model without a skeleton.
+    const QString path = QFileDialog::getOpenFileName(
+        mainWindow, tr("Import FBX Character"),
+        rememberedStartDir(Constants::PREF_LAST_IMPORT_DIR),
+        tr("FBX Files (*.fbx)"));
     if (path.isEmpty()) return; // user cancelled
 
     PreferencesManager::instance().setValue(Constants::PREF_LAST_IMPORT_DIR,

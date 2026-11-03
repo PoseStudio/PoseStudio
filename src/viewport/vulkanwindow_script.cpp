@@ -710,7 +710,7 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
     const QStringList part = name.split(QLatin1Char('.'));
     const QString     key = part[0].toLower();
     const int         bone = part.size() > 1 ? arm->boneIndex(figureBoneName(arm, part[1].toStdString())) : -1;
-    const int         head = arm->boneIndex("head");
+    const int         head = arm->boneIndex(figureBoneName(arm, "head")); // (by role on a rig in another convention)
     if (key == QLatin1String("grab")) {
         glm::vec3 grab(0.0f);
         if (!s.dragging || !scene().ikGrabPointWorld(grab)) {
@@ -749,7 +749,7 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         }
         value = std::hypot(at.x() - s.cursorPx.x(), at.y() - s.cursorPx.y());
     } else if (key == QLatin1String("hips")) {
-        value = moved(arm->boneIndex("hip"));
+        value = moved(arm->boneIndex(figureBoneName(arm, "hip"))); // (by the alias layer: any rig's hips)
     } else if (key == QLatin1String("head") && part.size() == 1) {
         value = moved(head);
     } else if (key == QLatin1String("group")) {
@@ -764,7 +764,7 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
     } else if (key == QLatin1String("lowest")) {
         // (Not the figure node and its like: parentless, or hanging straight off a parentless node
         // at the origin — the hip's own parent.)
-        const int hip = arm->boneIndex("hip");
+        const int hip = arm->boneIndex(figureBoneName(arm, "hip"));
         value = 1.0e9;
         for (std::size_t i = 0; i < arm->boneCount(); ++i) {
             bool body = false;

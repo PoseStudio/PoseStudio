@@ -194,8 +194,9 @@ int main(int argc, char *argv[]) {
         if (arg.endsWith(QStringLiteral(".obj"), Qt::CaseInsensitive)) {
             viewport->importObj(arg);
         } else if (arg.endsWith(QStringLiteral(".duf"), Qt::CaseInsensitive) ||
-                   arg.endsWith(QStringLiteral(".dsf"), Qt::CaseInsensitive)) {
-            viewport->importFigure(arg);
+                   arg.endsWith(QStringLiteral(".dsf"), Qt::CaseInsensitive) ||
+                   arg.endsWith(QStringLiteral(".fbx"), Qt::CaseInsensitive)) {
+            viewport->importFigure(arg); // (an FBX character takes the figure route too)
         } else if (arg.endsWith(QStringLiteral(".pose"), Qt::CaseInsensitive)) {
             // A pose file applies onto whichever figure was imported (queued until the figure exists).
             viewport->loadPose(arg);

@@ -298,6 +298,7 @@ private:
     // array's initial value — is "never written").
     std::array<std::uint64_t, kMaxFramesInFlight>   m_highlightUploaded{};
     uint32_t                                        m_jointCount = 1;
+    bool                                            m_linearSkinning = false; ///< MeshData::linearSkinning: the joint buffer's second half, entry 0's .y.
 
     // Pose correctives, blended on the GPU (set 2 bindings 1 + 2 — see correctiveset.h).
     CorrectiveSet            m_correctives;

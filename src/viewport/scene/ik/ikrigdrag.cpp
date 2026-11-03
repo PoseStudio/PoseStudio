@@ -293,7 +293,7 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
     for (const int c : contactNodes) {
         if (c >= 0 && c < n && !isEffector(c) && m_bodyNode[static_cast<std::size_t>(c)] &&
             descendsFromPelvis(c) &&
-            isFootClass(c) &&
+            isFootClass(c) && !helperNode(c) && // (a helper by the rig standard is no foot)
             !liftedByDrag(c)) {
             planted.push_back(c);
         }

@@ -77,6 +77,12 @@ int aliasedBoneIndex(const Armature& arm, const std::string& canonical) {
     // have been built. A rig that names its bones in a convention this table never saw resolves
     // the same canonical names the same way.
     const IkRig* rig = arm.ikRig();
+    if (rig == nullptr && arm.hasSkeleton()) {
+        // The rig is a cache of the bind skeleton (built at the first drag, pick or import): a
+        // name lookup on an armature that has none yet builds it, as reading any cache does.
+        const_cast<Armature&>(arm).prepareIkRig();
+        rig = arm.ikRig();
+    }
     if (rig != nullptr && rig->roles().built()) {
         const RigRoleTag tag = rig->roles().canonicalTag(canonical);
         if (tag.role != RigRole::None) {

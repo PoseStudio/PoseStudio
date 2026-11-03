@@ -579,6 +579,8 @@ private:
     /// Builds m_bodyVolumes / m_volumeClearance from the bone names and the bind pose (build()),
     /// fitted to the body mesh sample when there is one.
     void buildBodyVolumes(const std::vector<std::string>& names, const std::vector<BodyMeshPoint>* mesh);
+    /// The balance masses of the bones the name table left at the token mass, by their roles (see ikrig.cpp).
+    void fillMassesByRole();
     /// The floor clearances of the joints above the feet, from the figure's own skin: each bone's
     /// flesh, as its extreme points (see the definition).
     void fitFloorClearances(const std::vector<BodyMeshPoint>& mesh);

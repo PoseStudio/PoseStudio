@@ -60,21 +60,32 @@ void main() {
     // Pose correctives: the bind position plus this vertex's weighted corrective deltas.
     vec3 bindPos = applyCorrectives(inPos, inCorrectiveRange);
 
-    // Blend the influencing joints' dual quaternions by weight (see skinning.glsl).
-    vec4 rAcc;
-    vec4 dAcc;
-    blendDualQuat(inJoints, inWeights, rAcc, dAcc);
-
-    // Rigid transform of the normalized blend.
-    vec3 skinnedPos = dualQuatTransform(rAcc, dAcc, bindPos);
+    // Blend the influencing joints' dual quaternions by weight (see skinning.glsl) — or linearly,
+    // where the model's rig was authored for that.
+    vec3 skinnedPos;
+    vec3 skinnedNormal;
+    vec3 skinnedTangent;
+    if (linearSkinning()) {
+        skinnedPos = linearSkinPoint(inJoints, inWeights, bindPos);
+        skinnedNormal = normalize(linearSkinVector(inJoints, inWeights, inNormal));
+        skinnedTangent = linearSkinVector(inJoints, inWeights, inTangent.xyz);
+    } else {
+        vec4 rAcc;
+        vec4 dAcc;
+        blendDualQuat(inJoints, inWeights, rAcc, dAcc);
+        // Rigid transform of the normalized blend.
+        skinnedPos = dualQuatTransform(rAcc, dAcc, bindPos);
+        skinnedNormal = quatRotate(rAcc, inNormal);
+        skinnedTangent = quatRotate(rAcc, inTangent.xyz);
+    }
     vec4 worldPos = pc.model * vec4(skinnedPos, 1.0);
     // mat3(model) is correct for the rigid/uniform-scale model transforms in play; swap to a
     // proper normal matrix if non-uniform scale ever appears.
-    vWorldNormal = mat3(pc.model) * quatRotate(rAcc, inNormal);
+    vWorldNormal = mat3(pc.model) * skinnedNormal;
     vUv = inUv;
     vWorldPos = worldPos.xyz;
     vAo = inAo;
-    vTangent = vec4(mat3(pc.model) * quatRotate(rAcc, inTangent.xyz), inTangent.w);
+    vTangent = vec4(mat3(pc.model) * skinnedTangent, inTangent.w);
 
     // Selection highlight amount: the skin weight this vertex puts on the selected joint and its
     // twist twin — the flesh that joint moves, fading out where the weights blend into the

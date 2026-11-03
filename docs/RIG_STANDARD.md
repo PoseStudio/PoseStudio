@@ -159,25 +159,91 @@ tools speak.
 The reference figures were the measure: with the roles in place of the name lookups, the eight
 reference rigs produce the same poses to the last bit.
 
+## Conforming a rig that carries no anatomy
+
+A figure in its native scene format arrives with everything the posing engine lives by: a frame
+on every bone, a rotation order, limits, locked twist helpers. A rig from an FBX file arrives
+with none of it — names, a hierarchy, bind positions, skin weights, and whatever the authoring
+tool's local axes happened to be. `scene/ik/rigconformer.{h,cpp}` turns the second kind into the
+first, by role (2026-11-03). It runs inside the FBX import, on the raw skeleton, before the model
+is uploaded; `POSESTUDIO_FBX_NO_CONFORM` is the A/B (the skeleton as read: identity frames, no
+limits, which the engine poses as a static rig).
+
+1. **A provisional armature**, enough structure for the roles: every frame along its bone, no
+   limits — except that a bone whose name says *twist* or *roll* and carries nothing real
+   below it (a neck named "NeckTwist" carries the head, and is a neck), and a bone that repeats
+   its parent's segment word (a thigh cut into "thigh1" and "thigh2": the second piece), get
+   two channels locked across the bone and the one along it free, so the rig reads them as
+   twist helpers. The skin each bone dominates comes from the meshes' weights: a leaf no skin
+   follows is an end marker, not a joint — the importer leaves those out of the skeleton
+   altogether, keeping each one as its parent's **tip** (`ModelBone::tip`: the one thing a
+   bone with no joint below it, a fingertip or a single-bone toe, does not say for itself).
+2. **The roles**, as above, on the provisional rig.
+3. **The limits**, per role, transcribed from the reference generation's authored ranges — a
+   knee `-11..155` folding one way, an elbow `-135..20`, a thigh `-115..35` with `-26..85` of
+   abduction, a collar's `-10..55` of shrug, a finger's three joints, the toes', the ball's,
+   the neck's and each spine link's (a spine of any length is mapped onto the reference's four
+   links), the head's, the jaw's and the eyes'. The right side takes the left's with its side
+   and twist channels mirrored. A segment's own twist channel is locked only when a twist
+   helper of that segment lies **on the chain** between it and its next joint (the reference's
+   thigh twist carries the shin); a helper hanging as a leaf beside the chain carries skin
+   alone, and the segment keeps its twist. A helper is locked on every channel; a bone with no
+   role is left free. The upper arm's elevation range is relative to the bind: a figure bound
+   with its arms out horizontally keeps the same absolute reach as one bound at the reference's
+   46 degrees.
+4. **The frames**, by role, each the minimal rotation taking a world axis onto the bone's
+   direction — X for the arms, hands and fingers, Z for the feet, toes and pectorals — and
+   the direction itself by role: a chain bone points at its next joint through the helpers
+   between (the thigh at the shin, the forearm at the hand), the hand at the mean of its
+   fingers' bases, the ball at the mean of its toes', a leaf at its tip, a single-bone toe
+   along its foot; a leaf twist helper takes its segment's frame. **The trunk is
+   world-aligned** — Y up, X lateral, Z forward on the hips, the pelvis, every spine link, the
+   neck and the head, as the reference generation authors them whatever the spine's curve: the
+   engine's trunk rules read flexion about the world's lateral axis. A frame along a leaning
+   neck turned its flexion into a mix of flexion and roll; a ball framed at the first toe
+   listed (the pinky on one side, the big toe on the other) stood 66 degrees off and mirrored
+   25mm apart.
+5. **The rotation order** per role, the reference's: `YZX` on the trunk and legs, `XYZ` on the
+   arms, `XZY` on the forearm and thumb, `ZYX` on the feet and toes — the first letter the
+   twist, the last the wide bend, as the engine composes them.
+6. **The drivers.** A game-style rig keeps its correctives in the skeleton — twist helpers
+   along a segment, "share" bones at a knee or an elbow — driven by expressions the file does
+   not carry. Each helper gets a driver (`ModelBone::drivenBy`, re-derived from the driver's
+   rotation after every pose change, never posed by hand or by a solve): a helper standing at a
+   real joint takes half of that joint's rotation (counter-rotated by a half as the joint's
+   child, a half as its sibling), and a leaf twist helper the share of its segment's twist that
+   its place along the segment says, the skin twisting in proportion to its distance from the
+   joint. A twist helper on the chain, carrying the next joint, is the solve's and gets none.
+   And a rig authored for linear blend skinning is skinned linearly in the viewport
+   (`MeshData::linearSkinning`): under dual quaternions its bends bulged on the outside.
+
+The conformance report says how far it got (bones placed, chain lengths, twist helpers, finger
+and toe joints, bones without a role, the missing required roles); the import log prints it and
+`POSESTUDIO_RIG_ROLES_TRACE` the roles themselves.
+
+Four things the engine learned to read for such rigs, each bit-identical on the reference
+figures: a driven bone (above); a bone's mirror twin by a **side token** anywhere in its name (`Thing_L_Part`,
+`part.L`, `part_l`, `LeftPart`), then by role for what the names leave unpaired; a **helper**
+bone by role that is no twist bone (a corrective bone beside a knee) is the flesh of the joint
+it hangs from — a click on it selects that joint, as a click on a carpal selects the hand; and
+an idle arm at the **elevation it was bound at** is unposed (the reference binds at 46 degrees,
+inside the hang's 60-degree cone; a game rig's A-pose may stand 63 off the vertical).
+
 ## What the standard will grow to cover
 
-These are the next steps, in order. None exists in the code yet.
+These are the next steps, in order.
 
 1. **Channel semantics per role.** Which rotation channel of each joint is its flexion, its side
    bend and its twist, and which direction is forward, outward and pointed. The Transform tab's
-   dials already derive this by geometry for every joint; the standard will make it a definition.
-2. **Limits per role.** A canonical range for every role's channels, transcribed from the
-   reference generation's authored ranges, applied where a figure authors none (a rig exported
-   from a game engine has no limits at all). With it, every structural rule of the engine holds
-   on such a rig by construction: a knee is a fold, an elbow a hinge, a twist helper has two
-   locked channels.
-3. **The rest of the engine's name lookups**: the balance masses, the mirror pairing, the harness
-   alias table itself.
-4. **The standard's names in the test tools.** The names are decided (see *The standard's
+   dials already derive this by geometry for every joint, and the conformer's limits assume the
+   reference's channel layout; the standard will make it a definition.
+2. **The rest of the engine's name lookups**: the balance masses, the harness alias table
+   itself.
+3. **The standard's names in the test tools.** The names are decided (see *The standard's
    names*); the harness and the galleries still speak the reference generation's names and will
    move to the standard's.
-5. **A rig setup panel** for figures the inference cannot place: the roles against the bones,
+4. **A rig setup panel** for figures the inference cannot place: the roles against the bones,
    prefilled, with a picker per role, and the humanoid limits applied on request. A figure that
    is not humanoid, or not mapped, still poses joint by joint with the dials and the mouse mode;
    the IK is off for it.
-6. **Poses by role.** A pose saved by role loads onto any conforming figure.
+5. **Poses by role.** A pose saved by role loads onto any conforming figure.

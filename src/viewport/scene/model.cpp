@@ -138,6 +138,9 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
     // The armature — the runtime skeleton + pose (see armature.h) — built from the model's bones
     // (empty for a static model: one identity joint). Bind transforms are translation-only, so
     // each bone's local rest offset is the difference of the global rest positions.
+    for (const MeshData& mesh : data.meshes) {
+        m_linearSkinning = m_linearSkinning || mesh.linearSkinning; // (an FBX importer sets it on every mesh)
+    }
     std::vector<ArmatureBone> armatureBones(data.bones.size());
     for (std::size_t i = 0; i < data.bones.size(); ++i) {
         const ModelBone& src = data.bones[i];
@@ -154,11 +157,14 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
         dst.rotationMin = src.rotationMin;
         dst.rotationMax = src.rotationMax;
         dst.rotationLimited = src.rotationLimited;
+        dst.drivenBy = src.drivenBy;
+        dst.driveFactor = src.driveFactor;
     }
     m_armature.build(armatureBones);
     if (!bodyMesh.empty()) {
         m_armature.setBodyMesh(std::move(bodyMesh));
     }
+    m_armature.prepareIkRig(); // (the rig and the standard's roles exist from the import on)
     // Debug hook: POSESTUDIO_DUMP_SKELETON=<path> dumps the imported skeleton (one bone per
     // line) so the IK harness (tools/ikharness/) can run its drag-loop tests against REAL figure
     // rigs instead of synthetic approximations. No-op unless the environment variable is set.
@@ -220,6 +226,10 @@ void Model::uploadJointsIfDirty(uint32_t frameIndex) {
         for (uint32_t j = 0; j < m_jointCount; ++j) {
             lit[std::size_t{2} * j] = glm::vec4(m_armature.highlightedWithSelection(static_cast<int>(j)) ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
             lit[std::size_t{2} * j + 1] = glm::vec4(0.0f);
+        }
+        // ... and, in entry 0's .y, whether this model's skin blends LINEARLY (skinning.glsl).
+        if (m_jointCount > 0) {
+            lit[0].y = m_linearSkinning ? 1.0f : 0.0f;
         }
         m_highlightUploaded[frameIndex] = selectionKey;
     }

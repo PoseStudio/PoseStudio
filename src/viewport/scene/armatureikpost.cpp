@@ -61,6 +61,13 @@ namespace pose {
 // half the margin the support is inset by. The arms are for the eye; balance keeps the books it
 // kept, and every reach, step and gate is what it was.
 constexpr float kArmHangCone = 0.5f;      // cos 60 deg: an A-pose arm stands 46 degrees off the vertical
+// ... and an arm within this many degrees of the elevation it was BOUND at is unposed too, while that
+// bind stands under kArmHangBindMaxDeg from straight down (2026-11-03: an imported rig's A-pose may
+// stand 63 degrees off the vertical, three outside the cone, and every idle arm then rode as posed;
+// a T-pose, 90 degrees, stays posed — the manual says to lower the arms first). The reference rigs
+// bind at 46 degrees, inside the cone, so nothing changes there.
+constexpr float kArmHangBindSlackDeg = 12.0f;
+constexpr float kArmHangBindMaxDeg = 75.0f;
 constexpr float kArmHangElbowDeg = 35.0f; // more bend than this at the press is a POSED arm
 constexpr float kArmHangStepDeg = 4.0f;   // per tick, the largest channel (a fingertip 4cm: the jump gates)
 constexpr float kArmHangMinLength = 0.12f; // socket to fold joint: an upper arm, not a finger's first bone
@@ -608,7 +615,17 @@ void Armature::findHangArms() {
             // the cone, so read as posed — and when the hips went up and the hands let go the arms
             // rode where the release left them, the hands hovering a palm off the floor ahead of
             // her. A hand on the floor is a support, not a pose; once it lifts the arm hangs.)
-            const bool hungByPose = !(offset.y / length > -kArmHangCone || std::abs(m_ikStartEuler[e][foldAxis]) > kArmHangElbowDeg);
+            bool nearBind = false;
+            {
+                const glm::vec3 bindOffset = m_ikBindPos[e] - m_ikBindPos[static_cast<std::size_t>(socket)];
+                const float     bindLength = glm::length(bindOffset);
+                if (bindLength > 1.0e-4f && length > 1.0e-4f) {
+                    const float bindElev = glm::degrees(std::acos(std::max(-1.0f, std::min(1.0f, -bindOffset.y / bindLength))));
+                    const float liveElev = glm::degrees(std::acos(std::max(-1.0f, std::min(1.0f, -offset.y / length))));
+                    nearBind = bindElev <= kArmHangBindMaxDeg && std::abs(liveElev - bindElev) <= kArmHangBindSlackDeg;
+                }
+            }
+            const bool hungByPose = !((offset.y / length > -kArmHangCone && !nearBind) || std::abs(m_ikStartEuler[e][foldAxis]) > kArmHangElbowDeg);
             const bool hung = hungByPose || (!kBentLandedRides && landedAtPress);
             if (kFindTrace) {
                 std::fprintf(stderr, "[hang] candidate %s: hungByPose=%d landedAtPress=%d (hand %s, rests on the floor at the press: %d, landed now: %d) -> %s",

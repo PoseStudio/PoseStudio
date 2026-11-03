@@ -221,6 +221,12 @@ private:
 RealPhases::RealPhases(Report& report_, const std::vector<ArmatureBone>& bones_)
     : report(report_), bones(bones_), v(report_.verbose) {
     probe.build(bones);
+    // (The probe carries the rig from the start: a canonical name that is none of this rig's names
+    // nor an alias resolves through the rig standard's roles — bonealiases.h — which the rig holds.)
+    if (std::getenv("IK_HARNESS_NO_PROBE_RIG") == nullptr) { // (A/B: the probe without a rig, as before 2026-11-03)
+        applyBodyMesh(probe, 1.0f);
+        probe.prepareIkRig();
+    }
 }
 
 void RealPhases::runAll() {
@@ -611,9 +617,24 @@ void RealPhases::utilityPhases() {
             }
             pinKept = arm.isBonePinned(static_cast<std::size_t>(rHand)) ? 1.0 : 0.0;
         }
+        // (The mirror of a pose is exact only on a rig whose two sides are mirror images: a rig
+        // that is itself lopsided at rest — an imported one, by millimetres — mirrors its poses as
+        // well as its bind allows, and the geometric row is information there, 2026-11-03.)
+        double restAsymmetry = 0.0;
+        for (const int i : {lHand, lFoot, lShin, lForeArm}) { // (the joints the gate measures; a place-paired carpal is not)
+            const int j = i >= 0 ? arm.mirrorBone(static_cast<std::size_t>(i)) : -1;
+            if (i < 0 || j < 0 || j == i) {
+                continue;
+            }
+            const glm::vec3 a = arm.boneWorldPosition(static_cast<std::size_t>(i));
+            const glm::vec3 b = arm.boneWorldPosition(static_cast<std::size_t>(j));
+            restAsymmetry = std::max(restAsymmetry, static_cast<double>(glm::length(glm::vec3(-a.x, a.y, a.z) - b)) * 1000.0);
+        }
         report.phase("[real] pose utilities: mirror + reset",
                      {gateMin("bone pairing (l<->r, centre = self)", pairing, 1.0),
-                      gateMax("mirrored hand/foot vs reflected original (mm)", geomErr * 1000.0, 1.0),
+                      restAsymmetry <= 1.0 ? gateMax("mirrored hand/foot vs reflected original (mm)", geomErr * 1000.0, 1.0)
+                                           : info("mirrored hand/foot vs reflected original (mm; the rig is lopsided at rest)", geomErr * 1000.0),
+                      info("the rig's own left/right asymmetry at rest (mm)", restAsymmetry),
                       gateMax("mirror rule error (deg / m)", ruleErr, 1e-3),
                       gateMax("mirror twice = identity (max error)", involutionErr, 1e-3),
                       gateMax("limb copy error (deg)", copyErr, 1e-3),
@@ -5012,18 +5033,20 @@ void RealPhases::grabPhases() {
                           {gateMin("the finger's joint is a digit's, its hand is not", lHand >= 0 && probe.boneClass(lHand) == pose::BoneClass::Body ? 1.0 : 0.0, 1.0),
                            // (A CARPAL SELECTS THE HAND, 2026-10-28: every bone below the wrist that is
                            // neither the wrist nor a digit is a Carpal, and its selection is the hand's.)
-                           gateMin("carpals under the hand (each selecting the hand)", [&] {
+                           // (A rig whose fingers hang straight off the hand has no carpal to test: the
+                           // count is information there, 2026-11-03.)
+                           [&] {
                                int count = 0;
+                               bool allHand = true;
                                for (int i = 0; i < nBones; ++i) {
                                    if (strictlyUnder(i, lHand) && probe.boneClass(i) == pose::BoneClass::Carpal) {
-                                       if (probe.posingBone(i) != lHand) {
-                                           return 0.0;
-                                       }
+                                       allHand = allHand && probe.posingBone(i) == lHand;
                                        ++count;
                                    }
                                }
-                               return static_cast<double>(count);
-                           }(), 1.0),
+                               return count > 0 ? gateMin("carpals under the hand (each selecting the hand)", allHand ? static_cast<double>(count) : 0.0, 1.0)
+                                                : info("carpals under the hand (none on this rig)", 0.0);
+                           }(),
                            gateMax("everything outside the finger moved (mm)", outsideMoved(r, top), 0.001),
                            // (27-58mm on the eight rigs: the finger turns to its limits after the cursor.)
                            gateMin("the grabbed joint travelled (mm)", travelled(r), 20.0),

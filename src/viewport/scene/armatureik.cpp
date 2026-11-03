@@ -92,10 +92,67 @@ bool Armature::ensureIkRig() {
         m_ikRig = std::make_unique<IkRig>();
         m_ikRig->build(rigBones, m_bodyMesh.empty() ? nullptr : &m_bodyMesh);
         m_ikBindPos = std::move(bindPos);
+        pairMirrorsByRole(); // (what the names and the places left unpaired: the roles' twins)
         buildJointSolver();
         classifyBones(); // (the face rig and the digits: found with the rig, by structure)
     }
     return true;
+}
+
+void Armature::pairMirrorsByRole() {
+    // THE OTHER SIDE BY ROLE: a bone the name and the place rules left paired with ITSELF
+    // (Armature::build) takes the twin the rig standard's roles give it — the same role, index
+    // and joint on the other side, the k-th such in bone order on each side — so a rig whose
+    // names carry no side the name rule reads, or none at all, still mirrors (Mirror Pose, the
+    // harness's symmetry measure). The reference rigs pair completely by name and place, and
+    // nothing changes there: only a self-paired bone off the sagittal plane takes a twin, and
+    // only a twin that is itself unpaired.
+    if (!m_ikRig || !m_ikRig->roles().built() || m_mirrorBone.size() != m_bones.size()) {
+        return;
+    }
+    const RigRoles& roles = m_ikRig->roles();
+    struct Keyed {
+        RigRole role;
+        int     index;
+        int     joint;
+        int     ordinal;
+        int     bone;
+    };
+    std::vector<Keyed> left;
+    std::vector<Keyed> right;
+    for (std::size_t i = 0; i < m_bones.size(); ++i) {
+        const RigRoleTag& t = roles.tag(static_cast<int>(i));
+        if (t.role == RigRole::None || t.side == RigSide::Centre) {
+            continue;
+        }
+        std::vector<Keyed>& side = t.side == RigSide::Left ? left : right;
+        int ordinal = 0;
+        for (const Keyed& k : side) {
+            ordinal += (k.role == t.role && k.index == t.index && k.joint == t.joint) ? 1 : 0;
+        }
+        side.push_back({t.role, t.index, t.joint, ordinal, static_cast<int>(i)});
+    }
+    int paired = 0;
+    for (const Keyed& l : left) {
+        const std::size_t li = static_cast<std::size_t>(l.bone);
+        if (m_mirrorBone[li] != l.bone) {
+            continue; // (paired already by name or place)
+        }
+        for (const Keyed& r : right) {
+            const std::size_t ri = static_cast<std::size_t>(r.bone);
+            if (r.role == l.role && r.index == l.index && r.joint == l.joint && r.ordinal == l.ordinal &&
+                m_mirrorBone[ri] == r.bone) {
+                m_mirrorBone[li] = r.bone;
+                m_mirrorBone[ri] = l.bone;
+                ++paired;
+                break;
+            }
+        }
+    }
+    static const bool kTrace = std::getenv("POSESTUDIO_RIG_ROLES_TRACE") != nullptr;
+    if (kTrace && paired > 0) {
+        std::fprintf(stderr, "[rig-roles] %d mirror pair(s) made by role (the names and the places left them unpaired)\n", paired);
+    }
 }
 
 float Armature::fkVolumeDepth(int rotatedBone) const {
@@ -192,6 +249,17 @@ bool Armature::isTwistBone(int bone) const {
     if (longest < 1.0e-4f) {
         along = glm::vec3(b.localBind[3]); // (a leaf helper: the way it lies from its parent)
         longest = glm::length(along);
+    }
+    if (longest < 1.0e-4f && b.parent >= 0) {
+        // A leaf lying AT its parent's joint (a game export's twist bone, zero length) turns about
+        // its PARENT's bone: the parent's longest child offset is the way it lies.
+        for (const int c : m_children[static_cast<std::size_t>(b.parent)]) {
+            const glm::vec3 offset(m_bones[static_cast<std::size_t>(c)].localBind[3]);
+            if (glm::length(offset) > longest) {
+                longest = glm::length(offset);
+                along = offset;
+            }
+        }
     }
     return longest > 1.0e-4f && std::abs(glm::dot(glm::vec3(b.orient[freeAxis]), along / longest)) > 0.8f;
 }
