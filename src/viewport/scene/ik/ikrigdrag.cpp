@@ -34,6 +34,18 @@ bool IkRig::isGirdleJoint(int node) const {
     if (node == m_pelvis) {
         return true;
     }
+    // ... and NEVER THE TOP SPINE LINK (2026-11-03): the chest top the collars and the neck hang
+    // from carries the arms and the head, and is a chest however near the hips a short spine puts
+    // it. A biped export's two-link spine has its top 18cm up, two bones from the root, and read
+    // as the girdle every grab of the chest was a HIPS drag: the trunk never bent, a bow was a
+    // walk of two steps, and the pinned seat moved under a lean (the pin on the grabbed joint
+    // sits out). The reference's top link is four bones up and never met the walk below.
+    if (m_roles.built()) {
+        const RigRoleTag& t = m_roles.tag(node);
+        if (t.role == RigRole::Spine && static_cast<int>(t.index) == m_roles.spineLinks()) {
+            return false;
+        }
+    }
     int depth = 0; // (within two bones of the solve root: the walk stops at two)
     int cur = node;
     while (cur >= 0 && cur != m_pelvis && depth < 2) {

@@ -383,22 +383,46 @@ ModelData FbxFigureImporter::load(const std::string& path, FbxImportInfo* info) 
     }
     const int boneCount = static_cast<int>(boneNodes.size());
     std::vector<glm::vec3> bonePos(boneNodes.size(), glm::vec3(0.0f));
+    std::vector<glm::mat4> boneWorld(boneNodes.size(), glm::mat4(1.0f)); // (each bone's BIND frame in the world)
     std::vector<glm::vec3> tipPos(boneNodes.size(), glm::vec3(0.0f)); // (the pruned end marker's place, in the bind)
     std::vector<char>      hasTip(boneNodes.size(), 0);
+    static const bool      kBoneTrace = std::getenv("POSESTUDIO_FBX_BONE_TRACE") != nullptr; // where each bone's place came from
     for (int i = 0; i < boneCount; ++i) {
         const ufbx_node* node = boneNodes[static_cast<std::size_t>(i)];
         glm::mat4        world = toGlm(node->node_to_world);
+        const char*      source = "node";
         if (const auto it = clusterOf.find(node); it != clusterOf.end()) {
             world = toGlm(it->second->bind_to_world); // (what the skin is bound against)
+            source = "cluster";
         } else if (const auto bp = bindPoseOf.find(node); bp != bindPoseOf.end()) {
             world = toGlm(*bp->second);
+            source = "bind pose";
+        } else if (boneParent[static_cast<std::size_t>(i)] >= 0) {
+            // A bone no cluster binds and no bind pose lists RIDES ITS PARENT, as a marker does:
+            // its offset in the parent's frame as the file stands, carried to the parent's bind.
+            // Read at its own node_to_world it stood where the file's CURRENT pose put it — a
+            // biped export whose feet are pointed in the saved pose had its clusterless toe bone,
+            // the ball of the foot, 11cm under the floor at a bind whose skin rests on it
+            // (2026-11-03): every floor phase read a joint 111mm through the floor.
+            const int        p = boneParent[static_cast<std::size_t>(i)];
+            const ufbx_node* parent = boneNodes[static_cast<std::size_t>(p)];
+            const glm::mat4  local = glm::inverse(toGlm(parent->node_to_world)) * toGlm(node->node_to_world);
+            world = boneWorld[static_cast<std::size_t>(p)] * local;
+            source = "parent";
         }
+        boneWorld[static_cast<std::size_t>(i)] = world;
         bonePos[static_cast<std::size_t>(i)] = glm::vec3(world[3]);
         if (const auto tip = tipNodeOf.find(node); tip != tipNodeOf.end()) {
             // The marker rides its parent: its offset in the parent's frame, carried to the bind.
             const glm::mat4 local = glm::inverse(toGlm(node->node_to_world)) * toGlm(tip->second->node_to_world);
             tipPos[static_cast<std::size_t>(i)] = glm::vec3((world * local)[3]);
             hasTip[static_cast<std::size_t>(i)] = 1;
+        }
+        if (kBoneTrace) {
+            const glm::vec3 own(toGlm(node->node_to_world)[3]);
+            std::fprintf(stderr, "[fbx-bone] %3d %-28s %-9s at (%.3f %.3f %.3f) node (%.3f %.3f %.3f)%s\n", i, toStd(node->name).c_str(), source,
+                         bonePos[static_cast<std::size_t>(i)].x, bonePos[static_cast<std::size_t>(i)].y, bonePos[static_cast<std::size_t>(i)].z, own.x,
+                         own.y, own.z, hasTip[static_cast<std::size_t>(i)] ? " +tip" : "");
         }
     }
     const auto attachBone = [&](const ufbx_node* node) {

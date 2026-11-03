@@ -118,6 +118,49 @@ void Armature::classifyBones() {
             ++carpals;
         }
     }
+    // BY THE RIG STANDARD'S ROLES (rigroles.h, 2026-11-03): a Finger or a Toe is a DIGIT and a
+    // carpal, a metatarsal, the ball of the foot or the heel is the hand's or the foot's own,
+    // whatever the structural rules above made of them. The two agree on the reference rigs; on
+    // a biped export they disagreed once — its one-toe foot's ball (the Ball role: the toes are
+    // one childless block under it) bends 100 degrees, stands out in the foot and carries no digit,
+    // so the structure read it as a TOE, and a click on the ball of the foot began a digit drag.
+    if (rig.roles().built()) {
+        for (std::size_t b = 0; b < n; ++b) {
+            const RigRoleTag& t = rig.roles().tag(static_cast<int>(b));
+            const bool        digit = t.role == RigRole::Finger || t.role == RigRole::Toe;
+            // (A BALL is the foot's own where the toes fan from it; a ball with no toe below it — the
+            // one-bone toe block of a game rig, a rigging add-on's, a biped's — IS the toes, and keeps
+            // what the structure read: a digit, where it bends. The foot model's ball is a role, not a class.)
+            bool fans = false;
+            for (const int c : m_children[b]) {
+                fans = fans || rig.roles().role(c) == RigRole::Toe;
+            }
+            const bool        own = t.role == RigRole::Carpal || t.role == RigRole::Metatarsal || (t.role == RigRole::Ball && fans) || t.role == RigRole::Heel;
+            if (!digit && !own) {
+                continue;
+            }
+            const BoneClass was = static_cast<BoneClass>(m_boneClass[b]);
+            if (was == BoneClass::Face) {
+                continue;
+            }
+            if (digit && was != BoneClass::Digit) {
+                m_boneClass[b] = static_cast<char>(BoneClass::Digit);
+                digits += 1;
+                carpals -= was == BoneClass::Carpal ? 1 : 0;
+            } else if (own && was != BoneClass::Carpal) {
+                const int end = rig.roles().find(t.role == RigRole::Carpal ? RigRole::Hand : RigRole::Foot, t.side);
+                if (end < 0 && m_boneLimbEnd[b] < 0) {
+                    continue;
+                }
+                m_boneClass[b] = static_cast<char>(BoneClass::Carpal);
+                if (end >= 0) {
+                    m_boneLimbEnd[b] = end;
+                }
+                carpals += 1;
+                digits -= was == BoneClass::Digit ? 1 : 0;
+            }
+        }
+    }
     // A HELPER by the rig standard's roles (rigroles.h) that is no twist bone — a game rig's
     // corrective "share" bone beside a knee or an elbow, a control, a skinless leaf — is the
     // flesh of the JOINT IT HANGS FROM, not a joint to pose: a click on one selects that joint

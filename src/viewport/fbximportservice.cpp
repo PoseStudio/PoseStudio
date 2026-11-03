@@ -46,6 +46,8 @@ bool FbxImportService::importInto(VulkanRenderer& renderer, const QString& path,
                       "%d toe joints, %d without a role, %d helpers driven%s",
                       rep.bodyBones, rep.spineLinks, rep.neckLinks, rep.twistHelpers, rep.fingerJoints, rep.toeJoints, rep.unplaced,
                       rep.drivenHelpers, rep.complete ? "; complete" : "");
+                qInfo("[fbx] %d bone(s) named by the standard (hips, spine1, upper_arm_l, thumb1_r ...); the face rig and the helpers keep their file's names",
+                      rep.renamed);
                 for (const std::string& m : rep.missing) {
                     qWarning("[fbx]   required role missing: %s", m.c_str());
                 }

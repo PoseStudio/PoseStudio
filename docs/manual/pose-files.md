@@ -9,7 +9,7 @@ A pose is saved as a small plain-text `.pose` file that you can load back onto a
 - Both need a figure in the scene; with none, PoseStudio says so and does nothing.
 - A `.pose` file given on the command line, or dropped onto `PoseStudio.exe` after a figure, is applied to that figure once it has loaded.
 
-A pose file names the figure's bones, so it applies best to the figure it was saved from — or to another figure of the same generation, which names its bones the same way. Loaded onto a figure that names them differently, the joints it cannot find are skipped and stay at rest.
+A pose file names the figure's bones, so it applies best to the figure it was saved from — or to another figure of the same generation, which names its bones the same way. Loaded onto a figure that names them differently, the joints it cannot find are skipped and stay at rest. Characters imported from FBX files all carry the rig standard's bone names (see [Importing Content](importing.md)) and the standard's rotation frames and ranges, so a pose saved on one of them loads on any other, whatever tool rigged them; a pose from a native figure does not cross to them, nor theirs to a native figure.
 
 Poses saved by version 0.3.15 or earlier may load a little differently: those versions turned each joint about axes that were slightly off the figure's own, most visibly at the thumbs, the fingers, the forearms and the feet. The rotations in the file are applied about the correct axes now.
 

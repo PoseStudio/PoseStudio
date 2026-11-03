@@ -15,6 +15,7 @@
 
 #include "armature.h"
 #include "balancecontroller.h"
+#include "ikmath.h"
 #include "ikrig.h"
 #include "rigroles.h"
 #include "report.h"
@@ -309,6 +310,12 @@ void RealPhases::findRestPose() {
                     {"rShldr", glm::vec3(0.0f, 0.0f, 65.0f)}};
         std::printf("[info] T-pose rest: arms lowered by a shoulder pre-pose in every phase\n");
     }
+    // (Every probe that applies restPose resolves the names first — resolveBoneName — as the
+    // simulator does: posed by the RAW canonical name, a probe on a rig that calls its shoulder
+    // otherwise stayed in its T-pose while the run lowered the arms, and every target read off
+    // its hand was off by the arm's whole swing — the rigging-add-on-style FBX rig's hand lays landed
+    // at the far knee, 2026-11-03. The reference T-pose generations carry the literal names,
+    // so nothing changes there.)
 }
 
 /// THE RIG STANDARD'S ROLES (rigroles.h, 2026-11-02): this rig conforms — every required role is
@@ -665,8 +672,28 @@ void RealPhases::utilityPhases() {
                            abdomen >= 0 && head >= 0;
         double foldErr = 1e9, proportionErr = 1e9, roundTripErr = 1e9, stopErr = 1e9;
         double directions = 0.0, twistDials = 0.0, mirrorErr = 0.0, dialled = 0.0, noDial = 0.0;
+        double frameAsymDeg = 0.0; // the worst paired joints' frames, left against right reflected (deg)
         double sweepCos = -1.0, sweepRatioErr = 1e9, sweepTwist = 0.0;
         double digitTwins = 0.0, digitJoints = 0.0, limbTwinsMissing = 0.0, limbTwins = 0.0;
+        // A FINGER's Bend dial reaches its LONG limit at 100 — the flexion: the dial's low end then
+        // reads -100 at most (the short side in proportion). Read the way a joint carries its limb
+        // forward or down, a finger hanging in an A-pose was a coin toss, and a thumb's dial
+        // extended it on one conformed rig (2026-11-03).
+        double fingerDialsShort = 0.0; // finger joints whose Bend dial's 100 is the SHORT side
+        double fingerDials = 0.0;
+        if (arm.ikRig() != nullptr && arm.ikRig()->roles().built()) {
+            for (std::size_t i = 0; i < arm.boneCount(); ++i) {
+                if (arm.ikRig()->roles().role(static_cast<int>(i)) != RigRole::Finger) {
+                    continue;
+                }
+                const JointDial d = arm.jointDial(static_cast<int>(i), JointDialKind::BendForward);
+                if (!d.valid()) {
+                    continue;
+                }
+                fingerDials += 1.0;
+                fingerDialsShort += d.minValue < -100.0f - 1.0e-3f ? 1.0 : 0.0;
+            }
+        }
         // THE SELECTION HIGHLIGHT's twin (Armature::selectedHighlightTwin): a limb's TWIST bone
         // lights with its bend bone, so a grabbed thigh lights the whole thigh — and nothing else
         // is a twin. It was "any child with two locked axes", which a finger's or a toe's middle
@@ -818,22 +845,31 @@ void RealPhases::utilityPhases() {
             for (std::size_t i = 0; i < rest.size(); ++i) {
                 rest[i] = arm.boneWorldPosition(i);
             }
-            const auto lopsided = [&](const std::vector<glm::vec3>& one, const std::vector<glm::vec3>& other) {
+            // What each dial TURNED, left against right reflected (2026-11-03): every bone's world
+            // rotation away from the bind, the left's against the right twin's mirrored across the
+            // sagittal plane, the worst angle between them. A dial is a rotation: measured by
+            // POSITIONS (less the rig's worst rest asymmetry) a rig lopsided at rest read its own
+            // bind as a dial mismatch (a Blender export's clavicles 1mm apart: 2.2mm at a gate of
+            // 1), and measured by DISPLACEMENTS a character whose knee stands 6mm further from its
+            // socket on one side read 4.8mm for the same 46 degrees — the lever's, not the dial's.
+            // A limit or a frame authored asymmetrically still shows: the sides turn by different
+            // angles or about different axes. The reference rigs mirror exactly.
+            const glm::mat3 sagittal(-1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+            const auto lopsided = [&](const std::vector<glm::mat3>& one, const std::vector<glm::mat3>& other) {
                 double worst = 0.0;
                 for (std::size_t k = 0; k < one.size(); ++k) {
-                    const glm::vec3 reflected(-one[k].x, one[k].y, one[k].z);
-                    worst = std::max(worst, static_cast<double>(glm::length(reflected - other[static_cast<std::size_t>(arm.mirrorBone(k))])));
+                    const std::size_t m = static_cast<std::size_t>(arm.mirrorBone(k));
+                    worst = std::max(worst, rotationAngleDeg(one[k], sagittal * other[m] * sagittal));
                 }
                 return worst;
             };
-            const double restLopsided = lopsided(rest, rest);
             const auto posedBy = [&](int bone, JointDialKind kind, float share, bool& valid) {
                 const JointDial d = arm.jointDial(bone, kind);
                 valid = d.valid();
                 arm.setJointDial(d, share >= 0.0f ? share * d.maxValue : -share * d.minValue);
-                std::vector<glm::vec3> out(arm.boneCount());
+                std::vector<glm::mat3> out(arm.boneCount());
                 for (std::size_t i = 0; i < out.size(); ++i) {
-                    out[i] = arm.boneWorldPosition(i);
+                    out[i] = glm::mat3(arm.poseGlobal(i)); // (the bind is translation-only: this is the turn away from it)
                 }
                 arm.resetPose();
                 return out;
@@ -852,21 +888,40 @@ void RealPhases::utilityPhases() {
                 if (j <= static_cast<int>(i)) {
                     continue; // (a centre bone, or the pair's second)
                 }
+                {
+                    // The pair's FRAMES, left against right reflected: a rig conformed from an
+                    // asymmetric bind (an imported character's thighs 2.7mm apart in depth) turns
+                    // its two sides about axes a quarter of a degree apart, and the same dial value
+                    // then lands 2mm apart at the knee — the rig's own, not the dials'.
+                    const glm::mat3 frameL(eulerMatrix(bones[i].orientation, "ZYX"));
+                    const glm::mat3 frameR(eulerMatrix(bones[static_cast<std::size_t>(j)].orientation, "ZYX"));
+                    const glm::mat3 mirror(-1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+                    frameAsymDeg = std::max(frameAsymDeg, rotationAngleDeg(frameL, mirror * frameR * mirror));
+                }
                 for (int k = 0; k < kJointDialCount; ++k) {
                     for (const float share : {0.4f, -0.5f}) {
                         bool validL = false, validR = false;
-                        const std::vector<glm::vec3> posedL = posedBy(static_cast<int>(i), static_cast<JointDialKind>(k), share, validL);
-                        const std::vector<glm::vec3> posedR = posedBy(j, static_cast<JointDialKind>(k), share, validR);
-                        const double err = validL != validR ? 1.0 : lopsided(posedL, posedR) - restLopsided;
-                        if (v && err > 0.001) {
-                            std::fprintf(stderr, "  [transform-dials] %s / %s dial %d at share %.1f: %.1f mm from mirrored\n",
-                                         arm.boneName(i).c_str(), arm.boneName(static_cast<std::size_t>(j)).c_str(), k, share, err * 1000.0);
+                        const std::vector<glm::mat3> posedL = posedBy(static_cast<int>(i), static_cast<JointDialKind>(k), share, validL);
+                        const std::vector<glm::mat3> posedR = posedBy(j, static_cast<JointDialKind>(k), share, validR);
+                        const double err = validL != validR ? 90.0 : lopsided(posedL, posedR);
+                        if (v && err > 0.1) { // (the gate; a float frame's noise floor reads 0.03-0.05)
+                            const JointDial dl = arm.jointDial(static_cast<int>(i), static_cast<JointDialKind>(k));
+                            const JointDial dr = arm.jointDial(j, static_cast<JointDialKind>(k));
+                            std::fprintf(stderr, "  [transform-dials] %s / %s dial %d at share %.1f: %.2f deg from mirrored"
+                                                 " (L axis %d full %.1f range %.1f..%.1f on %s | R axis %d full %.1f range %.1f..%.1f on %s)\n",
+                                         arm.boneName(i).c_str(), arm.boneName(static_cast<std::size_t>(j)).c_str(), k, share, err,
+                                         dl.axis, dl.fullDeg, dl.minValue, dl.maxValue, dl.bone >= 0 ? arm.boneName(static_cast<std::size_t>(dl.bone)).c_str() : "-",
+                                         dr.axis, dr.fullDeg, dr.minValue, dr.maxValue, dr.bone >= 0 ? arm.boneName(static_cast<std::size_t>(dr.bone)).c_str() : "-");
                         }
                         mirrorErr = std::max(mirrorErr, err);
                     }
                 }
             }
         }
+        const bool mirrorGated = frameAsymDeg <= 0.05;
+        char mirrorInfo[200];
+        std::snprintf(mirrorInfo, sizeof(mirrorInfo),
+                      "left and right joints at the same value: off mirrored (deg; the rig's own frames differ %.2f deg between the sides)", frameAsymDeg);
         report.phase("[real] transform dials: bend forward / bend sideways / twist",
                      {gateMax("a fold's 100 is its long limit (deg off)", foldErr, 1e-3),
                       gateMax("... and its low end the short limit in proportion (dial units off)", proportionErr, 1e-2),
@@ -874,8 +929,13 @@ void RealPhases::utilityPhases() {
                       gateMax("a value beyond the range stops at the limit (off)", stopErr, 1e-2),
                       gateMin("positive dials go the way they say (of 7)", directions, 7.0),
                       gateMin("limb twist dials (thigh, upper arm, forearm)", twistDials, 3.0),
-                      gateMax("left and right joints at the same value: off mirrored (mm)", mirrorErr * 1000.0, 1.0),
+                      // (The error is what the dials TURNED, so the gate holds on a rig lopsided at rest too — and
+                      // it is a gate where the pairs' FRAMES mirror, information where the rig's own frames do not.)
+                      mirrorGated ? gateMax("left and right joints at the same value: off mirrored (deg)", mirrorErr, 0.1)
+                                  : info(mirrorInfo, mirrorErr),
                       gateMax("finger and toe joints lit together with another joint (each lights alone)", digitTwins, 0.0),
+                      gateMax("finger joints whose Bend dial's 100 is the short side (it is the flexion, the long side)", fingerDialsShort, 0.0),
+                      info("finger joints with a Bend dial", fingerDials),
                       info("finger and toe joints", digitJoints),
                       gateMax("limbs whose twist bone does not light with them", limbTwinsMissing, 0.0),
                       info("limbs with a twist bone", limbTwins),
@@ -924,7 +984,7 @@ void RealPhases::armPhases() {
             Armature posedProbe;
             posedProbe.build(bones);
             for (const auto& [bone, euler] : restPose) {
-                posedProbe.setBoneRotation(bone, euler);
+                posedProbe.setBoneRotation(resolveBoneName(posedProbe, bone), euler);
             }
             const int hand = resolveBone(posedProbe, "lHand");
             const int shoulder = resolveBone(posedProbe, "lShldr");
@@ -1346,8 +1406,8 @@ void RealPhases::armPhases() {
         int girdlePelvisBone = -1, girdleSpine1 = -1, girdleSpine2 = -1;
         {
             for (std::size_t i = 0; i < bones.size() && hip >= 0; ++i) {
-                if (bones[i].parent == hip && under(lFoot, static_cast<int>(i))) {
-                    girdlePelvisBone = static_cast<int>(i);
+                if (bones[i].parent == hip && under(lFoot, static_cast<int>(i)) && under(rFoot, static_cast<int>(i))) {
+                    girdlePelvisBone = static_cast<int>(i); // (BOTH legs hang from a pelvis bone: a rig whose thighs hang straight off the hips has none, and a thigh is no pelvis)
                 }
                 if (bones[i].parent == hip && under(head, static_cast<int>(i))) {
                     girdleSpine1 = static_cast<int>(i);
@@ -1550,7 +1610,7 @@ void RealPhases::armPhases() {
         Armature posedProbe;
         posedProbe.build(bones);
         for (const auto& [bone, euler] : restPose) {
-            posedProbe.setBoneRotation(bone, euler);
+            posedProbe.setBoneRotation(resolveBoneName(posedProbe, bone), euler);
         }
         const auto at = [&](const char* name) {
             const int i = resolveBone(posedProbe, name);
@@ -1735,7 +1795,7 @@ void RealPhases::armPhases() {
         Armature posedProbe;
         posedProbe.build(bones);
         for (const auto& [bone, euler] : restPose) {
-            posedProbe.setBoneRotation(bone, euler);
+            posedProbe.setBoneRotation(resolveBoneName(posedProbe, bone), euler);
         }
         const int handP = resolveBone(posedProbe, "rHand");
         const int headP = resolveBone(posedProbe, "head");
@@ -3018,7 +3078,7 @@ void RealPhases::collisionPhases() {
                     Armature arm;
                     arm.build(bones);
                     for (const auto& pp : restPose) {
-                        arm.setBoneRotation(pp.first, pp.second);
+                        arm.setBoneRotation(resolveBoneName(arm, pp.first), pp.second);
                     }
                     const int b = resolveBone(arm, canonical);
                     if (b < 0) {
@@ -3034,7 +3094,7 @@ void RealPhases::collisionPhases() {
                         Armature posedProbe;
                         posedProbe.build(bones);
                         for (const auto& pp : restPose) {
-                            posedProbe.setBoneRotation(pp.first, pp.second);
+                            posedProbe.setBoneRotation(resolveBoneName(posedProbe, pp.first), pp.second);
                         }
                         glm::vec3 e = start;
                         for (int k = 0; k < 40; ++k) {
@@ -3859,19 +3919,27 @@ void RealPhases::pelvisPhases() {
         const int hip = indexOf("hip");
         const int head = indexOf("head");
         const int lFoot = indexOf("lFoot");
-        // By structure (the generations name them differently): the hip's child over the legs,
-        // its child under the head, and the first joint of the left leg.
+        // By structure (the generations name them differently): the hip's child over BOTH legs
+        // (over one leg alone it is a thigh — a game-engine rig hangs its thighs off the hips and
+        // keeps the pelvis bone as a leaf beside them, 2026-11-03: the rig standard's Pelvis role
+        // then), its child under the head, and the first joint of the left leg — a child of the
+        // pelvis bone, or of the hips where there is none.
+        const int rFoot = indexOf("rFoot");
         int pelvisBone = -1, spineBone = -1, thigh = -1;
         for (std::size_t i = 0; i < bones.size() && hip >= 0; ++i) {
-            if (bones[i].parent == hip && under(lFoot, static_cast<int>(i))) {
+            if (bones[i].parent == hip && under(lFoot, static_cast<int>(i)) && under(rFoot, static_cast<int>(i))) {
                 pelvisBone = static_cast<int>(i);
             }
             if (bones[i].parent == hip && under(head, static_cast<int>(i))) {
                 spineBone = static_cast<int>(i);
             }
         }
-        for (std::size_t i = 0; i < bones.size() && pelvisBone >= 0; ++i) {
-            if (bones[i].parent == pelvisBone && under(lFoot, static_cast<int>(i))) {
+        if (pelvisBone < 0) {
+            pelvisBone = resolveBone(probe, "pelvis");
+        }
+        const int legRoot = pelvisBone >= 0 && under(lFoot, pelvisBone) ? pelvisBone : hip;
+        for (std::size_t i = 0; i < bones.size() && legRoot >= 0; ++i) {
+            if (bones[i].parent == legRoot && under(lFoot, static_cast<int>(i))) {
                 thigh = static_cast<int>(i);
             }
         }

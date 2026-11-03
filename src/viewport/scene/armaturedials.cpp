@@ -18,6 +18,8 @@
 
 #include "armature.h"
 #include "ikmath.h" // axisIndexOf
+#include "ikrig.h"
+#include "rigroles.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -162,6 +164,13 @@ glm::vec3 Armature::limbDirection(int bone) const {
         const glm::vec3 toward = count > 0 ? sum / static_cast<float>(count) : glm::vec3(src.localBind[3]);
         if (std::abs(glm::dot(axis, toward)) > 1.0e-6f) {
             along = glm::dot(axis, toward);
+        } else if (count == 0 && src.parent >= 0) {
+            // A zero-length LEAF at its parent's joint (a rigging add-on's palm bones, each a
+            // leaf beside the finger it stands for): nothing of its own says which way is
+            // distal, and read as "+axis" the right side's — whose mirrored frame's length axis
+            // points proximally — swung the other way for the same dial (4 degrees apart,
+            // 2026-11-03). It lies the way its parent's segment lies.
+            along = glm::dot(axis, limbDirection(src.parent));
         }
     }
     return along >= 0.0f ? axis : -axis;
@@ -294,12 +303,40 @@ JointDial Armature::jointDial(int bone, JointDialKind kind) const {
         const float big = std::max(std::abs(lo), std::abs(hi));
         const float small = std::min(std::abs(lo), std::abs(hi));
         float sign = 1.0f;
-        if (small <= kDialOneSidedShare * big) {
+        // A FINGER's bend dial is its long side — the flexion, on every finger joint the reference
+        // authors (a knuckle -90..50, a thumb's base -26..40): the geometric rule below reads the
+        // way a joint carries its limb forward or down, and a finger hanging in an A-pose carries
+        // its tip neither — the thumb's reads one way on one rig and the other on the next
+        // (2026-11-03: a character-creation rig's thumb Bend dial EXTENDED the thumb once its
+        // frame was the palm's). The toes keep the geometric rule: a toe points forward and curls
+        // DOWN, which the rule reads, and the reference's toe joints author their long side on
+        // either sign.
+        const bool finger = m_ikRig && m_ikRig->roles().built() && m_ikRig->roles().role(joint) == RigRole::Finger;
+        if (finger || small <= kDialOneSidedShare * big) {
             sign = std::abs(hi) >= std::abs(lo) ? 1.0f : -1.0f; // a fold: its long side
         } else {
             const glm::vec3 v = sweep(forward);
-            sign = std::abs(v.z) >= std::abs(v.y) ? (v.z >= 0.0f ? 1.0f : -1.0f)  // forward
-                                                  : (v.y <= 0.0f ? 1.0f : -1.0f); // ... or down
+            const bool      even = std::abs(hi) - std::abs(lo) <= kDialEvenShare * std::max(big, 1.0e-6f) &&
+                                   std::abs(lo) - std::abs(hi) <= kDialEvenShare * std::max(big, 1.0e-6f); // (the side bend's own test)
+            if (even && std::abs(v.x) > std::abs(v.y) && std::abs(v.x) > std::abs(v.z)) {
+                // An EVEN channel whose swing is SIDEWAYS (a rib helper's, a palm bone's: the
+                // bend dial of a joint that carries nothing fore and aft): outward for a side's
+                // bone, toward her left for a centre one — the side-bend rule below. Read as
+                // "forward" it was +1 on both sides, and on a rig conformed from an FBX file,
+                // whose two sides carry near-identical frames rather than mirror images, the same
+                // local sign is an UNMIRRORED turn: the Blender export's rib helpers turned 10
+                // degrees apart for the same dial, a rigging add-on's palms 4 (2026-11-03). The
+                // reference generations have no such channel, and read as before. EVEN only: a
+                // finger's knuckle hanging in an A-pose swings sideways too (its sweep's lateral
+                // part a hair over its downward one on the main family, well over on a biped
+                // export) and is no even channel (-90..50) — read outward, its Bend dial
+                // EXTENDED the finger on every A-pose rig for the day the rule stood unqualified.
+                const float outward = sideOf(joint) < 0 ? -v.x : v.x;
+                sign = outward >= 0.0f ? 1.0f : -1.0f;
+            } else {
+                sign = std::abs(v.z) >= std::abs(v.y) ? (v.z >= 0.0f ? 1.0f : -1.0f)  // forward
+                                                      : (v.y <= 0.0f ? 1.0f : -1.0f); // ... or down
+            }
         }
         return make(joint, forward, sign);
     }

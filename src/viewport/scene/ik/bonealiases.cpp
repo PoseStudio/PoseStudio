@@ -59,40 +59,61 @@ const BoneAlias kBoneAliases[] = {
 
 int aliasedBoneIndex(const Armature& arm, const std::string& canonical) {
     int idx = arm.boneIndex(canonical);
-    if (idx >= 0) {
-        return idx;
-    }
-    for (const BoneAlias& alias : kBoneAliases) {
-        if (canonical != alias.canonical) {
-            continue;
-        }
-        for (const char* alt : alias.alternates) {
-            if (alt != nullptr && (idx = arm.boneIndex(alt)) >= 0) {
-                return idx;
+    if (idx < 0) {
+        for (const BoneAlias& alias : kBoneAliases) {
+            if (canonical != alias.canonical) {
+                continue;
+            }
+            for (const char* alt : alias.alternates) {
+                if (alt != nullptr && (idx = arm.boneIndex(alt)) >= 0) {
+                    break;
+                }
+            }
+            if (idx >= 0) {
+                break;
             }
         }
     }
-    // Neither the name nor an alias: THE ROLE the canonical name denotes (rigroles.h — the
-    // reference generation's names are the standard's first convention), on a rig whose roles
-    // have been built. A rig that names its bones in a convention this table never saw resolves
-    // the same canonical names the same way.
+    // THE ROLE the canonical name denotes (rigroles.h — the reference generation's names are the
+    // standard's first convention), on a rig whose roles have been built: the answer where
+    // neither the name nor an alias fits (a rig that names its bones in a convention this table
+    // never saw resolves the same canonical names the same way) — and, since 2026-11-03, for ONE
+    // collision of conventions where the name does fit: a game-engine export calls its HIPS
+    // "pelvis" and keeps the pelvis bone as a leaf beside them, so "pelvis" read by name took the
+    // hips there and every pelvis-bone gesture was a hips drag. Where the canonical denotes the
+    // pelvis bone and the named bone is the rig's hips, the Pelvis-role bone answers. Only that
+    // pair: letting the role win over ANY name whose bone carries another role reached the
+    // reference rigs — the third generation's big toe is its Ball by role, and "lBigToe" then
+    // grabbed another toe (r79 against r76: 36-94 rows moved on every rig). The names are the
+    // standard's first convention; the roles are an inference, and where the two disagree on a
+    // reference rig the NAME is right.
     const IkRig* rig = arm.ikRig();
-    if (rig == nullptr && arm.hasSkeleton()) {
+    if (idx < 0 && rig == nullptr && arm.hasSkeleton()) {
         // The rig is a cache of the bind skeleton (built at the first drag, pick or import): a
-        // name lookup on an armature that has none yet builds it, as reading any cache does.
+        // name lookup that neither the names nor the aliases answer builds it, as reading any
+        // cache does — and ONLY such a lookup (2026-11-03): built on every lookup for a day, the
+        // harness's probes on the reference rigs, whose names all resolve, carried rigs they
+        // never had, built before their body mesh (skeleton-sized floor clearances), and the
+        // floor scenarios sized off those put the seat 25mm over the floor instead of 110 —
+        // every prone and all-fours phase moved on the eight rigs (r79/r80 against r76). A
+        // rig the lookup did not need is not built; one that exists is read.
         const_cast<Armature&>(arm).prepareIkRig();
         rig = arm.ikRig();
     }
     if (rig != nullptr && rig->roles().built()) {
         const RigRoleTag tag = rig->roles().canonicalTag(canonical);
         if (tag.role != RigRole::None) {
-            idx = rig->roles().find(tag.role, tag.side, tag.index, tag.joint);
-            if (idx >= 0) {
-                return idx;
+            const int byRole = rig->roles().find(tag.role, tag.side, tag.index, tag.joint);
+            if (idx < 0) {
+                return byRole;
+            }
+            if (byRole >= 0 && byRole != idx && tag.role == RigRole::Pelvis &&
+                rig->roles().role(idx) == RigRole::Hips) {
+                return byRole;
             }
         }
     }
-    return -1;
+    return idx;
 }
 
 std::string aliasedBoneName(const Armature& arm, const std::string& canonical) {

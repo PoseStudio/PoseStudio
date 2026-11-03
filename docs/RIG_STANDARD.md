@@ -99,6 +99,20 @@ it back — the standard's grammar first, then the reference generation's. The I
 round trip on every bone of every reference rig, and the test tools accept the standard's names
 beside the reference generation's.
 
+**The names are applied on import** (2026-11-03): the FBX conformer's last step renames every bone
+the standard names to that name and leaves the rest — the face rig, the helpers, a bone no role was
+found for — as the file had them (a standard name a kept name already uses is not applied). The
+skin and the drivers bind by index, so nothing moves; what changes is what a pose file carries:
+every conformed rig shares the standard's frames, rotation orders and ranges, so with its names a
+pose saved on one imported character loads on every other. The native figures are never renamed —
+their correctives, pose files and the content around them are keyed to their own names, which the
+standard reads as its first convention. A **standard-named rig** (every bone the standard names
+carrying that name) is also weighed **by role**: the balance masses come from each bone's role —
+the class's share split among the bones of that class on that side, the spine's lower half the
+abdomen's fraction and its upper half the chest's — where the name table, classing by fragments of
+the reference's names, put every `spineN` in one class and gave a conformed rig a third of the
+reference's trunk. The reference rigs carry their own names and keep the table, bit for bit.
+
 ## How a figure is conformed
 
 The roles are **inferred from the bind skeleton's structure**, in this order. Each rule reads only
@@ -131,7 +145,12 @@ what the rules before it settled.
 Two things are read from a bone's **name**, where the geometry does not decide them: which digit
 a finger or a toe is (the tokens thumb, index, mid, ring, pinky; big, index, mid, ring, pinky,
 little), falling back to the digit's place across the hand or the foot when a rig has no such
-tokens; and the two face bones the tests name, the eyes and the lower jaw.
+tokens — except that **the thumb is the digit whose first joint sits nearest the wrist** where
+one does by a fifth (a thumb's chain begins at the carpus, a finger's at the knuckle, a palm's
+length out: a biped rig that names its digits Finger0 to Finger4 had its index finger's knuckle,
+further forward than the thumb's base, taken for the thumb by place alone, and its first relaxed
+hand curled the index sideways and folded the thumb like a finger); and the two face bones the
+tests name, the eyes and the lower jaw.
 
 The inference needs: the hierarchy, the bind positions, the solve root, which joints are
 foot-class (low at bind), which bones are twist helpers, each subtree's mass, and the body mesh
@@ -182,21 +201,35 @@ limits, which the engine poses as a static rig).
 3. **The limits**, per role, transcribed from the reference generation's authored ranges — a
    knee `-11..155` folding one way, an elbow `-135..20`, a thigh `-115..35` with `-26..85` of
    abduction, a collar's `-10..55` of shrug, a finger's three joints, the toes', the ball's,
-   the neck's and each spine link's (a spine of any length is mapped onto the reference's four
-   links), the head's, the jaw's and the eyes'. The right side takes the left's with its side
+   the neck's and each spine link's (a spine or a neck of any length is mapped onto the
+   reference's chain by place, each link's limits interpolated at its relative place and then
+   renormalized so the links together carry the reference chain's total range — three links
+   that took links 1, 3 and 4 of the four had a third less flexion than the reference's trunk,
+   and the bow rested short by that), the head's, the jaw's and the eyes'. The right side takes the left's with its side
    and twist channels mirrored. A segment's own twist channel is locked only when a twist
    helper of that segment lies **on the chain** between it and its next joint (the reference's
    thigh twist carries the shin); a helper hanging as a leaf beside the chain carries skin
    alone, and the segment keeps its twist. A helper is locked on every channel; a bone with no
    role is left free. The upper arm's elevation range is relative to the bind: a figure bound
    with its arms out horizontally keeps the same absolute reach as one bound at the reference's
-   46 degrees.
+   46 degrees. The foot's pitch is two joints' on the reference — the ankle (-45..65) and a
+   metatarsal joint between it and the ball (-20..25), some 70 degrees of dorsiflexion in all,
+   which is what a kneel spends: the shin leans forward over a planted, flat foot until the knee
+   is nearly down. A foot with no metatarsal joint takes the metatarsal's range at the ankle
+   (-70..85), or its kneel stops with the knees 10 cm off the floor.
 4. **The frames**, by role, each the minimal rotation taking a world axis onto the bone's
    direction — X for the arms, hands and fingers, Z for the feet, toes and pectorals — and
    the direction itself by role: a chain bone points at its next joint through the helpers
    between (the thigh at the shin, the forearm at the hand), the hand at the mean of its
    fingers' bases, the ball at the mean of its toes', a leaf at its tip, a single-bone toe
-   along its foot; a leaf twist helper takes its segment's frame. **The trunk is
+   along its foot; a leaf twist helper takes its segment's frame; and a leaf **named twist**
+   lies along its segment whatever its tip says (a biped export hangs an end marker off each
+   twist bone that sits square to the arm, and read toward it no twist bone was one). **The
+   thumb's roll is the palm's**: a finger's bend axis lies in the palm's plane, where the least
+   rotation finds it on the binds seen, but a thumb lies out of that plane and flexes into it,
+   and the reference generation authors its bend axis as the back-of-hand normal (the index and
+   little fingers' bases about the wrist) rolled 28.5 degrees about the thumb's length, the
+   same on every joint of the thumb and on four generations to a degree. **The trunk is
    world-aligned** — Y up, X lateral, Z forward on the hips, the pelvis, every spine link, the
    neck and the head, as the reference generation authors them whatever the spine's curve: the
    engine's trunk rules read flexion about the world's lateral axis. A frame along a leaning
@@ -221,13 +254,62 @@ The conformance report says how far it got (bones placed, chain lengths, twist h
 and toe joints, bones without a role, the missing required roles); the import log prints it and
 `POSESTUDIO_RIG_ROLES_TRACE` the roles themselves.
 
-Four things the engine learned to read for such rigs, each bit-identical on the reference
+Ten things the engine learned to read for such rigs, each bit-identical on the reference
 figures: a driven bone (above); a bone's mirror twin by a **side token** anywhere in its name (`Thing_L_Part`,
 `part.L`, `part_l`, `LeftPart`), then by role for what the names leave unpaired; a **helper**
 bone by role that is no twist bone (a corrective bone beside a knee) is the flesh of the joint
-it hangs from — a click on it selects that joint, as a click on a carpal selects the hand; and
-an idle arm at the **elevation it was bound at** is unposed (the reference binds at 46 degrees,
-inside the hang's 60-degree cone; a game rig's A-pose may stand 63 off the vertical).
+it hangs from — a click on it selects that joint, as a click on a carpal selects the hand; an
+idle arm at the **elevation it was bound at** is unposed (the reference binds at 46 degrees,
+inside the hang's 60-degree cone; a game rig's A-pose may stand 63 off the vertical); the
+**balance masses' side** is read off the same side tokens (the name table split by the first
+letter alone, and a rig that puts the side last — `thigh_r`, `calf_twist_01_l` — had every thigh
+a centre thigh, its share split six ways across both sides and their helpers: a leg weighed
+3.5% of the body, a thigh socket was no girdle grab, and nothing dragged by the hips went
+anywhere); a **helper is no riding part** of the joint it hangs off (a leaf twist helper beside
+a shin carries the lower calf's skin to the ankle, and read as the knee's flesh it put the knee
+"within the kneel band" 25cm up, where a game rig's kneel then planted both knees in mid-air
+and stalled); a foot whose toes are **one childless bone** takes the standard's Ball role as its
+ball when the structural search (a joint with children under the ankle) finds none; a **skinned
+zero-length leaf at the hips** of a rig with no pelvis bone (a game-engine export re-parents the
+thighs to the hips and leaves the pelvis bone as a leaf carrying the pelvis skin) is the Pelvis;
+and where a rig calls its **hips "pelvis"** and has such a leaf, the canonical name "pelvis"
+resolves to the Pelvis-role bone — the one collision of conventions the alias layer corrects by
+role (every other literal name is right as read: the names are the standard's first convention,
+the roles an inference, and letting the role win over any name reached the reference rigs, whose
+third generation's big toe is its ball by role); and two rules of the Transform dials that the
+reference's authored frames never needed: an even forward-bend channel that swings **sideways** (a
+rib helper's, a palm bone's) takes the side-bend rule's sign — outward for a side's bone, her left
+for a centre one — because on a conformed rig, whose two sides carry near-identical frames rather
+than mirror images, the same local sign is an unmirrored turn (the Blender export's rib helpers
+turned 10 degrees apart for the same dial); and a **zero-length leaf** at its parent's joint (a
+rigging add-on's palm bones, each a leaf beside its finger) lies the way its parent's segment
+lies, nothing of its own saying which way is distal.
+
+And five more from a biped rig exported by an animation package (2026-11-03: its digits named
+only by number, its twist bones with end markers of their own, its chest one long bone on a
+two-link spine, its toe bone bound 11cm below a sole that rests on the floor), each bit-identical
+on the reference figures but the two noted: **the top spine link is never the girdle** — the
+chest top the collars and the neck hang from carries the arms and the head, and is a chest
+however near the hips a short spine puts it (two bones from the root and 18cm up, it met the
+girdle rule, and every grab of the chest was a hips drag: the trunk never bent, a bow was a walk
+and the pinned seat moved under a lean); **the bone classes follow the roles** where the
+structural rules and the roles disagree — a Finger or a Toe is a digit, a carpal, a metatarsal,
+the heel, or the ball the toes fan from, is the hand's or the foot's own — while a ball with
+no toe below it, the one-bone toe block of a game rig's, a rigging add-on's or a biped's foot,
+IS the toes and keeps what the structure read, a digit that curls (the foot model's ball is a
+role, not a class); on two reference generations the rule moves two foot bones each from digit
+to the foot's own — the oldest generation's toes block, its ball by role with the big toe below
+it, and the third generation's nameless mid-foot stub — so the oldest generation's big toe
+dragged no longer bends the block with it;
+**a foot-class joint bound below the floor keeps its bind height** as its clearance (clamped at
+the floor, the ball's clearance stood 11cm over the joint and every floor reading of the rig
+began 111mm through it); **the root is the seat** where the rig has no pelvis bone (the
+buttocks' flesh is the root's own there; excluded from the contacts, a figure sat on the floor
+had no seat, and reclined by the chest she leaned on nothing); and **a finger's Bend dial is its
+long side**, the flexion, on every rig (the geometric rule reads the way a joint carries its
+limb forward or down, which a finger hanging in an A-pose does neither: a thumb's dial extended
+the thumb on one conformed rig, and the main family's knuckle read extension for the day the
+sideways-swing rule above stood unqualified — it is for even channels only now).
 
 ## What the standard will grow to cover
 
@@ -237,8 +319,11 @@ These are the next steps, in order.
    bend and its twist, and which direction is forward, outward and pointed. The Transform tab's
    dials already derive this by geometry for every joint, and the conformer's limits assume the
    reference's channel layout; the standard will make it a definition.
-2. **The rest of the engine's name lookups**: the balance masses, the harness alias table
-   itself.
+2. **The rest of the engine's name lookups**: the balance masses — their SIDE is read by role-
+   grade tokens now, their CLASS still by name fragments, so a game-engine rig's spine weighs a
+   third of the reference's trunk (`spine_01..03` share the one "spine" entry where the reference's
+   four links share "abdomen" and "chest") and its bow rests 4cm short of a cursor the reference
+   reaches: the masses by role are the next round — and the harness alias table itself.
 3. **The standard's names in the test tools.** The names are decided (see *The standard's
    names*); the harness and the galleries still speak the reference generation's names and will
    move to the standard's.

@@ -158,6 +158,11 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
     const std::vector<ArmatureBone>& bones = sc.scale == 1.0f ? baseBones : scaled;
     arm.build(bones);
     applyBodyMesh(arm, sc.scale);
+    // The rig from the start, as the app has it from the import on (Model::Model): a canonical
+    // name a pin or a pre-pose speaks that is none of this rig's names resolves through the rig
+    // standard's roles, which the rig holds (bonealiases.cpp) — and the alias layer never builds
+    // it (2026-11-03). Built here, after the mesh, it is the rig the first drag would have built.
+    arm.prepareIkRig();
     const std::size_t n = arm.boneCount();
     const auto applyPrePose = [&]() {
         for (const auto& [bone, euler] : sc.prePose) {
@@ -1121,6 +1126,11 @@ IdleMetrics runIdleMetrics(const std::vector<ArmatureBone>& baseBones, const Sce
     Armature arm;
     arm.build(sc.scale == 1.0f ? baseBones : scaledBones(baseBones, sc.scale));
     applyBodyMesh(arm, sc.scale);
+    // The rig from the start, as the app has it from the import on (Model::Model): a canonical
+    // name a pin or a pre-pose speaks that is none of this rig's names resolves through the rig
+    // standard's roles, which the rig holds (bonealiases.cpp) — and the alias layer never builds
+    // it (2026-11-03). Built here, after the mesh, it is the rig the first drag would have built.
+    arm.prepareIkRig();
     for (const auto& [bone, euler] : sc.prePose) {
         arm.setBoneRotation(resolveBoneName(arm, bone), euler);
     }

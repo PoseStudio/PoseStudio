@@ -45,6 +45,7 @@ struct RigConformReport {
     int                      toeJoints = 0;
     int                      unplaced = 0;      ///< Bones of the body the standard has no role for.
     int                      drivenHelpers = 0; ///< Helper bones given a driver (half a joint's bend, a share of a segment's twist).
+    int                      renamed = 0;       ///< Bones given the standard's name (the face rig and the helpers keep their file's).
     int                      spineLinks = 0;
     int                      neckLinks = 0;
     std::vector<std::string> missing;           ///< The required roles not found.

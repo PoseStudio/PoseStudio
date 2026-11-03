@@ -182,6 +182,22 @@ void Armature::ikChooseUnknowns(IkSolveScratch& s) {
                     }
                 }
             }
+            // THE BALL BY ROLE (2026-11-03): the search above wants a candidate WITH children (the
+            // toes fan from the ball), and a rig whose toes are one childless bone — a rigging
+            // add-on's "toe" block — found none: its ankles were pinned rigidly, no heel lift, no
+            // tucked toes, no kneel. Where the structure finds nothing, the rig standard's Ball
+            // role of this foot stands in (rigroles.h: the first bone under the ankle with two
+            // children or more, else the deepest with a child, else the toe block), a childless
+            // ball held flat like any other. The reference rigs never reach this: their toes hang
+            // off the ball.
+            if (ball < 0 && m_ikRig && m_ikRig->roles().built()) {
+                const RigRoles& roles = m_ikRig->roles();
+                const int       roleBall = roles.find(RigRole::Ball, roles.side(node));
+                if (roleBall >= 0 && roleBall != node && boneUnder(roleBall, node) &&
+                    m_ikBindPos[static_cast<std::size_t>(roleBall)].y < kBallHeightFraction * pinHeight) {
+                    ball = roleBall;
+                }
+            }
         }
         m_jsBall[static_cast<std::size_t>(node)] = ball;
         static const bool kBallTrace = std::getenv("IK_JS_BALL_TRACE") != nullptr; // which joint each pin's ball is

@@ -505,9 +505,10 @@ void IkRig::seedPoseContacts(const std::vector<glm::vec3>& positions) {
         const std::size_t ci = static_cast<std::size_t>(c);
         const bool realMass =
             m_masses[ci] >= kTokenBoneMass || m_subtreeMass[ci] >= kTokenLimbMass;
-        if (!m_bodyNode[ci] || c == m_pelvis || isEffector(c) || !realMass ||
-            !descendsFromPelvis(c) || isFootClass(static_cast<int>(ci)) || helperNode(c)) {
-            continue; // (helperNode: a twist helper is no contact — the segment's far joint is; see ikrig.h)
+        const bool rootSeat = c == m_pelvis && m_rootIsSeat; // (the root descends from nothing: it is the seat by itself)
+        if (!m_bodyNode[ci] || (c == m_pelvis && !rootSeat) || isEffector(c) || !realMass ||
+            (!descendsFromPelvis(c) && !rootSeat) || isFootClass(static_cast<int>(ci)) || helperNode(c)) {
+            continue; // (helperNode: a twist helper is no contact — the segment's far joint is; see ikrig.h; m_rootIsSeat: a rig with no pelvis bone sits on its root)
         }
         const float h = contactHeight(c, positions);
         if (kTrace && h < 0.08f * scale) {
@@ -1054,9 +1055,10 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
         // share a helper bone halved still carries its fingers) — the promotion rule's pair.
         const bool realMass =
             m_masses[ci] >= kTokenBoneMass || m_subtreeMass[ci] >= kTokenLimbMass;
-        if (!m_bodyNode[ci] || c == m_pelvis || isEffector(c) || !realMass ||
-            !descendsFromPelvis(c) || helperNode(c)) {
-            continue; // (helperNode: a twist helper is no contact — the segment's far joint is; see ikrig.h)
+        const bool rootSeat = c == m_pelvis && m_rootIsSeat; // (the root descends from nothing: it is the seat by itself)
+        if (!m_bodyNode[ci] || (c == m_pelvis && !rootSeat) || isEffector(c) || !realMass ||
+            (!descendsFromPelvis(c) && !rootSeat) || helperNode(c)) {
+            continue; // (helperNode: a twist helper is no contact — the segment's far joint is; see ikrig.h; m_rootIsSeat: a rig with no pelvis bone sits on its root)
         }
         const float h = contactHeight(c, applied);
         if (kTraceNear && h < 0.05f * scale) {

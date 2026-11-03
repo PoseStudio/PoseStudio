@@ -173,9 +173,13 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
         if (!m_bodyNode[i]) {
             continue;
         }
+        // (A foot-class joint's clearance IS its bind height — below the floor too, 2026-11-03: a
+        // biped export binds its toe bone, the ball of the foot, 11cm under a sole that rests on
+        // the floor, and clamped at 0 the ball's clearance stood 11cm over the joint's own place:
+        // every floor reading of the rig began 111mm "through the floor", while the foot model,
+        // which holds the ball at its clearance, was asked a foot the skin never has.)
         const float bindY = m_bindPos[i].y;
-        m_floorClearance[i] = bindY < kContactHeight * m_sizeScale ? std::max(bindY, 0.0f)
-                                                                   : kFleshRadius * m_sizeScale;
+        m_floorClearance[i] = bindY < kContactHeight * m_sizeScale ? bindY : kFleshRadius * m_sizeScale;
     }
     // THE RIG STANDARD'S ROLES (rigroles.h): what each bone is, from the structure settled above
     // — the root, the body tree, the masses, the helpers, the foot class — and the mesh sample.
@@ -198,13 +202,36 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
         in.root = m_pelvis;
         in.sizeScale = m_sizeScale;
         m_roles.build(in);
+        // THE ROOT IS THE SEAT where the rig has no pelvis bone (2026-11-03): a biped export and a
+        // rigging add-on's export hang the thighs straight off the hips, and the buttocks' flesh
+        // is the root's own. The contact rules keep the root out of the contacts on every rig
+        // with a pelvis bone (that bone is the seat there); on these it is the one joint a
+        // sitting figure rests on, and excluded she had no seat: reclined by the chest she leaned
+        // on nothing, and laid down by it she arched her spine to its limits 15cm off the floor.
+        m_rootIsSeat = m_roles.built() && m_roles.find(RigRole::Pelvis) < 0;
         m_headNode = m_roles.find(RigRole::Head);
         m_neckBase = m_roles.find(RigRole::Neck, RigSide::Centre, 1);
         static const bool kRolesTrace = std::getenv("POSESTUDIO_RIG_ROLES_TRACE") != nullptr;
         if (kRolesTrace) {
             std::fputs(m_roles.report().c_str(), stderr);
         }
-        fillMassesByRole();
+        // A STANDARD-NAMED rig — every bone the standard names carries that name: the FBX
+        // conformer's rigs since 2026-11-03, or a figure authored to the standard — is massed BY
+        // ROLE outright. The name table classes by fragments of the reference generation's names,
+        // and read on the standard's it put every spine link in the one "spine" class, a third of
+        // the reference's trunk (the game-engine export's known short bow); by role the lower
+        // links share the abdomen's fraction and the upper the chest's, as the table splits the
+        // reference. The reference rigs carry their own names and keep the table, bit for bit.
+        m_standardNamed = m_roles.built();
+        for (std::size_t i = 0; i < n && m_standardNamed; ++i) {
+            const std::string standard = RigRoles::standardName(m_roles.tag(static_cast<int>(i)));
+            m_standardNamed = standard.empty() || standard == names[i];
+        }
+        if (m_standardNamed) {
+            assignMassesByRole();
+        } else {
+            fillMassesByRole();
+        }
     }
     // BODY VOLUMES (see bodyVolumes()): the trunk and the limb roots by their ROLES, the radii
     // from the hip-socket spacing so they scale with the rig, each volume applied to the other
@@ -219,7 +246,14 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
     // walk stopping at the first child that is not: a hand's whole finger tree, the head's
     // face bones, a foot's toes; the pelvis stops at the thighs and the spine, a forearm at
     // the hand even where a helper bone has halved the hand's own share. The live contact
-    // detection measures a joint's height through them.
+    // detection measures a joint's height through them. NOT a HELPER (2026-11-03): a leaf twist
+    // helper beside a shin carries the LOWER calf's skin, and, no segment (no child), answers
+    // for all of it down to the ankle — read as the knee's riding part, that skin put the knee
+    // "within the kneel band" with the knee 25cm up, and a game-engine rig's kneel planted both
+    // knees in mid-air and stalled there (IK_HELPER_RIDERS is the A/B). A helper splits a rigid
+    // segment and has no joint of its own; what rides a joint is the token flesh that moves with
+    // it — a finger, a toe, the face — not the far half of its own segment.
+    static const bool kHelperRiders = std::getenv("IK_HELPER_RIDERS") != nullptr; // A/B probe
     m_ridingDescendants.assign(n, {});
     for (std::size_t i = 0; i < n; ++i) {
         if (!m_bodyNode[i] || (m_masses[i] < kTokenBoneMass && m_subtreeMass[i] < kTokenLimbMass)) {
@@ -232,6 +266,9 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
             const std::size_t ci = static_cast<std::size_t>(c);
             if (!m_bodyNode[ci] || m_masses[ci] >= kTokenBoneMass ||
                 m_subtreeMass[ci] >= kTokenLimbMass) {
+                continue;
+            }
+            if (!kHelperRiders && m_helperNode[ci]) {
                 continue;
             }
             m_ridingDescendants[i].push_back(c);
@@ -268,6 +305,127 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
 // the table knows (the reference generations: every real bone named) is untouched and bit-identical;
 // a rig in another convention gets a centre of mass instead of a hundred token masses. The leaf
 // twist helpers' clamp is re-applied after, the subtree masses recomputed.
+namespace {
+
+/// The balance class a role belongs to: a twist helper is its segment's, a toe the ball's.
+RigRole massClassOf(RigRole r) {
+    switch (r) {
+    case RigRole::UpperArmTwist: return RigRole::UpperArm;
+    case RigRole::ForearmTwist: return RigRole::Forearm;
+    case RigRole::ThighTwist: return RigRole::Thigh;
+    case RigRole::ShinTwist: return RigRole::Shin;
+    case RigRole::Toe: return RigRole::Ball;
+    default: return r;
+    }
+}
+
+/// Whether spine link @p spineIndex (1-based) lies in the upper half of a chain of @p spineLinks.
+bool spineUpperHalf(int spineIndex, int spineLinks) {
+    return spineIndex * 2 > spineLinks;
+}
+
+/// A class's share of the body's mass — the name table's biomechanical fractions (balancecontroller.cpp),
+/// the spine's lower half the abdomen's, its upper half the chest's; 0 for a class with none.
+float massShareOf(RigRole cls, int spineIndex, int spineLinks) {
+    switch (cls) {
+    case RigRole::Hips: return 0.050f;
+    case RigRole::Pelvis: return 0.112f;
+    case RigRole::Spine: return spineUpperHalf(spineIndex, spineLinks) ? 0.170f : 0.100f;
+    case RigRole::Neck: return 0.012f;
+    case RigRole::Head: return 0.081f;
+    case RigRole::Collar: return 0.021f;
+    case RigRole::UpperArm: return 0.028f;
+    case RigRole::Forearm: return 0.016f;
+    case RigRole::Hand: return 0.006f;
+    case RigRole::Thigh: return 0.100f;
+    case RigRole::Shin: return 0.0465f;
+    case RigRole::Foot: return 0.0137f;
+    case RigRole::Metatarsal: return 0.005f;
+    case RigRole::Ball: return 0.004f;
+    default: return 0.0f;
+    }
+}
+
+} // namespace
+
+// THE BALANCE MASSES OF A STANDARD-NAMED RIG (2026-11-03): every real bone by its role, the class's
+// share split among the bones of that class on that side (and, for the spine, in that half) — the
+// name table's own split of the reference generation, now read off the roles, so a conformed rig
+// of any naming weighs as the reference does: a two-link spine carries the abdomen's and the
+// chest's fractions, a three-link one too, where the name table gave every "spineN" a share of
+// one class. What has no class — a finger, a carpal, a face bone, a pectoral, a helper — is a
+// token mass, as on the reference. The leaf twist helpers' clamp is re-applied after and the
+// subtree masses recomputed, as fillMassesByRole does. IK_NO_ROLE_MASSES keeps the name table's.
+void IkRig::assignMassesByRole() {
+    static const bool kNoRoleMasses = std::getenv("IK_NO_ROLE_MASSES") != nullptr; // A/B probe
+    if (kNoRoleMasses || !m_roles.built()) {
+        return;
+    }
+    const std::size_t n = m_masses.size();
+    const float       token = BalanceController::unclassifiedMass();
+    const auto        keyOf = [&](const RigRoleTag& t, RigRole cls) {
+        const int half = cls == RigRole::Spine && spineUpperHalf(t.index, m_roles.spineLinks()) ? 1 : 0;
+        return (static_cast<int>(cls) * 3 + static_cast<int>(t.side)) * 2 + half;
+    };
+    std::vector<int>   group(n, -1);
+    std::vector<int>   keys;
+    std::vector<int>   groupCount;
+    std::vector<float> groupShare;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (!m_bodyNode[i]) {
+            m_masses[i] = 0.0f;
+            continue;
+        }
+        m_masses[i] = token;
+        const RigRoleTag& t = m_roles.tag(static_cast<int>(i));
+        const RigRole     cls = massClassOf(t.role);
+        const float       share = massShareOf(cls, t.index, m_roles.spineLinks());
+        if (share <= 0.0f) {
+            continue;
+        }
+        const int key = keyOf(t, cls);
+        int       g = -1;
+        for (std::size_t k = 0; k < keys.size(); ++k) {
+            if (keys[k] == key) {
+                g = static_cast<int>(k);
+                break;
+            }
+        }
+        if (g < 0) {
+            keys.push_back(key);
+            groupCount.push_back(0);
+            groupShare.push_back(share);
+            g = static_cast<int>(keys.size()) - 1;
+        }
+        group[i] = g;
+        ++groupCount[static_cast<std::size_t>(g)];
+    }
+    int massed = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (group[i] >= 0) {
+            const std::size_t g = static_cast<std::size_t>(group[i]);
+            m_masses[i] = groupShare[g] / static_cast<float>(std::max(1, groupCount[g]));
+            ++massed;
+        }
+    }
+    static const bool kRolesTrace = std::getenv("POSESTUDIO_RIG_ROLES_TRACE") != nullptr;
+    if (kRolesTrace) {
+        std::fprintf(stderr, "[rig-roles] a standard-named rig: %d balance mass(es) by role\n", massed);
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        if (m_children[i].empty() && m_helperNode[i]) {
+            m_masses[i] = std::min(m_masses[i], 0.0015f);
+        }
+    }
+    m_subtreeMass = m_masses;
+    for (std::size_t i = n; i-- > 1;) {
+        const int p = m_parents[i];
+        if (p >= 0) {
+            m_subtreeMass[static_cast<std::size_t>(p)] += m_subtreeMass[i];
+        }
+    }
+}
+
 void IkRig::fillMassesByRole() {
     static const bool kNoRoleMasses = std::getenv("IK_NO_ROLE_MASSES") != nullptr; // A/B probe
     if (kNoRoleMasses) {
@@ -275,36 +433,9 @@ void IkRig::fillMassesByRole() {
     }
     const std::size_t n = m_masses.size();
     const float       token = BalanceController::unclassifiedMass();
-    const auto classOf = [](RigRole r) {
-        switch (r) {
-        case RigRole::UpperArmTwist: return RigRole::UpperArm;
-        case RigRole::ForearmTwist: return RigRole::Forearm;
-        case RigRole::ThighTwist: return RigRole::Thigh;
-        case RigRole::ShinTwist: return RigRole::Shin;
-        case RigRole::Toe: return RigRole::Ball;
-        default: return r;
-        }
-    };
-    const auto upperHalf = [&](int spineIndex) { return spineIndex * 2 > m_roles.spineLinks(); };
-    const auto shareOf = [&](RigRole cls, int spineIndex) -> float {
-        switch (cls) {
-        case RigRole::Hips: return 0.050f;
-        case RigRole::Pelvis: return 0.112f;
-        case RigRole::Spine: return upperHalf(spineIndex) ? 0.170f : 0.100f;
-        case RigRole::Neck: return 0.012f;
-        case RigRole::Head: return 0.081f;
-        case RigRole::Collar: return 0.021f;
-        case RigRole::UpperArm: return 0.028f;
-        case RigRole::Forearm: return 0.016f;
-        case RigRole::Hand: return 0.006f;
-        case RigRole::Thigh: return 0.100f;
-        case RigRole::Shin: return 0.0465f;
-        case RigRole::Foot: return 0.0137f;
-        case RigRole::Metatarsal: return 0.005f;
-        case RigRole::Ball: return 0.004f;
-        default: return 0.0f;
-        }
-    };
+    const auto        classOf = [](RigRole r) { return massClassOf(r); };
+    const auto        upperHalf = [&](int spineIndex) { return spineUpperHalf(spineIndex, m_roles.spineLinks()); };
+    const auto        shareOf = [&](RigRole cls, int spineIndex) -> float { return massShareOf(cls, spineIndex, m_roles.spineLinks()); };
     // Only a class the name table gave NO mass to at all is filled: a class with one bone named
     // (the reference generations' forearm beside its twist helper named like a wrist) keeps the
     // table's books, so the reference rigs stay bit-identical.

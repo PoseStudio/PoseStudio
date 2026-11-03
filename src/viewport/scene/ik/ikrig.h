@@ -419,6 +419,9 @@ public:
     /// used to read a bone's NAME for its part (the body volumes' limb roots, the head and the neck,
     /// the helpers) reads this; a rig whose names match nothing conforms the same way.
     const RigRoles& roles() const { return m_roles; }
+    /// True when every bone the standard names carries that name (the FBX conformer's rigs): the
+    /// balance masses are then the roles', not the name table's.
+    bool standardNamed() const { return m_standardNamed; }
     /// The node of the foot currently mid-STEP (its pin target swinging to its new spot), or -1.
     int steppingPin() const {
         return m_stepPin >= 0 ? m_pins[static_cast<std::size_t>(m_stepPin)].node : -1;
@@ -508,6 +511,8 @@ private:
     /// pose's contacts are seeded): her arms are no supports in it (seedPoseContacts).
     bool                                m_seatedTrunkDrag = false;
     std::vector<char>            m_helperNode;     ///< Per bone: IkRigBone::helper — a twist helper, never a contact (helperNode()).
+    bool                         m_rootIsSeat = false; ///< The rig has no pelvis bone: the root's own flesh is the seat, and the root a contact candidate (see the contact rules).
+    bool                         m_standardNamed = false; ///< Every bone the standard names carries that name (a conformed FBX rig, or one authored to the standard): massed by role.
     std::vector<char>            m_bodyNode;       ///< False for the figure-node chain above the
                                                    ///< pelvis: no edges, contacts, or mass.
     /// Per bone: its token-mass descendants — the parts that ride it rigidly whenever it is not
@@ -581,6 +586,8 @@ private:
     void buildBodyVolumes(const std::vector<std::string>& names, const std::vector<BodyMeshPoint>* mesh);
     /// The balance masses of the bones the name table left at the token mass, by their roles (see ikrig.cpp).
     void fillMassesByRole();
+    /// The balance masses of a STANDARD-NAMED rig, every real bone by its role (see ikrig.cpp).
+    void assignMassesByRole();
     /// The floor clearances of the joints above the feet, from the figure's own skin: each bone's
     /// flesh, as its extreme points (see the definition).
     void fitFloorClearances(const std::vector<BodyMeshPoint>& mesh);

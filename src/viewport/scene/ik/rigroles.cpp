@@ -44,6 +44,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <limits>
 #include <sstream>
 
 namespace pose {
@@ -62,6 +63,10 @@ constexpr double kHelperSkinShare = 0.002;
 /// carpal or a metacarpal): a finger itself is three joints (a thumb's first joint IS its
 /// metacarpal, on every rig seen, and the rigs that author a carpal for it name it so).
 constexpr int kCarpalChainLength = 4;
+/// A finger base this share of the way to the next-nearest base's distance from the wrist, or
+/// nearer, is the THUMB (its chain begins at the carpus; a finger's at the knuckle, a palm's
+/// length out: 0.27 of the index's on the reference generation, 0.44 on a biped rig).
+constexpr float kThumbNearShare = 0.8f;
 
 std::string lowerAlpha(const std::string& name) {
     std::string out;
@@ -662,7 +667,12 @@ void RigRoles::build(const Input& in) {
         if (!isBody(c) || roleOf(c) != RigRole::None || skinlessLeaf(c) || isHelper(c) || hasFoot[idx(c)]) {
             continue;
         }
-        if (neck < 0 || std::abs(pos[idx(c)].x - rootX) < std::abs(pos[idx(neck)].x - rootX)) {
+        // The nearest the midline — and of two there, the one with MORE below it (2026-11-03: a
+        // biped export hangs a skinned leaf, its last spine link, beside the neck at the top,
+        // both on the midline to 1e-8; the neck carries the head).
+        const bool nearer = neck < 0 || std::abs(pos[idx(c)].x - rootX) < std::abs(pos[idx(neck)].x - rootX) - kSideOffPlane * scale;
+        const bool level = neck >= 0 && std::abs(std::abs(pos[idx(c)].x - rootX) - std::abs(pos[idx(neck)].x - rootX)) <= kSideOffPlane * scale;
+        if (nearer || (level && size[idx(c)] > size[idx(neck)])) {
             neck = c;
         }
     }
@@ -690,9 +700,12 @@ void RigRoles::build(const Input& in) {
                 continue;
             }
             const RigSide sd = sideByX(c);
-            if (sd == RigSide::Centre) {
-                continue;
+            if (sd == RigSide::Centre && (!ch[idx(c)].empty() || skinlessLeaf(c) || isHelper(c))) {
+                continue; // (a centre child with anything below it is no rider: the neck was taken above)
             }
+            // (A skinned centre LEAF off a spine link — a biped export's last spine link, hung
+            // beside the neck with the upper chest's skin — rides the link as a pectoral does,
+            // 2026-11-03: classed "other" it was a selectable joint with no limits.)
             std::vector<int> stack{c};
             while (!stack.empty()) {
                 const int b = stack.back();
@@ -748,6 +761,7 @@ void RigRoles::build(const Input& in) {
             int   bone;
             int   digit;
             float across;
+            float near; ///< The base's distance from the wrist (the thumb's is the least).
         };
         std::vector<FingerBase> bases;
         int                     carpals = 0;
@@ -797,7 +811,7 @@ void RigRoles::build(const Input& in) {
                 set(chain[q], RigRole::Carpal, s, ++carpals);
             }
             bases.push_back({chain[fingerFrom], digitByToken(lowerAlpha(m_names[idx(chain[fingerFrom])]), false),
-                             pos[idx(chain[fingerFrom])].z - pos[idx(hand)].z});
+                             pos[idx(chain[fingerFrom])].z - pos[idx(hand)].z, glm::length(pos[idx(chain[fingerFrom])] - pos[idx(hand)])});
             for (std::size_t q = fingerFrom; q < chain.size(); ++q) {
                 set(chain[q], RigRole::Finger, s, 0, static_cast<int>(q - fingerFrom) + 1); // (the digit is filled below)
             }
@@ -812,8 +826,33 @@ void RigRoles::build(const Input& in) {
         }
         if (!allTokens) {
             // The thumb foremost (the palm faces the body at bind, the thumb points forward), the
-            // little finger hindmost.
+            // little finger hindmost — EXCEPT THAT THE THUMB IS THE DIGIT WHOSE FIRST JOINT SITS
+            // NEAREST THE WRIST where one does by kThumbNearShare (2026-11-03): a thumb's chain
+            // begins at the carpus (its first bone is a metacarpal), a finger's at the knuckle, a
+            // palm's length out. A biped rig names its digits Finger0..Finger4, no digit words,
+            // and by the place alone the index's knuckle, further forward than the thumb's base
+            // at the wrist, was the thumb: the thumb got a finger's frame and limits, the index
+            // the thumb's, and the first relaxed hand curled its index sideways and folded its
+            // thumb like a finger. The other four keep their order by place.
             std::sort(bases.begin(), bases.end(), [](const FingerBase& a, const FingerBase& b) { return a.across > b.across; });
+            if (bases.size() >= 2) {
+                std::size_t nearest = 0;
+                for (std::size_t q = 1; q < bases.size(); ++q) {
+                    if (bases[q].near < bases[nearest].near) {
+                        nearest = q;
+                    }
+                }
+                float second = std::numeric_limits<float>::max();
+                for (std::size_t q = 0; q < bases.size(); ++q) {
+                    if (q != nearest) {
+                        second = std::min(second, bases[q].near);
+                    }
+                }
+                if (bases[nearest].near < kThumbNearShare * second) {
+                    std::rotate(bases.begin(), bases.begin() + static_cast<std::ptrdiff_t>(nearest),
+                                bases.begin() + static_cast<std::ptrdiff_t>(nearest) + 1); // (the thumb first, the rest as they were)
+                }
+            }
             for (std::size_t q = 0; q < bases.size(); ++q) {
                 bases[q].digit = static_cast<int>(q) + 1;
             }
@@ -919,7 +958,15 @@ void RigRoles::build(const Input& in) {
         }
         const bool scrap = haveMesh && realKids == 0 && totalSkin > 0 &&
                            static_cast<double>(skin[idx(i)]) < kHelperSkinShare * static_cast<double>(totalSkin);
-        set(i, skinlessLeaf(i) || scrap ? RigRole::Helper : RigRole::Other, sideByX(i));
+        // ... and a SKINNED leaf lying AT the hips' joint, where no bone carries both legs, is the
+        // PELVIS's flesh without its joint: a game-engine export re-parents the thighs to the hips
+        // and leaves the pelvis bone as such a leaf. It keeps the pelvis's role — the seat a floor
+        // sit rests on, the girdle a click on the hips finds — where a helper (no contact) left
+        // the sitter with no seat, and Other left it listed.
+        const bool atHips = realKids == 0 && par[idx(i)] == in.root && !skinlessLeaf(i) && !scrap &&
+                            find(RigRole::Pelvis) < 0 &&
+                            glm::length(pos[idx(i)] - pos[idx(par[idx(i)])]) < kSideOffPlane * scale;
+        set(i, atHips ? RigRole::Pelvis : skinlessLeaf(i) || scrap ? RigRole::Helper : RigRole::Other, atHips ? RigSide::Centre : sideByX(i));
     }
 
     // ---- THE REQUIRED ROLES.
