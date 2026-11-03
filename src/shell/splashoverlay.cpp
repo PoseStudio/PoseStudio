@@ -138,6 +138,7 @@ void SplashOverlay::dismiss() {
     if (qApp) {
         qApp->removeEventFilter(this);
     }
+    emit dismissed();
     deleteLater();
 }
 

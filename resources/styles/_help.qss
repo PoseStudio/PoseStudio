@@ -117,3 +117,30 @@
 #HelpSplitter::handle {
     background-color: #121212;
 }
+
+/* =========================================================================
+   [ WHAT'S NEW WINDOW ]  — the same page look (src/help/whatsnewdialog.cpp)
+   ========================================================================= */
+
+#WhatsNewDialog {
+    background-color: #191a1b;
+}
+
+#WhatsNewBrowser {
+    background-color: #1f2021;
+    color: #d6d6d6;
+    border: none;
+    font-size: 14px;
+    selection-background-color: #314d7a;
+    selection-color: #ffffff;
+}
+
+#WhatsNewFooter {
+    background-color: #191a1b;
+    border-top: 1px solid #121212;
+}
+
+#WhatsNewFooter QCheckBox {
+    color: #c8c8c8;
+    font-size: 13px;
+}

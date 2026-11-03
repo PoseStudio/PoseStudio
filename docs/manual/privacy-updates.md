@@ -31,6 +31,12 @@ The message does not block you; keep working and answer it when you like. Turn t
 
 Updating is manual: download the new installer or zip from the release page and run it. The installer upgrades in place and keeps your library and settings.
 
+## What's New after an update
+
+The first time a new version starts, PoseStudio opens **What's New in PoseStudio x.y.z** as soon as you have clicked the splash screen away: the release notes of the version you are now running — what was added, changed and fixed — in a scrollable window of its own. It appears once per version (a fresh install shows it too, for the version installed). **Release Notes** in the window opens the full history in this manual; **Close** (or `Enter` / `Esc`) puts it away.
+
+**Help → What's New…** opens the same window whenever you like. To stop it opening by itself, untick **Show this window after an update** in the window, or **Edit → Preferences → General → Show What's New after an update**.
+
 ## Where your data is
 
 | Data | Location | Uploaded? |

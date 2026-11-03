@@ -22,6 +22,7 @@
 #include "constants.h"
 #include "updatecheck.h"
 #include "helpwindow.h"
+#include "whatsnewdialog.h"
 #include "viewport/viewportwidget.h"
 #include "jointtransform.h" // pose::JointTransform: which of the joint-mode keys are live
 #include "scene/shademode.h" // kDefaultShadeMode (File → New's picker reset)
@@ -312,6 +313,12 @@ void MenuManager::setupMenus() {
     manualAction->setShortcut(QKeySequence::HelpContents);
     QObject::connect(manualAction, &QAction::triggered, mainWindow, [this]() {
         HelpWindow::open(mainWindow);
+    });
+    // What's New…: the running version's release notes in their own window — the one that opens
+    // by itself on the first start of a new version (whatsnewdialog.h); here, on demand.
+    QAction *whatsNewAction = helpMenu->addAction(tr("What's New..."));
+    QObject::connect(whatsNewAction, &QAction::triggered, mainWindow, [this]() {
+        WhatsNewDialog::showNow(mainWindow);
     });
     QAction *releaseNotesAction = helpMenu->addAction(tr("Release Notes"));
     QObject::connect(releaseNotesAction, &QAction::triggered, mainWindow, [this]() {

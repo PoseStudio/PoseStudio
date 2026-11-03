@@ -72,6 +72,10 @@ namespace Constants {
     // release version the user chose to skip ("0.3.14"), silenced at startup until a newer one.
     inline constexpr const char* PREF_UPDATE_CHECK_ENABLED = "UpdateCheckEnabled";
     inline constexpr const char* PREF_UPDATE_SKIPPED_VERSION = "UpdateCheckSkippedVersion";
+    /// The What's New window (src/help/whatsnewdialog.h): whether it opens on the first start of a
+    /// new version ("1"/"0", absent = on), and the last version it was decided for.
+    inline constexpr const char* PREF_WHATS_NEW_ENABLED = "WhatsNewEnabled";
+    inline constexpr const char* PREF_WHATS_NEW_SEEN_VERSION = "WhatsNewSeenVersion";
 
     // =========================================================================
     // UI DIMENSIONS & LAYOUT

@@ -73,6 +73,9 @@ public:
     /// the dark theme (heading colours, link colour, code backgrounds, table borders) and gives
     /// every heading an anchor named by its slug so `scrollToAnchor(slug)` works.
     void render(const QString& file, QTextDocument& document);
+    /// Renders @p markdown itself the same way (the What's New window's notes: a changelog
+    /// section under a title of its own).
+    void renderMarkdown(const QString& markdown, QTextDocument& document) const;
 
     /// The GitHub-style anchor for a heading's text: lower-cased, punctuation dropped, spaces to
     /// hyphens ("Joint pins (P)" -> "joint-pins-p"). Duplicates within a page get "-2", "-3", …

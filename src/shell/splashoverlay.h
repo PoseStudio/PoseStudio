@@ -30,9 +30,16 @@ class QShowEvent;
  * every other app — even ones the user switched to — which is a bad experience.
  */
 class SplashOverlay : public QWidget {
+    Q_OBJECT
+
 public:
     /// @param parent The window this overlay should cover (usually the QMainWindow).
     explicit SplashOverlay(QWidget *parent);
+
+signals:
+    /// The overlay has been dismissed (the user's first click): what waits for the branding to
+    /// clear — the What's New window on the first start of a new version — goes now.
+    void dismissed();
 
 protected:
     void mousePressEvent(QMouseEvent *) override;

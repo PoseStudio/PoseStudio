@@ -11,6 +11,7 @@
 #include "database.h"
 #include "menumanager.h"
 #include "splashoverlay.h"
+#include "whatsnewdialog.h"
 #include "helpwindow.h"
 #include "constants.h"
 #include "preferencesmanager.h"
@@ -180,6 +181,29 @@ int main(int argc, char *argv[]) {
     // Boot branding screen; dismisses itself on the user's next click anywhere
     SplashOverlay *splash = new SplashOverlay(&mainWindow);
     splash->show();
+    // The What's New window (see whatsnewdialog.h): on the first start of a new version, its
+    // release notes — raised once the splash is dismissed, so they are the first thing seen of
+    // the version and never sit under the branding. POSESTUDIO_WHATS_NEW=1 raises it at once.
+    QObject::connect(splash, &SplashOverlay::dismissed, &mainWindow, [&mainWindow]() {
+        WhatsNewDialog::showIfUpdated(&mainWindow);
+    });
+    if (qEnvironmentVariableIsSet("POSESTUDIO_WHATS_NEW")) {
+        QTimer::singleShot(800, &mainWindow, [&mainWindow]() {
+            WhatsNewDialog::showIfUpdated(&mainWindow);
+            // POSESTUDIO_WHATS_NEW_SHOT=<png>: save a picture of the window and exit (the
+            // manual shot's twin: how the window is LOOKED at without a desktop).
+            if (const QByteArray shotPath = qgetenv("POSESTUDIO_WHATS_NEW_SHOT"); !shotPath.isEmpty()) {
+                QTimer::singleShot(600, &mainWindow, [shotPath]() {
+                    for (QWidget* top : QApplication::topLevelWidgets()) {
+                        if (auto* dialog = qobject_cast<WhatsNewDialog*>(top)) {
+                            dialog->grab().save(QString::fromUtf8(shotPath));
+                        }
+                    }
+                    QApplication::quit();
+                });
+            }
+        });
+    }
 
     // "Open with" / drag-onto-exe convenience: import any model/figure paths passed on the command
     // line. Two paths, depending on the platform: the viewport builds its renderer on the first

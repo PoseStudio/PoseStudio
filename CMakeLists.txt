@@ -168,6 +168,8 @@ add_executable(
     src/help/helpwindow.h
     src/help/helpmanual.cpp               # the manual's manifest, embedded Markdown pages and page styling
     src/help/helpmanual.h
+    src/help/whatsnewdialog.cpp           # "What's New in x.y.z": the version's release notes, once per version at startup
+    src/help/whatsnewdialog.h
 
     # --- Asset Manager ---
     src/assets/assetmanagerwidget.cpp

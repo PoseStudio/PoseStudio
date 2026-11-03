@@ -34,7 +34,7 @@ The viewport sits on the left and the side panel on the right, separated by a dr
 
 **View** — the skeleton overlay and the camera views (all with keyboard shortcuts; see [Navigating the Viewport](navigation.md#the-camera-views)).
 
-**Help** — this manual (`F1`), the release notes (the manual's *What's New* page), the website, the update check, and the About screens. *Tutorials* and *Support* are placeholders.
+**Help** — this manual (`F1`), *What's New…* (this version's release notes in their own window — the one that opens by itself the first time a new version starts, see [Privacy and Updates](privacy-updates.md#whats-new-after-an-update)), the release notes (the manual's *What's New* page, the full history), the website, the update check, and the About screens. *Tutorials* and *Support* are placeholders.
 
 ## The viewport strip
 

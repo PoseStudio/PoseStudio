@@ -6,6 +6,7 @@
 #include "generalpreferencespanel.h"
 #include "installping.h"
 #include "updatecheck.h"
+#include "whatsnewdialog.h"
 #include "constants.h"
 #include "preferencesmanager.h"
 
@@ -55,6 +56,18 @@ GeneralPreferencesPanel::GeneralPreferencesPanel(QWidget* parent)
            "is sent. Help → Check for Updates… does the same on demand."));
     connect(updateToggle, &QCheckBox::toggled, this, [](bool enabled) {
         UpdateCheck::setEnabled(enabled);
+    });
+
+    // --- What's New after an update ---
+    auto* whatsNewToggle = new QCheckBox(tr("Show What's New after an update"), this);
+    whatsNewToggle->setChecked(WhatsNewDialog::isEnabled());
+    contentLayout()->addWidget(whatsNewToggle);
+    addDescription(
+        tr("The first time a new version of PoseStudio starts, a window with that version's release notes "
+           "opens once the splash screen is dismissed. Help → What's New… opens the same window whenever you "
+           "like."));
+    connect(whatsNewToggle, &QCheckBox::toggled, this, [](bool enabled) {
+        WhatsNewDialog::setEnabled(enabled);
     });
 
     // --- Camera changes as unsaved ---

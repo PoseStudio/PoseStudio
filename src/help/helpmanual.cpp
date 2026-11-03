@@ -199,14 +199,16 @@ QString HelpManual::searchTextOf(const QString& file) {
 }
 
 void HelpManual::render(const QString& file, QTextDocument& document) {
-    document.clear();
     const QString markdown = markdownOf(file);
-    if (markdown.isEmpty()) {
-        document.setMarkdown(QStringLiteral("# Page not found\n\nThe page `%1` is not embedded in this build.").arg(file),
-                             QTextDocument::MarkdownDialectGitHub);
-    } else {
-        document.setMarkdown(markdown, QTextDocument::MarkdownDialectGitHub);
-    }
+    renderMarkdown(markdown.isEmpty()
+                       ? QStringLiteral("# Page not found\n\nThe page `%1` is not embedded in this build.").arg(file)
+                       : markdown,
+                   document);
+}
+
+void HelpManual::renderMarkdown(const QString& markdown, QTextDocument& document) const {
+    document.clear();
+    document.setMarkdown(markdown, QTextDocument::MarkdownDialectGitHub);
     styleDocument(document);
 }
 

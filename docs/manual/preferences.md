@@ -8,6 +8,8 @@
 
 **Check for updates at startup** (on by default). A few seconds after launch PoseStudio asks GitHub for the latest release and tells you when a newer one exists. Nothing but the request is sent. **Help → Check for Updates…** does the same on demand.
 
+**Show What's New after an update** (on by default). The first time a new version of PoseStudio starts, a window with that version's release notes opens once the splash screen is dismissed — see [Privacy and Updates](privacy-updates.md#whats-new-after-an-update). **Help → What's New…** opens the same window on demand.
+
 **Count camera changes as unsaved** (off by default). Moving the camera — orbiting, panning, dollying, switching named views, framing the selection — does not mark a project dirty, so closing the window or starting a new scene after a camera move asks nothing. Turn this on if you want a changed framing to count as an unsaved change; the camera is always saved with the project file either way.
 ## Interface, Input, Navigation, System
 
