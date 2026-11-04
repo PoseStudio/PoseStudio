@@ -30,6 +30,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -143,8 +144,13 @@ void ModelImportService::decodeModelTextures(ModelData& data) {
     };
     std::unordered_map<std::string, std::shared_ptr<DecodedImage>> images;
     std::vector<SourceJob>                                         imageJobs;
-    auto addImageSource = [&](const TextureSource& src) -> std::string {
+    // (@p suffix keys a processed variant of a source apart from the plain decode — a roughness
+    // map read from its green channel — so the two never share one image.)
+    auto addImageSource = [&](const TextureSource& src, const char* suffix = "") -> std::string {
         std::string key = sourceKey(src);
+        if (!key.empty()) {
+            key += suffix;
+        }
         if (!key.empty() && images.emplace(key, nullptr).second) {
             imageJobs.push_back({key, &src});
         }
@@ -169,7 +175,7 @@ void ModelImportService::decodeModelTextures(ModelData& data) {
         keys[m].diffuse = addImageSource(mesh.diffuse);
         keys[m].mask = addMaskSource(mesh.opacityMask);
         keys[m].normal = addImageSource(mesh.normal);
-        keys[m].roughness = addImageSource(mesh.roughnessMap);
+        keys[m].roughness = addImageSource(mesh.roughnessMap, mesh.roughnessChannel == 1 ? "#g" : mesh.roughnessChannel == 2 ? "#b" : "");
         keys[m].specMask = addImageSource(mesh.specMask);
         keys[m].translucency = addImageSource(mesh.translucencyMap);
         keys[m].detailNormal = addImageSource(mesh.detailNormalMap);
@@ -195,6 +201,29 @@ void ModelImportService::decodeModelTextures(ModelData& data) {
         }
         for (std::size_t i = 0; i < maskJobs.size(); ++i) {
             masks[maskJobs[i].key] = std::move(maskResults[i]);
+        }
+    }
+    // A roughness map read from its green or blue channel (glTF's metallic-roughness map, a USD
+    // texture whose roughness output names a channel): that channel is moved into RED, the one
+    // the shader samples. Each such variant has its own key (the suffix above), so the plain
+    // decode of the same file, if another slot uses it, stays as it is.
+    {
+        std::unordered_set<std::string> swizzled;
+        for (std::size_t m = 0; m < data.meshes.size(); ++m) {
+            const MeshData& mesh = data.meshes[m];
+            const int       channel = mesh.roughnessChannel;
+            if (channel <= 0 || channel > 2 || keys[m].roughness.empty() || !swizzled.insert(keys[m].roughness).second) {
+                continue;
+            }
+            const std::shared_ptr<DecodedImage> image = images[keys[m].roughness];
+            if (!image) {
+                continue;
+            }
+            // (the image is this key's alone: freshly decoded, shared with no other key)
+            std::vector<uint8_t>& pixels = image->pixels;
+            for (std::size_t i = 0; i + 3 < pixels.size(); i += 4) {
+                pixels[i] = pixels[i + static_cast<std::size_t>(channel)];
+            }
         }
     }
 
@@ -273,6 +302,9 @@ void ModelImportService::decodeModelTextures(ModelData& data) {
             mesh.hasOpacityMask = combo.masked;
         } else if (!k.diffuse.empty()) {
             mesh.diffuseImage = images[k.diffuse];
+            if (mesh.opacityFromDiffuseAlpha && mesh.diffuseImage) {
+                mesh.hasOpacityMask = true; // (the decoded alpha IS the mask: no bake needed)
+            }
         }
         if (!k.normal.empty()) {
             mesh.normalImage = images[k.normal];

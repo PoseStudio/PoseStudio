@@ -10,7 +10,6 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -43,151 +42,30 @@ std::string toStd(const ufbx_string& s) {
     return std::string(s.data, s.length);
 }
 
-std::string lowerCopy(std::string s) {
-    for (char& c : s) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+/// An FBX texture: embedded content first (as bytes), else the paths the file gives, through the
+/// shared finder (the file's own path, relative to the FBX or the folder above, then by name).
+TextureSource resolveTexture(TextureFinder& finder, const ufbx_texture* tex, RiggedImportInfo* info) {
+    TextureSource out;
+    if (tex == nullptr) {
+        return out;
     }
-    return s;
-}
-
-bool isImageFile(const fs::path& p) {
-    static const char* const kExt[] = {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".tif", ".tiff", ".webp", ".exr", ".hdr", ".dds", ".psd", ".gif"};
-    const std::string ext = lowerCopy(p.extension().string());
-    for (const char* e : kExt) {
-        if (ext == e) {
-            return true;
-        }
+    if (tex->type != UFBX_TEXTURE_FILE && tex->file_textures.count > 0) {
+        tex = tex->file_textures.data[0]; // (a layered or shader texture: its first file)
     }
-    return false;
-}
-
-/// sRGB -> linear (the renderer's base colour is linear; authored colours are sRGB).
-float srgbToLinear(float c) {
-    c = std::max(0.0f, std::min(1.0f, c));
-    return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
-}
-
-/// Finds a texture's file: embedded content first, then the paths the file gives (absolute, or
-/// relative to the FBX), then a file of that name anywhere under the FBX's folder.
-class TextureFinder {
-public:
-    explicit TextureFinder(fs::path dir) : m_dir(std::move(dir)) {}
-
-    TextureSource resolve(const ufbx_texture* tex, FbxImportInfo* info) {
-        TextureSource out;
-        if (tex == nullptr) {
-            return out;
-        }
-        if (tex->type != UFBX_TEXTURE_FILE && tex->file_textures.count > 0) {
-            tex = tex->file_textures.data[0]; // (a layered or shader texture: its first file)
-        }
-        if (tex->content.size > 0 && tex->content.data != nullptr) {
-            const auto* bytes = static_cast<const uint8_t*>(tex->content.data);
-            out.encoded.assign(bytes, bytes + tex->content.size);
-            if (info != nullptr) {
-                ++info->embeddedTextures;
-            }
-            return out;
-        }
-        const std::string candidates[] = {toStd(tex->absolute_filename), toStd(tex->filename), toStd(tex->relative_filename)};
-        std::error_code   ec;
-        for (const std::string& c : candidates) {
-            if (c.empty()) {
-                continue;
-            }
-            const fs::path p(c);
-            if (p.is_absolute() && fs::is_regular_file(p, ec)) {
-                return found(p, info);
-            }
-            const fs::path rel = m_dir / p;
-            if (fs::is_regular_file(rel, ec)) {
-                return found(rel, info);
-            }
-            // (... or against the folder ABOVE the file's: exports keep "textures/" beside a
-            // "formats/" folder, and write the path relative to the project.)
-            const fs::path above = m_dir.parent_path() / p;
-            if (!m_dir.parent_path().empty() && fs::is_regular_file(above, ec)) {
-                return found(above, info);
-            }
-        }
-        for (const std::string& c : candidates) {
-            if (c.empty()) {
-                continue;
-            }
-            const std::string name = lowerCopy(fs::path(c).filename().string());
-            if (name.empty()) {
-                continue;
-            }
-            index();
-            const auto it = m_byName.find(name);
-            if (it != m_byName.end()) {
-                return found(it->second, info);
-            }
-        }
+    if (tex->content.size > 0 && tex->content.data != nullptr) {
+        const auto* bytes = static_cast<const uint8_t*>(tex->content.data);
+        out.encoded.assign(bytes, bytes + tex->content.size);
         if (info != nullptr) {
-            ++info->missingTextures;
-            std::string shown = toStd(tex->relative_filename);
-            if (shown.empty()) {
-                shown = toStd(tex->filename);
-            }
-            if (m_missingNoted.insert(shown).second && m_missingNoted.size() <= 8) {
-                info->notes.push_back("texture not found: " + shown);
-            }
+            ++info->embeddedTextures;
         }
         return out;
     }
-
-private:
-    TextureSource found(const fs::path& p, FbxImportInfo* info) {
-        TextureSource out;
-        out.path = p.string();
-        if (info != nullptr) {
-            ++info->externalTextures;
-        }
-        return out;
+    std::string shown = toStd(tex->relative_filename);
+    if (shown.empty()) {
+        shown = toStd(tex->filename);
     }
-
-    void index() {
-        if (m_indexed) {
-            return;
-        }
-        m_indexed = true;
-        std::error_code ec;
-        // The file's own folder, deep (an export's texture tree is a few folders deep), then the
-        // folder above it, shallower (a "textures/" beside a "formats/"; a library root is not what
-        // sits beside a character — the walk is capped either way).
-        const fs::path above = m_dir.parent_path();
-        const struct { fs::path dir; int depth; } roots[] = {{m_dir, 8}, {above, 3}};
-        std::size_t files = 0;
-        for (const auto& r : roots) {
-            if (r.dir.empty() || !fs::is_directory(r.dir, ec)) {
-                continue;
-            }
-            fs::recursive_directory_iterator it(r.dir, fs::directory_options::skip_permission_denied, ec);
-            const fs::recursive_directory_iterator end;
-            for (; it != end && files < 20000; it.increment(ec)) {
-                if (ec) {
-                    ec.clear();
-                    continue;
-                }
-                if (it.depth() > r.depth) {
-                    it.disable_recursion_pending();
-                    continue;
-                }
-                if (!it->is_regular_file(ec) || !isImageFile(it->path())) {
-                    continue;
-                }
-                ++files;
-                m_byName.emplace(lowerCopy(it->path().filename().string()), it->path()); // (the first found wins: the file's own folder)
-            }
-        }
-    }
-
-    fs::path                                   m_dir;
-    bool                                       m_indexed = false;
-    std::unordered_map<std::string, fs::path>  m_byName;
-    std::unordered_set<std::string>            m_missingNoted;
-};
+    return finder.resolve({toStd(tex->absolute_filename), toStd(tex->filename), toStd(tex->relative_filename)}, info, shown);
+}
 
 struct CornerKey {
     uint32_t vertex;
@@ -218,7 +96,7 @@ const char* axisName(ufbx_coordinate_axis a) {
 
 } // namespace
 
-ModelData FbxFigureImporter::load(const std::string& path, FbxImportInfo* info) const {
+ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* info) const {
     ufbx_load_opts opts = {};
     opts.target_axes = ufbx_axes_right_handed_y_up;
     opts.target_unit_meters = 1.0;
@@ -382,13 +260,12 @@ ModelData FbxFigureImporter::load(const std::string& path, FbxImportInfo* info) 
         }
     }
     const int boneCount = static_cast<int>(boneNodes.size());
-    std::vector<glm::vec3> bonePos(boneNodes.size(), glm::vec3(0.0f));
-    std::vector<glm::mat4> boneWorld(boneNodes.size(), glm::mat4(1.0f)); // (each bone's BIND frame in the world)
-    std::vector<glm::vec3> tipPos(boneNodes.size(), glm::vec3(0.0f)); // (the pruned end marker's place, in the bind)
-    std::vector<char>      hasTip(boneNodes.size(), 0);
-    static const bool      kBoneTrace = std::getenv("POSESTUDIO_FBX_BONE_TRACE") != nullptr; // where each bone's place came from
+    std::vector<RawSkeletonBone> bones(boneNodes.size());
+    std::vector<glm::mat4>       boneWorld(boneNodes.size(), glm::mat4(1.0f)); // (each bone's BIND frame in the world)
+    static const bool            kBoneTrace = std::getenv("POSESTUDIO_FBX_BONE_TRACE") != nullptr; // where each bone's place came from
     for (int i = 0; i < boneCount; ++i) {
         const ufbx_node* node = boneNodes[static_cast<std::size_t>(i)];
+        RawSkeletonBone& bone = bones[static_cast<std::size_t>(i)];
         glm::mat4        world = toGlm(node->node_to_world);
         const char*      source = "node";
         if (const auto it = clusterOf.find(node); it != clusterOf.end()) {
@@ -411,18 +288,19 @@ ModelData FbxFigureImporter::load(const std::string& path, FbxImportInfo* info) 
             source = "parent";
         }
         boneWorld[static_cast<std::size_t>(i)] = world;
-        bonePos[static_cast<std::size_t>(i)] = glm::vec3(world[3]);
+        bone.name = toStd(node->name);
+        bone.parent = boneParent[static_cast<std::size_t>(i)];
+        bone.position = glm::vec3(world[3]);
         if (const auto tip = tipNodeOf.find(node); tip != tipNodeOf.end()) {
             // The marker rides its parent: its offset in the parent's frame, carried to the bind.
             const glm::mat4 local = glm::inverse(toGlm(node->node_to_world)) * toGlm(tip->second->node_to_world);
-            tipPos[static_cast<std::size_t>(i)] = glm::vec3((world * local)[3]);
-            hasTip[static_cast<std::size_t>(i)] = 1;
+            bone.tip = glm::vec3((world * local)[3]);
+            bone.hasTip = true;
         }
         if (kBoneTrace) {
             const glm::vec3 own(toGlm(node->node_to_world)[3]);
-            std::fprintf(stderr, "[fbx-bone] %3d %-28s %-9s at (%.3f %.3f %.3f) node (%.3f %.3f %.3f)%s\n", i, toStd(node->name).c_str(), source,
-                         bonePos[static_cast<std::size_t>(i)].x, bonePos[static_cast<std::size_t>(i)].y, bonePos[static_cast<std::size_t>(i)].z, own.x,
-                         own.y, own.z, hasTip[static_cast<std::size_t>(i)] ? " +tip" : "");
+            std::fprintf(stderr, "[fbx-bone] %3d %-28s %-9s at (%.3f %.3f %.3f) node (%.3f %.3f %.3f)%s\n", i, bone.name.c_str(), source,
+                         bone.position.x, bone.position.y, bone.position.z, own.x, own.y, own.z, bone.hasTip ? " +tip" : "");
         }
     }
     const auto attachBone = [&](const ufbx_node* node) {
@@ -438,7 +316,6 @@ ModelData FbxFigureImporter::load(const std::string& path, FbxImportInfo* info) 
     ModelData     model;
     TextureFinder textures(fs::path(path).parent_path());
     std::string   skinningMethod = boneCount > 0 ? "rigid" : "none";
-    std::size_t   totalVertices = 0;
     for (std::size_t mi = 0; mi < scene->meshes.count; ++mi) {
         const ufbx_mesh* mesh = scene->meshes.data[mi];
         if (mesh->instances.count == 0 || mesh->num_faces == 0) {
@@ -594,16 +471,16 @@ ModelData FbxFigureImporter::load(const std::string& path, FbxImportInfo* info) 
                                               srgbToLinear(static_cast<float>(base.value_vec4.z)));
                 }
                 const ufbx_texture* diffuseTex = mat->pbr.base_color.texture != nullptr ? mat->pbr.base_color.texture : mat->fbx.diffuse_color.texture;
-                out.diffuse = textures.resolve(diffuseTex, info);
+                out.diffuse = resolveTexture(textures, diffuseTex, info);
                 if (!out.diffuse.empty()) {
                     out.baseColor = glm::vec3(1.0f); // (the map carries the colour)
                 }
                 const ufbx_texture* normalTex = mat->pbr.normal_map.texture != nullptr ? mat->pbr.normal_map.texture : mat->fbx.normal_map.texture;
                 if (normalTex != nullptr) {
-                    out.normal = textures.resolve(normalTex, info);
+                    out.normal = resolveTexture(textures, normalTex, info);
                     out.normalMode = out.normal.empty() ? 0 : 1;
                 } else if (mat->fbx.bump.texture != nullptr) {
-                    out.normal = textures.resolve(mat->fbx.bump.texture, info);
+                    out.normal = resolveTexture(textures, mat->fbx.bump.texture, info);
                     out.normalMode = out.normal.empty() ? 0 : 2;
                     if (mat->fbx.bump_factor.has_value) {
                         out.normalStrength = std::max(0.1f, std::min(8.0f, static_cast<float>(mat->fbx.bump_factor.value_real)));
@@ -617,7 +494,7 @@ ModelData FbxFigureImporter::load(const std::string& path, FbxImportInfo* info) 
                 out.lobe1Roughness = out.roughness;
                 out.lobe2Roughness = out.roughness;
                 if (mat->pbr.roughness.texture != nullptr) {
-                    out.roughnessMap = textures.resolve(mat->pbr.roughness.texture, info);
+                    out.roughnessMap = resolveTexture(textures, mat->pbr.roughness.texture, info);
                 }
                 if (mat->pbr.metalness.has_value) {
                     out.metalness = std::max(0.0f, std::min(1.0f, static_cast<float>(mat->pbr.metalness.value_real)));
@@ -630,12 +507,11 @@ ModelData FbxFigureImporter::load(const std::string& path, FbxImportInfo* info) 
                 }
                 out.opacity = std::max(0.0f, std::min(1.0f, opacity));
                 if (mat->pbr.opacity.texture != nullptr) {
-                    out.opacityMask = textures.resolve(mat->pbr.opacity.texture, info);
+                    out.opacityMask = resolveTexture(textures, mat->pbr.opacity.texture, info);
                 } else if (mat->fbx.transparency_color.texture != nullptr) {
-                    out.opacityMask = textures.resolve(mat->fbx.transparency_color.texture, info);
+                    out.opacityMask = resolveTexture(textures, mat->fbx.transparency_color.texture, info);
                 }
             }
-            totalVertices += out.vertices.size();
             model.meshes.push_back(std::move(out));
         }
     }
@@ -643,151 +519,8 @@ ModelData FbxFigureImporter::load(const std::string& path, FbxImportInfo* info) 
         throw std::runtime_error("FBX: the file holds no mesh");
     }
 
-    // ---- FACING, CENTRE AND FLOOR. The figure faces +z with her left at +x, stands over the origin,
-    // and her lowest point rests on y = 0 — what every reader of the bind pose takes for granted.
-    float yawDeg = 0.0f;
-    if (boneCount >= 3) {
-        float     minY = std::numeric_limits<float>::max();
-        float     maxY = -std::numeric_limits<float>::max();
-        glm::vec3 mean(0.0f);
-        for (const glm::vec3& p : bonePos) {
-            minY = std::min(minY, p.y);
-            maxY = std::max(maxY, p.y);
-            mean += p;
-        }
-        mean /= static_cast<float>(boneCount);
-        const float height = maxY - minY;
-        // THE LATERAL AXIS is the skeleton's widest horizontal spread (a standing figure is wider
-        // than deep, arms out or down), read off the bone positions' covariance in the floor plane
-        // — exact to a fraction of a degree where the toes alone (splayed, few) are not; the toes
-        // give the SIGN: they point forward.
-        float sxx = 0.0f, sxz = 0.0f, szz = 0.0f;
-        for (const glm::vec3& p : bonePos) {
-            sxx += (p.x - mean.x) * (p.x - mean.x);
-            sxz += (p.x - mean.x) * (p.z - mean.z);
-            szz += (p.z - mean.z) * (p.z - mean.z);
-        }
-        const float lateralAngle = 0.5f * std::atan2(2.0f * sxz, sxx - szz); // the major axis, from +x toward +z
-        glm::vec3   lateral(std::cos(lateralAngle), 0.0f, std::sin(lateralAngle));
-        glm::vec3   forward = glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), lateral); // one of the two perpendiculars
-        glm::vec3   toes(0.0f);
-        if (height > 0.2f) {
-            const float lowY = minY + 0.12f * height;
-            for (int i = 0; i < boneCount; ++i) {
-                const int p = boneParent[static_cast<std::size_t>(i)];
-                if (p < 0) {
-                    continue;
-                }
-                const glm::vec3& a = bonePos[static_cast<std::size_t>(p)];
-                const glm::vec3& b = bonePos[static_cast<std::size_t>(i)];
-                if (a.y < lowY && b.y < lowY) {
-                    toes += glm::vec3(b.x - a.x, 0.0f, b.z - a.z);
-                }
-            }
-        }
-        const float spread = std::abs(sxx - szz) + std::abs(sxz);
-        if (spread > 1.0e-4f && glm::length(toes) > 0.01f * std::max(height, 0.2f)) {
-            if (glm::dot(forward, toes) < 0.0f) {
-                forward = -forward;
-            }
-            yawDeg = glm::degrees(std::atan2(forward.x, forward.z));
-        } else if (glm::length(toes) > 0.01f * std::max(height, 0.2f)) {
-            yawDeg = glm::degrees(std::atan2(toes.x, toes.z)); // (no clear spread: the toes alone)
-        } else if (info != nullptr) {
-            info->notes.push_back("the figure's facing could not be read off the skeleton: assumed to face +z");
-        }
-    }
-    if (std::abs(yawDeg) > 0.5f) {
-        const glm::mat4 turn = glm::rotate(glm::mat4(1.0f), glm::radians(-yawDeg), glm::vec3(0.0f, 1.0f, 0.0f));
-        const glm::mat3 turn3(turn);
-        for (glm::vec3& p : bonePos) {
-            p = turn3 * p;
-        }
-        for (glm::vec3& p : tipPos) {
-            p = turn3 * p;
-        }
-        for (MeshData& mesh : model.meshes) {
-            for (Vertex& v : mesh.vertices) {
-                v.pos = turn3 * v.pos;
-                v.normal = turn3 * v.normal;
-            }
-        }
-    }
-    glm::vec3 centre(0.0f);
-    if (boneCount > 0) {
-        // Over the HIPS: the first bone (parents first) with two children or more — the body's
-        // midline runs through it, and the engine measures the sides from it.
-        std::vector<int> childCount(boneNodes.size(), 0);
-        for (int i = 0; i < boneCount; ++i) {
-            const int p = boneParent[static_cast<std::size_t>(i)];
-            if (p >= 0) {
-                ++childCount[static_cast<std::size_t>(p)];
-            }
-        }
-        int hips = -1;
-        for (int i = 0; i < boneCount && hips < 0; ++i) {
-            if (childCount[static_cast<std::size_t>(i)] >= 2) {
-                hips = i;
-            }
-        }
-        if (hips >= 0) {
-            centre = bonePos[static_cast<std::size_t>(hips)];
-        } else {
-            for (const glm::vec3& p : bonePos) {
-                centre += p;
-            }
-            centre /= static_cast<float>(boneCount);
-        }
-    } else {
-        std::size_t count = 0;
-        for (const MeshData& mesh : model.meshes) {
-            for (const Vertex& v : mesh.vertices) {
-                centre += v.pos;
-                ++count;
-            }
-        }
-        centre /= static_cast<float>(std::max<std::size_t>(1, count));
-    }
-    float lowest = std::numeric_limits<float>::max();
-    float highest = -std::numeric_limits<float>::max();
-    for (const MeshData& mesh : model.meshes) {
-        for (const Vertex& v : mesh.vertices) {
-            lowest = std::min(lowest, v.pos.y);
-            highest = std::max(highest, v.pos.y);
-        }
-    }
-    const glm::vec3 shift(-centre.x, -lowest, -centre.z);
-    for (MeshData& mesh : model.meshes) {
-        for (Vertex& v : mesh.vertices) {
-            v.pos += shift;
-        }
-    }
-    for (glm::vec3& p : bonePos) {
-        p += shift;
-    }
-    for (glm::vec3& p : tipPos) {
-        p += shift;
-    }
-
-    // ---- THE BONES, raw: names, hierarchy, bind positions. Frames and limits are the conformer's.
-    model.bones.reserve(boneNodes.size());
-    std::unordered_set<std::string> usedNames;
-    for (int i = 0; i < boneCount; ++i) {
-        ModelBone bone;
-        bone.name = toStd(boneNodes[static_cast<std::size_t>(i)]->name);
-        if (bone.name.empty()) {
-            bone.name = "bone_" + std::to_string(i);
-        }
-        for (int suffix = 2; !usedNames.insert(bone.name).second; ++suffix) {
-            bone.name = toStd(boneNodes[static_cast<std::size_t>(i)]->name) + "_" + std::to_string(suffix);
-        }
-        bone.parent = boneParent[static_cast<std::size_t>(i)];
-        bone.bindGlobal = glm::translate(glm::mat4(1.0f), bonePos[static_cast<std::size_t>(i)]);
-        bone.rotationOrder = "XYZ";
-        bone.tip = tipPos[static_cast<std::size_t>(i)];
-        bone.hasTip = hasTip[static_cast<std::size_t>(i)] != 0;
-        model.bones.push_back(std::move(bone));
-    }
+    // ---- FACING, CENTRE AND FLOOR, and the raw bones: the step every rigged reader shares.
+    finishRiggedModel(model, bones, info);
 
     // The skinning method is the rig's: a file authored for linear blend skinning is blended
     // linearly in the viewport (MeshData::linearSkinning; the native figures stay dual quaternion).
@@ -798,19 +531,7 @@ ModelData FbxFigureImporter::load(const std::string& path, FbxImportInfo* info) 
         }
     }
     if (info != nullptr) {
-        info->bones = boneCount;
-        info->heightMetres = highest - lowest;
-        info->yawDegrees = yawDeg;
-        info->groundedMm = -lowest * 1000.0f;
         info->skinningMethod = skinningMethod;
-        if (info->heightMetres < 1.2f || info->heightMetres > 2.4f) {
-            char line[160];
-            std::snprintf(line, sizeof(line), "the figure stands %.2f m tall after the unit conversion: an unusual height for a human", static_cast<double>(info->heightMetres));
-            info->notes.push_back(line);
-        }
-        if (totalVertices == 0) {
-            info->notes.push_back("no vertices");
-        }
     }
     return model;
 }

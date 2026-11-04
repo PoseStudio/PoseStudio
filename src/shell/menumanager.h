@@ -73,7 +73,12 @@ private:
 
     /// Opens a file dialog and imports the chosen native figure (`.duf`/`.dsf`) into the viewport.
     void importFigureFile();
+    /// Open a rigged character in an interchange format (FBX, glTF / GLB, USD): one file dialog
+    /// each, all through the figure route (ViewportWidget::importFigure dispatches by extension).
     void importFbxFile();
+    void importGltfFile();
+    void importUsdFile();
+    void importRiggedFile(const QString &title, const QString &filter);
 
     /// Saves / loads the current figure's pose to/from a `.pose` file via a file dialog.
     void savePoseFile();

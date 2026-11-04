@@ -1,12 +1,12 @@
 # Importing Content
 
-PoseStudio reads three kinds of content today: static models in the Wavefront `.obj` format, rigged character figures in their native scene format (`.duf` presets backed by `.dsf` data files), and rigged characters in `.fbx` files. The other formats in the File → Import menu are placeholders for planned importers.
+PoseStudio reads three kinds of content today: static models in the Wavefront `.obj` format, rigged character figures in their native scene format (`.duf` presets backed by `.dsf` data files), and rigged characters — or plain meshes — in the interchange formats other tools write: `.fbx`, glTF (`.glb` and `.gltf`) and USD (`.usd`, `.usda`, `.usdc` and `.usdz` packages). The other formats in the File → Import menu are placeholders for planned importers.
 
 There are four ways to import, and they all do the same thing:
 
-- **File → Import → .OBJ (Wavefront)**, **File → Import → .DUF (DUF File)** or **File → Import → .FBX (FBX File)** — a file dialog, opening in the folder you imported from last time.
-- **Double-click** an `.obj`, `.duf`, `.dsf` or `.fbx` asset in the [Asset Manager](asset-manager.md) grid.
-- **Open with** PoseStudio, or **drag files onto** `PoseStudio.exe`: every `.obj`, `.duf`, `.dsf` and `.fbx` on the command line is imported in order, and a `.pose` file after a figure is applied to it.
+- **File → Import → .OBJ (Wavefront)**, **File → Import → .DUF (DUF File)**, **File → Import → .FBX (FBX File)**, **File → Import → .GLB (GL Transmission Format .glTF)** or **File → Import → .USD (Universal Scene Description)** — a file dialog, opening in the folder you imported from last time.
+- **Double-click** an `.obj`, `.duf`, `.dsf`, `.fbx`, `.glb`, `.gltf`, `.usd`, `.usda`, `.usdc` or `.usdz` asset in the [Asset Manager](asset-manager.md) grid.
+- **Open with** PoseStudio, or **drag files onto** `PoseStudio.exe`: every model or figure file on the command line is imported in order, and a `.pose` file after a figure is applied to it.
 
 Every import lands a new object in the scene, selected (outlined in blue) and framed by the camera. Imports run one at a time on the main thread: the application is busy until the object appears.
 
@@ -35,19 +35,31 @@ Import takes a few seconds for a fully textured character. The progress dialog n
 
 Pose, material, light and other presets share the `.duf` extension. Importing one of those shows *"This file may be a pose, material, or other preset rather than a figure"* — pick the character's own preset instead. (Pose presets in this format are not readable yet; PoseStudio has its own [pose files](pose-files.md).)
 
-## Characters from FBX files (.fbx)
+## Characters from FBX, glTF and USD files
 
-An `.fbx` file carries everything in itself (or beside itself), so there is no content folder to locate. Importing one brings in:
+An `.fbx`, `.glb` / `.gltf` or `.usd` / `.usda` / `.usdc` / `.usdz` file carries everything in itself (or beside itself), so there is no content folder to locate. The three formats take the same route and end in the same place; what differs is listed under each format below. Importing one brings in:
 
-- **The meshes** with their materials — the base colour, the normal or bump map, the roughness, metalness and opacity where the file links them — and their textures, embedded in the file or found by the path the file gives, relative to the `.fbx`, or by name anywhere under the file's folder or the folder above it (exports commonly keep their textures in a folder beside the file).
+- **The meshes** with their materials — the base colour, the normal or bump map, the roughness, metalness and opacity where the file links them — and their textures, embedded in the file or found by the path the file gives, relative to the file, or by name anywhere under the file's folder or the folder above it (exports commonly keep their textures in a folder beside the file).
 - **The skeleton** with its skin weights. Skinless end markers at the tips of the chains are left out of the skeleton (they still tell PoseStudio which way a fingertip or a single-bone toe points). The bones take the rig standard's names — `hips`, `spine1`, `neck1`, `head`, `collar_l`, `upper_arm_l`, `forearm_l`, `hand_l`, `thumb1_l`, `index2_r`, `thigh_l`, `shin_l`, `foot_l`, `ball_l` and so on, the side last — whatever the file called them; the face rig, the helper bones and any bone PoseStudio could not place keep their file names. That is what the Transform tab and the joint menu show, and what a pose file carries: because every imported character shares the standard's names, frames and ranges, a pose saved on one loads on any other (see [Pose Files](pose-files.md)).
-- **The pose it was saved in** is discarded in favour of the bind pose, so a file saved mid-animation imports at rest.
+- **The bind pose**: an `.fbx` or a USD file saved mid-animation imports at rest, from the skin's bind; a glTF imports with its joints where the file's nodes stand (see the format notes below).
 
 The figure lands in metres, standing on the floor over the origin, turned to face the camera's default view with her left at the viewer's right — whatever axes and units the file was written in.
 
-### Posing an FBX character
+### FBX files (.fbx)
 
-An `.fbx` file carries no anatomy: no joint limits, no notion of which bone is a knee. PoseStudio reads that off the skeleton's structure — the hips, the spine, the neck and head, each arm and leg with their twist helpers, the hands and fingers, the feet and toes — and gives every joint the standard rotation frame and the anatomical range the native figures author for that part of the body. From then on the character poses like any other: the full-body IK, the Transform tab's dials, `B` / `S` / `T`, pins, the Ground button and pose files all work, and a click on a helper bone (a corrective bone beside a knee or an elbow, an anchor) selects the joint it belongs to.
+Binary and ASCII FBX from version 6 on. The file's own axes and units are converted, its skinning method (linear or dual quaternion) is kept, and a file saved mid-animation imports at rest, from the skin's bind pose.
+
+### glTF files (.glb, .gltf)
+
+A `.glb` holds everything in one file; a `.gltf` keeps its buffers (`.bin`) and images beside it, or embedded as data URIs — both import. glTF is metres and Y-up by definition, so nothing is converted; a file written in centimetres (a character 20 m tall) is read as such and scaled down. The joints stand where the file's nodes put them — glTF stores no bind pose apart from the skins' matrices, and this is what every viewer shows at the default pose — so a file whose nodes are saved posed imports in that pose (its animations are not read). The metallic-roughness material model is read (the base colour and map, the metallic-roughness map's green channel as the roughness map, the normal map with its scale, the alpha mode as the opacity, with the base map's alpha as the cutout for masked and blended materials), the older specular-glossiness extension as a fallback. Not read: morph targets, vertex colours, texture transforms, a second UV set. A file that requires Draco or meshopt mesh compression, or Basis Universal textures, is refused with a message naming the extension: export it without compression.
+
+### USD files (.usd, .usda, .usdc, .usdz)
+
+ASCII (`.usda`), binary crate (`.usdc`, or `.usd` in either encoding) and USDZ packages, whose textures are read from inside the package. The stage's `metersPerUnit` and `upAxis` are honoured (a Z-up stage is turned Y-up; a stage that authors no unit is centimetres, as the format's own fallback says), and a file whose skeleton would stand 20 m tall is read as centimetres regardless. The skeleton is the UsdSkel one — the joints with their bind transforms, the meshes' joint weights — with the geometry bind transform and the skeleton's own transform applied; a file with several skeletons imports the largest as the figure and the others' meshes rigid. Materials are UsdPreviewSurface: diffuse colour and map, roughness (a value or a map, whichever channel the map's output names), metalness, the normal map, opacity (the base map's alpha when that is what the opacity reads, else its own map). Not read: blend shapes, animation, point instancers, MaterialX networks (such a mesh renders with its colour alone).
+
+### Posing an imported character
+
+An `.fbx`, glTF or USD file carries no anatomy: no joint limits, no notion of which bone is a knee. PoseStudio reads that off the skeleton's structure — the hips, the spine, the neck and head, each arm and leg with their twist helpers, the hands and fingers, the feet and toes — and gives every joint the standard rotation frame and the anatomical range the native figures author for that part of the body. From then on the character poses like any other: the full-body IK, the Transform tab's dials, `B` / `S` / `T`, pins, the Ground button and pose files all work, and a click on a helper bone (a corrective bone beside a knee or an elbow, an anchor) selects the joint it belongs to.
 
 What to expect, compared with a native figure:
 
@@ -57,7 +69,7 @@ What to expect, compared with a native figure:
 - **A biped rig from an animation package** — the digits named only by number, the twist bones carrying end markers of their own, the chest one long bone on a two-link spine — reads like the others: the thumb is the digit whose base sits at the wrist, the twist helpers spread the limb's twist, the one toe bone curls as a toe, and she sits on her hips (such a rig has no pelvis bone). Take hold of the chest where the chest is, up by the breastbone, to bow her; the chest joint itself sits low on this kind of rig and is read as the waist.
 - A rig whose structure PoseStudio cannot read completely — no arms found, say — still imports and poses joint by joint with the dials; the import log names the roles it could not place.
 
-A static `.fbx` (no skeleton) imports as a model, like an `.obj`.
+A static file (no skeleton) in any of the three formats imports as a model, like an `.obj` — a prop, a helmet, a building — with its textures and materials; it can be selected, framed and deleted, not posed.
 
 ## When the figure's data cannot be found
 
@@ -76,6 +88,8 @@ Every folder you locate this way is remembered, so you only do this once per con
 | *The figure's geometry and morph data (its "data" folder) couldn't be found.* | Locate the content folder as described above. |
 | *Could not import a character figure from… Details: …* | Something in the files could not be read; the details line names it. |
 | *Could not import "….fbx"* | The file could not be read as FBX (a damaged file, or one older than the FBX 6 series), or it holds no mesh. The second line names the cause. |
+| *Could not import "….glb"* / *"….gltf"* | The file could not be read as glTF 2.0 (a glTF 1.0 file, malformed JSON, a `.bin` or image it refers to that is missing beside it), it holds no triangle mesh, or it requires Draco / meshopt compression or Basis Universal textures. The second line names the cause. |
+| *Could not import "….usd"* (or `.usda`, `.usdc`, `.usdz`) | The file could not be read as USD (a damaged file, a layer it references that is missing), or it holds no mesh. The second line names the cause. |
 | Nothing happens after choosing a file | The file's format is not supported, or (for `.obj`) it could not be parsed. |
 
 A materials preset a figure lists for one of its followers is applied to every follower it addresses by name, so eyelashes and tears that share one preset both receive their maps.

@@ -8,6 +8,7 @@
  * widget polishes.
  */
 
+#include "importformats.h"
 #include "database.h"
 #include "menumanager.h"
 #include "splashoverlay.h"
@@ -231,12 +232,10 @@ int main(int argc, char *argv[]) {
             restoreProject = launchArgs.at(++i);
         } else if (arg == QStringLiteral("--project-clean")) {
             restoreClean = true;
-        } else if (arg.endsWith(QStringLiteral(".obj"), Qt::CaseInsensitive)) {
+        } else if (pose::ImportFormats::isModelFile(arg)) {
             viewport->importObj(arg);
-        } else if (arg.endsWith(QStringLiteral(".duf"), Qt::CaseInsensitive) ||
-                   arg.endsWith(QStringLiteral(".dsf"), Qt::CaseInsensitive) ||
-                   arg.endsWith(QStringLiteral(".fbx"), Qt::CaseInsensitive)) {
-            viewport->importFigure(arg); // (an FBX character takes the figure route too)
+        } else if (pose::ImportFormats::isFigureRouteFile(arg)) {
+            viewport->importFigure(arg); // (an FBX / glTF / USD character takes the figure route too)
         } else if (arg.endsWith(QStringLiteral(".pose"), Qt::CaseInsensitive)) {
             // A pose file applies onto whichever figure was imported (queued until the figure exists).
             viewport->loadPose(arg);

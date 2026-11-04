@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > public repository; this changelog and `CMakeLists.txt` (whose `project(VERSION)` stamps
 > `Constants::APP_VERSION` at build time) are the authoritative version record, and releases are tagged from 0.3.0 onward.
 
+## [Unreleased]
+
+### Added
+- **glTF and USD import**: File → Import → **.GLB (GL Transmission Format .glTF)** reads `.glb` and `.gltf` files, File → Import → **.USD (Universal Scene Description)** reads `.usd`, `.usda`, `.usdc` and `.usdz` packages — a rigged character in either is conformed to the rig standard like an FBX one and posed by the full-body IK, a plain mesh imports as a static model with its materials. Double-clicking such a file in the Asset Manager, "open with" and files on the command line import them too. glTF: metallic-roughness materials with the base colour, metallic-roughness (its green channel as the roughness map), normal and alpha-mode cutout maps, embedded or data-URI or file images, the older specular-glossiness extension as a fallback; a file that requires Draco or meshopt compression or Basis Universal textures is refused with a message. USD: the stage's units and up axis, UsdSkel skeletons and skin weights, UsdPreviewSurface materials, textures read from inside a USDZ package. Verified on the Khronos sample models and on four rigged characters exported to every encoding, whose IK harness results match the same characters imported from FBX.
+
+### Changed
+- The FBX, glTF and USD readers share one import service and one post-read step (facing, centring, floor, the raw skeleton); the FBX reader's output is unchanged, bit for bit, on every reference file.
+- A roughness map may name the channel it is read from, and a material may use its base map's own alpha as its cutout (what glTF and USD author); the native figures and OBJ are unaffected.
+- The build fetches cgltf (the glTF reader) and LightUSD, the library formerly named TinyUSDZ (the USD reader, built as a static library), alongside the other `FetchContent` dependencies; nothing new to install.
+
 ## [0.4.1] - 2026-11-04
 
 VR. Put on a headset and the scene is around you, life-size: the figure stands on your real floor at her true height, you walk around her and look from any angle while the scene stays live — and with the controllers you pose her from inside it, grabbing joints on a pointer ray or in your hand, the whole body following as it does from the desk. Any PC VR setup works through OpenXR: a Meta Quest over Quest Link or Air Link, Virtual Desktop, or SteamVR.

@@ -54,6 +54,7 @@ The scripts:
 | `gallery_landing.txt` | The Ground button's landing bounce: a figure lifted and dropped 5cm, 50cm and 2m, shot falling, at the deepest of the dip and after — the knees' fold asserted deeper for the higher drop, the pose afterwards asserted exactly the pose she was dropped in, the skin on the floor — a posed figure keeping her pose through it, and a kneeling one landing with no bounce. |
 | `check_project.txt` | Numbers only: a posed scene saved as a `.pss` project, emptied with New and opened again — the figure re-imported, its pose and pin restored, the document clean; a pose edit dirties it; a bad file is refused with the scene intact. |
 | `check_picking.txt` | Numbers only: what a click selects (`selected.<bone>`) — hidden parts are never selected through the part in front, a click on a joint's own pixel takes that joint (the hip's, though its skin is the pelvis bone's). |
+| `check_rigged.txt` | A rigged character from an interchange file (FBX, glTF / GLB, USD) — or any figure: shot from the front and the side, then posed by the hand and by the hips, with the grab on the cursor, the feet planted and nothing through the floor asserted; Reset Pose brings her back. Run it on one file: `POSESTUDIO_TEST_FIGURE=<file> tools/ikscripts/run.sh tools/ikscripts/check_rigged.txt <out>` — the import check for a new format or a new character. |
 
 Useful beside it: `QT_LOGGING_TO_CONSOLE=1` (the `[ikscript]` lines reach a redirected stderr),
 `POSESTUDIO_NO_PING=1`, `POSESTUDIO_NO_UPDATE_CHECK=1`, and any `IK_…` probe for an A/B

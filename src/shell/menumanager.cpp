@@ -114,11 +114,11 @@ void MenuManager::setupMenus() {
         {".DAE (Collada)",                    nullptr},
         {".DUF (DUF File)",                   &MenuManager::importFigureFile},
         {".FBX (FBX File)",                   &MenuManager::importFbxFile},
-        {".GLB (GL Transmission Format .glTF)", nullptr},
+        {".GLB (GL Transmission Format .glTF)", &MenuManager::importGltfFile},
         {".OBJ (Wavefront)",                  &MenuManager::importObjFile},
         {".PLY (Polygon File Format)",        nullptr},
         {".STL (Stereolithography)",          nullptr},
-        {".USD (Universal Scene Description)", nullptr},
+        {".USD (Universal Scene Description)", &MenuManager::importUsdFile},
     };
     for (const ImportFormat &format : importFormats) {
         QAction *action = importMenu->addAction(format.label);
@@ -585,14 +585,27 @@ void MenuManager::importFigureFile() {
 }
 
 void MenuManager::importFbxFile() {
-    if (!viewportWidget) return;
     // A rigged character in an FBX file: imported through the figure route (VulkanWindow dispatches
     // by extension), conformed to the rig standard on the way in. A static FBX mesh imports too, as
     // a model without a skeleton.
+    importRiggedFile(tr("Import FBX Character"), tr("FBX Files (*.fbx)"));
+}
+
+void MenuManager::importGltfFile() {
+    // A rigged character in a glTF file — the binary .glb, or a .gltf with its buffers and
+    // images beside it — through the same route as FBX.
+    importRiggedFile(tr("Import glTF Character"), tr("glTF Files (*.glb *.gltf)"));
+}
+
+void MenuManager::importUsdFile() {
+    // A rigged character in a USD file — ASCII, crate, or a USDZ package — through the same route.
+    importRiggedFile(tr("Import USD Character"), tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
+}
+
+void MenuManager::importRiggedFile(const QString &title, const QString &filter) {
+    if (!viewportWidget) return;
     const QString path = QFileDialog::getOpenFileName(
-        mainWindow, tr("Import FBX Character"),
-        rememberedStartDir(Constants::PREF_LAST_IMPORT_DIR),
-        tr("FBX Files (*.fbx)"));
+        mainWindow, title, rememberedStartDir(Constants::PREF_LAST_IMPORT_DIR), filter);
     if (path.isEmpty()) return; // user cancelled
 
     PreferencesManager::instance().setValue(Constants::PREF_LAST_IMPORT_DIR,

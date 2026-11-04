@@ -95,6 +95,14 @@ struct MeshData {
     // MaterialRefs::specularWeightWithMap). Null => 1x1 white fallback (scalar behaviour).
     TextureSource         roughnessMap;
     DecodedImagePtr       roughnessImage;
+    /// Which channel of the roughness map carries the roughness: 0 red (the native figures' and
+    /// FBX's grayscale maps), 1 green (glTF's metallic-roughness map: roughness in G, metalness
+    /// in B), 2 blue. The decode layer moves it into red, which is what the shader samples.
+    int                   roughnessChannel = 0;
+    /// The diffuse map's own ALPHA channel is the opacity (cutout) mask — a glTF material in
+    /// MASK or BLEND alpha mode, a USD material whose opacity reads the base texture's alpha.
+    /// The decode layer keeps the decoded alpha and sets hasOpacityMask without a bake.
+    bool                  opacityFromDiffuseAlpha = false;
     TextureSource         specMask;
     DecodedImagePtr       specMaskImage;
 

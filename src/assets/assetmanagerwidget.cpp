@@ -13,6 +13,7 @@
  */
 
 #include "assetmanagerwidget.h"
+#include "importformats.h"
 #include "assetbreadcrumblabel.h"
 #include "assetdb.h"
 #include "assetfolderproxymodel.h"
@@ -989,11 +990,9 @@ void AssetManagerWidget::onGridItemDoubleClicked(QListWidgetItem *item) {
     } else if (path.endsWith(QStringLiteral(".obj"), Qt::CaseInsensitive)) {
         // Importable model: load it into the 3D viewport rather than the OS default app.
         emit importModelRequested(path);
-    } else if (path.endsWith(QStringLiteral(".duf"), Qt::CaseInsensitive) ||
-               path.endsWith(QStringLiteral(".dsf"), Qt::CaseInsensitive) ||
-               path.endsWith(QStringLiteral(".fbx"), Qt::CaseInsensitive)) {
-        // Character figure (native, or a rigged FBX): import it into the 3D viewport (same path as
-        // File -> Import / open-with).
+    } else if (pose::ImportFormats::isFigureRouteFile(path)) {
+        // Character figure (native, or a rigged FBX / glTF / USD): import it into the 3D viewport
+        // (same path as File -> Import / open-with).
         emit importFigureRequested(path);
     } else {
         QDesktopServices::openUrl(QUrl::fromLocalFile(path));
