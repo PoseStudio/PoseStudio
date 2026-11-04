@@ -73,24 +73,6 @@ QString iconButtonStyle(const QString& objectName, bool checkable) {
     return style;
 }
 
-// The VR button's style: a text button on the strip's surface that LIGHTS UP in the accent
-// while VR Mode is on — the state is what it shows, so the lit look is unmistakable.
-QString vrButtonStyle(const QString& objectName) {
-    return QStringLiteral("#%1 {"
-                          "  background-color: #252627;"
-                          "  color: #e8e8ea;"
-                          "  border: 1px solid #555555;"
-                          "  border-radius: 4px;"
-                          "  padding: 0 10px;"
-                          "  font-size: 12px;"
-                          "  font-weight: bold;"
-                          "}"
-                          "#%1:hover { background-color: #3a3d40; }"
-                          "#%1:checked { background-color: #314D7A; color: #ffffff; border-color: #5b87cc; }"
-                          "#%1:checked:hover { background-color: #3a5a8c; }")
-        .arg(objectName);
-}
-
 // Builds one square icon button squared off to the field height, so the strip aligns whatever
 // the font metrics work out to.
 QPushButton* makeIconButton(QWidget* parent, const QString& objectName, const QString& iconPath,
@@ -257,13 +239,11 @@ ViewportStrip::ViewportStrip(QWidget* owner)
     const int fieldHeight = m_shaderPicker->sizeHint().height();
 
     // The VR button, right of the view picker: enters / leaves VR Mode and is LIT while it is
-    // on. Like the picker's entry it only asks; the lit state is the viewport's (setVrActive).
-    m_vrButton = new QPushButton(tr("VR"), this);
-    m_vrButton->setObjectName(QStringLiteral("ViewportVrButton"));
-    m_vrButton->setToolTip(tr("Enter or leave VR Mode"));
-    m_vrButton->setCheckable(true);
-    m_vrButton->setStyleSheet(vrButtonStyle(QStringLiteral("ViewportVrButton")));
-    m_vrButton->setFixedHeight(fieldHeight);
+    // on (the checkable icon-button look the Skeleton button has). Like the picker's entry it
+    // only asks; the lit state is the viewport's (setVrActive).
+    m_vrButton = makeIconButton(this, QStringLiteral("ViewportVrButton"),
+                                QStringLiteral(":/resources/icons/vr-mode.png"),
+                                tr("Enter or leave VR Mode"), fieldHeight, true);
     connect(m_vrButton, &QPushButton::clicked, this, [this](bool on) {
         m_vrButton->setChecked(!on); // back until the state is real
         emit vrModeToggled(on);
