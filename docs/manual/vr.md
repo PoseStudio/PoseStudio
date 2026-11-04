@@ -18,9 +18,9 @@ The Link app, Virtual Desktop or SteamVR does the streaming to the headset; Pose
 
 1. Open **Edit → Preferences → VR** and turn on **Enable VR support**. PoseStudio connects to the headset runtime as it starts, so this takes a restart — the **View → VR Mode** entry offers the restart itself the first time you choose it, and your scene comes back with it: nothing you have posed is lost.
 2. Connect the headset *before* starting PoseStudio: start Quest Link or Air Link (or Virtual Desktop, or SteamVR), then start PoseStudio. A headset connected after launch needs another restart; **View → VR Mode** offers that too, scene included. The VR page in Preferences shows what the startup found under **Status**.
-3. Choose **View → VR Mode** and put the headset on. You stand about two metres in front of the figure, facing her.
+3. Choose **View → VR Mode** — or click the **VR** button on the viewport's control strip, right of the view picker, or pick **VR Mode** at the bottom of that picker — and put the headset on. You stand about two metres in front of the figure, facing her. The VR button lights up blue while the headset has the scene.
 
-**View → Recenter VR View** puts you back in front of the figure, facing her, from wherever you have walked to. Choose **View → VR Mode** again to end it.
+**View → Recenter VR View** puts you back in front of the figure, facing her, from wherever you have walked to. To leave VR Mode press **Esc** at the desktop, click the lit VR button, or choose **View → VR Mode** again.
 
 ## The controllers
 
@@ -39,7 +39,7 @@ Both controllers draw a pointer ray. The bindings below are for Meta Touch contr
 | **X** (left) | The Ground button: drops the figure onto the floor. |
 | **Menu** (left controller) | Recenters you in front of the figure. |
 
-The ray turns blue over a joint it can grab and orange while it carries one; it ends with a small marker on whatever it is on, and a short stub at its root shows where the controller is. Everything you do with the controllers is on the undo stack like the mouse's edits, and the desktop viewport shows it all meanwhile — with a **VR** badge under its control strip while VR Mode is on.
+The ray turns blue over a joint it can grab and orange while it carries one; it ends with a small marker on whatever it is on, and a short stub at its root shows where the controller is. Everything you do with the controllers is on the undo stack like the mouse's edits, and the desktop viewport shows it all meanwhile — its VR button lit while VR Mode is on.
 
 On a Valve Index the A and B buttons of each hand take the same roles (right A pins, right B undoes, left A grounds, left B redoes) and the left stick's click recenters; Windows Mixed Reality and Vive controllers use their trackpad clicks, grips and menu buttons.
 

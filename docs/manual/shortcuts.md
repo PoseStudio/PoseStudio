@@ -43,6 +43,7 @@ The keys work on the number row and on the numeric keypad. With NumLock off, the
 | `T` | a joint selected | The same for Twist |
 | Left click or `Enter` | while `B` / `S` / `T` is on | Keep the result |
 | `Esc`, right click, or the same key again | while `B` / `S` / `T` is on | Put the joint back as it was |
+| `Esc` | in VR Mode (anywhere in the window) | Leave VR Mode — see [VR Mode](vr.md) |
 | `Delete` or `Backspace` | viewport focus, a model selected | Delete the selected model (clears the undo history) |
 | `Ctrl+Z` | | Undo |
 | `Ctrl+Y` | | Redo |

@@ -17,8 +17,8 @@
 #include "scene/shademode.h"
 
 #include <QCoreApplication>
+#include <QAction>
 #include <QHBoxLayout>
-#include <QLabel>
 #include <QIcon>
 #include <QList>
 #include <QMenu>
@@ -71,6 +71,24 @@ QString iconButtonStyle(const QString& objectName, bool checkable) {
         style += QStringLiteral("#%1:hover { background-color: #314D7A; }").arg(objectName);
     }
     return style;
+}
+
+// The VR button's style: a text button on the strip's surface that LIGHTS UP in the accent
+// while VR Mode is on — the state is what it shows, so the lit look is unmistakable.
+QString vrButtonStyle(const QString& objectName) {
+    return QStringLiteral("#%1 {"
+                          "  background-color: #252627;"
+                          "  color: #e8e8ea;"
+                          "  border: 1px solid #555555;"
+                          "  border-radius: 4px;"
+                          "  padding: 0 10px;"
+                          "  font-size: 12px;"
+                          "  font-weight: bold;"
+                          "}"
+                          "#%1:hover { background-color: #3a3d40; }"
+                          "#%1:checked { background-color: #314D7A; color: #ffffff; border-color: #5b87cc; }"
+                          "#%1:checked:hover { background-color: #3a5a8c; }")
+        .arg(objectName);
 }
 
 // Builds one square icon button squared off to the field height, so the strip aligns whatever
@@ -215,6 +233,19 @@ ViewportStrip::ViewportStrip(QWidget* owner)
             emit viewSelected(kViewEntries[index].preset);
         }
     });
+    // VR Mode, at the bottom of the view picker — off the camera views by a separator, since it
+    // is not a view: the headset shows the scene and this viewport mirrors it. An action of its
+    // own, outside the picker's exclusive view group, so the caption keeps reading the camera.
+    // It only ASKS (vrModeToggled): the check mark is put back and the real state arrives
+    // through setVrActive once the headset has the scene — a start that cannot happen (no
+    // headset) leaves it as it was.
+    m_viewPicker->pickerMenu()->addSeparator();
+    m_vrMenuAction = m_viewPicker->pickerMenu()->addAction(tr("VR Mode"));
+    m_vrMenuAction->setCheckable(true);
+    connect(m_vrMenuAction, &QAction::triggered, this, [this](bool on) {
+        m_vrMenuAction->setChecked(!on);
+        emit vrModeToggled(on);
+    });
     row->addWidget(m_viewPicker);
 
     // "Home": snap the camera back to the default perspective framing. "Ground": drop the figure
@@ -224,6 +255,21 @@ ViewportStrip::ViewportStrip(QWidget* owner)
     // (unlike the one-shot Home/Ground), so it's checkable and shows its state; off by default,
     // joints are grabbed directly on the figure and stay clickable either way.
     const int fieldHeight = m_shaderPicker->sizeHint().height();
+
+    // The VR button, right of the view picker: enters / leaves VR Mode and is LIT while it is
+    // on. Like the picker's entry it only asks; the lit state is the viewport's (setVrActive).
+    m_vrButton = new QPushButton(tr("VR"), this);
+    m_vrButton->setObjectName(QStringLiteral("ViewportVrButton"));
+    m_vrButton->setToolTip(tr("Enter or leave VR Mode"));
+    m_vrButton->setCheckable(true);
+    m_vrButton->setStyleSheet(vrButtonStyle(QStringLiteral("ViewportVrButton")));
+    m_vrButton->setFixedHeight(fieldHeight);
+    connect(m_vrButton, &QPushButton::clicked, this, [this](bool on) {
+        m_vrButton->setChecked(!on); // back until the state is real
+        emit vrModeToggled(on);
+    });
+    row->addWidget(m_vrButton);
+
     m_homeButton = makeIconButton(this, QStringLiteral("ViewportHomeButton"),
                                   QStringLiteral(":/resources/icons/home.png"),
                                   tr("Reset to the default view"), fieldHeight, false);
@@ -248,19 +294,9 @@ ViewportStrip::ViewportStrip(QWidget* owner)
     // only while the joint mouse mode is on (B / S / T with a joint selected: setJointModeBadge).
     m_modeBadge = new JointModeBadge(this, fieldHeight);
     m_modeBadge->hide();
-    // The VR badge (setVrBadge): the headset has the scene, this viewport mirrors its left eye.
-    m_vrBadge = new QLabel(tr("VR"), this);
-    m_vrBadge->setObjectName(QStringLiteral("VrBadge"));
-    m_vrBadge->setFixedHeight(fieldHeight);
-    m_vrBadge->setAlignment(Qt::AlignCenter);
-    m_vrBadge->setStyleSheet(QStringLiteral("QLabel#VrBadge { color: #5b87cc; background: #252627; border: 1px solid "
-                                            "#555555; border-radius: 4px; padding: 0 10px; font-weight: bold; }"));
-    m_vrBadge->hide();
     auto* badgeRow = new QHBoxLayout();
     badgeRow->setContentsMargins(0, 0, 0, 0);
-    badgeRow->setSpacing(6);
     badgeRow->addStretch(1);
-    badgeRow->addWidget(m_vrBadge);
     badgeRow->addWidget(m_modeBadge);
     column->addLayout(badgeRow);
 
@@ -310,12 +346,10 @@ void ViewportStrip::setJointModeBadge(int kind) {
     }
 }
 
-void ViewportStrip::setVrBadge(bool on) {
-    if (m_vrBadge->isVisibleTo(this) == on) {
-        return;
-    }
-    m_vrBadge->setVisible(on);
-    anchorTo(m_anchor); // the badge row appeared or went away
+void ViewportStrip::setVrActive(bool on) {
+    // (setChecked raises toggled, not clicked / triggered: the user-only signals stay quiet.)
+    m_vrButton->setChecked(on);
+    m_vrMenuAction->setChecked(on);
 }
 
 } // namespace pose

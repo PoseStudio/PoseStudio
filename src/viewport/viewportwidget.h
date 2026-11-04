@@ -183,6 +183,10 @@ signals:
     /// Re-emitted from the viewport when VR Mode starts or ends (by the user or because the
     /// headset session was lost); the View menu's checkable entry follows it.
     void vrModeChanged(bool on);
+    /// The strip's VR button or its view picker's VR Mode entry asked to enter (@p on) or leave
+    /// VR Mode. The shell handles it exactly as the View menu's entry — including the explanation
+    /// when VR cannot start — so every way in takes one path.
+    void vrModeRequested(bool on);
     /// Re-emitted from the viewport with a user-readable message when VR Mode could not start or
     /// was ended by the runtime. The shell shows it.
     void vrError(const QString& message);

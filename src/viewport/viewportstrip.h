@@ -24,7 +24,7 @@
 
 #include <QWidget>
 
-class QLabel;
+class QAction;
 class QPushButton;
 
 namespace pose {
@@ -57,9 +57,9 @@ public slots:
     /// Shows the joint-mode badge for @p kind (0/1/2 = Bend / Side-Side / Twist: the dial the
     /// mouse is turning) or hides it (-1), re-anchoring the strip as its row appears/disappears.
     void setJointModeBadge(int kind);
-    /// The "VR" badge beside the joint-mode badge: shown while VR Mode is on (the headset has
-    /// the scene; the viewport is its mirror).
-    void setVrBadge(bool on);
+    /// Whether VR Mode is on: the VR button lights up and the view picker's VR Mode entry is
+    /// checked. The real state, from the viewport — the controls only ASK (vrModeToggled).
+    void setVrActive(bool on);
 
 signals:
     /// The user picked a shading mode: a row of scene/shademode.h's table.
@@ -70,6 +70,10 @@ signals:
     void groundClicked();
     /// The user toggled the Skeleton button (not emitted by setSkeletonChecked).
     void skeletonToggled(bool on);
+    /// The user asked to enter (@p on) or leave VR Mode — the VR button or the view picker's
+    /// VR Mode entry. The shell decides (a headset-less launch gets an explanation instead); the
+    /// outcome comes back through setVrActive.
+    void vrModeToggled(bool on);
 
 private:
     MenuPickerButton* m_shaderPicker = nullptr;  // "#ShaderModeButton"
@@ -78,7 +82,8 @@ private:
     QPushButton*      m_groundButton = nullptr;  // drops the figure onto the floor plane
     QPushButton*      m_skeletonButton = nullptr; // toggles the skeleton overlay (checkable)
     JointModeBadge*   m_modeBadge = nullptr;     // "the mouse is turning Bend / Side-Side / Twist", under the buttons
-    QLabel*           m_vrBadge = nullptr;       // "VR" while VR Mode is on (setVrBadge)
+    QPushButton*      m_vrButton = nullptr;      // "VR", right of the view picker: enters / leaves VR Mode, lit while on
+    QAction*          m_vrMenuAction = nullptr;  // "VR Mode" at the bottom of the view picker's menu
     const QWidget*    m_anchor = nullptr;        // the container anchorTo() last glued us to
 };
 

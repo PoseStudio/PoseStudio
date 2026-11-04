@@ -14,6 +14,7 @@
 #include "vulkanwindow.h"
 
 #include <QAction>
+#include <QApplication>
 #include <QByteArrayList>
 #include <QCoreApplication>
 #include <QDebug>
@@ -206,6 +207,10 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
     layout->addWidget(m_container);
 
     createStrip(); // the floating control strip in the top-right corner
+
+    // Application-wide, for the one key that must work wherever the focus is: Esc leaves VR Mode
+    // (eventFilter). The top-level window's own filter (anchorStrip) is installed in showEvent.
+    QCoreApplication::instance()->installEventFilter(this);
 }
 
 void ViewportWidget::importObj(const QString& path) {
@@ -418,7 +423,9 @@ void ViewportWidget::createStrip() {
     connect(m_window, &VulkanWindow::viewPresetChanged, m_strip, &ViewportStrip::setViewPreset);
     connect(m_window, &VulkanWindow::shadeModeChanged, m_strip, &ViewportStrip::setShadeMode);
     connect(m_window, &VulkanWindow::jointModalChanged, m_strip, &ViewportStrip::setJointModeBadge);
-    connect(m_window, &VulkanWindow::vrModeChanged, m_strip, &ViewportStrip::setVrBadge);
+    connect(m_window, &VulkanWindow::vrModeChanged, m_strip, &ViewportStrip::setVrActive);
+    connect(m_strip, &ViewportStrip::vrModeToggled, this, &ViewportWidget::vrModeRequested);
+    m_strip->setVrActive(m_window->vrModeActive());
     connect(this, &ViewportWidget::skeletonVisibilityChanged, m_strip,
             &ViewportStrip::setSkeletonChecked);
     m_strip->setViewPreset(m_window->currentView());
@@ -468,6 +475,18 @@ void ViewportWidget::moveEvent(QMoveEvent* event) {
 }
 
 bool ViewportWidget::eventFilter(QObject* watched, QEvent* event) {
+    // ESCAPE, anywhere in the application, leaves VR Mode (installed on the application for
+    // that; the event is read at the WINDOW it arrives at, once per press). Not while the joint
+    // mouse mode is on — its Esc puts the joint back, and JointModalInput consumes it — and not
+    // while a modal dialog has the keyboard (its own Esc closes it).
+    if (event->type() == QEvent::KeyPress && watched->isWindowType() && m_window && m_window->vrModeActive() &&
+        m_window->jointModal() < 0 && QApplication::activeModalWidget() == nullptr) {
+        const auto* key = static_cast<const QKeyEvent*>(event);
+        if (key->key() == Qt::Key_Escape && !key->isAutoRepeat()) {
+            m_window->setVrMode(false);
+            return true;
+        }
+    }
     if (watched == m_filteredWindow) {
         const QEvent::Type t = event->type();
         if (t == QEvent::Move || t == QEvent::Resize || t == QEvent::WindowStateChange) {
@@ -488,6 +507,9 @@ bool ViewportWidget::eventFilter(QObject* watched, QEvent* event) {
 }
 
 ViewportWidget::~ViewportWidget() {
+    if (QCoreApplication::instance()) {
+        QCoreApplication::instance()->removeEventFilter(this); // the Esc-leaves-VR filter
+    }
     // The QVulkanInstance (m_instance) owns the VkInstance, and the VulkanWindow's
     // device/renderer were created from it. Qt would otherwise destroy the window via the
     // base QWidget destructor — i.e. AFTER m_instance is gone — leaving the renderer to

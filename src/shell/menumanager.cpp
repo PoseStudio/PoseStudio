@@ -445,6 +445,13 @@ void MenuManager::setViewportWidget(pose::ViewportWidget *viewport) {
         QObject::connect(viewport, &pose::ViewportWidget::vrError, this, [this](const QString &message) {
             QMessageBox::warning(mainWindow, tr("VR Mode"), message);
         });
+        // The strip's VR button and its view picker's VR Mode entry take the menu entry's path
+        // (trigger: the toggle + the handler above, explanation included), so every way in is one.
+        QObject::connect(viewport, &pose::ViewportWidget::vrModeRequested, this, [this](bool on) {
+            if (m_vrModeAction && m_vrModeAction->isChecked() != on) {
+                m_vrModeAction->trigger();
+            }
+        });
     }
     if (m_recenterVrAction) {
         QObject::connect(m_recenterVrAction, &QAction::triggered, this, [this]() {
