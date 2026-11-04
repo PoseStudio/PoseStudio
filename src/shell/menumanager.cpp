@@ -27,6 +27,7 @@
 #include "jointtransform.h" // pose::JointTransform: which of the joint-mode keys are live
 #include "scene/shademode.h" // kDefaultShadeMode (File → New's picker reset)
 #include "vrsettings.h"      // VR Mode: can it start, and why not
+#include <QDir>
 #include <QMenu>
 #include <QProcess>
 #include <QMenuBar>
@@ -463,7 +464,7 @@ void MenuManager::explainVrUnavailable() {
         box.setInformativeText(
             tr("PoseStudio connects to the headset runtime when it starts, so VR support takes a restart to "
                "turn on. Connect your headset first (Quest Link or Air Link, Virtual Desktop, or SteamVR), "
-               "then restart.\n\nTurn VR support on now?"));
+               "then restart — your scene comes back with it.\n\nTurn VR support on now?"));
         QAbstractButton *restart = box.addButton(tr("Turn On and Restart"), QMessageBox::AcceptRole);
         QAbstractButton *later = box.addButton(tr("Turn On, Restart Later"), QMessageBox::ActionRole);
         box.addButton(tr("Cancel"), QMessageBox::RejectRole);
@@ -479,7 +480,7 @@ void MenuManager::explainVrUnavailable() {
     // VR support is on, but the startup found no usable headset: the status says why.
     box.setText(tr("VR Mode cannot start."));
     box.setInformativeText(tr("%1\n\nConnect the headset (Quest Link or Air Link, Virtual Desktop, or SteamVR), "
-                              "then restart PoseStudio.")
+                              "then restart PoseStudio — your scene comes back with it.")
                                .arg(VrSettings::status()));
     QAbstractButton *restart = box.addButton(tr("Restart Now"), QMessageBox::AcceptRole);
     box.addButton(tr("OK"), QMessageBox::RejectRole);
@@ -490,15 +491,35 @@ void MenuManager::explainVrUnavailable() {
 }
 
 void MenuManager::relaunchApplication() {
-    if (!confirmDiscardChanges()) {
+    // THE SCENE SURVIVES THE RESTART: it is saved to a temporary project the new process reopens
+    // (main.cpp's --restore-scene), deletes, and re-attaches to the document it belonged to —
+    // unsaved as it was — so a restart costs the user nothing and asks nothing. Only when that
+    // temporary file cannot be written does the unsaved-changes prompt stand in.
+    QStringList args;
+    bool preserved = false;
+    if (viewportWidget) {
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        const QString temp = dir + QStringLiteral("/restart-scene.pss");
+        if (QDir().mkpath(dir) && viewportWidget->saveProjectFile(temp)) {
+            preserved = true;
+            args << QStringLiteral("--restore-scene") << temp;
+            if (!viewportWidget->projectPath().isEmpty()) {
+                args << QStringLiteral("--project") << viewportWidget->projectPath();
+            }
+            if (!viewportWidget->isProjectDirty()) {
+                args << QStringLiteral("--project-clean");
+            }
+        }
+    }
+    if (!preserved && !confirmDiscardChanges()) {
         return; // Save cancelled, or the user changed their mind
     }
     if (viewportWidget) {
-        viewportWidget->setProjectClean(); // the scene was saved or let go of: no second prompt on the way out
+        viewportWidget->setProjectClean(); // preserved, saved or let go of: no second prompt on the way out
     }
-    // The Factory Reset relaunch (factoryresetpreferencespanel.cpp): no arguments, so the new
-    // process doesn't replay this one's "open-with" paths.
-    QProcess::startDetached(QApplication::applicationFilePath(), QStringList());
+    // The Factory Reset relaunch (factoryresetpreferencespanel.cpp), with only the restore
+    // arguments: the new process must not replay this one's "open-with" paths.
+    QProcess::startDetached(QApplication::applicationFilePath(), args);
     QApplication::quit();
 }
 

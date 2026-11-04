@@ -67,8 +67,9 @@ PostProcess::PostProcess(VulkanContext& context, VkRenderPass swapchainRenderPas
     // + the mirror composite over another chain's images, see setMirrorSource). ----------------
     m_setLayout = createDescriptorSetLayout(
         device, uniformBindings(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT));
-    m_pool = createDescriptorPool(device, {poolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 21)}, 7);
-    std::array<VkDescriptorSet, 7> sets{};
+    // (+ an eighth for VR Mode's depth resolve over the eye target's MSAA depth.)
+    m_pool = createDescriptorPool(device, {poolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 24)}, 8);
+    std::array<VkDescriptorSet, 8> sets{};
     allocateDescriptorSets(device, m_pool.get(), m_setLayout.get(), static_cast<uint32_t>(sets.size()),
                            sets.data());
     m_brightSet = sets[0];
@@ -78,6 +79,7 @@ PostProcess::PostProcess(VulkanContext& context, VkRenderPass swapchainRenderPas
     m_sssHSet = sets[4];
     m_sssVSet = sets[5];
     m_mirrorSet = sets[6];
+    m_depthResolveSet = sets[7];
 
     // --- Pipelines. All single-sample: bright/blur/SSS target the bloom pass, the composite the
     // swapchain's single-sample present pass (the scene's MSAA lives in the HDR target). --------
@@ -178,6 +180,13 @@ void PostProcess::updateDescriptors(const VkDescriptorImageInfo& hdrResolve,
     const VkDescriptorImageInfo* mirrorHdr = m_hasMirror ? &m_mirrorInfos[0] : &hdrResolve;
     const VkDescriptorImageInfo* mirrorBloom = m_hasMirror ? &m_mirrorInfos[1] : &aInfo;
     const VkDescriptorImageInfo* mirrorOutline = m_hasMirror ? &m_mirrorInfos[2] : &outlineMask;
+    // (The depth-resolve set is written by enableDepthResolve, from a target that never resizes;
+    // until then it holds this chain's HDR image so a stray bind is valid.)
+    const VkDescriptorImageInfo* depthSource = m_depthResolvePipeline ? nullptr : &hdrResolve;
+    if (depthSource != nullptr) {
+        const VkDescriptorImageInfo infos[3] = {*depthSource, *depthSource, *depthSource};
+        writeCombinedImageSamplers(m_context.device(), m_depthResolveSet, 0, infos, 3);
+    }
     const std::array<Entry, 21> entries{{{m_brightSet, 0, &hdrResolve},
                                          {m_brightSet, 1, &hdrResolve},
                                          {m_brightSet, 2, &hdrResolve},
@@ -307,6 +316,64 @@ void PostProcess::clearMirrorSource() {
 
 VkDescriptorImageInfo PostProcess::bloomInfo() const {
     return sampledImageInfo(m_bloomA.image.view(), m_sampler);
+}
+
+void PostProcess::enableDepthResolve(VkRenderPass depthRenderPass, const VkDescriptorImageInfo& msaaDepth,
+                                     uint32_t sampleCount, const std::vector<char>& fullscreenVertSpirv,
+                                     const std::vector<char>& depthResolveFragSpirv) {
+    m_depthResolvePass = depthRenderPass;
+    m_depthSamples = sampleCount;
+    const VkDescriptorImageInfo infos[3] = {msaaDepth, msaaDepth, msaaDepth}; // (binding 0 read; the rest valid)
+    writeCombinedImageSamplers(m_context.device(), m_depthResolveSet, 0, infos, 3);
+
+    // A depth-only single-sample pipeline: the fullscreen triangle writes gl_FragDepth and the
+    // depth test (LESS against the pass's clear of 1.0) lets every nearer value land.
+    PipelineConfig config;
+    config.pushConstantSize = sizeof(PostPush);
+    config.pushConstantStages = VK_SHADER_STAGE_FRAGMENT_BIT;
+    config.depthTestEnable = true;
+    config.depthWriteEnable = true;
+    config.blendEnable = false;
+    config.descriptorSetLayouts = {m_setLayout.get()};
+    config.singleSample = true;
+    config.hasColorAttachment = false;
+    m_depthResolvePipeline = std::make_unique<VulkanPipeline>(m_context, depthRenderPass, fullscreenVertSpirv,
+                                                              depthResolveFragSpirv, config);
+}
+
+void PostProcess::recordDepthResolve(VkCommandBuffer cmd, VkFramebuffer framebuffer, VkExtent2D extent) {
+    if (!m_depthResolvePipeline) {
+        return;
+    }
+    VkClearValue clear{};
+    clear.depthStencil = {1.0f, 0};
+    VkRenderPassBeginInfo rp{};
+    rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp.renderPass = m_depthResolvePass;
+    rp.framebuffer = framebuffer;
+    rp.renderArea.extent = extent;
+    rp.clearValueCount = 1;
+    rp.pClearValues = &clear;
+    vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
+
+    VkViewport viewport{};
+    viewport.width = static_cast<float>(extent.width);
+    viewport.height = static_cast<float>(extent.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    VkRect2D scissor{};
+    scissor.extent = extent;
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_depthResolvePipeline->handle());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_depthResolvePipeline->layout(), 0, 1,
+                            &m_depthResolveSet, 0, nullptr);
+    const PostPush push{{static_cast<float>(m_depthSamples), 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f},
+                        {1.0f, 1.0f, 0.0f, 0.0f}};
+    vkCmdPushConstants(cmd, m_depthResolvePipeline->layout(), VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdEndRenderPass(cmd);
 }
 
 } // namespace pose

@@ -30,6 +30,11 @@ public:
     static constexpr double kMinRenderScale = 0.5;
     static constexpr double kMaxRenderScale = 1.5;
 
+    /// Preferences → VR → "Reduced effects in the headset": skip the subsurface blur and bloom
+    /// per eye (absent = off). Applies when VR Mode next starts.
+    static bool reducedEffects();
+    static void setReducedEffects(bool reduced);
+
     /// What the viewport found at startup, in the user's words ("VR support is off", "No OpenXR
     /// runtime is installed", "Ready: Oculus / Meta Quest 3") — the Preferences page's status
     /// line, and the explanation behind a VR Mode that cannot start.

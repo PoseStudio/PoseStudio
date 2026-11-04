@@ -103,7 +103,10 @@ bool OpenXrInput::createActions(std::string& failReason) {
     return make("move", "Move", XR_ACTION_TYPE_VECTOR2F_INPUT, false, m_move) &&
            make("turn", "Turn", XR_ACTION_TYPE_VECTOR2F_INPUT, false, m_turn) &&
            make("select", "Select / Grab", XR_ACTION_TYPE_FLOAT_INPUT, true, m_select) &&
-           make("pin", "Pin Joint", XR_ACTION_TYPE_BOOLEAN_INPUT, true, m_pin) &&
+           make("pin", "Pin Joint", XR_ACTION_TYPE_BOOLEAN_INPUT, false, m_pin) &&
+           make("undo", "Undo", XR_ACTION_TYPE_BOOLEAN_INPUT, false, m_undo) &&
+           make("redo", "Redo", XR_ACTION_TYPE_BOOLEAN_INPUT, false, m_redo) &&
+           make("ground", "Ground Figure", XR_ACTION_TYPE_BOOLEAN_INPUT, false, m_ground) &&
            make("recenter", "Recenter", XR_ACTION_TYPE_BOOLEAN_INPUT, false, m_recenter) &&
            make("aim", "Aim Pose", XR_ACTION_TYPE_POSE_INPUT, true, m_aim) &&
            make("haptic", "Haptic", XR_ACTION_TYPE_VIBRATION_OUTPUT, true, m_haptic);
@@ -121,14 +124,19 @@ bool OpenXrInput::suggestBindings(std::string& failReason) {
     // The physical inputs of each controller family, by the OpenXR interaction-profile paths.
     // The analog trigger value drives "select" where there is one (the caller thresholds it with
     // hysteresis); the simple profile's select/click arrives as 0/1 through the same action.
+    // The face buttons: on Touch A = pin, B = undo, X = ground, Y = redo and the left menu
+    // recentres — every one a deliberate press (grips and stick clicks fire by accident while
+    // holding the controller or walking). The other families map their own buttons likewise.
     const std::vector<Profile> profiles = {
         {"/interaction_profiles/oculus/touch_controller",
          {{m_move, "/user/hand/left/input/thumbstick"},
           {m_turn, "/user/hand/right/input/thumbstick"},
           {m_select, "/user/hand/left/input/trigger/value"},
           {m_select, "/user/hand/right/input/trigger/value"},
-          {m_pin, "/user/hand/left/input/x/click"},
           {m_pin, "/user/hand/right/input/a/click"},
+          {m_undo, "/user/hand/right/input/b/click"},
+          {m_ground, "/user/hand/left/input/x/click"},
+          {m_redo, "/user/hand/left/input/y/click"},
           {m_recenter, "/user/hand/left/input/menu/click"},
           {m_aim, "/user/hand/left/input/aim/pose"},
           {m_aim, "/user/hand/right/input/aim/pose"},
@@ -139,9 +147,11 @@ bool OpenXrInput::suggestBindings(std::string& failReason) {
           {m_turn, "/user/hand/right/input/thumbstick"},
           {m_select, "/user/hand/left/input/trigger/value"},
           {m_select, "/user/hand/right/input/trigger/value"},
-          {m_pin, "/user/hand/left/input/a/click"},
           {m_pin, "/user/hand/right/input/a/click"},
-          {m_recenter, "/user/hand/left/input/b/click"},
+          {m_undo, "/user/hand/right/input/b/click"},
+          {m_ground, "/user/hand/left/input/a/click"},
+          {m_redo, "/user/hand/left/input/b/click"},
+          {m_recenter, "/user/hand/left/input/thumbstick/click"},
           {m_aim, "/user/hand/left/input/aim/pose"},
           {m_aim, "/user/hand/right/input/aim/pose"},
           {m_haptic, "/user/hand/left/output/haptic"},
@@ -151,8 +161,10 @@ bool OpenXrInput::suggestBindings(std::string& failReason) {
           {m_turn, "/user/hand/right/input/thumbstick"},
           {m_select, "/user/hand/left/input/trigger/value"},
           {m_select, "/user/hand/right/input/trigger/value"},
-          {m_pin, "/user/hand/left/input/trackpad/click"},
           {m_pin, "/user/hand/right/input/trackpad/click"},
+          {m_undo, "/user/hand/right/input/menu/click"},
+          {m_ground, "/user/hand/left/input/trackpad/click"},
+          {m_redo, "/user/hand/left/input/squeeze/click"},
           {m_recenter, "/user/hand/left/input/menu/click"},
           {m_aim, "/user/hand/left/input/aim/pose"},
           {m_aim, "/user/hand/right/input/aim/pose"},
@@ -163,8 +175,9 @@ bool OpenXrInput::suggestBindings(std::string& failReason) {
           {m_turn, "/user/hand/right/input/trackpad"},
           {m_select, "/user/hand/left/input/trigger/value"},
           {m_select, "/user/hand/right/input/trigger/value"},
-          {m_pin, "/user/hand/left/input/squeeze/click"},
           {m_pin, "/user/hand/right/input/squeeze/click"},
+          {m_undo, "/user/hand/right/input/menu/click"},
+          {m_ground, "/user/hand/left/input/squeeze/click"},
           {m_recenter, "/user/hand/left/input/menu/click"},
           {m_aim, "/user/hand/left/input/aim/pose"},
           {m_aim, "/user/hand/right/input/aim/pose"},
@@ -245,11 +258,19 @@ bool OpenXrInput::sync(int64_t time, XrSpace baseSpace, VrInput& out) {
     if (XR_SUCCEEDED(xrGetActionStateVector2f(m_session, &get, &vec)) && vec.isActive) {
         out.turn = glm::vec2(vec.currentState.x, vec.currentState.y);
     }
-    get.action = m_recenter;
-    XrActionStateBoolean button{XR_TYPE_ACTION_STATE_BOOLEAN};
-    if (XR_SUCCEEDED(xrGetActionStateBoolean(m_session, &get, &button)) && button.isActive) {
-        out.recenterPressed = button.changedSinceLastSync == XR_TRUE && button.currentState == XR_TRUE;
-    }
+    // The buttons: a press is the frame the state went down (changedSinceLastSync + down).
+    const auto pressed = [&](XrAction action) {
+        get.action = action;
+        get.subactionPath = XR_NULL_PATH;
+        XrActionStateBoolean button{XR_TYPE_ACTION_STATE_BOOLEAN};
+        return XR_SUCCEEDED(xrGetActionStateBoolean(m_session, &get, &button)) && button.isActive &&
+               button.changedSinceLastSync == XR_TRUE && button.currentState == XR_TRUE;
+    };
+    out.pinPressed = pressed(m_pin);
+    out.undoPressed = pressed(m_undo);
+    out.redoPressed = pressed(m_redo);
+    out.groundPressed = pressed(m_ground);
+    out.recenterPressed = pressed(m_recenter);
 
     for (int hand = 0; hand < 2; ++hand) {
         VrHandInput& h = out.hand[hand];
@@ -259,11 +280,6 @@ bool OpenXrInput::sync(int64_t time, XrSpace baseSpace, VrInput& out) {
         XrActionStateFloat trigger{XR_TYPE_ACTION_STATE_FLOAT};
         if (XR_SUCCEEDED(xrGetActionStateFloat(m_session, &get, &trigger)) && trigger.isActive) {
             h.select = trigger.currentState;
-        }
-        get.action = m_pin;
-        button = XrActionStateBoolean{XR_TYPE_ACTION_STATE_BOOLEAN};
-        if (XR_SUCCEEDED(xrGetActionStateBoolean(m_session, &get, &button)) && button.isActive) {
-            h.pinPressed = button.changedSinceLastSync == XR_TRUE && button.currentState == XR_TRUE;
         }
         get.action = m_aim;
         XrActionStatePose pose{XR_TYPE_ACTION_STATE_POSE};

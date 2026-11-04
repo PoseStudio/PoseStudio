@@ -861,6 +861,7 @@ set(SHADER_SOURCES
     composite.frag
     sssblur.frag
     outlinemask.frag
+    depthresolve.frag
 )
 
 set(COMPILED_SPV_FILES "")

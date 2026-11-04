@@ -39,6 +39,15 @@ void VrSettings::setRenderScale(double scale) {
         QString::number(std::clamp(scale, kMinRenderScale, kMaxRenderScale), 'f', 2));
 }
 
+bool VrSettings::reducedEffects() {
+    return PreferencesManager::instance().getValue(Constants::PREF_VR_REDUCED_EFFECTS, false).toBool();
+}
+
+void VrSettings::setReducedEffects(bool reduced) {
+    PreferencesManager::instance().setValue(Constants::PREF_VR_REDUCED_EFFECTS,
+                                           reduced ? QStringLiteral("1") : QStringLiteral("0"));
+}
+
 QString VrSettings::status() {
     return g_status;
 }

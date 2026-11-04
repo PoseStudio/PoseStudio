@@ -10,9 +10,11 @@
  * whole of VR Mode:
  *
  *   move      the LEFT thumbstick (x = strafe, y = forward/back), head-relative locomotion
- *   turn      the RIGHT thumbstick (x = snap turn; y = push/pull a dragged joint)
+ *   turn      the RIGHT thumbstick (x = smooth turn; y = push/pull a dragged joint)
  *   select    each hand's trigger, analog (a press is thresholded with hysteresis by the caller)
- *   pin       each hand's primary face button (A / X on Touch): pin / unpin the selected joint
+ *   pin       A (Touch): pin / unpin the selected joint — the P key
+ *   undo      B (Touch): Edit -> Undo;   redo   Y (Touch): Edit -> Redo
+ *   ground    X (Touch): the Ground button — the figure dropped onto the floor
  *   recenter  the left menu button: back in front of the figure
  *   aim       each hand's aim pose — the controller's pointing ray
  *   haptic    each hand's vibration — a tick on a grab
@@ -44,14 +46,18 @@ struct VrHandInput {
     glm::vec3 aimPosition{0.0f};
     glm::quat aimOrientation{1.0f, 0.0f, 0.0f, 0.0f}; ///< -Z = the pointing direction
     float     select = 0.0f;     ///< The trigger, 0..1 (0 when unbound / inactive).
-    bool      pinPressed = false; ///< The pin button went down this frame.
 };
 
-/// Everything the controllers say for one frame.
+/// Everything the controllers say for one frame. The buttons report the PRESS (the frame they
+/// went down), never a held state.
 struct VrInput {
     bool        focused = false;  ///< The session has input focus (else every value is at rest).
     glm::vec2   move{0.0f};       ///< Left stick: x right, y forward, each -1..1.
     glm::vec2   turn{0.0f};       ///< Right stick.
+    bool        pinPressed = false;
+    bool        undoPressed = false;
+    bool        redoPressed = false;
+    bool        groundPressed = false;
     bool        recenterPressed = false;
     VrHandInput hand[2];          ///< 0 = left, 1 = right.
 };
@@ -86,6 +92,9 @@ private:
     XrAction    m_turn = XR_NULL_HANDLE;
     XrAction    m_select = XR_NULL_HANDLE;
     XrAction    m_pin = XR_NULL_HANDLE;
+    XrAction    m_undo = XR_NULL_HANDLE;
+    XrAction    m_redo = XR_NULL_HANDLE;
+    XrAction    m_ground = XR_NULL_HANDLE;
     XrAction    m_recenter = XR_NULL_HANDLE;
     XrAction    m_aim = XR_NULL_HANDLE;
     XrAction    m_haptic = XR_NULL_HANDLE;

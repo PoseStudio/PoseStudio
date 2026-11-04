@@ -87,10 +87,12 @@ std::unique_ptr<OpenXrSystem> OpenXrSystem::create(std::string& failReason) {
         xrEnumerateInstanceExtensionProperties(nullptr, extensionCount, &extensionCount, extensions.data());
     }
     bool hasVulkan = false;
+    bool hasDepthLayer = false;
     for (const XrExtensionProperties& ext : extensions) {
         if (std::strcmp(ext.extensionName, XR_KHR_VULKAN_ENABLE_EXTENSION_NAME) == 0) {
             hasVulkan = true;
-            break;
+        } else if (std::strcmp(ext.extensionName, XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME) == 0) {
+            hasDepthLayer = true;
         }
     }
     if (!hasVulkan) {
@@ -99,17 +101,22 @@ std::unique_ptr<OpenXrSystem> OpenXrSystem::create(std::string& failReason) {
         return nullptr;
     }
 
-    // --- The instance. OpenXR 1.1 first; a 1.0-only runtime gets the 1.0 API. -------------------
+    // --- The instance. OpenXR 1.1 first; a 1.0-only runtime gets the 1.0 API. The depth layer
+    // extension rides along when the runtime offers it (the session submits depth then). ---------
     std::unique_ptr<OpenXrSystem> system(new OpenXrSystem());
-    const char* enabled[] = {XR_KHR_VULKAN_ENABLE_EXTENSION_NAME};
+    system->m_depthLayer = hasDepthLayer;
+    std::vector<const char*> enabled = {XR_KHR_VULKAN_ENABLE_EXTENSION_NAME};
+    if (hasDepthLayer) {
+        enabled.push_back(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME);
+    }
     XrInstanceCreateInfo info{XR_TYPE_INSTANCE_CREATE_INFO};
     std::snprintf(info.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE, "PoseStudio");
     info.applicationInfo.applicationVersion = 1;
     std::snprintf(info.applicationInfo.engineName, XR_MAX_ENGINE_NAME_SIZE, "PoseStudio");
     info.applicationInfo.engineVersion = 1;
     info.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
-    info.enabledExtensionCount = 1;
-    info.enabledExtensionNames = enabled;
+    info.enabledExtensionCount = static_cast<uint32_t>(enabled.size());
+    info.enabledExtensionNames = enabled.data();
     result = xrCreateInstance(&info, &system->m_instance);
     if (result == XR_ERROR_API_VERSION_UNSUPPORTED) {
         info.applicationInfo.apiVersion = XR_API_VERSION_1_0;
@@ -173,10 +180,11 @@ std::unique_ptr<OpenXrSystem> OpenXrSystem::create(std::string& failReason) {
     system->m_maxApiVersion = vulkanVersionFromXr(requirements.maxApiVersionSupported);
 
     // Plain stderr (not qInfo): this module is Qt-free like the rendering core.
-    std::fprintf(stderr, "[vr] OpenXR runtime: %s; headset: %s; Vulkan %u.%u-%u.%u\n",
+    std::fprintf(stderr, "[vr] OpenXR runtime: %s; headset: %s; Vulkan %u.%u-%u.%u; depth layer %s\n",
                  system->m_runtimeName.c_str(), system->m_systemName.c_str(),
                  VK_API_VERSION_MAJOR(system->m_minApiVersion), VK_API_VERSION_MINOR(system->m_minApiVersion),
-                 VK_API_VERSION_MAJOR(system->m_maxApiVersion), VK_API_VERSION_MINOR(system->m_maxApiVersion));
+                 VK_API_VERSION_MAJOR(system->m_maxApiVersion), VK_API_VERSION_MINOR(system->m_maxApiVersion),
+                 hasDepthLayer ? "yes" : "no");
     return system;
 }
 

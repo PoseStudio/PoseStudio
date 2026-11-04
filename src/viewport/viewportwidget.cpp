@@ -258,6 +258,10 @@ void ViewportWidget::setProjectClean() {
     withWindow([](VulkanWindow& w) { w.setProjectClean(); });
 }
 
+void ViewportWidget::markProjectDirty() {
+    withWindow([](VulkanWindow& w) { w.markProjectDirty(); });
+}
+
 void ViewportWidget::setShadeMode(int mode) {
     withWindow([mode](VulkanWindow& w) { w.setShadeMode(mode); });
 }
@@ -414,6 +418,7 @@ void ViewportWidget::createStrip() {
     connect(m_window, &VulkanWindow::viewPresetChanged, m_strip, &ViewportStrip::setViewPreset);
     connect(m_window, &VulkanWindow::shadeModeChanged, m_strip, &ViewportStrip::setShadeMode);
     connect(m_window, &VulkanWindow::jointModalChanged, m_strip, &ViewportStrip::setJointModeBadge);
+    connect(m_window, &VulkanWindow::vrModeChanged, m_strip, &ViewportStrip::setVrBadge);
     connect(this, &ViewportWidget::skeletonVisibilityChanged, m_strip,
             &ViewportStrip::setSkeletonChecked);
     m_strip->setViewPreset(m_window->currentView());

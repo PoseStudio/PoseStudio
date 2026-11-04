@@ -24,6 +24,7 @@
 
 #include <QWidget>
 
+class QLabel;
 class QPushButton;
 
 namespace pose {
@@ -56,6 +57,9 @@ public slots:
     /// Shows the joint-mode badge for @p kind (0/1/2 = Bend / Side-Side / Twist: the dial the
     /// mouse is turning) or hides it (-1), re-anchoring the strip as its row appears/disappears.
     void setJointModeBadge(int kind);
+    /// The "VR" badge beside the joint-mode badge: shown while VR Mode is on (the headset has
+    /// the scene; the viewport is its mirror).
+    void setVrBadge(bool on);
 
 signals:
     /// The user picked a shading mode: a row of scene/shademode.h's table.
@@ -74,6 +78,7 @@ private:
     QPushButton*      m_groundButton = nullptr;  // drops the figure onto the floor plane
     QPushButton*      m_skeletonButton = nullptr; // toggles the skeleton overlay (checkable)
     JointModeBadge*   m_modeBadge = nullptr;     // "the mouse is turning Bend / Side-Side / Twist", under the buttons
+    QLabel*           m_vrBadge = nullptr;       // "VR" while VR Mode is on (setVrBadge)
     const QWidget*    m_anchor = nullptr;        // the container anchorTo() last glued us to
 };
 

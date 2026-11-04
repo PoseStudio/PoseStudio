@@ -81,6 +81,9 @@ namespace Constants {
     /// a fraction of the headset's recommended resolution, applied when VR Mode next starts).
     inline constexpr const char* PREF_VR_ENABLED = "VrEnabled";
     inline constexpr const char* PREF_VR_RENDER_SCALE = "VrRenderScale";
+    /// "1"/"0", absent = off: skip the subsurface blur and bloom in the headset (a lighter GPU's
+    /// frame rate over skin realism); applies when VR Mode next starts.
+    inline constexpr const char* PREF_VR_REDUCED_EFFECTS = "VrReducedEffects";
 
     // =========================================================================
     // UI DIMENSIONS & LAYOUT

@@ -41,6 +41,7 @@
 #include "vrsettings.h"
 
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QVulkanInstance>
 
@@ -90,6 +91,12 @@ constexpr float kPointerLength = 3.0f;
 /// While a joint is dragged on the ray, the right stick's Y pushes it away / pulls it in — the
 /// mouse wheel's depth control — at this many metres per second at full deflection.
 constexpr float kDragDepthSpeed = 0.8f;
+/// A HAND GRAB: a trigger press whose ray hits nothing takes the joint within this reach of the
+/// controller itself (metres) — reaching out and taking hold, rather than pointing.
+constexpr float kHandGrabRadius = 0.15f;
+/// The small controller glyph at each ray's origin: a stub back along the ray and an up tick.
+constexpr float kGlyphStubLength = 0.06f;
+constexpr float kGlyphTickLength = 0.03f;
 /// The ray's colours (linear): at rest, over a joint, and carrying one.
 const glm::vec3 kPointerIdle(0.55f, 0.55f, 0.6f);
 const glm::vec3 kPointerHover(0.1046f, 0.2423f, 0.6038f); // the selection accent (postprocess.h)
@@ -118,6 +125,23 @@ struct VrSync {
     bool    waiterFailed = false;   // xrWaitFrame failed: the session is gone
     int64_t time = 0;               // the pending frame's predicted display time
     bool    shouldRender = false;   // the runtime wants content for it
+    int64_t period = 0;             // the headset's display period (nanoseconds)
+};
+
+/// The frame-time readout (POSESTUDIO_VR_PERF=1): per second, how many frames the headset asked
+/// for, how many were rendered, how many came LATE (a display-time gap of more than 1.5 periods —
+/// a frame the runtime had to reproject), and the GUI thread's work per frame.
+struct VrPerf {
+    bool          on = false;
+    QElapsedTimer clock;
+    qint64        windowStart = 0;
+    int           frames = 0;
+    int           rendered = 0;
+    int           late = 0;
+    double        workMs = 0.0;
+    double        workMaxMs = 0.0;
+    int64_t       lastDisplayTime = 0;
+    int64_t       period = 0;
 };
 
 struct VulkanWindow::VrState {
@@ -129,12 +153,17 @@ struct VulkanWindow::VrState {
     bool                           needsRecenter = true;
     bool                           announcedTracking = false;
     // The controllers (applyVrInput): the previous frame's time (for the walk's and the turn's
-    // dt), each trigger's held state, and the hand carrying an IK drag with the distance along
-    // its ray at which the grabbed point rides.
-    int64_t lastFrameTime = 0;
-    bool    selectHeld[2] = {false, false};
-    int     dragHand = -1;
-    float   grabDistance = 0.0f;
+    // dt), each trigger's held state and aim orientation (the roll between frames twists a held
+    // joint), and the hand carrying an IK drag with where the grabbed point rides in the HAND's
+    // frame — straight down the ray at the grab distance for a ray grab, the joint's offset from
+    // the hand for a hand grab — so the point follows the hand's every move and turn.
+    int64_t   lastFrameTime = 0;
+    bool      selectHeld[2] = {false, false};
+    bool      prevAimValid[2] = {false, false};
+    glm::quat prevAim[2] = {glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f)};
+    int       dragHand = -1;
+    glm::vec3 grabOffset{0.0f};
+    VrPerf    perf;
 };
 
 void VulkanWindow::VrStateDeleter::operator()(VrState* state) const {
@@ -182,7 +211,10 @@ bool VulkanWindow::setVrMode(bool on) {
     binding.queueIndex = 0; // VulkanContext takes queue 0 of the family (vkGetDeviceQueue(…, 0))
 
     std::string reason;
-    auto session = OpenXrSession::create(*m_xr, binding, static_cast<float>(VrSettings::renderScale()), reason);
+    // The depth layer needs the resolve shader's multisampled read: only with MSAA.
+    const bool wantDepth = m_context->sampleCount() != VK_SAMPLE_COUNT_1_BIT;
+    auto session = OpenXrSession::create(*m_xr, binding, static_cast<float>(VrSettings::renderScale()), wantDepth,
+                                         reason);
     if (!session) {
         qWarning() << "[vr] session creation failed:" << QString::fromStdString(reason);
         emit vrError(QString::fromStdString(reason));
@@ -195,8 +227,14 @@ bool VulkanWindow::setVrMode(bool on) {
     vr->worldFromStage = vrRecenterTransform(glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), vrStandPoint(),
                                              session->floorLevel() ? 0.0f : kEyeLevelFloorOffset);
     vr->needsRecenter = true;
+    vr->perf.on = qEnvironmentVariableIsSet("POSESTUDIO_VR_PERF");
+    if (vr->perf.on) {
+        vr->perf.clock.start();
+    }
     try {
-        m_renderer->beginVr(session->renderPass(), session->eyeExtent(), !session->formatIsSrgb());
+        m_renderer->beginVr(session->renderPass(), session->eyeExtent(), !session->formatIsSrgb(),
+                            session->hasDepth() ? session->depthRenderPass() : VK_NULL_HANDLE,
+                            VrSettings::reducedEffects());
     } catch (const VulkanError& e) {
         qWarning() << "[vr] the eye targets could not be created:" << e.what();
         emit vrError(tr("The headset's render targets could not be created: %1").arg(e.what()));
@@ -286,7 +324,8 @@ void VulkanWindow::startVrWaiter() {
             }
             int64_t time = 0;
             bool shouldRender = false;
-            if (!session->waitFrame(time, shouldRender)) {
+            int64_t period = 0;
+            if (!session->waitFrame(time, shouldRender, period)) {
                 {
                     std::lock_guard<std::mutex> lock(sync->mutex);
                     sync->waiterFailed = true;
@@ -301,6 +340,7 @@ void VulkanWindow::startVrWaiter() {
                 }
                 sync->time = time;
                 sync->shouldRender = shouldRender;
+                sync->period = period;
                 sync->framePending = true;
             }
             wakeGui();
@@ -359,6 +399,7 @@ void VulkanWindow::onVrFrameReady() {
     int64_t time = 0;
     bool shouldRender = false;
     bool failed = false;
+    int64_t period = 0;
     {
         std::lock_guard<std::mutex> lock(sync->mutex);
         failed = sync->waiterFailed;
@@ -369,8 +410,10 @@ void VulkanWindow::onVrFrameReady() {
             sync->framePending = false;
             time = sync->time;
             shouldRender = sync->shouldRender;
+            period = sync->period;
         }
     }
+    const qint64 workStart = vr.perf.on ? vr.perf.clock.nsecsElapsed() : 0;
     // Whatever happens below — a lost session, a device loss — the wait thread may wait for the
     // next frame once this scope ends (it holds its own reference to the sync block).
     struct Consumed {
@@ -426,6 +469,7 @@ void VulkanWindow::onVrFrameReady() {
                 qInfo() << "[vr] tracking; first stereo frame";
             }
             VkFramebuffer framebuffers[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+            VkFramebuffer depthFramebuffers[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
             bool acquired[2] = {false, false};
             bool ok = true;
             for (int eye = 0; eye < 2 && ok; ++eye) {
@@ -434,10 +478,11 @@ void VulkanWindow::onVrFrameReady() {
                 ok = acquired[eye];
                 if (ok) {
                     framebuffers[eye] = vr.session->framebuffer(eye, imageIndex);
+                    depthFramebuffers[eye] = vr.session->depthFramebuffer(eye); // null without a depth layer
                 }
             }
             if (ok) {
-                m_renderer->drawVrFrame(views, framebuffers);
+                m_renderer->drawVrFrame(views, framebuffers, depthFramebuffers);
                 rendered = true;
             }
             for (int eye = 0; eye < 2; ++eye) {
@@ -454,6 +499,35 @@ void VulkanWindow::onVrFrameReady() {
     vr.session->endFrame(time, rendered);
     if (rendered) {
         requestUpdate(); // the desktop mirror follows the headset
+    }
+
+    if (vr.perf.on) {
+        VrPerf& perf = vr.perf;
+        const double workMs = static_cast<double>(perf.clock.nsecsElapsed() - workStart) * 1.0e-6;
+        ++perf.frames;
+        perf.rendered += rendered ? 1 : 0;
+        perf.workMs += workMs;
+        perf.workMaxMs = std::max(perf.workMaxMs, workMs);
+        perf.period = period;
+        if (perf.lastDisplayTime > 0 && period > 0 && time - perf.lastDisplayTime > period + period / 2) {
+            ++perf.late;
+        }
+        perf.lastDisplayTime = time;
+        const qint64 now = perf.clock.nsecsElapsed();
+        if (now - perf.windowStart >= 1'000'000'000) {
+            qInfo().noquote() << QStringLiteral("[vr perf] %1 frames/s, %2 rendered, %3 late; display period %4 ms "
+                                                "(%5 Hz); GUI work per frame mean %6 ms, max %7 ms")
+                                     .arg(perf.frames)
+                                     .arg(perf.rendered)
+                                     .arg(perf.late)
+                                     .arg(perf.period * 1.0e-6, 0, 'f', 2)
+                                     .arg(perf.period > 0 ? 1.0e9 / static_cast<double>(perf.period) : 0.0, 0, 'f', 1)
+                                     .arg(perf.frames > 0 ? perf.workMs / perf.frames : 0.0, 0, 'f', 2)
+                                     .arg(perf.workMaxMs, 0, 'f', 2);
+            perf.windowStart = now;
+            perf.frames = perf.rendered = perf.late = 0;
+            perf.workMs = perf.workMaxMs = 0.0;
+        }
     }
 }
 
@@ -477,8 +551,25 @@ void VulkanWindow::endVrDrag() {
 }
 
 void VulkanWindow::applyVrInput(VrState& vr, const VrInput& input, float dt, int64_t time) {
+    // --- The buttons: the desktop actions a posing session in the headset needs. -------------
+    // (Each is refused or no-ops where its desktop twin would be: undo/redo close open edits
+    // and are left alone while a drag owns the pose; ground and pin do their own guarding.)
     if (input.recenterPressed) {
         vr.needsRecenter = true;
+    }
+    if (!dragInFlight()) {
+        if (input.undoPressed) {
+            undo();
+        }
+        if (input.redoPressed) {
+            redo();
+        }
+        if (input.groundPressed) {
+            groundFigure();
+        }
+    }
+    if (input.pinPressed) {
+        togglePinSelectedJoint(); // P: one undoable pose edit; refused while a drag owns the pose
     }
 
     // --- Locomotion: the left stick walks where the HEAD faces (forward/back, strafe), the
@@ -522,20 +613,38 @@ void VulkanWindow::applyVrInput(VrState& vr, const VrInput& input, float dt, int
         const bool releaseEdge = !pressed && vr.selectHeld[h];
         vr.selectHeld[h] = pressed;
 
-        if (hand.pinPressed) {
-            togglePinSelectedJoint(); // P: one undoable pose edit; refused while a drag owns the pose
-        }
         if (!hand.aimValid) {
+            vr.prevAimValid[h] = false;
             if (releaseEdge && vr.dragHand == h) {
                 endVrDrag(); // a release with the controller untracked still lets go
             }
             continue;
         }
         const glm::vec3 origin = glm::vec3(vr.worldFromStage * glm::vec4(hand.aimPosition, 1.0f));
-        glm::vec3 direction = glm::mat3(vr.worldFromStage) * (hand.aimOrientation * glm::vec3(0.0f, 0.0f, -1.0f));
+        const glm::quat handRotation = glm::quat_cast(glm::mat3(vr.worldFromStage)) * hand.aimOrientation; // world
+        glm::vec3 direction = handRotation * glm::vec3(0.0f, 0.0f, -1.0f);
         direction = glm::length(direction) > 1.0e-6f ? glm::normalize(direction) : glm::vec3(0.0f, 0.0f, -1.0f);
         const Camera pickCamera = pointerPickCamera(origin, direction);
         const float  centre = 0.5f * kPickViewportPx;
+        // The controller's roll since the previous frame, about its own pointing axis (stage
+        // space, both poses): the swing-twist split of the frame-to-frame rotation.
+        float rollDegrees = 0.0f;
+        if (vr.prevAimValid[h]) {
+            const glm::quat delta = hand.aimOrientation * glm::inverse(vr.prevAim[h]);
+            const glm::vec3 axis = hand.aimOrientation * glm::vec3(0.0f, 0.0f, -1.0f);
+            const float     along = glm::dot(glm::vec3(delta.x, delta.y, delta.z), axis);
+            glm::quat       twist = glm::quat(delta.w, axis * along);
+            if (glm::length(twist) > 1.0e-6f) {
+                twist = glm::normalize(twist);
+                if (twist.w < 0.0f) {
+                    twist = -twist; // the same rotation, the short way round
+                }
+                const float angle = 2.0f * std::atan2(glm::length(glm::vec3(twist.x, twist.y, twist.z)), twist.w);
+                rollDegrees = glm::degrees(angle) * (along >= 0.0f ? 1.0f : -1.0f);
+            }
+        }
+        vr.prevAim[h] = hand.aimOrientation;
+        vr.prevAimValid[h] = true;
 
         // Hover: the joint the ray is on, with no selection made — through the CHEAP 2D pick
         // (the joints and bone bodies projected, Scene::setPick2D): the exact skin cast the
@@ -559,10 +668,20 @@ void VulkanWindow::applyVrInput(VrState& vr, const VrInput& input, float dt, int
         // left alone.
         if (pressEdge && !dragInFlight()) {
             closeSettlingEdits(); // a settle still landing, a fall, an open dial edit: closed, as for a mouse press
-            const int bone = scene().selectBoneAt(centre, centre, kPickViewportPx, kPickViewportPx, pickCamera);
+            // The joint under the ray — or, with nothing on the ray, the joint within reach of the
+            // hand itself (a HAND GRAB: taking hold rather than pointing).
+            int  bone = scene().selectBoneAt(centre, centre, kPickViewportPx, kPickViewportPx, pickCamera);
+            bool byHand = false;
+            if (bone < 0) {
+                bone = scene().selectNearestBone(origin, kHandGrabRadius);
+                byHand = bone >= 0;
+            }
             if (bone >= 0 && beginIkDrag(false)) {
                 vr.dragHand = h;
-                vr.grabDistance = std::max(0.05f, glm::dot(m_ik.planePoint - origin, direction));
+                // Where the grabbed point rides, in the hand's frame: down the ray at the grab
+                // distance (a ray grab), or wherever the joint is relative to the hand (a hand grab).
+                vr.grabOffset = byHand ? glm::inverse(handRotation) * (m_ik.planePoint - origin)
+                                       : glm::vec3(0.0f, 0.0f, -std::max(0.05f, glm::dot(m_ik.planePoint - origin, direction)));
                 m_preEditPose = scene().capturePose(); // the undo snapshot (committed when the settle lands)
                 vr.session->hapticPulse(h, 0.03f, 0.6f); // the grab, felt
             } else {
@@ -576,23 +695,54 @@ void VulkanWindow::applyVrInput(VrState& vr, const VrInput& input, float dt, int
             }
             requestUpdate(); // the selection (outline / highlight) changed
         }
-        // Held: the grabbed point goes where the ray's grab distance now is (the 60 Hz tick
-        // solves toward it, as for the mouse); the right stick's Y pushes / pulls it along the ray.
+        // Held: the grabbed point goes where the hand now carries it (the 60 Hz tick solves
+        // toward it, as for the mouse); the right stick's Y pushes / pulls it along the ray; and
+        // the controller's ROLL turns the joint's TWIST dial by the same angle (the Transform
+        // tab's Twist, the B/S/T mode's T) — a wrist turn twists the limb.
         if (m_ik.dragging && vr.dragHand == h) {
             if (std::abs(input.turn.y) > kStickDeadzone && dt > 0.0f) {
-                vr.grabDistance = std::max(0.05f, vr.grabDistance + input.turn.y * kDragDepthSpeed * dt);
+                vr.grabOffset += glm::vec3(0.0f, 0.0f, -input.turn.y * kDragDepthSpeed * dt);
+                if (glm::length(vr.grabOffset) < 0.05f) {
+                    vr.grabOffset = glm::vec3(0.0f, 0.0f, -0.05f); // never pulled into the hand
+                }
             }
-            setIkTarget(origin + direction * vr.grabDistance);
+            setIkTarget(origin + handRotation * vr.grabOffset);
+            if (std::abs(rollDegrees) > 0.05f) {
+                if (const Armature* armature = scene().figureArmature()) {
+                    const JointDial twistDial = armature->jointDial(armature->highlightBone(), JointDialKind::Twist);
+                    if (twistDial.valid() && std::abs(twistDial.fullDeg) > 1.0e-3f) {
+                        const float units = rollDegrees * 100.0f / std::abs(twistDial.fullDeg);
+                        scene().setSelectedJointDial(static_cast<int>(JointDialKind::Twist),
+                                                     armature->jointDialValue(twistDial) + units);
+                        m_ik.poseChanged = true; // a twist is an edit: the release settles + commits
+                    }
+                }
+            }
         }
         if (releaseEdge && vr.dragHand == h) {
             endVrDrag();
         }
 
+        // The controller itself: a stub back along the ray and an up tick, so the hand reads as
+        // a hand and the ray's origin is never in doubt.
+        {
+            PointerLine stub;
+            stub.from = origin - direction * kGlyphStubLength;
+            stub.to = origin;
+            stub.color = kPointerIdle * 0.7f;
+            lines.push_back(stub);
+            PointerLine tick;
+            tick.from = origin;
+            tick.to = origin + (handRotation * glm::vec3(0.0f, 1.0f, 0.0f)) * kGlyphTickLength;
+            tick.color = kPointerIdle * 0.7f;
+            lines.push_back(tick);
+        }
+
         // The ray as drawn: to the carried point, to the hovered joint, or to the floor / 3 m out.
         PointerLine line;
         line.from = origin;
-        if (m_vr && vr.dragHand == h) {
-            line.to = origin + direction * vr.grabDistance;
+        if (vr.dragHand == h) {
+            line.to = origin + handRotation * vr.grabOffset;
             line.color = kPointerDrag;
             line.marker = true;
         } else if (hovering) {

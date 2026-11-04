@@ -110,6 +110,17 @@ public:
     /// The final bloom target (sampled, SHADER_READ_ONLY after recordBloom) — a mirror source.
     VkDescriptorImageInfo bloomInfo() const;
 
+    /// VR Mode's DEPTH RESOLVE (XR_KHR_composition_layer_depth): the eye target's multisampled
+    /// depth (@p msaaDepth = HdrTarget::depthInfo of a storeDepth target, @p sampleCount samples)
+    /// resolved — the nearest sample — into the headset's single-sample depth image through
+    /// @p depthRenderPass (the session's depth-only pass, cleared to 1.0 here). Build once after
+    /// construction; recordDepthResolve then runs per eye.
+    void enableDepthResolve(VkRenderPass depthRenderPass, const VkDescriptorImageInfo& msaaDepth,
+                            uint32_t sampleCount, const std::vector<char>& fullscreenVertSpirv,
+                            const std::vector<char>& depthResolveFragSpirv);
+    bool hasDepthResolve() const { return m_depthResolvePipeline != nullptr; }
+    void recordDepthResolve(VkCommandBuffer cmd, VkFramebuffer framebuffer, VkExtent2D extent);
+
 private:
     /// One single-sample RGBA16F render target + the framebuffer that draws into it.
     struct Target {
@@ -157,6 +168,9 @@ private:
     VkDescriptorSet           m_mirrorSet = VK_NULL_HANDLE;    // the composite over setMirrorSource's images
     bool                      m_hasMirror = false;
     VkDescriptorImageInfo     m_mirrorInfos[3]{};              // hdr, bloom, outline (re-written on resize)
+    VkDescriptorSet           m_depthResolveSet = VK_NULL_HANDLE; // 0 = the MSAA depth (enableDepthResolve)
+    VkRenderPass              m_depthResolvePass = VK_NULL_HANDLE; // borrowed (the session's)
+    uint32_t                  m_depthSamples = 1;
 
     // Selection-outline colour (linear rgb), pushed to the composite: the app's accent blue
     // (kSelectionAccentLinear) — the composite paints it after tonemapping and the sRGB
@@ -168,6 +182,7 @@ private:
     std::unique_ptr<VulkanPipeline> m_blurPipeline;   // bloom pass (direction via push constant)
     std::unique_ptr<VulkanPipeline> m_sssPipeline;    // SSSSS masked blur (bloom pass, full res)
     std::unique_ptr<VulkanPipeline> m_compositePipeline; // swapchain pass
+    std::unique_ptr<VulkanPipeline> m_depthResolvePipeline; // the session's depth pass (VR, optional)
 };
 
 } // namespace pose

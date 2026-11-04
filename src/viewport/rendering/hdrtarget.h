@@ -31,7 +31,10 @@ class VulkanContext;
 
 class HdrTarget {
 public:
-    HdrTarget(VulkanContext& context, VkExtent2D extent);
+    /// @param storeDepth Keep the (multisampled) depth after the pass and make it sampleable —
+    ///                   VR Mode's eye target, whose depth is resolved into the headset's depth
+    ///                   swapchain for reprojection (depthInfo()). The desktop target discards it.
+    HdrTarget(VulkanContext& context, VkExtent2D extent, bool storeDepth = false);
     ~HdrTarget() = default; // members clean up in reverse declaration order
 
     HdrTarget(const HdrTarget&) = delete;
@@ -52,6 +55,11 @@ public:
     /// smear glints into a wet-looking film; the blur's V pass adds it back after diffusing.
     VkDescriptorImageInfo specResolveInfo() const;
 
+    /// The depth attachment (at the context's MSAA count) through a NEAREST non-comparison
+    /// sampler, in DEPTH_STENCIL_READ_ONLY layout after the pass — only with storeDepth.
+    VkDescriptorImageInfo depthInfo() const;
+    bool storesDepth() const { return m_storeDepth; }
+
     /// Number of attachments in the pass — the render-pass-begin clear array must cover them.
     /// Attachment order (the clear array follows it): MSAA = colourMS(0) / depth(1) /
     /// resolve(2) / specMS(3) / specResolve(4); single-sample = colour(0) / depth(1) / spec(2).
@@ -67,6 +75,8 @@ private:
     VkExtent2D       m_extent{};
     UniqueRenderPass m_renderPass;
     VkSampler        m_sampler = VK_NULL_HANDLE; // borrowed from the context's SamplerCache
+    VkSampler        m_depthSampler = VK_NULL_HANDLE; // (storeDepth) nearest, borrowed
+    bool             m_storeDepth = false;
     uint32_t         m_attachmentCount = 0;
 
     // MSAA colour + specular (transient) + MSAA depth + their single-sample resolve targets.

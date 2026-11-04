@@ -69,9 +69,12 @@ public:
     };
 
     /// Creates the session, its spaces and swapchains. @p renderScale scales the runtime's
-    /// recommended per-eye resolution. Null with @p failReason set on failure.
+    /// recommended per-eye resolution; @p wantDepth adds a depth swapchain per eye and submits
+    /// the frame's depth with it (hasDepth() says whether that came together — the runtime
+    /// must offer the depth-layer extension and a depth format). Null with @p failReason set on
+    /// failure.
     static std::unique_ptr<OpenXrSession> create(const OpenXrSystem& system, const VulkanBinding& binding,
-                                                 float renderScale, std::string& failReason);
+                                                 float renderScale, bool wantDepth, std::string& failReason);
     ~OpenXrSession();
 
     OpenXrSession(const OpenXrSession&) = delete;
@@ -87,8 +90,9 @@ public:
 
     // --- The frame loop ------------------------------------------------------------------------
     /// Blocks until the runtime wants the next frame rendered. May run on a thread of its own.
-    /// False when the runtime refuses (the session is no longer running).
-    bool waitFrame(int64_t& predictedDisplayTime, bool& shouldRender);
+    /// False when the runtime refuses (the session is no longer running). @p displayPeriod is
+    /// the headset's frame period (nanoseconds) — the frame-time readout's yardstick.
+    bool waitFrame(int64_t& predictedDisplayTime, bool& shouldRender, int64_t& displayPeriod);
     bool beginFrame();
     /// The two eyes' matrices at @p time through @p worldFromStage (false while the headset is
     /// not tracked — render nothing then). The poses are kept for endFrame's layer.
@@ -102,18 +106,27 @@ public:
     /// A short vibration on hand @p hand (0 left, 1 right); no-op without controllers.
     void hapticPulse(int hand, float seconds, float amplitude);
     bool hasControllers() const { return m_input != nullptr; }
-    /// Acquires (and waits for) eye @p eye's next swapchain image; its index selects the
-    /// framebuffer to render into. False on failure.
+    /// Acquires (and waits for) eye @p eye's next swapchain image — and its depth image, with a
+    /// depth swapchain; its index selects the framebuffer to render into. False on failure.
     bool acquireEye(int eye, uint32_t& imageIndex);
-    /// Hands the rendered image back (after the submit that renders it).
+    /// Hands the rendered image(s) back (after the submit that renders them).
     void releaseEye(int eye);
-    /// Ends the frame with the projection layer when @p rendered, else with no layer.
+    /// Ends the frame with the projection layer when @p rendered (its depth attached when the
+    /// session has depth), else with no layer.
     void endFrame(int64_t time, bool rendered);
 
     // --- What the renderer draws into ----------------------------------------------------------
     VkRenderPass  renderPass() const { return m_renderPass.get(); }
     VkFramebuffer framebuffer(int eye, uint32_t imageIndex) const { return m_framebuffers[eye][imageIndex].get(); }
     VkExtent2D    eyeExtent() const { return m_extent; }
+    /// The depth swapchains (create's wantDepth, when the runtime offers the depth layer and a
+    /// depth format): the depth-only pass over their images and, after acquireEye, the
+    /// framebuffer of the acquired depth image.
+    bool          hasDepth() const { return m_depth; }
+    VkRenderPass  depthRenderPass() const { return m_depthRenderPass.get(); }
+    VkFramebuffer depthFramebuffer(int eye) const {
+        return m_depth ? m_depthFramebuffers[eye][m_depthIndex[eye]].get() : VK_NULL_HANDLE;
+    }
     /// Whether the swapchain format is an sRGB one (the store encodes) — else the composite
     /// must encode in the shader.
     bool          formatIsSrgb() const { return m_formatIsSrgb; }
@@ -125,6 +138,9 @@ private:
     OpenXrSession() = default;
     bool createSpaces(const OpenXrSystem& system);
     bool createSwapchains(const OpenXrSystem& system, float renderScale, std::string& failReason);
+    /// The per-eye depth swapchains + their pass and framebuffers; false (depth off, the
+    /// session still fine) when the runtime offers no depth format.
+    bool createDepthSwapchains();
 
     XrInstance m_instance = XR_NULL_HANDLE; // borrowed from the system
     XrSession  m_session = XR_NULL_HANDLE;
@@ -150,6 +166,17 @@ private:
     UniqueRenderPass                           m_renderPass;
     std::vector<UniqueImageView>               m_imageViews[2];
     std::vector<UniqueFramebuffer>             m_framebuffers[2];
+
+    // The depth swapchains (optional), mirroring the colour ones; m_depthIndex is the image
+    // acquired for the frame in flight.
+    bool                                   m_depth = false;
+    VkFormat                               m_depthFormat = VK_FORMAT_UNDEFINED;
+    XrSwapchain                            m_depthSwapchains[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
+    std::vector<XrSwapchainImageVulkanKHR> m_depthImages[2];
+    UniqueRenderPass                       m_depthRenderPass;
+    std::vector<UniqueImageView>           m_depthViews[2];
+    std::vector<UniqueFramebuffer>         m_depthFramebuffers[2];
+    uint32_t                               m_depthIndex[2] = {0, 0};
 
     // The eyes as last located (pose + fov): endFrame's projection layer describes the images
     // with the same poses they were rendered from.

@@ -603,6 +603,40 @@ int Scene::selectBoneAt(float px, float py, float vpW, float vpH, const Camera& 
     return figure.selectedBone();
 }
 
+int Scene::selectNearestBone(const glm::vec3& point, float radius) {
+    int   pickedModel = -1;
+    int   pickedBone = -1;
+    float best = radius;
+    for (std::size_t m = 0; m < m_models.size(); ++m) {
+        const Model* fig = m_models[m].get();
+        if (!fig->hasSkeleton()) {
+            continue;
+        }
+        const Armature& arm = fig->armature();
+        for (std::size_t i = 0; i < fig->boneCount(); ++i) {
+            const float distance = glm::length(arm.boneWorldPosition(i) - point);
+            if (distance < best) {
+                best = distance;
+                pickedModel = static_cast<int>(m);
+                pickedBone = static_cast<int>(i);
+            }
+        }
+    }
+    if (pickedBone < 0) {
+        return -1;
+    }
+    if (pickedModel != activeFigureIndex()) {
+        if (Model* previous = figureModel()) {
+            previous->setSelectedBone(-1);
+        }
+    }
+    setActiveFigure(pickedModel);
+    Model& figure = *m_models[static_cast<std::size_t>(pickedModel)];
+    figure.setSelectedBone(pickedBone); // (a face-rig bone selects the head, as for a click)
+    figure.setIkGrabPoint(figure.selectedBone(), figure.armature().boneWorldPosition(static_cast<std::size_t>(pickedBone)));
+    return figure.selectedBone();
+}
+
 int Scene::shiftPressBoneAt(float px, float py, float vpW, float vpH, const Camera& camera, bool& wasMember) {
     wasMember = false;
     int       pickedModel = -1;

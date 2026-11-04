@@ -187,6 +187,11 @@ public:
     /// if within a small radius; see bonepicker.h). Returns the selected bone index, or -1 if
     /// none is selected.
     int selectBoneAt(float px, float py, float vpW, float vpH, const Camera& camera);
+    /// Selects the figure joint nearest the world point @p point within @p radius (metres) — a VR
+    /// controller's HAND GRAB: the joint is taken where the hand is, its grab point the joint
+    /// itself. Every figure's joints compete, the nearest of any figure wins and its figure
+    /// becomes the active one. Returns the selected bone, or -1 with none within reach.
+    int selectNearestBone(const glm::vec3& point, float radius);
     /// The pick selectBoneAt and shiftPressBoneAt share: the figure, the bone and the grab point
     /// under the pixel, with no selection made. False on a miss.
     bool pickBoneAt(float px, float py, float vpW, float vpH, const Camera& camera, int& outModel, int& outBone,

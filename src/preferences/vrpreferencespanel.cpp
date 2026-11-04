@@ -53,4 +53,16 @@ VrPreferencesPanel::VrPreferencesPanel(QWidget* parent)
     connect(scaleBox, &pose::DragNumberBox::valueChanged, this, [](double value) {
         VrSettings::setRenderScale(value);
     });
+
+    // --- Reduced effects ---
+    auto* reducedToggle = new QCheckBox(tr("Reduced effects in the headset"), this);
+    reducedToggle->setChecked(VrSettings::reducedEffects());
+    contentLayout()->addWidget(reducedToggle);
+    addDescription(
+        tr("Skips the skin's subsurface blur and the bloom for each eye — a lighter GPU gets its frame rate "
+           "back at the cost of some skin realism. The desktop view keeps the full look. Applies when VR Mode "
+           "next starts."));
+    connect(reducedToggle, &QCheckBox::toggled, this, [](bool reduced) {
+        VrSettings::setReducedEffects(reduced);
+    });
 }

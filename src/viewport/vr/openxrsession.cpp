@@ -32,7 +32,7 @@ constexpr int64_t kImageWaitNanoseconds = 1'000'000'000; // a second: far beyond
 } // namespace
 
 std::unique_ptr<OpenXrSession> OpenXrSession::create(const OpenXrSystem& system, const VulkanBinding& binding,
-                                                     float renderScale, std::string& failReason) {
+                                                     float renderScale, bool wantDepth, std::string& failReason) {
     std::unique_ptr<OpenXrSession> session(new OpenXrSession());
     session->m_instance = system.instance();
     session->m_device = binding.device;
@@ -71,6 +71,11 @@ std::unique_ptr<OpenXrSession> OpenXrSession::create(const OpenXrSystem& system,
     if (!session->createSwapchains(system, renderScale, failReason)) {
         return nullptr;
     }
+    if (wantDepth && system.depthLayerSupported()) {
+        session->m_depth = session->createDepthSwapchains();
+    }
+    std::fprintf(stderr, "[vr] depth layer: %s\n",
+                 session->m_depth ? "on" : (wantDepth ? "off (no depth format / extension)" : "off"));
     // The controllers: declared and attached before the session begins. A runtime without any
     // of the controller families leaves the headset view-only — not a failure.
     std::string inputReason;
@@ -99,12 +104,17 @@ OpenXrSession::~OpenXrSession() {
     for (int eye = 0; eye < 2; ++eye) {
         m_framebuffers[eye].clear();
         m_imageViews[eye].clear();
+        m_depthFramebuffers[eye].clear();
+        m_depthViews[eye].clear();
     }
     m_renderPass.reset();
-    for (XrSwapchain& swapchain : m_swapchains) {
-        if (swapchain != XR_NULL_HANDLE) {
-            xrDestroySwapchain(swapchain);
-            swapchain = XR_NULL_HANDLE;
+    m_depthRenderPass.reset();
+    for (XrSwapchain* chains : {m_swapchains, m_depthSwapchains}) {
+        for (int eye = 0; eye < 2; ++eye) {
+            if (chains[eye] != XR_NULL_HANDLE) {
+                xrDestroySwapchain(chains[eye]);
+                chains[eye] = XR_NULL_HANDLE;
+            }
         }
     }
     if (m_viewSpace != XR_NULL_HANDLE) {
@@ -270,6 +280,86 @@ bool OpenXrSession::createSwapchains(const OpenXrSystem& system, float renderSca
     return true;
 }
 
+bool OpenXrSession::createDepthSwapchains() {
+    uint32_t formatCount = 0;
+    xrEnumerateSwapchainFormats(m_session, 0, &formatCount, nullptr);
+    std::vector<int64_t> formats(formatCount);
+    if (formatCount > 0) {
+        xrEnumerateSwapchainFormats(m_session, formatCount, &formatCount, formats.data());
+    }
+    const auto offers = [&formats](VkFormat format) {
+        return std::find(formats.begin(), formats.end(), static_cast<int64_t>(format)) != formats.end();
+    };
+    m_depthFormat = VK_FORMAT_UNDEFINED;
+    for (VkFormat candidate : {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D16_UNORM}) {
+        if (offers(candidate)) {
+            m_depthFormat = candidate;
+            break;
+        }
+    }
+    if (m_depthFormat == VK_FORMAT_UNDEFINED) {
+        return false;
+    }
+    const bool hasStencil = m_depthFormat == VK_FORMAT_D24_UNORM_S8_UINT;
+    const VkImageAspectFlags aspect = VK_IMAGE_ASPECT_DEPTH_BIT | (hasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0u);
+
+    // A depth-only pass over the runtime's depth images: cleared, the resolve written, stored
+    // and left in DEPTH_STENCIL_ATTACHMENT_OPTIMAL — the layout the runtime hands depth images
+    // over in and reads them back in. The dependencies mirror the colour pass's.
+    VkSubpassDependency before{};
+    before.srcSubpass = VK_SUBPASS_EXTERNAL;
+    before.dstSubpass = 0;
+    before.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    before.srcAccessMask = 0;
+    before.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    before.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    VkSubpassDependency after{};
+    after.srcSubpass = 0;
+    after.dstSubpass = VK_SUBPASS_EXTERNAL;
+    after.srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    after.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    after.dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    after.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+    m_depthRenderPass = RenderPassBuilder()
+                            .depth(m_depthFormat, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                   VK_ATTACHMENT_STORE_OP_STORE, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+                            .dependency(before)
+                            .dependency(after)
+                            .build(m_device);
+
+    for (int eye = 0; eye < 2; ++eye) {
+        XrSwapchainCreateInfo info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+        info.usageFlags = XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        info.format = static_cast<int64_t>(m_depthFormat);
+        info.sampleCount = 1;
+        info.width = m_extent.width;
+        info.height = m_extent.height;
+        info.faceCount = 1;
+        info.arraySize = 1;
+        info.mipCount = 1;
+        if (XR_FAILED(xrCreateSwapchain(m_session, &info, &m_depthSwapchains[eye]))) {
+            return false;
+        }
+        uint32_t imageCount = 0;
+        xrEnumerateSwapchainImages(m_depthSwapchains[eye], 0, &imageCount, nullptr);
+        m_depthImages[eye].assign(imageCount, {XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR});
+        if (XR_FAILED(xrEnumerateSwapchainImages(m_depthSwapchains[eye], imageCount, &imageCount,
+                                                 reinterpret_cast<XrSwapchainImageBaseHeader*>(m_depthImages[eye].data()))) ||
+            imageCount == 0) {
+            return false;
+        }
+        for (const XrSwapchainImageVulkanKHR& image : m_depthImages[eye]) {
+            m_depthViews[eye].push_back(
+                createImageView(m_device, image.image, VK_IMAGE_VIEW_TYPE_2D, m_depthFormat, aspect));
+            const VkImageView view = m_depthViews[eye].back().get();
+            m_depthFramebuffers[eye].push_back(createFramebuffer(m_device, m_depthRenderPass.get(), &view, 1, m_extent));
+        }
+    }
+    std::fprintf(stderr, "[vr] depth swapchains: format %d, %zu images per eye\n", static_cast<int>(m_depthFormat),
+                 m_depthImages[0].size());
+    return true;
+}
+
 OpenXrSession::Event OpenXrSession::pollEvents() {
     Event event = Event::None;
     XrEventDataBuffer buffer{XR_TYPE_EVENT_DATA_BUFFER};
@@ -324,7 +414,7 @@ void OpenXrSession::requestExit() {
     xrRequestExitSession(m_session);
 }
 
-bool OpenXrSession::waitFrame(int64_t& predictedDisplayTime, bool& shouldRender) {
+bool OpenXrSession::waitFrame(int64_t& predictedDisplayTime, bool& shouldRender, int64_t& displayPeriod) {
     XrFrameWaitInfo info{XR_TYPE_FRAME_WAIT_INFO};
     XrFrameState state{XR_TYPE_FRAME_STATE};
     if (XR_FAILED(xrWaitFrame(m_session, &info, &state))) {
@@ -332,6 +422,7 @@ bool OpenXrSession::waitFrame(int64_t& predictedDisplayTime, bool& shouldRender)
     }
     predictedDisplayTime = state.predictedDisplayTime;
     shouldRender = state.shouldRender == XR_TRUE;
+    displayPeriod = state.predictedDisplayPeriod;
     return true;
 }
 
@@ -380,37 +471,73 @@ bool OpenXrSession::headPose(int64_t time, glm::vec3& position, glm::quat& orien
     return true;
 }
 
-bool OpenXrSession::acquireEye(int eye, uint32_t& imageIndex) {
+namespace {
+/// Acquires and waits for the next image of @p swapchain; on a failed wait the image is released
+/// unrendered so the swapchain's bookkeeping balances.
+bool acquireAndWait(XrSwapchain swapchain, uint32_t& imageIndex) {
     XrSwapchainImageAcquireInfo acquire{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
-    if (XR_FAILED(xrAcquireSwapchainImage(m_swapchains[eye], &acquire, &imageIndex))) {
+    if (XR_FAILED(xrAcquireSwapchainImage(swapchain, &acquire, &imageIndex))) {
         return false;
     }
     XrSwapchainImageWaitInfo wait{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
     wait.timeout = kImageWaitNanoseconds;
-    if (xrWaitSwapchainImage(m_swapchains[eye], &wait) != XR_SUCCESS) {
-        // The image stays acquired: release it unrendered so the swapchain's bookkeeping balances.
+    if (xrWaitSwapchainImage(swapchain, &wait) != XR_SUCCESS) {
         XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-        xrReleaseSwapchainImage(m_swapchains[eye], &release);
+        xrReleaseSwapchainImage(swapchain, &release);
         return false;
     }
-    return imageIndex < m_framebuffers[eye].size();
+    return true;
+}
+} // namespace
+
+bool OpenXrSession::acquireEye(int eye, uint32_t& imageIndex) {
+    if (!acquireAndWait(m_swapchains[eye], imageIndex) || imageIndex >= m_framebuffers[eye].size()) {
+        return false;
+    }
+    if (m_depth) {
+        uint32_t depthIndex = 0;
+        if (!acquireAndWait(m_depthSwapchains[eye], depthIndex) || depthIndex >= m_depthFramebuffers[eye].size()) {
+            XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+            xrReleaseSwapchainImage(m_swapchains[eye], &release); // the colour image, unrendered
+            return false;
+        }
+        m_depthIndex[eye] = depthIndex;
+    }
+    return true;
 }
 
 void OpenXrSession::releaseEye(int eye) {
     XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
     xrReleaseSwapchainImage(m_swapchains[eye], &release);
+    if (m_depth) {
+        xrReleaseSwapchainImage(m_depthSwapchains[eye], &release);
+    }
 }
 
 void OpenXrSession::endFrame(int64_t time, bool rendered) {
+    const XrRect2Di rect{{0, 0}, {static_cast<int32_t>(m_extent.width), static_cast<int32_t>(m_extent.height)}};
+    // The depth layer (XR_KHR_composition_layer_depth): the eye's depth image, with the
+    // projection it was written through — depth 0..1 from the near to the far plane, as
+    // vrProjectionFromFov maps them — so the runtime's reprojection can move the image against
+    // the geometry rather than a flat plane.
+    XrCompositionLayerDepthInfoKHR depthInfos[2];
     XrCompositionLayerProjectionView projectionViews[2];
     for (int eye = 0; eye < 2; ++eye) {
+        depthInfos[eye] = XrCompositionLayerDepthInfoKHR{XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR};
+        depthInfos[eye].subImage.swapchain = m_depthSwapchains[eye];
+        depthInfos[eye].subImage.imageRect = rect;
+        depthInfos[eye].subImage.imageArrayIndex = 0;
+        depthInfos[eye].minDepth = 0.0f;
+        depthInfos[eye].maxDepth = 1.0f;
+        depthInfos[eye].nearZ = kNearPlane;
+        depthInfos[eye].farZ = kFarPlane;
+
         projectionViews[eye] = XrCompositionLayerProjectionView{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
+        projectionViews[eye].next = m_depth ? &depthInfos[eye] : nullptr;
         projectionViews[eye].pose = m_located[eye].pose;
         projectionViews[eye].fov = m_located[eye].fov;
         projectionViews[eye].subImage.swapchain = m_swapchains[eye];
-        projectionViews[eye].subImage.imageRect.offset = {0, 0};
-        projectionViews[eye].subImage.imageRect.extent = {static_cast<int32_t>(m_extent.width),
-                                                          static_cast<int32_t>(m_extent.height)};
+        projectionViews[eye].subImage.imageRect = rect;
         projectionViews[eye].subImage.imageArrayIndex = 0;
     }
     XrCompositionLayerProjection layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};

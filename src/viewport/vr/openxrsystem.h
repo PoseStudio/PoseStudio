@@ -59,6 +59,9 @@ public:
     /// The Vulkan API version range the runtime accepts (VK_MAKE_API_VERSION-packed).
     uint32_t minVulkanApiVersion() const { return m_minApiVersion; }
     uint32_t maxVulkanApiVersion() const { return m_maxApiVersion; }
+    /// Whether the runtime takes a depth layer with the frame (XR_KHR_composition_layer_depth,
+    /// enabled when offered): its reprojection then moves the image against real geometry.
+    bool depthLayerSupported() const { return m_depthLayer; }
 
     /// A user-readable name for an OpenXR result ("XR_ERROR_RUNTIME_UNAVAILABLE"), with the
     /// instance's own spelling when one exists.
@@ -73,6 +76,7 @@ private:
     std::string m_systemName;
     uint32_t    m_minApiVersion = 0;
     uint32_t    m_maxApiVersion = 0;
+    bool        m_depthLayer = false;
 
     // XR_KHR_vulkan_enable entry points (loaded through xrGetInstanceProcAddr).
     PFN_xrGetVulkanInstanceExtensionsKHR   m_getInstanceExtensions = nullptr;

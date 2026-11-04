@@ -85,6 +85,9 @@ public:
     void setProjectPath(const QString& path);
     bool isProjectDirty() const;
     void setProjectClean();
+    /// Marks the scene as having unsaved changes (a scene restored across a restart is unsaved
+    /// work again — main.cpp's --restore-scene).
+    void markProjectDirty();
     /// Sets the viewport shade mode by index into the picker's table (scene/shademode.h — the
     /// order shaderModeNames() lists). No-op if the viewport degraded.
     void setShadeMode(int mode);

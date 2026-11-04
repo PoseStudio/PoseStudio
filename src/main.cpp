@@ -31,8 +31,14 @@
 #include <QTimer>
 #include <QTabWidget>
 #include <QCloseEvent>
+#include <QFile>
 #include <QFileInfo>
 #include <QString>
+
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
 
 /**
  * @brief Vetoed window close while the scene has unsaved changes.
@@ -213,9 +219,19 @@ int main(int argc, char *argv[]) {
     // importers queue the paths and drain them, in this order, once the renderer is up — so the
     // calls are safe either way.
     const QStringList launchArgs = QCoreApplication::arguments();
+    QString projectToOpen;   // a .pss on the command line ("open with" a project file)
+    QString restoreScene;    // --restore-scene <tmp.pss>: the SCENE-PRESERVING RESTART (below)
+    QString restoreProject;  // --project <original.pss>: the document that scene belonged to
+    bool    restoreClean = false; // --project-clean: ... and it was saved, not unsaved work
     for (int i = 1; i < launchArgs.size(); ++i) {
         const QString& arg = launchArgs.at(i);
-        if (arg.endsWith(QStringLiteral(".obj"), Qt::CaseInsensitive)) {
+        if (arg == QStringLiteral("--restore-scene") && i + 1 < launchArgs.size()) {
+            restoreScene = launchArgs.at(++i);
+        } else if (arg == QStringLiteral("--project") && i + 1 < launchArgs.size()) {
+            restoreProject = launchArgs.at(++i);
+        } else if (arg == QStringLiteral("--project-clean")) {
+            restoreClean = true;
+        } else if (arg.endsWith(QStringLiteral(".obj"), Qt::CaseInsensitive)) {
             viewport->importObj(arg);
         } else if (arg.endsWith(QStringLiteral(".duf"), Qt::CaseInsensitive) ||
                    arg.endsWith(QStringLiteral(".dsf"), Qt::CaseInsensitive) ||
@@ -224,7 +240,40 @@ int main(int argc, char *argv[]) {
         } else if (arg.endsWith(QStringLiteral(".pose"), Qt::CaseInsensitive)) {
             // A pose file applies onto whichever figure was imported (queued until the figure exists).
             viewport->loadPose(arg);
+        } else if (arg.endsWith(QStringLiteral(".pss"), Qt::CaseInsensitive)) {
+            projectToOpen = arg;
         }
+    }
+    // A project on the command line, or the scene of the process that restarted into this one
+    // (MenuManager::relaunchApplication — the VR Mode "Turn On and Restart": it saved its scene
+    // to a temporary project, which is reopened here, deleted, and re-attached to the document
+    // it came from, unsaved as it was, so nothing is lost across the restart). The load needs
+    // the renderer; on Windows the first expose built it inside show() above, elsewhere the
+    // open is retried until it exists.
+    const QString projectPath = restoreScene.isEmpty() ? projectToOpen : restoreScene;
+    if (!projectPath.isEmpty()) {
+        auto openProject = std::make_shared<std::function<void(int)>>();
+        *openProject = [=](int attempt) {
+            std::vector<std::string> missing;
+            std::string              error;
+            const int status = viewport->loadProjectFile(projectPath, {}, missing, error);
+            if (status == -1 && error == "no renderer yet" && attempt < 40) {
+                QTimer::singleShot(250, viewport, [=]() { (*openProject)(attempt + 1); });
+                return;
+            }
+            if (status != 0) {
+                qWarning() << "[project] could not open" << projectPath << ":" << QString::fromStdString(error)
+                           << (missing.empty() ? "" : "(missing figure sources)");
+            }
+            if (!restoreScene.isEmpty()) {
+                QFile::remove(restoreScene); // the temporary project has served
+                viewport->setProjectPath(restoreProject);
+                if (status == 0 && !restoreClean) {
+                    viewport->markProjectDirty(); // it was unsaved work; it still is
+                }
+            }
+        };
+        (*openProject)(0);
     }
 
     // The anonymous per-launch install ping (see installping.h): armed now, it fires a few

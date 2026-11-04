@@ -135,15 +135,23 @@ public:
     /// (@p eyeRenderPass, over its swapchain images; @p encodeSrgb when their format is UNORM so
     /// the composite encodes). Waits for the device. Until endVr(), drawFrame() no longer renders
     /// the desktop camera: it MIRRORS the headset's left eye into the window instead.
-    void beginVr(VkRenderPass eyeRenderPass, VkExtent2D eyeExtent, bool encodeSrgb);
+    /// @p eyeDepthRenderPass (VK_NULL_HANDLE = none): the session's depth-only pass over its
+    /// depth swapchain — the eye target then keeps its depth and resolves it per eye for the
+    /// runtime's reprojection (needs MSAA: the resolve shader reads a multisampled image).
+    /// @p reducedEffects skips the subsurface blur and bloom in the eyes (a lighter GPU).
+    void beginVr(VkRenderPass eyeRenderPass, VkExtent2D eyeExtent, bool encodeSrgb,
+                 VkRenderPass eyeDepthRenderPass = VK_NULL_HANDLE, bool reducedEffects = false);
     /// Leaves VR (waits for the device, frees the eye targets); the desktop view is its own again.
     void endVr();
     bool vrActive() const { return m_vr != nullptr; }
     /// Renders one VR frame: the key-light shadow map once, then each eye's scene through its
     /// tracked view (VrEyeView) into the eye targets, composited into @p eyeFramebuffers[eye]
-    /// (the headset's framebuffer for the image the caller acquired). Submits on the graphics
-    /// queue — one VR frame in flight: the previous one is waited for first. Throws VulkanError.
-    void drawVrFrame(const VrEyeView views[2], const VkFramebuffer eyeFramebuffers[2]);
+    /// (the headset's framebuffer for the image the caller acquired), and — with a depth pass —
+    /// its depth resolved into @p eyeDepthFramebuffers[eye] (null entries skip it). Submits on
+    /// the graphics queue — one VR frame in flight: the previous one is waited for first. Throws
+    /// VulkanError.
+    void drawVrFrame(const VrEyeView views[2], const VkFramebuffer eyeFramebuffers[2],
+                     const VkFramebuffer eyeDepthFramebuffers[2] = nullptr);
 
 private:
     void createCommandPool();
@@ -157,7 +165,8 @@ private:
     /// slot @p frameSlot's UBOs. Shared by the desktop frame and each VR eye. Returns whether the
     /// outline mask was drawn (the composite paints no outline otherwise).
     bool recordScenePasses(VkCommandBuffer cmd, const Camera& camera, uint32_t frameSlot, HdrTarget& hdr,
-                           OutlineMask& outline, PostProcess& post, VkExtent2D extent);
+                           OutlineMask& outline, PostProcess& post, VkExtent2D extent,
+                           bool postEffects = true);
 
     VulkanContext& m_context;
 

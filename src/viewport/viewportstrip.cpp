@@ -18,6 +18,7 @@
 
 #include <QCoreApplication>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QIcon>
 #include <QList>
 #include <QMenu>
@@ -247,9 +248,19 @@ ViewportStrip::ViewportStrip(QWidget* owner)
     // only while the joint mouse mode is on (B / S / T with a joint selected: setJointModeBadge).
     m_modeBadge = new JointModeBadge(this, fieldHeight);
     m_modeBadge->hide();
+    // The VR badge (setVrBadge): the headset has the scene, this viewport mirrors its left eye.
+    m_vrBadge = new QLabel(tr("VR"), this);
+    m_vrBadge->setObjectName(QStringLiteral("VrBadge"));
+    m_vrBadge->setFixedHeight(fieldHeight);
+    m_vrBadge->setAlignment(Qt::AlignCenter);
+    m_vrBadge->setStyleSheet(QStringLiteral("QLabel#VrBadge { color: #5b87cc; background: #252627; border: 1px solid "
+                                            "#555555; border-radius: 4px; padding: 0 10px; font-weight: bold; }"));
+    m_vrBadge->hide();
     auto* badgeRow = new QHBoxLayout();
     badgeRow->setContentsMargins(0, 0, 0, 0);
+    badgeRow->setSpacing(6);
     badgeRow->addStretch(1);
+    badgeRow->addWidget(m_vrBadge);
     badgeRow->addWidget(m_modeBadge);
     column->addLayout(badgeRow);
 
@@ -297,6 +308,14 @@ void ViewportStrip::setJointModeBadge(int kind) {
     if (was != (kind >= 0)) {
         anchorTo(m_anchor); // the strip grew or shrank by a row
     }
+}
+
+void ViewportStrip::setVrBadge(bool on) {
+    if (m_vrBadge->isVisibleTo(this) == on) {
+        return;
+    }
+    m_vrBadge->setVisible(on);
+    anchorTo(m_anchor); // the badge row appeared or went away
 }
 
 } // namespace pose

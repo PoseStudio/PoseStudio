@@ -18,8 +18,8 @@ namespace {
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 } // namespace
 
-HdrTarget::HdrTarget(VulkanContext& context, VkExtent2D extent)
-    : m_context(context), m_extent(extent) {
+HdrTarget::HdrTarget(VulkanContext& context, VkExtent2D extent, bool storeDepth)
+    : m_context(context), m_extent(extent), m_storeDepth(storeDepth) {
     const VkSampleCountFlagBits samples = m_context.sampleCount();
     const bool msaa = samples != VK_SAMPLE_COUNT_1_BIT;
 
@@ -37,8 +37,12 @@ HdrTarget::HdrTarget(VulkanContext& context, VkExtent2D extent)
                                           : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     RenderPassBuilder pass;
     pass.color(kColorFormat, samples, VK_ATTACHMENT_LOAD_OP_CLEAR, colorStore, colorFinal);
-    pass.depth(kDepthFormat, samples, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_DONT_CARE,
-               VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+    // The depth is discarded after the pass — unless it is kept for VR Mode's depth resolve
+    // (storeDepth): stored, and left readable for the resolve's sampler.
+    pass.depth(kDepthFormat, samples, VK_ATTACHMENT_LOAD_OP_CLEAR,
+               m_storeDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE,
+               m_storeDepth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                            : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
     if (msaa) {
         pass.resolve(kColorFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
@@ -53,6 +57,10 @@ HdrTarget::HdrTarget(VulkanContext& context, VkExtent2D extent)
     m_attachmentCount = pass.attachmentCount();
 
     m_sampler = m_context.samplers().get(SamplerDesc::linearClamp());
+    if (m_storeDepth) {
+        // The depth is fetched sample by sample (texelFetch): a nearest, non-comparison sampler.
+        m_depthSampler = m_context.samplers().get(SamplerDesc::shadowRaw());
+    }
     createImages();
 }
 
@@ -76,8 +84,9 @@ void HdrTarget::createImages() {
 
     m_color = AttachmentImage(m_context, kColorFormat, m_extent, samples, colorUsage,
                               VK_IMAGE_ASPECT_COLOR_BIT);
-    m_depth = AttachmentImage(m_context, kDepthFormat, m_extent, samples,
-                              VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
+    const VkImageUsageFlags depthUsage =
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | (m_storeDepth ? VK_IMAGE_USAGE_SAMPLED_BIT : 0u);
+    m_depth = AttachmentImage(m_context, kDepthFormat, m_extent, samples, depthUsage, VK_IMAGE_ASPECT_DEPTH_BIT);
     m_spec = AttachmentImage(m_context, kColorFormat, m_extent, samples, colorUsage,
                              VK_IMAGE_ASPECT_COLOR_BIT);
     if (msaa) {
@@ -103,6 +112,14 @@ void HdrTarget::destroyImages() {
     m_resolve.reset();
     m_depth.reset();
     m_color.reset();
+}
+
+VkDescriptorImageInfo HdrTarget::depthInfo() const {
+    VkDescriptorImageInfo info{};
+    info.sampler = m_depthSampler;
+    info.imageView = m_depth.view();
+    info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    return info;
 }
 
 VkDescriptorImageInfo HdrTarget::resolveInfo() const {
