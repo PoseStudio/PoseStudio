@@ -12,6 +12,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QDesktopServices>
+#include <QTimer>
 #include <QHBoxLayout>
 #include <QPushButton>
 #include <QScrollBar>
@@ -29,6 +30,10 @@
 namespace {
 
 constexpr const char* kChangelogFile = "changelog.md";
+/// How many releases BEFORE the running one the window also shows, each under an "Also new in"
+/// heading (see the constructor). 1 while 0.4.1 (VR) follows 0.4.0 (FBX characters) by a day;
+/// 0 once the previous release is old news.
+constexpr int kPreviousReleasesShown = 1;
 
 /// The one window open at a time (Help → What's New… raises it instead of stacking a second).
 QPointer<WhatsNewDialog> g_open;
@@ -67,8 +72,9 @@ WhatsNewDialog::WhatsNewDialog(QWidget* owner) : QDialog(owner), m_owner(owner) 
     layout->addWidget(m_browser, 1);
 
     QString       date;
-    const QString notes = notesFor(QLatin1String(Constants::APP_VERSION), &date);
-    QString       markdown = QStringLiteral("# What's New in PoseStudio %1\n\n").arg(QLatin1String(Constants::APP_VERSION));
+    const QString version = QLatin1String(Constants::APP_VERSION);
+    const QString notes = notesFor(version, &date);
+    QString       markdown = QStringLiteral("# What's New in PoseStudio %1\n\n").arg(version);
     if (!date.isEmpty()) {
         markdown += tr("*Released %1*\n\n").arg(date);
     }
@@ -77,6 +83,28 @@ WhatsNewDialog::WhatsNewDialog(QWidget* owner) : QDialog(owner), m_owner(owner) 
                        "The full history is in the manual's *What's New* page.");
     } else {
         markdown += notes;
+    }
+    // THE RELEASES BEFORE IT, kPreviousReleasesShown of them, each under its own heading: a
+    // point release that follows a big one by a day (0.4.1's VR after 0.4.0's FBX characters)
+    // must not hide the big one from whoever skipped straight to it. Set to 0 once the previous
+    // release is old news.
+    QString previous = version;
+    for (int i = 0; i < kPreviousReleasesShown; ++i) {
+        previous = releaseBefore(previous);
+        if (previous.isEmpty()) {
+            break;
+        }
+        QString       previousDate;
+        const QString previousNotes = notesFor(previous, &previousDate);
+        if (previousNotes.isEmpty()) {
+            break;
+        }
+        markdown += QStringLiteral("\n\n---\n\n## ") + tr("Also new in %1").arg(previous) + QStringLiteral("\n\n");
+        if (!previousDate.isEmpty()) {
+            markdown += tr("*Released %1*\n\n").arg(previousDate);
+        }
+        // The section's own `### Added` / `### Changed` headings sit one level under this one.
+        markdown += previousNotes;
     }
     m_manual.renderMarkdown(markdown, *m_browser->document());
     // Air between the entries: the notes are read, not scanned like a manual page — a little
@@ -95,6 +123,13 @@ WhatsNewDialog::WhatsNewDialog(QWidget* owner) : QDialog(owner), m_owner(owner) 
     // view — the window would open at the bottom of the notes. Start at the top.
     m_browser->moveCursor(QTextCursor::Start);
     m_browser->verticalScrollBar()->setValue(0);
+    // ... and once more after the window is up: the document lays out as it is shown, and with
+    // two releases' notes in it the browser's cursor-into-view scroll could land it partway
+    // down (seen opening at the 0.4.1 "Changed" entries with 0.4.0's section below).
+    QTimer::singleShot(0, this, [this]() {
+        m_browser->moveCursor(QTextCursor::Start);
+        m_browser->verticalScrollBar()->setValue(0);
+    });
 
     // THE FOOTER: the toggle that Preferences → General also carries, the manual's full history,
     // Close (Enter / Esc).
@@ -171,6 +206,31 @@ bool WhatsNewDialog::isEnabled() {
 void WhatsNewDialog::setEnabled(bool enabled) {
     PreferencesManager::instance().setValue(Constants::PREF_WHATS_NEW_ENABLED,
                                             enabled ? QStringLiteral("1") : QStringLiteral("0"));
+}
+
+QString WhatsNewDialog::releaseBefore(const QString& version) {
+    // The changelog lists releases newest first: the next `## [x.y.z]` heading after @p version's.
+    HelpManual        manual;
+    const QStringList lines = manual.markdownOf(QLatin1String(kChangelogFile)).split(QLatin1Char('\n'));
+    const QString     heading = QStringLiteral("## [%1]").arg(version);
+    bool              found = false;
+    for (const QString& raw : lines) {
+        const QString line = raw.trimmed();
+        if (!line.startsWith(QLatin1String("## ["))) {
+            continue;
+        }
+        if (!found) {
+            found = line.startsWith(heading) &&
+                    (line.size() == heading.size() || !line.at(heading.size()).isLetterOrNumber());
+            continue;
+        }
+        const int close = line.indexOf(QLatin1Char(']'));
+        const QString next = close > 4 ? line.mid(4, close - 4) : QString();
+        if (!next.isEmpty() && next.at(0).isDigit()) { // (never "Unreleased")
+            return next;
+        }
+    }
+    return QString();
 }
 
 QString WhatsNewDialog::notesFor(const QString& version, QString* dateOut) {

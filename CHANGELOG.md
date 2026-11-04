@@ -11,7 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > public repository; this changelog and `CMakeLists.txt` (whose `project(VERSION)` stamps
 > `Constants::APP_VERSION` at build time) are the authoritative version record, and releases are tagged from 0.3.0 onward.
 
-## [Unreleased]
+## [0.4.1] - 2026-11-04
+
+VR. Put on a headset and the scene is around you, life-size: the figure stands on your real floor at her true height, you walk around her and look from any angle while the scene stays live — and with the controllers you pose her from inside it, grabbing joints on a pointer ray or in your hand, the whole body following as it does from the desk. Any PC VR setup works through OpenXR: a Meta Quest over Quest Link or Air Link, Virtual Desktop, or SteamVR.
 
 ### Added
 - **VR Mode** (View → VR Mode): the scene in a VR headset, life-size and live — the figure stands on your real floor at her true height and you walk around her while you pose her from the desk. Any PC VR setup works through OpenXR: a Meta Quest over Quest Link or Air Link, Virtual Desktop, or SteamVR. The desktop viewport mirrors the headset's left eye meanwhile; View → Recenter VR View puts you back in front of the figure, facing her (VR Mode also does that as it starts). The viewport strip has a VR button right of the view picker, lit while VR Mode is on, and the picker's last entry is VR Mode; Esc at the desktop leaves it.

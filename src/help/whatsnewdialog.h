@@ -61,6 +61,9 @@ public:
     /// The CHANGELOG section for @p version as Markdown (its heading line left out), or an empty
     /// string when the embedded changelog has none. @p dateOut receives the heading's date, if any.
     static QString notesFor(const QString& version, QString* dateOut = nullptr);
+    /// The release the changelog lists right after @p version's section (the one before it in
+    /// time), or "" when @p version is the oldest or absent — the "Also new in" section's source.
+    static QString releaseBefore(const QString& version);
 
 private:
     void onAnchorClicked(const QUrl& url);
