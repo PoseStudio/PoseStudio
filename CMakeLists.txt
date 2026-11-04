@@ -143,6 +143,30 @@ FetchContent_Declare(ufbx
 )
 FetchContent_MakeAvailable(glm vma tinyobjloader nlohmann_json miniz stb tinyexr ufbx)
 
+# OpenXR: the loader behind VR Mode (src/viewport/vr/). Unlike the header-only libraries above
+# this one IS configured and built — the Khronos OpenXR-SDK repository (the PRE-GENERATED loader
+# sources: no Python at configure time, unlike OpenXR-SDK-Source) builds a STATIC openxr_loader
+# that links into the executable, so the package carries no extra DLL. The loader finds the
+# active runtime (Meta Quest Link, SteamVR, Virtual Desktop, Monado) through the registry /
+# ~/.config at xrCreateInstance time; the runtime's own Vulkan requirements are negotiated at
+# startup (OpenXrSystem) when VR support is enabled in Preferences.
+set(DYNAMIC_LOADER OFF CACHE BOOL "OpenXR: link the loader statically" FORCE)
+set(BUILD_LOADER ON CACHE BOOL "OpenXR: the loader is what we need" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "OpenXR: no tests" FORCE)
+set(BUILD_API_LAYERS OFF CACHE BOOL "OpenXR: no API layers" FORCE)
+set(BUILD_CONFORMANCE_TESTS OFF CACHE BOOL "OpenXR: no conformance tests" FORCE)
+FetchContent_Declare(openxr
+    GIT_REPOSITORY https://github.com/KhronosGroup/OpenXR-SDK.git
+    GIT_TAG        release-1.1.65
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(openxr)
+if(TARGET OpenXR::openxr_loader)
+    set(POSESTUDIO_OPENXR_TARGET OpenXR::openxr_loader)
+else()
+    set(POSESTUDIO_OPENXR_TARGET openxr_loader)
+endif()
+
 # ==============================================================================
 # [ TARGET DEFINITION & SOURCE FILES ]
 # ==============================================================================
@@ -233,6 +257,17 @@ add_executable(
     src/viewport/vulkanwindow_ik.cpp      # the FBIK drag loop, ground fall, X/Y/Z wheel hold
     src/viewport/vulkanwindow_pose.cpp    # pose utilities, pins, pose files, delete, undo/redo
     src/viewport/vulkanwindow_bench.cpp   # POSESTUDIO_IK_PERF / _BENCH diagnostics
+    src/viewport/vulkanwindow_vr.cpp      # VR Mode: the OpenXR session's lifecycle, wait thread, stereo frame
+    # The OpenXR layer (Qt-free: OpenXR + Vulkan + GLM): the headset found at startup, the session
+    # and its swapchains, the eye/placement math. rendering/ never includes these.
+    src/viewport/vr/openxrsystem.cpp
+    src/viewport/vr/openxrsystem.h
+    src/viewport/vr/openxrsession.cpp
+    src/viewport/vr/openxrsession.h
+    src/viewport/vr/openxrinput.cpp     # the controllers: actions, bindings, sticks/trigger/buttons, aim poses, haptics
+    src/viewport/vr/openxrinput.h
+    src/viewport/vr/vrmath.cpp
+    src/viewport/vr/vrmath.h
     src/viewport/ikdiagnostics.h          # the diagnostics state (null unless enabled)
     src/viewport/vulkanwindow_script.cpp  # POSESTUDIO_IK_SCRIPT: the scripted in-app posing test
     src/viewport/ikscript.h               # its state (null unless enabled)
@@ -266,6 +301,7 @@ add_executable(
     src/viewport/rendering/shaderlibrary.cpp # SPIR-V loading by name + the one in-code shader list
     src/viewport/rendering/shaderlibrary.h
     src/viewport/rendering/ibldata.h        # the CPU-baked IBL products the GPU layer uploads
+    src/viewport/rendering/vreyeview.h      # a VR eye's view + projection — the one VR type the core knows
     src/viewport/rendering/vulkancontext.cpp
     src/viewport/rendering/vulkancontext.h
     src/viewport/rendering/vulkanswapchain.cpp
@@ -433,6 +469,8 @@ add_executable(
     src/preferences/preferencespanel.h
     src/preferences/generalpreferencespanel.cpp
     src/preferences/generalpreferencespanel.h
+    src/preferences/vrpreferencespanel.cpp  # VR support toggle, headset status, render scale
+    src/preferences/vrpreferencespanel.h
     src/preferences/assetspreferencespanel.cpp
     src/preferences/assetspreferencespanel.h
     src/preferences/placeholderpreferencespanel.cpp # one class for every not-yet-built tab (Interface/Input/Navigation/System)
@@ -453,6 +491,8 @@ add_executable(
     src/core/installping.h
     src/core/updatecheck.cpp              # startup "newer release on GitHub?" check + Help → Check for Updates
     src/core/updatecheck.h
+    src/core/vrsettings.cpp                # VR Mode's preferences + the startup headset report
+    src/core/vrsettings.h
     
     # --- Embedded Resources ---
     resources/resources.qrc   # Injects images, UI styles, and SQL templates
@@ -522,6 +562,7 @@ target_include_directories(PoseStudio PRIVATE
     src/viewport/import/obj
     src/viewport/import/figure
     src/viewport/import/fbx
+    src/viewport/vr
     ${ufbx_SOURCE_DIR}                       # so <ufbx.h> resolves
     ${glm_SOURCE_DIR}                        # so <glm/glm.hpp> resolves
     ${vma_SOURCE_DIR}/include                # so <vk_mem_alloc.h> resolves
@@ -531,6 +572,7 @@ target_include_directories(PoseStudio PRIVATE
     ${CMAKE_SOURCE_DIR}/cmake/miniz-shim     # supplies miniz_export.h (miniz's CMake is skipped)
     ${stb_SOURCE_DIR}                        # so <stb_image.h> resolves
     ${tinyexr_SOURCE_DIR}                    # so <tinyexr.h> resolves
+    ${openxr_SOURCE_DIR}/include             # so <openxr/openxr.h> resolves (the loader target exports it too)
 )
 
 # miniz's C implementation, compiled directly into the target (its split source layout: core +
@@ -553,6 +595,10 @@ target_compile_definitions(PoseStudio PRIVATE
     # The app's version string (Constants::APP_VERSION, the title bar, the About overlay, the
     # install ping) is stamped from project(... VERSION) above, so a release bumps one number.
     POSESTUDIO_VERSION="${PROJECT_VERSION}"
+    # OpenXR's headers only declare the Vulkan graphics binding structs (XrGraphicsBindingVulkanKHR,
+    # the KHR_vulkan_enable entry points) under this define — set project-wide so every VR TU
+    # agrees, like the GLM flags above.
+    XR_USE_GRAPHICS_API_VULKAN
 )
 
 # ------------------------------------------------------------------------------
@@ -586,6 +632,7 @@ target_link_libraries(PoseStudio PRIVATE
     Qt6::Concurrent  # off-thread IBL bake on HDRI switches (QtConcurrent::run + QFutureWatcher)
     Qt6::Network     # the anonymous install ping (src/core/installping.*) and the update check (src/core/updatecheck.*)
     Vulkan::Vulkan
+    ${POSESTUDIO_OPENXR_TARGET} # the static OpenXR loader (VR Mode, src/viewport/vr/)
 )
 
 # ==============================================================================

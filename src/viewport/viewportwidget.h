@@ -37,6 +37,7 @@ class QMoveEvent;
 
 namespace pose {
 
+class OpenXrSystem;
 class ViewportStrip;
 class VulkanWindow;
 struct JointTransform;
@@ -165,7 +166,23 @@ public:
     /// which is the single source of truth (each row also says how the scene draws in that mode).
     static QStringList shaderModeNames();
 
+    /// VR Mode (View → VR Mode): the scene in the headset found at startup, live, with the window
+    /// mirroring the headset's left eye. Returns whether VR is on afterwards; a start that fails
+    /// explains itself through vrError. Whether it CAN start is VrSettings::ready() — the shell
+    /// consults that before calling, so a headset-less launch gets the explanation instead.
+    /// No-op if the viewport degraded.
+    bool setVrMode(bool on);
+    bool vrModeActive() const;
+    /// Puts the user back in front of the figure, facing it (View → Recenter VR View).
+    void recenterVr();
+
 signals:
+    /// Re-emitted from the viewport when VR Mode starts or ends (by the user or because the
+    /// headset session was lost); the View menu's checkable entry follows it.
+    void vrModeChanged(bool on);
+    /// Re-emitted from the viewport with a user-readable message when VR Mode could not start or
+    /// was ended by the runtime. The shell shows it.
+    void vrError(const QString& message);
     /// Re-emitted from the viewport when undo/redo restores a lighting state, so the Environment
     /// panel can sync its widgets. The settings are already applied renderer-side.
     void lightingRestored(const LightingSettings& settings);
@@ -208,6 +225,7 @@ private:
         }
     }
 
+    std::unique_ptr<OpenXrSystem>    m_xr;                     // the headset found at startup (VR enabled in Preferences); null = none
     std::unique_ptr<QVulkanInstance> m_instance;               // owns the VkInstance
     VulkanWindow*                    m_window = nullptr;        // owned by m_container
     JointModalInput*                 m_modalInput = nullptr;    // the joint mouse mode's app-wide input (a child)

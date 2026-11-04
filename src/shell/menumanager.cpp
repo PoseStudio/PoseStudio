@@ -26,7 +26,9 @@
 #include "viewport/viewportwidget.h"
 #include "jointtransform.h" // pose::JointTransform: which of the joint-mode keys are live
 #include "scene/shademode.h" // kDefaultShadeMode (File → New's picker reset)
+#include "vrsettings.h"      // VR Mode: can it start, and why not
 #include <QMenu>
+#include <QProcess>
 #include <QMenuBar>
 #include <QAction>
 #include <QApplication>
@@ -302,6 +304,16 @@ void MenuManager::setupMenus() {
         if (viewportWidget) viewportWidget->resetView();
     });
 
+    // VR Mode: the scene in the headset (OpenXR — Quest Link / Air Link, SteamVR, Virtual
+    // Desktop), the window mirroring its left eye. Checkable; kept in sync with the viewport's
+    // vrModeChanged (the runtime can end a session on its own). Recenter puts the user back in
+    // front of the figure. Both wired in setViewportWidget, like Show Skeleton.
+    viewMenu->addSeparator();
+    m_vrModeAction = viewMenu->addAction(tr("VR Mode"));
+    m_vrModeAction->setCheckable(true);
+    m_recenterVrAction = viewMenu->addAction(tr("Recenter VR View"));
+    m_recenterVrAction->setEnabled(false);
+
     // =========================================================================
     // HELP MENU — documentation, support links, and the About dialog
     QMenu *helpMenu = mainWindow->menuBar()->addMenu(tr("Help"));
@@ -397,6 +409,97 @@ void MenuManager::setViewportWidget(pose::ViewportWidget *viewport) {
         m_showSkeletonAction->setChecked(visible);
         m_showSkeletonAction->blockSignals(false);
     });
+
+    // View → VR Mode: a start the viewport cannot do explains itself (explainVrUnavailable)
+    // instead of failing silently; the viewport's vrModeChanged keeps the check mark honest
+    // (the headset runtime can end a session by itself), and Recenter is live only in VR.
+    if (m_vrModeAction) {
+        QObject::connect(m_vrModeAction, &QAction::triggered, this, [this](bool on) {
+            if (!viewportWidget) {
+                return;
+            }
+            if (!on) {
+                viewportWidget->setVrMode(false);
+                return;
+            }
+            if (!VrSettings::ready() || !viewportWidget->setVrMode(true)) {
+                m_vrModeAction->blockSignals(true);
+                m_vrModeAction->setChecked(false);
+                m_vrModeAction->blockSignals(false);
+                if (!VrSettings::ready()) {
+                    explainVrUnavailable();
+                }
+            }
+        });
+        QObject::connect(viewport, &pose::ViewportWidget::vrModeChanged, this, [this](bool on) {
+            if (m_vrModeAction && m_vrModeAction->isChecked() != on) {
+                m_vrModeAction->blockSignals(true);
+                m_vrModeAction->setChecked(on);
+                m_vrModeAction->blockSignals(false);
+            }
+            if (m_recenterVrAction) {
+                m_recenterVrAction->setEnabled(on);
+            }
+        });
+        QObject::connect(viewport, &pose::ViewportWidget::vrError, this, [this](const QString &message) {
+            QMessageBox::warning(mainWindow, tr("VR Mode"), message);
+        });
+    }
+    if (m_recenterVrAction) {
+        QObject::connect(m_recenterVrAction, &QAction::triggered, this, [this]() {
+            if (viewportWidget) viewportWidget->recenterVr();
+        });
+    }
+}
+
+void MenuManager::explainVrUnavailable() {
+    QMessageBox box(mainWindow);
+    box.setIcon(QMessageBox::Information);
+    box.setWindowTitle(tr("VR Mode"));
+    if (!VrSettings::isEnabled()) {
+        // Opt-in: the headset runtime is consulted as PoseStudio starts (before the Vulkan device
+        // exists), so turning VR on is a restart — offered right here.
+        box.setText(tr("VR support is off."));
+        box.setInformativeText(
+            tr("PoseStudio connects to the headset runtime when it starts, so VR support takes a restart to "
+               "turn on. Connect your headset first (Quest Link or Air Link, Virtual Desktop, or SteamVR), "
+               "then restart.\n\nTurn VR support on now?"));
+        QAbstractButton *restart = box.addButton(tr("Turn On and Restart"), QMessageBox::AcceptRole);
+        QAbstractButton *later = box.addButton(tr("Turn On, Restart Later"), QMessageBox::ActionRole);
+        box.addButton(tr("Cancel"), QMessageBox::RejectRole);
+        box.exec();
+        if (box.clickedButton() == restart || box.clickedButton() == later) {
+            VrSettings::setEnabled(true);
+        }
+        if (box.clickedButton() == restart) {
+            relaunchApplication();
+        }
+        return;
+    }
+    // VR support is on, but the startup found no usable headset: the status says why.
+    box.setText(tr("VR Mode cannot start."));
+    box.setInformativeText(tr("%1\n\nConnect the headset (Quest Link or Air Link, Virtual Desktop, or SteamVR), "
+                              "then restart PoseStudio.")
+                               .arg(VrSettings::status()));
+    QAbstractButton *restart = box.addButton(tr("Restart Now"), QMessageBox::AcceptRole);
+    box.addButton(tr("OK"), QMessageBox::RejectRole);
+    box.exec();
+    if (box.clickedButton() == restart) {
+        relaunchApplication();
+    }
+}
+
+void MenuManager::relaunchApplication() {
+    if (!confirmDiscardChanges()) {
+        return; // Save cancelled, or the user changed their mind
+    }
+    if (viewportWidget) {
+        viewportWidget->setProjectClean(); // the scene was saved or let go of: no second prompt on the way out
+    }
+    // The Factory Reset relaunch (factoryresetpreferencespanel.cpp): no arguments, so the new
+    // process doesn't replay this one's "open-with" paths.
+    QProcess::startDetached(QApplication::applicationFilePath(), QStringList());
+    QApplication::quit();
 }
 
 void MenuManager::newScene() {

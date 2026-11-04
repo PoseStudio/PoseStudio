@@ -102,6 +102,8 @@ void Scene::setShowSkeleton(bool on) { m_lineOverlay->setShowSkeleton(on); }
 
 bool Scene::showSkeleton() const { return m_lineOverlay->showSkeleton(); }
 
+void Scene::setVrPointerLines(std::vector<PointerLine> lines) { m_lineOverlay->setPointerLines(std::move(lines)); }
+
 void Scene::addModel(const ModelData& data) {
     m_models.push_back(std::make_unique<Model>(m_context, data, m_pipelines->materialSetLayout(),
                                                m_pipelines->poseSetLayout(),

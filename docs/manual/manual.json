@@ -8,6 +8,7 @@
     { "id": "navigation",       "title": "Navigating the Viewport", "file": "navigation.md" },
     { "id": "shading",          "title": "Shading and Display",     "file": "shading.md" },
     { "id": "environment",      "title": "Lighting and Environment","file": "environment.md" },
+    { "id": "vr",               "title": "VR Mode",                 "file": "vr.md" },
     { "id": "posing",           "title": "Posing",                  "file": "posing.md",
       "children": [
         { "id": "poses",        "title": "Poses Step by Step",      "file": "poses.md" },

@@ -76,6 +76,11 @@ namespace Constants {
     /// new version ("1"/"0", absent = on), and the last version it was decided for.
     inline constexpr const char* PREF_WHATS_NEW_ENABLED = "WhatsNewEnabled";
     inline constexpr const char* PREF_WHATS_NEW_SEEN_VERSION = "WhatsNewSeenVersion";
+    /// VR Mode (src/core/vrsettings.h): whether the headset runtime is consulted at startup
+    /// ("1"/"0", absent = OFF — opt-in, takes a restart), and the per-eye render scale ("1.00",
+    /// a fraction of the headset's recommended resolution, applied when VR Mode next starts).
+    inline constexpr const char* PREF_VR_ENABLED = "VrEnabled";
+    inline constexpr const char* PREF_VR_RENDER_SCALE = "VrRenderScale";
 
     // =========================================================================
     // UI DIMENSIONS & LAYOUT

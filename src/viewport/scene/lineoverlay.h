@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace pose {
@@ -37,6 +38,16 @@ class VulkanPipeline;
 struct LineVertex {
     glm::vec3 pos;
     glm::vec3 color;
+};
+
+/// A pointer drawn by the overlay — a VR controller's ray (VR Mode, vulkanwindow_vr.cpp): the
+/// segment @p from -> @p to in @p color, with a small marker at @p to when @p marker (the ray's
+/// end on a joint, a model or the floor). Set per frame; empty outside VR Mode.
+struct PointerLine {
+    glm::vec3 from{0.0f};
+    glm::vec3 to{0.0f};
+    glm::vec3 color{1.0f};
+    bool      marker = false;
 };
 
 class LineOverlay {
@@ -56,6 +67,8 @@ public:
     /// Show/hide the skeleton line list (View -> Show Skeleton / the strip's Skeleton button).
     void setShowSkeleton(bool on) { m_showSkeleton = on; }
     bool showSkeleton() const { return m_showSkeleton; }
+    /// The pointer lines to draw from now on (VR Mode's controller rays; empty = none).
+    void setPointerLines(std::vector<PointerLine> lines) { m_pointerLines = std::move(lines); }
 
     /// Emits this frame's lines into frame slot @p frameIndex's buffer and draws them (nothing
     /// is recorded when there are none). @p cameraSet is this frame's set-0 descriptor;
@@ -73,6 +86,7 @@ private:
     // frame's GPU read of it is still in flight.
     std::vector<VulkanBuffer>       m_vertexBuffers;
     bool                            m_showSkeleton = false;
+    std::vector<PointerLine>        m_pointerLines; // see setPointerLines
 };
 
 } // namespace pose

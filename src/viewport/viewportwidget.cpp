@@ -6,12 +6,15 @@
 #include "viewportwidget.h"
 
 #include "jointmodalinput.h"
+#include "openxrsystem.h" // the headset's Vulkan requirements, negotiated before the instance (vr/)
 #include "scene/jointtransform.h"
 #include "scene/shademode.h"
 #include "viewportstrip.h"
+#include "vrsettings.h"
 #include "vulkanwindow.h"
 
 #include <QAction>
+#include <QByteArrayList>
 #include <QCoreApplication>
 #include <QDebug>
 #include <QEvent>
@@ -30,6 +33,9 @@
 
 #include <vulkan/vulkan.h>
 
+#include <algorithm>
+#include <string>
+
 namespace pose {
 
 namespace {
@@ -44,7 +50,43 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
     layout->setContentsMargins(0, 0, 0, 0);
 
     m_instance = std::make_unique<QVulkanInstance>();
-    m_instance->setApiVersion(QVersionNumber(1, 1));
+    uint32_t apiVersion = kVulkanApiVersion;
+
+    // VR (opt-in, Preferences → VR): the headset runtime dictates instance extensions, a device
+    // and an API version range BEFORE the instance exists, so it is consulted here, first. Every
+    // failure is a normal outcome reported to the Preferences page; the viewport is the same
+    // without it. Off by default because connecting to a runtime at every launch would start
+    // SteamVR for people who never wear a headset.
+    if (VrSettings::isEnabled()) {
+        std::string reason;
+        m_xr = OpenXrSystem::create(reason);
+        if (!m_xr) {
+            VrSettings::setStatus(QString::fromStdString(reason));
+            qInfo() << "[vr] unavailable:" << QString::fromStdString(reason);
+        } else if (m_xr->maxVulkanApiVersion() < kVulkanApiVersion) {
+            VrSettings::setStatus(tr("The OpenXR runtime (%1) supports only Vulkan %2.%3; this viewport needs 1.1.")
+                                      .arg(QString::fromStdString(m_xr->runtimeName()))
+                                      .arg(VK_API_VERSION_MAJOR(m_xr->maxVulkanApiVersion()))
+                                      .arg(VK_API_VERSION_MINOR(m_xr->maxVulkanApiVersion())));
+            m_xr.reset();
+        } else {
+            apiVersion = std::max(kVulkanApiVersion, m_xr->minVulkanApiVersion());
+            QByteArrayList extensions;
+            for (const std::string& name : m_xr->vulkanInstanceExtensions()) {
+                extensions << QByteArray::fromStdString(name);
+            }
+            m_instance->setExtensions(extensions); // Qt adds its own surface extensions on top
+            VrSettings::setStatus(tr("Headset found: %1 (runtime: %2) — waiting for the viewport.")
+                                      .arg(QString::fromStdString(m_xr->systemName()),
+                                           QString::fromStdString(m_xr->runtimeName())));
+        }
+    } else {
+        VrSettings::setStatus(tr("VR support is off. Turn it on and restart PoseStudio to use VR Mode."));
+    }
+    VrSettings::setReady(false); // the window reports readiness once the device exists
+
+    m_instance->setApiVersion(QVersionNumber(static_cast<int>(VK_API_VERSION_MAJOR(apiVersion)),
+                                             static_cast<int>(VK_API_VERSION_MINOR(apiVersion))));
 #ifndef NDEBUG
     // Standard validation layer in debug builds; QVulkanInstance routes its messages to
     // qDebug() automatically. Released builds skip it for performance.
@@ -69,7 +111,26 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
     // Compiled shaders are mirrored next to the executable by the build (see CMakeLists).
     const QString shaderDir = QCoreApplication::applicationDirPath() + QStringLiteral("/shaders");
 
-    m_window = new VulkanWindow(m_instance.get(), kVulkanApiVersion, shaderDir);
+    // The instance exists: did it take every extension the headset runtime asked for? Qt drops
+    // the ones the driver lacks silently, and a runtime short of one cannot drive the device.
+    if (m_xr) {
+        const QByteArrayList enabled = m_instance->extensions();
+        for (const std::string& name : m_xr->vulkanInstanceExtensions()) {
+            if (!enabled.contains(QByteArray::fromStdString(name))) {
+                VrSettings::setStatus(tr("This GPU driver lacks a Vulkan instance extension the headset runtime "
+                                         "needs (%1).")
+                                          .arg(QString::fromStdString(name)));
+                qWarning() << "[vr] instance extension unavailable:" << QString::fromStdString(name);
+                m_xr.reset();
+                break;
+            }
+        }
+    }
+
+    m_window = new VulkanWindow(m_instance.get(), apiVersion, shaderDir);
+    m_window->setOpenXrSystem(m_xr.get()); // before the first expose builds the device
+    connect(m_window, &VulkanWindow::vrModeChanged, this, &ViewportWidget::vrModeChanged);
+    connect(m_window, &VulkanWindow::vrError, this, &ViewportWidget::vrError);
     // Signal-to-signal forward: undo/redo restoring a lighting state surfaces on the facade,
     // where the Environment panel listens.
     connect(m_window, &VulkanWindow::lightingRestored, this, &ViewportWidget::lightingRestored);
@@ -301,6 +362,18 @@ void ViewportWidget::redo() {
 
 void ViewportWidget::registerLightingUndo(const LightingSettings& preEdit) {
     withWindow([&](VulkanWindow& w) { w.registerLightingUndo(preEdit); });
+}
+
+bool ViewportWidget::setVrMode(bool on) {
+    return m_window && m_window->setVrMode(on);
+}
+
+bool ViewportWidget::vrModeActive() const {
+    return m_window && m_window->vrModeActive();
+}
+
+void ViewportWidget::recenterVr() {
+    withWindow([](VulkanWindow& w) { w.recenterVr(); });
 }
 
 QStringList ViewportWidget::shaderModeNames() {

@@ -27,6 +27,8 @@
  *                                  delete, the Transform tab's dials and the joint mouse mode
  *                                  (B / S / T), the unified undo/redo stack.
  *   - vulkanwindow_bench.cpp       the POSESTUDIO_IK_PERF / POSESTUDIO_IK_BENCH diagnostics.
+ *   - vulkanwindow_vr.cpp          VR Mode: the OpenXR session (vr/) — its state machine, the
+ *                                  frame-wait thread, and the per-frame stereo render + mirror.
  * The private declarations below follow the same order.
  *
  * Gesture contracts (each learned from a real failure; see CLAUDE.md's viewport section):
@@ -70,6 +72,8 @@ class QVulkanInstance;
 
 namespace pose {
 
+class OpenXrSystem;
+struct VrInput;
 class Scene;
 class VulkanContext;
 class VulkanError;
@@ -250,7 +254,29 @@ public:
     /// gesture; undoing the entry emits lightingRestored so the panel's widgets follow.
     void registerLightingUndo(const LightingSettings& preEdit);
 
+    // --- VR Mode (vulkanwindow_vr.cpp) ----------------------------------------------------------
+    /// Registers the headset found at startup (an OpenXrSystem owned by ViewportWidget, which
+    /// created the Vulkan instance to its requirements). Must precede the renderer's creation
+    /// (the first expose): the device is created on the headset's physical device with its
+    /// extensions. Null = no VR this session. Whether VR Mode can start is published through
+    /// VrSettings::setReady once the device exists.
+    void setOpenXrSystem(OpenXrSystem* system);
+    /// Starts / stops VR Mode (View → VR Mode). Returns whether VR is on afterwards; a failure
+    /// to start, or a session the runtime ends, is announced through vrError. No-op before the
+    /// renderer exists or without a headset.
+    bool setVrMode(bool on);
+    bool vrModeActive() const { return m_vr != nullptr; }
+    /// Puts the user back in front of the figure, facing it (View → Recenter VR View) — applied
+    /// at the next tracked frame. VR Mode also does this on its own as it starts.
+    void recenterVr();
+
 signals:
+    /// Emitted when VR Mode starts or ends — by the user, or because the headset session was
+    /// lost. The View menu's checkable entry follows it.
+    void vrModeChanged(bool on);
+    /// Emitted with a user-readable message when VR Mode could not start or was ended by the
+    /// runtime. The shell shows it.
+    void vrError(const QString& message);
     /// Emitted when undo/redo restores a lighting state. The settings are already applied to the
     /// renderer; the Environment panel listens (via ViewportWidget) to sync its widgets.
     void lightingRestored(const LightingSettings& settings);
@@ -703,6 +729,50 @@ private:
     void scriptReport(const char* label); ///< `report`: what a user would see, as numbers.
     bool scriptMetric(const QString& name, double& value); ///< A number `expect` can assert on.
     std::unique_ptr<IkScript> m_script;
+
+    // =========================================================================================
+    // VR Mode (vulkanwindow_vr.cpp)
+    // =========================================================================================
+
+    /// The session's poll timer tick: runs the OpenXR state machine (begin on Ready, end on
+    /// Stopping, tear down on Gone) and starts/stops the frame-wait thread with it.
+    void onVrPoll();
+    /// The GUI-thread half of a VR frame: the wait thread has a predicted display time —
+    /// beginFrame, locate the eyes, render both into the headset's images, endFrame, then
+    /// request the desktop mirror. Strictly one frame at a time.
+    void onVrFrameReady();
+    /// Starts / stops the thread that blocks in xrWaitFrame (the ONE OpenXR call off the GUI
+    /// thread, so the headset's pacing never stalls the UI).
+    void startVrWaiter();
+    void stopVrWaiter();
+    /// Ends VR Mode: stops the wait thread, releases the eye targets and the session, emits
+    /// vrModeChanged(false) and, with a non-empty @p error, vrError. Idempotent.
+    void stopVr(const QString& error);
+    /// Where the user should stand to look at the scene: in front of the framed bounds.
+    glm::vec3 vrStandPoint() const;
+    struct VrState; // complete only in vulkanwindow_vr.cpp (see m_vr below)
+    /// THE CONTROLLERS (one frame's input, VrInput): locomotion on the play-space transform —
+    /// the left stick walks head-relative, the right stick turns smoothly about the head — then each
+    /// hand's pointer ray: a hover pick colours it and ends it on the joint, the trigger is the
+    /// LEFT MOUSE BUTTON (a press on a joint selects it and begins the full-body-IK drag of it,
+    /// the grabbed point then carried on the ray at its grab distance while the trigger is held,
+    /// the right stick's Y pushing/pulling it; a press on empty space click-selects the model
+    /// under the ray or clears the selection), the face button pins / unpins the selected joint,
+    /// the menu button recentres. Called per VR frame before the eyes are located, so the frame
+    /// shows the move.
+    void applyVrInput(VrState& vr, const VrInput& input, float dt, int64_t time);
+    /// Ends a controller-driven IK drag (as the mouse's release would), if one is in flight.
+    void endVrDrag();
+
+    // VrState is complete only in vulkanwindow_vr.cpp (it holds the OpenXR session and the wait
+    // thread); the deleter is defined there too, so the other TUs of this class can hold the
+    // pointer without knowing the type.
+    struct VrStateDeleter {
+        void operator()(VrState* state) const;
+    };
+    std::unique_ptr<VrState, VrStateDeleter> m_vr; // null = VR Mode off
+    OpenXrSystem*            m_xr = nullptr;   // borrowed (ViewportWidget); null = no headset
+    uint64_t                 m_vrGeneration = 0; // ++ per start/stop: stale queued frames are ignored
 };
 
 } // namespace pose

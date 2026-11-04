@@ -164,6 +164,19 @@ void LineOverlay::record(VkCommandBuffer cmd, const Camera& camera, VkDescriptor
         }
     }
 
+    // The VR controllers' pointer rays (setPointerLines): a segment each, and a marker where the
+    // ray ends on something (a joint, a model, the floor).
+    for (const PointerLine& pointer : m_pointerLines) {
+        if (count + 2 > kMaxSkeletonVerts) {
+            break;
+        }
+        verts[count++] = {pointer.from, pointer.color};
+        verts[count++] = {pointer.to, pointer.color};
+        if (pointer.marker) {
+            emitPinMarker(pointer.to, 0.25f * markerRadius(pointer.to, cameraPos), pointer.color);
+        }
+    }
+
     if (count > 0) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->handle());
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->layout(), 0, 1,

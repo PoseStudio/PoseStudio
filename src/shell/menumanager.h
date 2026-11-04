@@ -97,6 +97,15 @@ private:
     // Edit → Turn Joint with Mouse → Bend / Side-Side / Twist (B / S / T); wired and kept
     // enabled-with-the-selection in setViewportWidget.
     QAction *m_turnJointActions[3] = {nullptr, nullptr, nullptr};
+
+    /// View → VR Mode (checkable) and Recenter VR View; wired in setViewportWidget.
+    QAction *m_vrModeAction = nullptr;
+    QAction *m_recenterVrAction = nullptr;
+    /// The VR Mode entry's response when VR cannot start: why, and what to do — enable VR support
+    /// (a restart, offered on the spot), or connect the headset and restart.
+    void explainVrUnavailable();
+    /// Restarts the application (the Factory Reset relaunch), after the unsaved-changes gate.
+    void relaunchApplication();
 };
 
 #endif // MENUMANAGER_H

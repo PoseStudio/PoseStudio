@@ -26,6 +26,7 @@
 #define VULKANRENDERER_H
 
 #include "camera.h"
+#include "vreyeview.h"
 #include "vulkancommon.h"
 #include "vulkanhandles.h"
 
@@ -41,6 +42,7 @@ class VulkanSwapchain;
 class HdrTarget;
 class OutlineMask;
 class PostProcess;
+class ShaderLibrary;
 class Grid;
 class Scene;
 struct ModelData;
@@ -127,6 +129,22 @@ public:
     /// and the image codec out of this core. No-op if the scene doesn't exist yet.
     void applyBakedEnvironment(const BakedEnvironment& baked);
 
+    // --- VR Mode (the OpenXR session lives in src/viewport/vr/; this core sees only Vulkan) -----
+    /// Enters VR: builds a second set of scene targets at the headset's per-eye size (@p eyeExtent)
+    /// — HDR target, outline mask, post chain — and a composite for the headset's render pass
+    /// (@p eyeRenderPass, over its swapchain images; @p encodeSrgb when their format is UNORM so
+    /// the composite encodes). Waits for the device. Until endVr(), drawFrame() no longer renders
+    /// the desktop camera: it MIRRORS the headset's left eye into the window instead.
+    void beginVr(VkRenderPass eyeRenderPass, VkExtent2D eyeExtent, bool encodeSrgb);
+    /// Leaves VR (waits for the device, frees the eye targets); the desktop view is its own again.
+    void endVr();
+    bool vrActive() const { return m_vr != nullptr; }
+    /// Renders one VR frame: the key-light shadow map once, then each eye's scene through its
+    /// tracked view (VrEyeView) into the eye targets, composited into @p eyeFramebuffers[eye]
+    /// (the headset's framebuffer for the image the caller acquired). Submits on the graphics
+    /// queue — one VR frame in flight: the previous one is waited for first. Throws VulkanError.
+    void drawVrFrame(const VrEyeView views[2], const VkFramebuffer eyeFramebuffers[2]);
+
 private:
     void createCommandPool();
     void createCommandBuffers();
@@ -134,8 +152,20 @@ private:
     void recreateSwapchain();
     /// Records the whole frame graph for one frame — see the file banner and the definition.
     void recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex, VkBuffer captureInto);
+    /// The view-dependent half of the frame graph (steps 2-4 of recordCommandBuffer: the outline
+    /// mask, the HDR scene pass, SSS + bloom) for @p camera into the given targets, writing frame
+    /// slot @p frameSlot's UBOs. Shared by the desktop frame and each VR eye. Returns whether the
+    /// outline mask was drawn (the composite paints no outline otherwise).
+    bool recordScenePasses(VkCommandBuffer cmd, const Camera& camera, uint32_t frameSlot, HdrTarget& hdr,
+                           OutlineMask& outline, PostProcess& post, VkExtent2D extent);
 
     VulkanContext& m_context;
+
+    std::unique_ptr<ShaderLibrary>   m_shaders; // kept: the VR post chain is built later from it
+
+    /// The eye-sized targets + the headset composite of VR Mode (beginVr .. endVr).
+    struct VrTargets;
+    std::unique_ptr<VrTargets> m_vr;
 
     std::unique_ptr<VulkanSwapchain> m_swapchain;
     std::unique_ptr<HdrTarget>       m_hdrTarget;   // offscreen HDR scene target (see hdrtarget.h)

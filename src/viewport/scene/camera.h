@@ -77,6 +77,14 @@ public:
     float            yaw() const { return m_yaw; }
     float            distance() const { return m_distance; }
 
+    /// An EXPLICIT view: @p view (world -> eye) and @p projection as given, bypassing the orbit
+    /// framing — a VR eye as the headset tracked it (rendering/vreyeview.h), whose off-centre
+    /// frustum and pose no orbit state can express. The orbit members are left untouched; the
+    /// object just answers view()/viewProjection()/position() from the given matrices until an
+    /// orbit mutator is called. The renderer makes a throwaway Camera per eye this way, so the
+    /// desktop camera never carries VR state.
+    void setExplicitView(const glm::mat4& view, const glm::mat4& projection);
+
     glm::mat4 view() const;
     glm::mat4 viewProjection() const { return m_projection * view(); }
     glm::vec3 position() const;
@@ -109,6 +117,11 @@ private:
     float m_farPlane = 1000.0f;
     bool  m_orthographic = false; // see setOrthographic(); the projection depends on m_distance then
     glm::mat4 m_projection = glm::mat4(1.0f);
+
+    // setExplicitView: the given view matrix and the eye it implies (its inverse's translation).
+    bool      m_explicit = false;
+    glm::mat4 m_explicitView = glm::mat4(1.0f);
+    glm::vec3 m_explicitEye = glm::vec3(0.0f);
 };
 
 } // namespace pose

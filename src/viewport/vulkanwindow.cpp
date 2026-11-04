@@ -18,10 +18,12 @@
 #include "ikdiagnostics.h"
 #include "ikscript.h"
 #include "modelimportservice.h"
+#include "openxrsystem.h" // the headset's device requirements (vr/)
 #include "rendering/vulkancommon.h"
 #include "rendering/vulkancontext.h"
 #include "rendering/vulkanrenderer.h"
 #include "scene/scene.h"
+#include "vrsettings.h"
 
 #include <QDebug>
 #include <QFileInfo>
@@ -114,7 +116,31 @@ void VulkanWindow::initializeVulkan() {
         if (surface == VK_NULL_HANDLE) {
             throw VulkanError("QVulkanInstance::surfaceForWindow returned a null surface.");
         }
-        m_context = std::make_unique<VulkanContext>(m_instance->vkInstance(), surface, m_apiVersion);
+        // The headset runtime's device requirements (set at startup, see setOpenXrSystem): its
+        // physical device and extensions. A device that can't meet them is still a fine desktop
+        // device — VR Mode is then simply unavailable, with the reason on the Preferences page.
+        VulkanContextOptions options;
+        if (m_xr) {
+            options.preferredDevice = m_xr->vulkanPhysicalDevice(m_instance->vkInstance());
+            options.extraDeviceExtensions = m_xr->vulkanDeviceExtensions();
+        }
+        m_context = std::make_unique<VulkanContext>(m_instance->vkInstance(), surface, m_apiVersion, options);
+        if (m_xr) {
+            if (m_context->vrDeviceReady()) {
+                VrSettings::setReady(true);
+                VrSettings::setStatus(tr("Ready: %1 (runtime: %2). View → VR Mode puts the scene in the headset.")
+                                          .arg(QString::fromStdString(m_xr->systemName()),
+                                               QString::fromStdString(m_xr->runtimeName())));
+                qInfo() << "[vr] headset ready:" << QString::fromStdString(m_xr->systemName());
+            } else {
+                VrSettings::setReady(false);
+                VrSettings::setStatus(tr("The headset (%1) is driven by a GPU this viewport cannot render through, "
+                                         "or that GPU lacks an extension the runtime needs — see the log.")
+                                          .arg(QString::fromStdString(m_xr->systemName())));
+                qWarning() << "[vr] the Vulkan device does not meet the headset runtime's requirements; VR Mode unavailable";
+                m_xr = nullptr;
+            }
+        }
         m_renderer = std::make_unique<VulkanRenderer>(*m_context, toExtent(pixelExtent()),
                                                       m_shaderDir.toStdString());
         m_deferred.applyTo(*m_renderer);
@@ -163,6 +189,20 @@ void VulkanWindow::initializeVulkan() {
         if (m_script) {
             QTimer::singleShot(1500, this, &VulkanWindow::startScript);
         }
+        // POSESTUDIO_VR_AUTOSTART=1: straight into VR Mode once the first frames are up — the
+        // developer lever for exercising the session with no menu clicks (and for a launch that
+        // goes directly to the headset). With no headset it only LOGS: the menu path's "cannot
+        // start" dialog is modal, and raised from inside the command-line import's progress loop
+        // it would hold the import (and a scripted run) until someone dismissed it.
+        if (qEnvironmentVariableIsSet("POSESTUDIO_VR_AUTOSTART")) {
+            QTimer::singleShot(1500, this, [this]() {
+                if (!m_xr) {
+                    qInfo() << "[vr] autostart: no headset —" << VrSettings::status();
+                } else if (!setVrMode(true)) {
+                    qInfo() << "[vr] autostart: VR Mode did not start";
+                }
+            });
+        }
     } catch (const VulkanError& e) {
         // Leave the surface intact (Qt owns it) but mark the device as failed so we don't retry
         // every expose. The container just shows the clear-colour-less window.
@@ -182,6 +222,9 @@ void VulkanWindow::failDevice(const char* stage, const VulkanError& error) {
 }
 
 void VulkanWindow::releaseVulkan() {
+    // VR Mode first: its session holds swapchain images on the device, and its wait thread
+    // must be gone before the renderer it renders through.
+    stopVr(QString());
     // A pending IK drag or release settle dies with the renderer (nothing left to settle or
     // commit) — the DRAG flags must clear too, or a rebuilt renderer inherits a phantom drag
     // whose eventual release would settle-and-commit against a stale pre-teardown pose. The

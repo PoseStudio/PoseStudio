@@ -25,12 +25,15 @@ namespace {
 //   blur:      xy = texel size, zw = blur direction
 //   sss:       xy = texel size, zw = blur direction (H then V; V adds the spec attachment back)
 //   composite: x = tonemap (0/1), y = bloom strength, z = bloom on (0/1),
-//              w = selection-outline width in pixels (0 = none); outline.rgb = its linear colour
+//              w = selection-outline width in pixels (0 = none); outline.rgb = its linear colour,
+//              outline.w = encode sRGB in the shader (0/1); uvRect = the UV crop (scale.xy,
+//              offset.xy — identity for the desktop's own composite, see CompositeOptions)
 // The bright/blur/sss shaders declare only the first vec4 — a shader block may be a prefix of
 // the pipeline's push range.
 struct PostPush {
     float params[4];
     float outline[4];
+    float uvRect[4];
 };
 
 } // namespace
@@ -60,11 +63,12 @@ PostProcess::PostProcess(VulkanContext& context, VkRenderPass swapchainRenderPas
 
     m_sampler = m_context.samplers().get(SamplerDesc::linearClamp());
 
-    // --- Descriptors: one 3-sampler layout, six sets (bright/blurH/blurV/composite/sssH/sssV). --
+    // --- Descriptors: one 3-sampler layout, seven sets (bright/blurH/blurV/composite/sssH/sssV
+    // + the mirror composite over another chain's images, see setMirrorSource). ----------------
     m_setLayout = createDescriptorSetLayout(
         device, uniformBindings(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT));
-    m_pool = createDescriptorPool(device, {poolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 18)}, 6);
-    std::array<VkDescriptorSet, 6> sets{};
+    m_pool = createDescriptorPool(device, {poolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 21)}, 7);
+    std::array<VkDescriptorSet, 7> sets{};
     allocateDescriptorSets(device, m_pool.get(), m_setLayout.get(), static_cast<uint32_t>(sets.size()),
                            sets.data());
     m_brightSet = sets[0];
@@ -73,6 +77,7 @@ PostProcess::PostProcess(VulkanContext& context, VkRenderPass swapchainRenderPas
     m_compositeSet = sets[3];
     m_sssHSet = sets[4];
     m_sssVSet = sets[5];
+    m_mirrorSet = sets[6];
 
     // --- Pipelines. All single-sample: bright/blur/SSS target the bloom pass, the composite the
     // swapchain's single-sample present pass (the scene's MSAA lives in the HDR target). --------
@@ -168,7 +173,12 @@ void PostProcess::updateDescriptors(const VkDescriptorImageInfo& hdrResolve,
         uint32_t                     binding;
         const VkDescriptorImageInfo* info;
     };
-    const std::array<Entry, 18> entries{{{m_brightSet, 0, &hdrResolve},
+    // The mirror set follows the images it was pointed at (setMirrorSource) and, with none, this
+    // chain's own composite inputs — valid either way, so a stray bind can never fault.
+    const VkDescriptorImageInfo* mirrorHdr = m_hasMirror ? &m_mirrorInfos[0] : &hdrResolve;
+    const VkDescriptorImageInfo* mirrorBloom = m_hasMirror ? &m_mirrorInfos[1] : &aInfo;
+    const VkDescriptorImageInfo* mirrorOutline = m_hasMirror ? &m_mirrorInfos[2] : &outlineMask;
+    const std::array<Entry, 21> entries{{{m_brightSet, 0, &hdrResolve},
                                          {m_brightSet, 1, &hdrResolve},
                                          {m_brightSet, 2, &hdrResolve},
                                          {m_blurHSet, 0, &aInfo},
@@ -185,8 +195,11 @@ void PostProcess::updateDescriptors(const VkDescriptorImageInfo& hdrResolve,
                                          {m_sssHSet, 2, &hdrResolve},
                                          {m_sssVSet, 0, &sssInfo},
                                          {m_sssVSet, 1, &hdrSpecResolve},
-                                         {m_sssVSet, 2, &sssInfo}}};
-    std::array<VkWriteDescriptorSet, 18> writes{};
+                                         {m_sssVSet, 2, &sssInfo},
+                                         {m_mirrorSet, 0, mirrorHdr},
+                                         {m_mirrorSet, 1, mirrorBloom},
+                                         {m_mirrorSet, 2, mirrorOutline}}};
+    std::array<VkWriteDescriptorSet, 21> writes{};
     for (std::size_t i = 0; i < entries.size(); ++i) {
         writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet = entries[i].set;
@@ -258,16 +271,42 @@ void PostProcess::recordBloom(VkCommandBuffer cmd) {
 }
 
 void PostProcess::recordComposite(VkCommandBuffer cmd, bool tonemap, bool bloom,
-                                  float outlineWidthPx) {
+                                  float outlineWidthPx, const CompositeOptions& options) {
     constexpr float kBloomStrength = 0.35f;
     const PostPush push{{tonemap ? 1.0f : 0.0f, kBloomStrength, bloom ? 1.0f : 0.0f, outlineWidthPx},
-                        {m_outlineColor[0], m_outlineColor[1], m_outlineColor[2], 0.0f}};
+                        {m_outlineColor[0], m_outlineColor[1], m_outlineColor[2], options.encodeSrgb ? 1.0f : 0.0f},
+                        {options.uvScale[0], options.uvScale[1], options.uvOffset[0], options.uvOffset[1]}};
+    const VkDescriptorSet set = (options.fromMirror && m_hasMirror) ? m_mirrorSet : m_compositeSet;
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_compositePipeline->handle());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_compositePipeline->layout(), 0,
-                            1, &m_compositeSet, 0, nullptr);
+                            1, &set, 0, nullptr);
     vkCmdPushConstants(cmd, m_compositePipeline->layout(), VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                        sizeof(push), &push);
     vkCmdDraw(cmd, 3, 1, 0, 0);
+}
+
+void PostProcess::setMirrorSource(const VkDescriptorImageInfo& hdrResolve, const VkDescriptorImageInfo& bloom,
+                                  const VkDescriptorImageInfo& outlineMask) {
+    m_mirrorInfos[0] = hdrResolve;
+    m_mirrorInfos[1] = bloom;
+    m_mirrorInfos[2] = outlineMask;
+    m_hasMirror = true;
+    writeCombinedImageSamplers(m_context.device(), m_mirrorSet, 0, m_mirrorInfos, 3);
+}
+
+void PostProcess::clearMirrorSource() {
+    if (!m_hasMirror) {
+        return;
+    }
+    m_hasMirror = false;
+    // Point the set back at this chain's own images (they outlive the mirror's) so it stays valid.
+    const VkDescriptorImageInfo aInfo = sampledImageInfo(m_bloomA.image.view(), m_sampler);
+    const VkDescriptorImageInfo infos[3] = {aInfo, aInfo, aInfo};
+    writeCombinedImageSamplers(m_context.device(), m_mirrorSet, 0, infos, 3);
+}
+
+VkDescriptorImageInfo PostProcess::bloomInfo() const {
+    return sampledImageInfo(m_bloomA.image.view(), m_sampler);
 }
 
 } // namespace pose

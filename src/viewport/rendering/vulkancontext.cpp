@@ -32,10 +32,11 @@ const std::array<const char*, 1> kRequiredDeviceExtensions = {
 constexpr const char* kPortabilitySubsetExtension = "VK_KHR_portability_subset";
 } // namespace
 
-VulkanContext::VulkanContext(VkInstance instance, VkSurfaceKHR surface, uint32_t apiVersion)
+VulkanContext::VulkanContext(VkInstance instance, VkSurfaceKHR surface, uint32_t apiVersion,
+                             const VulkanContextOptions& options)
     : m_instance(instance), m_surface(surface) {
-    pickPhysicalDevice();
-    createLogicalDevice();
+    pickPhysicalDevice(options.preferredDevice);
+    createLogicalDevice(options.extraDeviceExtensions);
     createAllocator(apiVersion);
     m_samplers = std::make_unique<SamplerCache>(m_device);
 
@@ -103,7 +104,7 @@ bool VulkanContext::findQueueFamilies(VkPhysicalDevice device, uint32_t& graphic
     return false;
 }
 
-void VulkanContext::pickPhysicalDevice() {
+void VulkanContext::pickPhysicalDevice(VkPhysicalDevice preferred) {
     uint32_t count = 0;
     vkEnumeratePhysicalDevices(m_instance, &count, nullptr);
     if (count == 0) {
@@ -114,7 +115,9 @@ void VulkanContext::pickPhysicalDevice() {
 
     // Prefer a discrete GPU, but accept any device that has a graphics+present queue
     // family and the required extensions. Score-based selection lets a future "let the
-    // user choose their GPU" preference slot in without reworking the loop.
+    // user choose their GPU" preference slot in without reworking the loop. The headset
+    // runtime's device (VulkanContextOptions::preferredDevice) outscores everything when it
+    // qualifies: the headset can only be driven from it.
     VkPhysicalDevice best = VK_NULL_HANDLE;
     int bestScore = -1;
     for (VkPhysicalDevice device : devices) {
@@ -139,6 +142,9 @@ void VulkanContext::pickPhysicalDevice() {
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(device, &props);
         int score = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) ? 1000 : 0;
+        if (preferred != VK_NULL_HANDLE && device == preferred) {
+            score += 10000;
+        }
         if (score > bestScore) {
             bestScore = score;
             best = device;
@@ -151,15 +157,18 @@ void VulkanContext::pickPhysicalDevice() {
         throw VulkanError("No physical device with a graphics+present queue and swapchain support.");
     }
     m_physicalDevice = best;
+    m_preferredDeviceUsed = preferred != VK_NULL_HANDLE && best == preferred;
 
     // Plain stderr (not qInfo) keeps the rendering/ core free of Qt — see CLAUDE.md.
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(m_physicalDevice, &props);
-    std::fprintf(stderr, "[Vulkan] Using device: %s (API %u.%u)\n", props.deviceName,
-                 VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion));
+    std::fprintf(stderr, "[Vulkan] Using device: %s (API %u.%u)%s\n", props.deviceName,
+                 VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
+                 preferred == VK_NULL_HANDLE ? "" : (m_preferredDeviceUsed ? " [the headset's device]"
+                                                                             : " [NOT the headset's device]"));
 }
 
-void VulkanContext::createLogicalDevice() {
+void VulkanContext::createLogicalDevice(const std::vector<std::string>& extraExtensions) {
     const float priority = 1.0f;
     // Use a set so a graphics==present family only produces one create-info entry.
     std::set<uint32_t> uniqueFamilies = {m_graphicsFamily, m_presentFamily};
@@ -203,6 +212,40 @@ void VulkanContext::createLogicalDevice() {
                 enabledExtensions.push_back(kPortabilitySubsetExtension);
                 break;
             }
+        }
+
+        // The headset runtime's extensions (VulkanContextOptions): all of them or none — a
+        // partially satisfied runtime cannot drive the device, and the desktop needs none of
+        // them. Already-listed names are skipped (vkCreateDevice rejects duplicates).
+        const auto supported = [&available](const std::string& name) {
+            for (const auto& ext : available) {
+                if (name == ext.extensionName) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        bool allSupported = true;
+        for (const std::string& name : extraExtensions) {
+            if (!supported(name)) {
+                std::fprintf(stderr, "[Vulkan] device lacks %s (the headset runtime requires it)\n", name.c_str());
+                allSupported = false;
+            }
+        }
+        if (allSupported) {
+            for (const std::string& name : extraExtensions) {
+                bool listed = false;
+                for (const char* enabled : enabledExtensions) {
+                    if (name == enabled) {
+                        listed = true;
+                        break;
+                    }
+                }
+                if (!listed) {
+                    enabledExtensions.push_back(name.c_str()); // extraExtensions outlives vkCreateDevice below
+                }
+            }
+            m_extraExtensionsEnabled = true;
         }
     }
 

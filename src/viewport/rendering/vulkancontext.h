@@ -24,12 +24,25 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace pose {
 
 class SamplerCache;
+
+/// What an external consumer of the device — the VR headset runtime (src/viewport/vr/) — needs
+/// the device created WITH. Both are satisfied together or not at all: a device the headset
+/// cannot drive is still a fine desktop device, so a failed requirement never fails the
+/// context, it just leaves vrDeviceReady() false.
+struct VulkanContextOptions {
+    /// The physical device the headset is driven by (xrGetVulkanGraphicsDeviceKHR); the context
+    /// picks it when it can also render and present to the window. VK_NULL_HANDLE = no preference.
+    VkPhysicalDevice preferredDevice = VK_NULL_HANDLE;
+    /// Device extensions the runtime requires; enabled when the chosen device supports them ALL.
+    std::vector<std::string> extraDeviceExtensions;
+};
 
 /**
  * @class VulkanContext
@@ -45,15 +58,18 @@ public:
      * @param instance       The VkInstance owned by the app's QVulkanInstance.
      * @param surface        The window surface to ensure the queue family can present to.
      * @param apiVersion     Vulkan API version the instance was created with (e.g. VK_API_VERSION_1_2).
+     * @param options        The headset runtime's device requirements, if VR is in play.
      * @throws VulkanError if no suitable device is found or device creation fails.
      */
-    VulkanContext(VkInstance instance, VkSurfaceKHR surface, uint32_t apiVersion);
+    VulkanContext(VkInstance instance, VkSurfaceKHR surface, uint32_t apiVersion,
+                  const VulkanContextOptions& options = {});
     ~VulkanContext();
 
     VulkanContext(const VulkanContext&) = delete;
     VulkanContext& operator=(const VulkanContext&) = delete;
 
     // --- Accessors (handles are owned by this object; callers must not destroy them) ---
+    VkInstance       instance()        const { return m_instance; }
     VkSurfaceKHR     surface()         const { return m_surface; }
     VkPhysicalDevice physicalDevice()  const { return m_physicalDevice; }
     VkDevice         device()          const { return m_device; }
@@ -84,9 +100,14 @@ public:
     /// the feature every colour attachment of a pipeline must share one blend state.
     bool supportsIndependentBlend() const { return m_supportsIndependentBlend; }
 
+    /// Whether the device meets the VulkanContextOptions it was created with: the preferred
+    /// physical device was usable AND every extra extension was enabled — the headset runtime can
+    /// drive this device. False when no options were given.
+    bool vrDeviceReady() const { return m_preferredDeviceUsed && m_extraExtensionsEnabled; }
+
 private:
-    void pickPhysicalDevice();
-    void createLogicalDevice();
+    void pickPhysicalDevice(VkPhysicalDevice preferred);
+    void createLogicalDevice(const std::vector<std::string>& extraExtensions);
     void createAllocator(uint32_t apiVersion);
 
     /// Returns true and fills the out-params if @p device has a single queue family
@@ -105,6 +126,8 @@ private:
     VkSampleCountFlagBits m_sampleCount = VK_SAMPLE_COUNT_1_BIT; // MSAA level (see sampleCount())
     bool             m_supportsWireframe = false;        // fillModeNonSolid enabled (see supportsWireframe())
     bool             m_supportsIndependentBlend = false; // independentBlend enabled (see supportsIndependentBlend())
+    bool             m_preferredDeviceUsed = false;      // see vrDeviceReady()
+    bool             m_extraExtensionsEnabled = false;   // see vrDeviceReady()
 
     std::unique_ptr<SamplerCache> m_samplers; // destroyed explicitly before the device
     mutable std::unordered_map<VkFormat, VkFormatProperties> m_formatProperties; // see formatProperties()

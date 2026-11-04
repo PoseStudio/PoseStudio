@@ -20,6 +20,7 @@
 #include "shademode.h"
 #include "armature.h" // IkScope
 #include "jointtransform.h"
+#include "lineoverlay.h" // PointerLine (setVrPointerLines)
 
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
@@ -164,6 +165,9 @@ public:
     /// drawn or not — can be seen).
     void setShowSkeleton(bool on);
     bool showSkeleton() const;
+    /// The VR controllers' pointer rays, drawn by the line overlay from now on (VR Mode sets
+    /// them every frame; empty = none, the state outside VR Mode).
+    void setVrPointerLines(std::vector<PointerLine> lines);
 
     // --- Shading ---
     /// Selects the viewport shade mode: an index into the picker's table (scene/shademode.h),

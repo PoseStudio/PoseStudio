@@ -13,8 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **VR Mode** (View → VR Mode): the scene in a VR headset, life-size and live — the figure stands on your real floor at her true height and you walk around her while you pose her from the desk. Any PC VR setup works through OpenXR: a Meta Quest over Quest Link or Air Link, Virtual Desktop, or SteamVR. The desktop viewport mirrors the headset's left eye meanwhile; View → Recenter VR View puts you back in front of the figure, facing her (VR Mode also does that as it starts).
+- **VR controllers**: the left stick walks you through the scene the way you are looking, the right stick turns you smoothly, and each controller draws a pointer ray — the trigger is the left mouse button: pull it on a joint and the joint is selected and carried on the ray, the whole body following as in a viewport drag, until you let go and the figure settles; pull it on empty space to select the model the ray is on. The right stick pushes or pulls a held joint along the ray, A / X pins the selected joint, the left menu button recenters. Meta Touch, Valve Index, Windows Mixed Reality and Vive controllers are bound.
+- Preferences → **VR**: "Enable VR support" (off by default; PoseStudio consults the headset runtime as it starts, so it takes a restart — the VR Mode entry offers the restart itself), the headset status that startup found, and a per-eye render scale.
+
 ### Changed
 - The release pipeline's actions moved to their Node 24 majors (`actions/checkout@v7`, `softprops/action-gh-release@v3`, `actions/upload-artifact@v7`): the 0.4.0 build warned that the Node 20 ones it used are deprecated.
+- The build fetches the Khronos OpenXR-SDK (the loader, linked statically) alongside the other `FetchContent` dependencies; nothing new to install.
 
 ## [0.4.0] - 2026-11-03
 
