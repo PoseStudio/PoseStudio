@@ -202,6 +202,11 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
         in.mesh = mesh;
         in.root = m_pelvis;
         in.sizeScale = m_sizeScale;
+        std::vector<std::string> given(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            given[i] = bones[i].roleHint; // (a VRM avatar's humanoid map; empty elsewhere)
+        }
+        in.givenNames = &given;
         m_roles.build(in);
         // THE ROOT IS THE SEAT where the rig has no pelvis bone (2026-11-03): a biped export and a
         // rigging add-on's export hang the thighs straight off the hips, and the buttocks' flesh

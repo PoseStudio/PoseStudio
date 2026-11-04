@@ -53,6 +53,7 @@ void Armature::build(const std::vector<ArmatureBone>& bones) {
     for (std::size_t i = 0; i < bones.size(); ++i) {
         const ArmatureBone& src = bones[i];
         m_bones[i].drivenBy = src.drivenBy >= 0 && src.drivenBy < static_cast<int>(bones.size()) && src.drivenBy != static_cast<int>(i) ? src.drivenBy : -1;
+        m_bones[i].roleHint = src.roleHint;
         m_bones[i].driveFactor = src.driveFactor;
         Bone& bone = m_bones[i];
         const bool hasParent = src.parent >= 0 && static_cast<std::size_t>(src.parent) < i;
@@ -231,7 +232,11 @@ bool Armature::dump(const std::string& path) const {
             << t.y << ' ' << t.z << ' ' << o.x << ' ' << o.y << ' ' << o.z << ' ' << b.rotMin.x
             << ' ' << b.rotMin.y << ' ' << b.rotMin.z << ' ' << b.rotMax.x << ' ' << b.rotMax.y
             << ' ' << b.rotMax.z << ' ' << (b.rotLimited.x ? 1 : 0) << ' '
-            << (b.rotLimited.y ? 1 : 0) << ' ' << (b.rotLimited.z ? 1 : 0) << '\n';
+            << (b.rotLimited.y ? 1 : 0) << ' ' << (b.rotLimited.z ? 1 : 0);
+        if (!b.roleHint.empty()) {
+            out << " role=" << b.roleHint; // (an optional trailing token: the file's own word on the bone's role)
+        }
+        out << '\n';
     }
     if (!m_bodyMesh.empty()) {
         saveBodyMesh(path + ".mesh", m_bodyMesh); // the sidecar (see setBodyMesh)
@@ -267,6 +272,12 @@ bool Armature::loadDump(const std::string& path, std::vector<ArmatureBone>& out)
                 tokens.push_back(tok);
             }
         }
+        // An optional trailing `role=<standard name>` token (ArmatureBone::roleHint) comes off first.
+        std::string roleHint;
+        if (!tokens.empty() && tokens.back().rfind("role=", 0) == 0) {
+            roleHint = tokens.back().substr(5);
+            tokens.pop_back();
+        }
         constexpr std::size_t kFields = 17;
         if (tokens.size() < kFields + 1) {
             out.clear();
@@ -296,6 +307,7 @@ bool Armature::loadDump(const std::string& path, std::vector<ArmatureBone>& out)
             return false;
         }
         b.rotationLimited = glm::bvec3(lx != 0, ly != 0, lz != 0);
+        b.roleHint = roleHint;
         if (b.parent >= static_cast<int>(out.size())) {
             out.clear();
             return false; // parents must precede children

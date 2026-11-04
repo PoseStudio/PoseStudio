@@ -51,6 +51,7 @@ namespace pose {
 /// Bind-skeleton description of one bone, as the Armature hands it to IkRig::build().
 struct IkRigBone {
     std::string name;
+    std::string roleHint; ///< ArmatureBone::roleHint: the file's own word on the bone's role, taken as given.
     int         parent = -1;         ///< Anatomical parent index (-1 = skeleton root).
     glm::vec3   bindPos{0.0f};       ///< Bind joint position (model space).
     bool        helper = false;      ///< A twist helper that splits a rigid segment (Armature::isTwistBone): no joint a body rests on — never a contact of its own (see IkRig::helperNode).

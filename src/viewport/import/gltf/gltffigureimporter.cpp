@@ -12,6 +12,8 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -148,6 +150,119 @@ const cgltf_image* imageOf(const cgltf_texture* texture) {
 
 bool readFloats(const cgltf_accessor* acc, cgltf_size i, float* out, cgltf_size n) {
     return acc != nullptr && i < acc->count && cgltf_accessor_read_float(acc, i, out, n);
+}
+
+/// A VRM avatar's HUMANOID MAP: the file says outright which node is the hips, the left upper
+/// arm, the right thumb's second joint — in VRM 1.0 (`VRMC_vrm`: humanBones is an object keyed
+/// by the bone's name) or VRM 0.x (`VRM`: an array of {bone, node}; the thumb's joints named one
+/// step differently). Returned as node index -> the rig standard's name for that role; the
+/// avatar's version and title in @p avatar. Empty for a plain glTF.
+std::unordered_map<cgltf_size, std::string> vrmHumanoidMap(const cgltf_data* data, std::string& avatar) {
+    std::unordered_map<cgltf_size, std::string> out;
+    for (cgltf_size i = 0; i < data->data_extensions_count; ++i) {
+        const cgltf_extension& ext = data->data_extensions[i];
+        if (ext.name == nullptr || ext.data == nullptr) {
+            continue;
+        }
+        const bool v1 = std::strcmp(ext.name, "VRMC_vrm") == 0;
+        const bool v0 = std::strcmp(ext.name, "VRM") == 0;
+        if (!v1 && !v0) {
+            continue;
+        }
+        const nlohmann::json j = nlohmann::json::parse(ext.data, nullptr, false);
+        if (j.is_discarded() || !j.is_object()) {
+            continue;
+        }
+        avatar = v1 ? "VRM 1.0" : "VRM 0.x";
+        if (const auto meta = j.find("meta"); meta != j.end() && meta->is_object()) {
+            const auto title = meta->find(v1 ? "name" : "title");
+            if (title != meta->end() && title->is_string() && !title->get<std::string>().empty()) {
+                avatar += " \"" + title->get<std::string>() + "\"";
+            }
+        }
+        // The map from VRM's bone names to the standard's. The thumb: VRM 1.0 names its joints
+        // metacarpal / proximal / distal, VRM 0.x proximal / intermediate / distal — the same
+        // three joints from the base.
+        static const std::pair<const char*, const char*> kFixed[] = {
+            {"hips", "hips"},         {"spine", "spine1"},     {"chest", "spine2"},     {"upperChest", "spine3"},
+            {"neck", "neck1"},        {"head", "head"},        {"jaw", "jaw"},          {"leftEye", "eye_l"},
+            {"rightEye", "eye_r"},    {"leftShoulder", "collar_l"}, {"rightShoulder", "collar_r"},
+            {"leftUpperArm", "upper_arm_l"}, {"rightUpperArm", "upper_arm_r"}, {"leftLowerArm", "forearm_l"},
+            {"rightLowerArm", "forearm_r"},  {"leftHand", "hand_l"},   {"rightHand", "hand_r"},
+            {"leftUpperLeg", "thigh_l"},     {"rightUpperLeg", "thigh_r"}, {"leftLowerLeg", "shin_l"},
+            {"rightLowerLeg", "shin_r"},     {"leftFoot", "foot_l"},   {"rightFoot", "foot_r"},
+            {"leftToes", "ball_l"},          {"rightToes", "ball_r"},
+        };
+        static const std::pair<const char*, const char*> kDigits[] = {
+            {"Thumb", "thumb"}, {"Index", "index"}, {"Middle", "middle"}, {"Ring", "ring"}, {"Little", "pinky"},
+        };
+        const auto standardFor = [&](const std::string& vrm) -> std::string {
+            for (const auto& [from, to] : kFixed) {
+                if (vrm == from) {
+                    return to;
+                }
+            }
+            const bool left = vrm.rfind("left", 0) == 0;
+            const bool right = vrm.rfind("right", 0) == 0;
+            if (!left && !right) {
+                return std::string();
+            }
+            const std::string rest = vrm.substr(left ? 4 : 5);
+            for (const auto& [from, to] : kDigits) {
+                const std::string digit(from);
+                if (rest.rfind(digit, 0) != 0) {
+                    continue;
+                }
+                const std::string jointName = rest.substr(digit.size());
+                int               joint = 0;
+                if (digit == "Thumb" && v1) {
+                    joint = jointName == "Metacarpal" ? 1 : jointName == "Proximal" ? 2 : jointName == "Distal" ? 3 : 0;
+                } else {
+                    joint = jointName == "Proximal" ? 1 : jointName == "Intermediate" ? 2 : jointName == "Distal" ? 3 : 0;
+                }
+                if (joint == 0) {
+                    return std::string();
+                }
+                return std::string(to) + std::to_string(joint) + (left ? "_l" : "_r");
+            }
+            return std::string();
+        };
+        const auto humanoid = j.find("humanoid");
+        if (humanoid == j.end() || !humanoid->is_object()) {
+            continue;
+        }
+        const auto bones = humanoid->find("humanBones");
+        if (bones == humanoid->end()) {
+            continue;
+        }
+        const auto take = [&](const std::string& vrmName, const nlohmann::json& entry) {
+            const auto node = entry.find("node");
+            if (node == entry.end() || !node->is_number_integer()) {
+                return;
+            }
+            const long long idx = node->get<long long>();
+            const std::string standard = standardFor(vrmName);
+            if (idx >= 0 && static_cast<cgltf_size>(idx) < data->nodes_count && !standard.empty()) {
+                out.emplace(static_cast<cgltf_size>(idx), standard);
+            }
+        };
+        if (bones->is_object()) {
+            for (auto it = bones->begin(); it != bones->end(); ++it) {
+                if (it.value().is_object()) {
+                    take(it.key(), it.value());
+                }
+            }
+        } else if (bones->is_array()) {
+            for (const nlohmann::json& entry : *bones) {
+                const auto name = entry.is_object() ? entry.find("bone") : entry.end();
+                if (name != entry.end() && name->is_string()) {
+                    take(name->get<std::string>(), entry);
+                }
+            }
+        }
+        break;
+    }
+    return out;
 }
 
 } // namespace
@@ -379,6 +494,32 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
         if (kBoneTrace) {
             std::fprintf(stderr, "[gltf-bone] %3d %-28s %-7s at (%.3f %.3f %.3f)%s\n", i, bone.name.c_str(), source, bone.position.x,
                          bone.position.y, bone.position.z, bone.hasTip ? " +tip" : "");
+        }
+    }
+    // A VRM avatar's humanoid map names the bones outright: each mapped bone takes the rig
+    // standard's name for its role here, ahead of the conformer (whose own, structural reading the
+    // service then checks against the file's — a disagreement is logged, never silently taken).
+    {
+        std::string avatar;
+        const auto  humanoid = vrmHumanoidMap(data, avatar);
+        if (!avatar.empty() && info != nullptr) {
+            info->avatar = avatar;
+        }
+        int mapped = 0;
+        for (const auto& [nodeIdx, standard] : humanoid) {
+            const auto it = boneIndexOf.find(&data->nodes[nodeIdx]);
+            if (it == boneIndexOf.end()) {
+                continue; // (a mapped node no skin reaches and nothing hangs from: pruned, a tip)
+            }
+            bones[static_cast<std::size_t>(it->second)].name = standard;
+            bones[static_cast<std::size_t>(it->second)].roleHint = standard;
+            if (info != nullptr) {
+                info->roleHints.emplace_back(it->second, standard);
+            }
+            ++mapped;
+        }
+        if (!avatar.empty() && info != nullptr) {
+            info->notes.push_back("the avatar's humanoid map names " + std::to_string(mapped) + " bones");
         }
     }
     const auto attachBone = [&](const cgltf_node* node) {

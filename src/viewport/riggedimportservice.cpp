@@ -69,6 +69,9 @@ bool RiggedImportService::importInto(VulkanRenderer& renderer, const QString& pa
               format.tag, qPrintable(path), info.sourceAxes.c_str(), info.bones, info.prunedLeaves, info.skinnedMeshes, info.rigidMeshes,
               info.materials, info.skinningMethod.c_str(), static_cast<double>(info.heightMetres), static_cast<double>(info.yawDegrees),
               static_cast<double>(info.groundedMm), info.embeddedTextures, info.externalTextures, info.missingTextures);
+        if (!info.avatar.empty()) {
+            qInfo("[%s] a %s avatar", format.tag, info.avatar.c_str());
+        }
         for (const std::string& note : info.notes) {
             qInfo("[%s]   %s", format.tag, note.c_str());
         }
@@ -90,6 +93,15 @@ bool RiggedImportService::importInto(VulkanRenderer& renderer, const QString& pa
                 }
                 for (const std::string& c : rep.collisions) {
                     qInfo("[%s]   the standard's name was not applied — %s (those bones keep their file's names)", format.tag, c.c_str());
+                }
+                // The file's own humanoid map (a VRM's) was taken as given over the structural
+                // reading: where the two differed, the log says so.
+                for (const std::string& o : rep.overridden) {
+                    qInfo("[%s]   humanoid map: %s", format.tag, o.c_str());
+                }
+                if (!info.roleHints.empty()) {
+                    qInfo("[%s] the file's humanoid map named %zu bones; the structural reading differed on %zu of them", format.tag, info.roleHints.size(),
+                          rep.overridden.size());
                 }
                 if (std::getenv("POSESTUDIO_RIG_ROLES_TRACE") != nullptr) {
                     qInfo("%s", rep.roles.c_str());

@@ -221,6 +221,12 @@ struct ModelBone {
     /// posed by hand or by a solve. -1: not driven (every native figure bone).
     int         drivenBy = -1;
     glm::vec3   driveFactor{0.0f};
+    /// What the FILE says this bone is, as the rig standard's name for the role (`upper_arm_l`,
+    /// `spine2`, `thumb1_r`) — a VRM avatar's humanoid map. The rig's role inference takes it as
+    /// GIVEN over its own structural reading (RigRoles::Input::givenNames), at conform time and
+    /// at run time alike; empty for a bone the file says nothing about (every bone of every
+    /// other format).
+    std::string roleHint;
 };
 
 /// One imported model: its material groups, plus an optional skeleton. An empty `bones` list means a

@@ -45,6 +45,11 @@ struct RiggedImportInfo {
     int                      externalTextures = 0;
     int                      missingTextures = 0;
     std::vector<std::string> notes;               ///< Anything worth a line in the log.
+    /// What the FILE says a bone is, where a format carries a humanoid map (a VRM avatar's): the
+    /// bone's index and the rig standard's name for its role. The reader names the bone so
+    /// already; the service checks the conformer's own reading against it and logs a disagreement.
+    std::vector<std::pair<int, std::string>> roleHints;
+    std::string              avatar;              ///< "VRM 1.0" / "VRM 0.x" and the avatar's title, for a VRM file; empty otherwise.
 };
 
 /// One bone as a reader found it: its name as the file has it (made unique on output), its parent
@@ -57,6 +62,7 @@ struct RawSkeletonBone {
     glm::vec3   position{0.0f};
     glm::vec3   tip{0.0f};
     bool        hasTip = false;
+    std::string roleHint; ///< ModelBone::roleHint: what the file says the bone is, if it says.
 };
 
 /// Finds a texture's file for a model whose textures are files beside it: the paths the file

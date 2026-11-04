@@ -78,6 +78,7 @@ private:
     void importFbxFile();
     void importGltfFile();
     void importUsdFile();
+    void importVrmFile();
     void importRiggedFile(const QString &title, const QString &filter);
 
     /// Saves / loads the current figure's pose to/from a `.pose` file via a file dialog.

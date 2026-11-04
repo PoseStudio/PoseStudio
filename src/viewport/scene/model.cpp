@@ -159,6 +159,7 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
         dst.rotationLimited = src.rotationLimited;
         dst.drivenBy = src.drivenBy;
         dst.driveFactor = src.driveFactor;
+        dst.roleHint = src.roleHint;
     }
     m_armature.build(armatureBones);
     if (!bodyMesh.empty()) {

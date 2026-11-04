@@ -1,11 +1,11 @@
 # Importing Content
 
-PoseStudio reads three kinds of content today: static models in the Wavefront `.obj` format, rigged character figures in their native scene format (`.duf` presets backed by `.dsf` data files), and rigged characters — or plain meshes — in the interchange formats other tools write: `.fbx`, glTF (`.glb` and `.gltf`) and USD (`.usd`, `.usda`, `.usdc` and `.usdz` packages). The other formats in the File → Import menu are placeholders for planned importers.
+PoseStudio reads three kinds of content today: static models in the Wavefront `.obj` format, rigged character figures in their native scene format (`.duf` presets backed by `.dsf` data files), and rigged characters — or plain meshes — in the interchange formats other tools write: `.fbx`, glTF (`.glb` and `.gltf`), VRM avatars (`.vrm`) and USD (`.usd`, `.usda`, `.usdc` and `.usdz` packages).
 
 There are four ways to import, and they all do the same thing:
 
-- **File → Import → .OBJ (Wavefront)**, **File → Import → .DUF (DUF File)**, **File → Import → .FBX (FBX File)**, **File → Import → .GLB (GL Transmission Format .glTF)** or **File → Import → .USD (Universal Scene Description)** — a file dialog, opening in the folder you imported from last time.
-- **Double-click** an `.obj`, `.duf`, `.dsf`, `.fbx`, `.glb`, `.gltf`, `.usd`, `.usda`, `.usdc` or `.usdz` asset in the [Asset Manager](asset-manager.md) grid.
+- **File → Import → .OBJ (Wavefront)**, **File → Import → .DUF (DUF File)**, **File → Import → .FBX (FBX File)**, **File → Import → .GLB (GL Transmission Format .glTF)**, **File → Import → .USD (Universal Scene Description)** or **File → Import → .VRM (VRM Avatar)** — a file dialog, opening in the folder you imported from last time.
+- **Double-click** an `.obj`, `.duf`, `.dsf`, `.fbx`, `.glb`, `.gltf`, `.vrm`, `.usd`, `.usda`, `.usdc` or `.usdz` asset in the [Asset Manager](asset-manager.md) grid.
 - **Open with** PoseStudio, or **drag files onto** `PoseStudio.exe`: every model or figure file on the command line is imported in order, and a `.pose` file after a figure is applied to it.
 
 Every import lands a new object in the scene, selected (outlined in blue) and framed by the camera. Imports run one at a time on the main thread: the application is busy until the object appears.
@@ -53,6 +53,10 @@ Binary and ASCII FBX from version 6 on. The file's own axes and units are conver
 
 A `.glb` holds everything in one file; a `.gltf` keeps its buffers (`.bin`) and images beside it, or embedded as data URIs — both import. glTF is metres and Y-up by definition, so nothing is converted; a file written in centimetres (a character 20 m tall) is read as such and scaled down. The joints stand where the file's nodes put them — glTF stores no bind pose apart from the skins' matrices, and this is what every viewer shows at the default pose — so a file whose nodes are saved posed imports in that pose (its animations are not read). The metallic-roughness material model is read (the base colour and map, the metallic-roughness map's green channel as the roughness map, the normal map with its scale, the alpha mode as the opacity, with the base map's alpha as the cutout for masked and blended materials), the older specular-glossiness extension as a fallback. Not read: morph targets, vertex colours, texture transforms, a second UV set. A file that requires Draco or meshopt mesh compression, or Basis Universal textures, is refused with a message naming the extension: export it without compression.
 
+### VRM avatars (.vrm)
+
+A VRM avatar is a `.glb` with a humanoid bone map (VRM 0.x and VRM 1.0 alike), so everything said of glTF applies. The map names the bones outright — the hips, the spine links, each arm and leg, the hands, every finger joint, the eyes and the jaw — and PoseStudio takes the file's word over its own structural reading of the skeleton: those bones get the rig standard's names (`hips`, `spine1`, `upper_arm_l`, `thumb1_r` …) and roles as the map says, which matters on an avatar whose hair or skirt chains would otherwise be mistaken for limbs; the import log names every bone where the two readings differed. The avatar's title is logged. Hair, skirt and other spring-bone chains import as ordinary bones that ride their parents; the toon material (MToon) renders as its base colour and texture under the viewport's lighting; expressions (blend shapes) are not read.
+
 ### USD files (.usd, .usda, .usdc, .usdz)
 
 ASCII (`.usda`), binary crate (`.usdc`, or `.usd` in either encoding) and USDZ packages, whose textures are read from inside the package. The stage's `metersPerUnit` and `upAxis` are honoured (a Z-up stage is turned Y-up; a stage that authors no unit is centimetres, as the format's own fallback says), and a file whose skeleton would stand 20 m tall is read as centimetres regardless. The skeleton is the UsdSkel one — the joints with their bind transforms, the meshes' joint weights — with the geometry bind transform and the skeleton's own transform applied; a file with several skeletons imports the largest as the figure and the others' meshes rigid. Materials are UsdPreviewSurface: diffuse colour and map, roughness (a value or a map, whichever channel the map's output names), metalness, the normal map, opacity (the base map's alpha when that is what the opacity reads, else its own map). Not read: blend shapes, animation, point instancers, MaterialX networks (such a mesh renders with its colour alone).
@@ -88,7 +92,7 @@ Every folder you locate this way is remembered, so you only do this once per con
 | *The figure's geometry and morph data (its "data" folder) couldn't be found.* | Locate the content folder as described above. |
 | *Could not import a character figure from… Details: …* | Something in the files could not be read; the details line names it. |
 | *Could not import "….fbx"* | The file could not be read as FBX (a damaged file, or one older than the FBX 6 series), or it holds no mesh. The second line names the cause. |
-| *Could not import "….glb"* / *"….gltf"* | The file could not be read as glTF 2.0 (a glTF 1.0 file, malformed JSON, a `.bin` or image it refers to that is missing beside it), it holds no triangle mesh, or it requires Draco / meshopt compression or Basis Universal textures. The second line names the cause. |
+| *Could not import "….glb"* / *"….gltf"* / *"….vrm"* | The file could not be read as glTF 2.0 (a glTF 1.0 file, malformed JSON, a `.bin` or image it refers to that is missing beside it), it holds no triangle mesh, or it requires Draco / meshopt compression or Basis Universal textures. The second line names the cause. |
 | *Could not import "….usd"* (or `.usda`, `.usdc`, `.usdz`) | The file could not be read as USD (a damaged file, a layer it references that is missing), or it holds no mesh. The second line names the cause. |
 | Nothing happens after choosing a file | The file's format is not supported, or (for `.obj`) it could not be parsed. |
 

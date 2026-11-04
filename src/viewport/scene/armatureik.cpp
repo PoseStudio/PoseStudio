@@ -85,6 +85,7 @@ bool Armature::ensureIkRig() {
             bindPos[i] = parentBind + glm::vec3(bone.localBind[3]);
             IkRigBone& rigBone = rigBones[i];
             rigBone.name = m_boneNames[i];
+            rigBone.roleHint = bone.roleHint;
             rigBone.parent = bone.parent;
             rigBone.bindPos = bindPos[i];
             rigBone.helper = isTwistBone(static_cast<int>(i)); // (a twist helper is no contact: IkRig::helperNode)

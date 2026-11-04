@@ -56,6 +56,7 @@ struct RigConformReport {
     int                      spineLinks = 0;
     int                      neckLinks = 0;
     std::vector<std::string> missing;           ///< The required roles not found.
+    std::vector<std::string> overridden;        ///< Bones whose role the FILE gave (a VRM humanoid map) against the structural reading, each with both readings.
     std::string              roles;             ///< The full conformance report (RigRoles::report).
 };
 

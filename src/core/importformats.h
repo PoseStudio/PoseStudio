@@ -33,13 +33,13 @@ inline bool isNativeFigureFile(const QString& path) {
 inline const QStringList& riggedExtensions() {
     static const QStringList kExtensions = {
         QStringLiteral(".fbx"),
-        QStringLiteral(".glb"), QStringLiteral(".gltf"),
+        QStringLiteral(".glb"), QStringLiteral(".gltf"), QStringLiteral(".vrm"),
         QStringLiteral(".usd"), QStringLiteral(".usda"), QStringLiteral(".usdc"), QStringLiteral(".usdz"),
     };
     return kExtensions;
 }
 
-/// A rigged character (or a plain mesh) in an interchange format: FBX, glTF / GLB, USD.
+/// A rigged character (or a plain mesh) in an interchange format: FBX, glTF / GLB / VRM, USD.
 inline bool isRiggedFile(const QString& path) {
     for (const QString& ext : riggedExtensions()) {
         if (path.endsWith(ext, Qt::CaseInsensitive)) {
@@ -59,10 +59,11 @@ inline bool isFbxFile(const QString& path) {
     return path.endsWith(QStringLiteral(".fbx"), Qt::CaseInsensitive);
 }
 
-/// glTF, binary or JSON (`.glb` / `.gltf`).
+/// glTF, binary or JSON (`.glb` / `.gltf`), or a VRM avatar (`.vrm`: a GLB with a humanoid map).
 inline bool isGltfFile(const QString& path) {
     return path.endsWith(QStringLiteral(".glb"), Qt::CaseInsensitive) ||
-           path.endsWith(QStringLiteral(".gltf"), Qt::CaseInsensitive);
+           path.endsWith(QStringLiteral(".gltf"), Qt::CaseInsensitive) ||
+           path.endsWith(QStringLiteral(".vrm"), Qt::CaseInsensitive);
 }
 
 /// USD in any of its encodings (`.usd` / `.usda` / `.usdc`) or a USDZ package.

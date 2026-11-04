@@ -1052,7 +1052,93 @@ void RigRoles::build(const Input& in) {
         m_missing.push_back("hips");
         return;
     }
-    Builder(*this, in).run();
+    Builder builder(*this, in);
+    builder.run();
+    // THE FILE'S OWN WORD (a VRM avatar's humanoid map): given over the structural reading, and
+    // the required roles asked again under it.
+    applyGiven(in);
+    if (!m_overridden.empty()) {
+        m_missing.clear();
+        builder.required();
+    }
+}
+
+void RigRoles::applyGiven(const Input& in) {
+    m_overridden.clear();
+    const int n = static_cast<int>(m_tags.size());
+    if (in.givenNames == nullptr || static_cast<int>(in.givenNames->size()) != n) {
+        return;
+    }
+    const auto same = [](const RigRoleTag& a, const RigRoleTag& b) {
+        return a.role == b.role && a.side == b.side && a.index == b.index && a.joint == b.joint;
+    };
+    // A role one bone holds per side, index and joint: a second bone the inference gave the
+    // given tag is unplaced (a skirt's chain read as the shin where the map names the real one).
+    const auto unique = [](RigRole r) {
+        switch (r) {
+        case RigRole::Hips: case RigRole::Pelvis: case RigRole::Spine: case RigRole::Neck: case RigRole::Head: case RigRole::Jaw:
+        case RigRole::Eye: case RigRole::Collar: case RigRole::UpperArm: case RigRole::Forearm: case RigRole::Hand:
+        case RigRole::Finger: case RigRole::Thigh: case RigRole::Shin: case RigRole::Foot: case RigRole::Heel:
+        case RigRole::Metatarsal: case RigRole::Ball: case RigRole::Toe:
+            return true;
+        default:
+            return false;
+        }
+    };
+    std::vector<RigRoleTag> given(static_cast<std::size_t>(n));
+    std::vector<char>       has(static_cast<std::size_t>(n), 0);
+    for (int i = 0; i < n; ++i) {
+        const std::string& name = (*in.givenNames)[static_cast<std::size_t>(i)];
+        if (name.empty()) {
+            continue;
+        }
+        const RigRoleTag tag = canonicalTag(name);
+        if (tag.role == RigRole::None) {
+            continue;
+        }
+        given[static_cast<std::size_t>(i)] = tag;
+        has[static_cast<std::size_t>(i)] = 1;
+    }
+    for (int i = 0; i < n; ++i) {
+        if (!has[static_cast<std::size_t>(i)] || !unique(given[static_cast<std::size_t>(i)].role)) {
+            continue;
+        }
+        for (int j = 0; j < n; ++j) {
+            if (j != i && !has[static_cast<std::size_t>(j)] && same(m_tags[static_cast<std::size_t>(j)], given[static_cast<std::size_t>(i)])) {
+                RigRoleTag other;
+                other.role = RigRole::Other;
+                other.side = m_tags[static_cast<std::size_t>(j)].side;
+                m_tags[static_cast<std::size_t>(j)] = other;
+            }
+        }
+    }
+    for (int i = 0; i < n; ++i) {
+        if (!has[static_cast<std::size_t>(i)]) {
+            continue;
+        }
+        const RigRoleTag& was = m_tags[static_cast<std::size_t>(i)];
+        const RigRoleTag& now = given[static_cast<std::size_t>(i)];
+        if (!same(was, now)) {
+            const std::string before = was.role == RigRole::None || was.role == RigRole::Other ? std::string("(none)") : standardName(was);
+            m_overridden.push_back(m_names[static_cast<std::size_t>(i)] + ": the file says " + standardName(now) + ", the structure read " + before);
+            m_tags[static_cast<std::size_t>(i)] = now;
+        }
+    }
+    // The chain lengths follow the tags.
+    int spine = 0, neck = 0;
+    for (const RigRoleTag& t : m_tags) {
+        if (t.role == RigRole::Spine) {
+            spine = std::max(spine, static_cast<int>(t.index));
+        } else if (t.role == RigRole::Neck) {
+            neck = std::max(neck, static_cast<int>(t.index));
+        }
+    }
+    if (spine > 0) {
+        m_spineLinks = spine;
+    }
+    if (neck > 0) {
+        m_neckLinks = neck;
+    }
 }
 
 std::string RigRoles::report() const {

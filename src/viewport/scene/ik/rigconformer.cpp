@@ -547,6 +547,7 @@ struct Conformer {
         for (int i = 0; i < n; ++i) {
             ArmatureBone& b = provisional[idx(i)];
             b.name = data.bones[idx(i)].name;
+            b.roleHint = data.bones[idx(i)].roleHint;
             b.parent = data.bones[idx(i)].parent;
             b.localBindTranslation = localTranslation(i);
             b.orientation = orientationEuler(frameAlong('Y', directionOf(i)));
@@ -577,6 +578,7 @@ struct Conformer {
         report.roles = rolesPtr->report();
         report.spineLinks = rolesPtr->spineLinks();
         report.neckLinks = rolesPtr->neckLinks();
+        report.overridden = rolesPtr->overridden();
         return true;
     }
 

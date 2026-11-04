@@ -314,6 +314,7 @@ void finishRiggedModel(ModelData& model, std::vector<RawSkeletonBone>& bones, Ri
         bone.rotationOrder = "XYZ";
         bone.tip = raw.tip;
         bone.hasTip = raw.hasTip;
+        bone.roleHint = raw.roleHint;
         model.bones.push_back(std::move(bone));
     }
 

@@ -66,6 +66,8 @@ struct ArmatureBone {
     /// every pose change (computeSkinMatrices). -1: not driven.
     int         drivenBy = -1;
     glm::vec3   driveFactor{0.0f};
+    /// ModelBone::roleHint: the standard's name for what the file says this bone is ("" = nothing said).
+    std::string roleHint;
 };
 
 /**
@@ -557,6 +559,7 @@ private:
         glm::bvec3  rotLimited{false, false, false};
         int         drivenBy = -1;        ///< See ArmatureBone::drivenBy.
         glm::vec3   driveFactor{0.0f};
+        std::string roleHint;             ///< See ArmatureBone::roleHint (carried to the rig, written to the dump).
     };
 
     /// Re-poses bone @p index from its accumulated Euler (m_boneEuler) in its oriented frame, then

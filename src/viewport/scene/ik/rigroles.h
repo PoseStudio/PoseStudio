@@ -102,6 +102,11 @@ public:
         const std::vector<char>*             footClass = nullptr;   ///< Per bone: foot-class, low at bind (IkRig::isFootClass).
         const std::vector<BodyMeshPoint>*    mesh = nullptr;        ///< The body mesh sample, or null: a leaf no skin follows is a helper.
         int                                  root = -1;             ///< The solve root (IkRig::rootNode): the hips.
+        /// Per bone: the standard's name for what the FILE says the bone is (a VRM avatar's
+        /// humanoid map; "" where it says nothing), taken as GIVEN over the structural reading
+        /// after the inference has run: the bone gets that tag, a bone the inference gave the same
+        /// tag is unplaced, and the required roles are re-checked. Null = nothing given.
+        const std::vector<std::string>*      givenNames = nullptr;
         float                                sizeScale = 1.0f;      ///< The figure's size against the reference (IkRig::sizeScale).
     };
 
@@ -131,6 +136,9 @@ public:
     /// arm, the forearm, the hand, the thigh, the shin and the foot. missing() names the rest.
     bool                            complete() const { return built() && m_missing.empty(); }
     const std::vector<std::string>& missing() const { return m_missing; }
+    /// The bones whose given role (Input::givenNames) differed from the structural reading, each
+    /// line naming the bone and both readings — for the import log.
+    const std::vector<std::string>& overridden() const { return m_overridden; }
 
     /// The conformance report: the chain lengths, the missing roles, then one line per bone of the
     /// body (name, role, side, index, joint). What POSESTUDIO_RIG_ROLES_TRACE prints at build.
@@ -170,6 +178,8 @@ private:
     std::vector<RigRoleTag>  m_tags;
     std::vector<std::string> m_names;
     std::vector<std::string> m_missing;
+    std::vector<std::string> m_overridden;
+    void                     applyGiven(const Input& in);
     int                      m_spineLinks = 0;
     int                      m_neckLinks = 0;
 };

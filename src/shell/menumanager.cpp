@@ -98,27 +98,24 @@ void MenuManager::setupMenus() {
     fileMenu->addAction(tr("Save Copy..."))->setEnabled(false);
     fileMenu->addSeparator();
 
-    // Import submenu: one entry per supported file format, kept alphabetical. An entry with a
-    // handler is live; the rest are disabled placeholders until their importer lands — wiring a
-    // new format is filling in its handler here. .DUF is the rigged character figure: its own
-    // native scene format + pipeline (geometry + skeleton + morphs + materials), listed as a
-    // file format alongside the mesh formats.
+    // Import submenu: one entry per supported file format, kept alphabetical. Every entry is live
+    // (a handler of nullptr would be a disabled placeholder, the form the formats took before
+    // their importers landed; the Alembic, BVH, Collada, PLY and STL placeholders were dropped on
+    // 2026-11-04 — none is a character format worth the menu room). .DUF is the rigged character
+    // figure: its own native scene format + pipeline (geometry + skeleton + morphs + materials),
+    // listed as a file format alongside the mesh formats.
     QMenu *importMenu = fileMenu->addMenu(loadDualStateIcon("import"), tr("Import"));
     struct ImportFormat {
         const char *label;
         void (MenuManager::*handler)(); // nullptr = importer not built yet
     };
     const ImportFormat importFormats[] = {
-        {".ABC (Alembic)",                    nullptr},
-        {".BVH (Biovision Hierarchy)",        nullptr},
-        {".DAE (Collada)",                    nullptr},
         {".DUF (DUF File)",                   &MenuManager::importFigureFile},
         {".FBX (FBX File)",                   &MenuManager::importFbxFile},
         {".GLB (GL Transmission Format .glTF)", &MenuManager::importGltfFile},
         {".OBJ (Wavefront)",                  &MenuManager::importObjFile},
-        {".PLY (Polygon File Format)",        nullptr},
-        {".STL (Stereolithography)",          nullptr},
         {".USD (Universal Scene Description)", &MenuManager::importUsdFile},
+        {".VRM (VRM Avatar)",                 &MenuManager::importVrmFile},
     };
     for (const ImportFormat &format : importFormats) {
         QAction *action = importMenu->addAction(format.label);
@@ -600,6 +597,11 @@ void MenuManager::importGltfFile() {
 void MenuManager::importUsdFile() {
     // A rigged character in a USD file — ASCII, crate, or a USDZ package — through the same route.
     importRiggedFile(tr("Import USD Character"), tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
+}
+
+void MenuManager::importVrmFile() {
+    // A VRM avatar: a GLB with a humanoid bone map, read by the glTF reader through the same route.
+    importRiggedFile(tr("Import VRM Avatar"), tr("VRM Avatars (*.vrm)"));
 }
 
 void MenuManager::importRiggedFile(const QString &title, const QString &filter) {
