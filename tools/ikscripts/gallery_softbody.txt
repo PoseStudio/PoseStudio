@@ -5,6 +5,10 @@
 # Reset Pose rests them again; the Ground button's landing bounces them and the arms, then rests.
 view right
 shot 01_standing
+closeup chest 0.30
+shot 01b_standing_closeup
+view home
+view right
 expect breastl < 0.5
 expect breastr < 0.5
 
@@ -17,7 +21,12 @@ expect breastr > 5
 release
 shot 03_bow_rest
 expect breastl > 5
+# ... and in close-up: the nipples lead, pointing at the floor, the breast's base where it was.
+closeup chest 0.30
+shot 03b_bow_closeup
 reset
+view home
+view right
 expect breastl < 0.5
 
 # Lying back: the hips down onto the floor, then the chest reclined — the breasts lift toward the chin.

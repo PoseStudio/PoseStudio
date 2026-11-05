@@ -1150,6 +1150,7 @@ private:
         int       bone = -1;
         int       parent = -1;
         float     size = 0.0f;       ///< 0 (a flat chest: no swing) .. 1 (a full breast), off the skin's protrusion.
+        glm::vec3 pivotBind{0.0f};   ///< The breast's base on the chest wall behind the nipple (model space at bind): the swing's pivot.
         glm::vec3 swing{0.0f};       ///< The dynamic swing (a rotation vector in the chest's frame, radians).
         glm::vec3 velocity{0.0f};
     };
