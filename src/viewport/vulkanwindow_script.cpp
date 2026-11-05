@@ -761,6 +761,10 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         value = arm->ikRig() != nullptr ? arm->ikRig()->stepsTaken() : 0;
     } else if (key == QLatin1String("jump")) {
         value = s.jumpMax * 1000.0;
+    } else if (key == QLatin1String("breastl") || key == QLatin1String("breastr")) {
+        // THE SOFT BREASTS: the left / right breast's swing from the sculpt, degrees (0 with the
+        // Posing preference off, or on a figure without pectoral bones).
+        value = static_cast<double>(scene().breastSwingDeg(key == QLatin1String("breastl") ? 0 : 1));
     } else if (key == QLatin1String("lowest")) {
         // (Not the figure node and its like: parentless, or hanging straight off a parentless node
         // at the origin — the hip's own parent.)

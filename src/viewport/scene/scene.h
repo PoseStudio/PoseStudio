@@ -285,6 +285,13 @@ public:
     bool beginLandingBounce(int index, float impactSpeed);
     bool landingBounceTick(int index, float seconds);
     void endLandingBounce(int index);
+    /// THE SOFT BREASTS (Armature::tickSoftBody) on model @p index: the fall's tick, its tail's
+    /// test and rest; the settings applied to every figure; the active figure's swing (scripts).
+    bool  tickSoftBody(int index, float dt);
+    bool  softBodyMoving(int index) const;
+    void  settleSoftBody(int index);
+    void  applySoftBodySettings();
+    float breastSwingDeg(int side) const;
 
     // --- Pose snapshot (for undo/redo) ---
     std::vector<std::pair<std::string, glm::vec3>> capturePose() const;

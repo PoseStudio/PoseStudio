@@ -1207,6 +1207,7 @@ void Armature::syncRigRotations() {
 }
 
 void Armature::endIkDrag() {
+    settleSoftBody(); // (the breasts' spring ends with the drag: the resting swing from here)
     if (m_ikRig) {
         m_ikRig->endDrag();
     }

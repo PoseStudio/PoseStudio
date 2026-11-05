@@ -142,6 +142,34 @@ bool Scene::landingBounceTick(int index, float seconds) {
            m_models[static_cast<std::size_t>(index)]->landingBounceTick(seconds);
 }
 
+bool Scene::tickSoftBody(int index, float dt) {
+    return index >= 0 && static_cast<std::size_t>(index) < m_models.size() && m_models[static_cast<std::size_t>(index)]->hasSkeleton() &&
+           m_models[static_cast<std::size_t>(index)]->tickSoftBody(dt);
+}
+
+bool Scene::softBodyMoving(int index) const {
+    return index >= 0 && static_cast<std::size_t>(index) < m_models.size() && m_models[static_cast<std::size_t>(index)]->softBodyMoving();
+}
+
+void Scene::settleSoftBody(int index) {
+    if (index >= 0 && static_cast<std::size_t>(index) < m_models.size()) {
+        m_models[static_cast<std::size_t>(index)]->settleSoftBody();
+    }
+}
+
+void Scene::applySoftBodySettings() {
+    for (auto& model : m_models) {
+        if (model->hasSkeleton()) {
+            model->applySoftBodySettings();
+        }
+    }
+}
+
+float Scene::breastSwingDeg(int side) const {
+    const Model* fig = figureModel();
+    return fig ? fig->breastSwingDeg(side) : 0.0f;
+}
+
 void Scene::endLandingBounce(int index) {
     if (index >= 0 && static_cast<std::size_t>(index) < m_models.size()) {
         m_models[static_cast<std::size_t>(index)]->endLandingBounce();

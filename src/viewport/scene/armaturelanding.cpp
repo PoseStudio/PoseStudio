@@ -16,6 +16,7 @@
  */
 
 #include "armature.h"
+#include "softbodysettings.h"
 #include "armatureiksolvetuning.h"
 
 #include "ikrig.h"
@@ -28,6 +29,8 @@
 namespace pose {
 
 namespace {
+
+constexpr float kLandingArmSwingDeg = 10.0f; ///< THE ARMS' BOUNCE: how far a hanging arm swings forward at the deepest dip a drop makes.
 
 /// The bounce's SHAPE, 0..1, at @p seconds of @p duration: down over the first kLandingDownShare
 /// (sin^2), back up over the rest (cos^2) — see the tuning header.
@@ -108,6 +111,24 @@ bool Armature::beginLandingBounce(float impactSpeed) {
     m_landing.seconds = kLandingSeconds * glm::mix(kLandingShortest, 1.0f, dip / most);
     m_landing.hipStart = m_boneWorldPos[static_cast<std::size_t>(root)];
     m_landing.euler = m_ikStartEuler; // (the drag's own snapshot of the pose: beginIkDrag)
+    // THE ARMS' BOUNCE: every arm that hangs (the press found them: findHangArms) swings forward
+    // over the dip and back, by kLandingArmSwingDeg at the deepest dip the drop makes.
+    m_landing.arms.clear();
+    m_landing.armSwingDeg = kLandingArmSwingDeg * (dip / most);
+    m_landing.lastSeconds = 0.0f;
+    m_landing.tail = false;
+    for (const HangArm& arm : m_jsHangArms) {
+        const JointDial dial = jointDial(arm.socket, JointDialKind::BendForward);
+        if (!dial.valid() || dial.bone < 0 || static_cast<std::size_t>(dial.bone) >= m_bones.size() || dial.fullDeg == 0.0f) {
+            continue;
+        }
+        LandingBounce::ArmSwing swing;
+        swing.bone = dial.bone;
+        swing.axis = dial.axis;
+        swing.sign = dial.fullDeg > 0.0f ? 1.0f : -1.0f;
+        swing.base = m_landing.euler[static_cast<std::size_t>(dial.bone)][dial.axis];
+        m_landing.arms.push_back(swing);
+    }
     m_landing.translation = m_jsStartTranslation;
     m_landing.selected = selected;
     m_landing.grabBone = grabBone;
@@ -116,10 +137,43 @@ bool Armature::beginLandingBounce(float impactSpeed) {
 }
 
 bool Armature::landingBounceTick(float seconds) {
-    if (!m_landing.active || seconds >= m_landing.seconds) {
+    if (!m_landing.active) {
         return false;
     }
+    const float dt = seconds > m_landing.lastSeconds ? seconds - m_landing.lastSeconds : 1.0f / 60.0f;
+    m_landing.lastSeconds = seconds;
+    if (seconds >= m_landing.seconds) {
+        // THE TAIL: the dip is over and the pose is home; the breasts' spring settles on, for
+        // up to a second, then the bounce ends (endLandingBounce rests it exactly).
+        if (!softbody::breastMotion() || seconds >= m_landing.seconds + 1.0f) {
+            return false;
+        }
+        if (!m_landing.tail) {
+            m_landing.tail = true;
+            if (m_landing.euler.size() == m_bones.size() && m_landing.translation.size() == m_bones.size()) {
+                m_boneEuler = m_landing.euler;
+                m_boneTranslation = m_landing.translation;
+                for (std::size_t b = 0; b < m_bones.size(); ++b) {
+                    recomposePoseLocal(b);
+                }
+            }
+        }
+        return tickSoftBody(dt);
+    }
     dragIkTo(m_landing.hipStart - glm::vec3(0.0f, m_landing.dip * landingShape(seconds, m_landing.seconds), 0.0f));
+    if (!m_landing.arms.empty()) {
+        const float p = seconds / m_landing.seconds;
+        const float angle = m_landing.armSwingDeg * std::sin(3.14159265f * p); // (forward over the dip, back by its end)
+        for (const LandingBounce::ArmSwing& arm : m_landing.arms) {
+            m_boneEuler[static_cast<std::size_t>(arm.bone)][arm.axis] = arm.base + arm.sign * angle;
+            clampBoneEuler(arm.bone);
+            recomposePoseLocal(static_cast<std::size_t>(arm.bone));
+        }
+        computeSkinMatrices();
+    }
+    if (softbody::breastMotion()) {
+        tickSoftBody(dt); // (THE SOFT BREASTS feel the landing's deceleration and bounce)
+    }
     // The tail: blended home to the pose she landed in.
     const float home = glm::smoothstep(kLandingBlendFrom * m_landing.seconds, m_landing.seconds, seconds);
     if (home > 0.0f && m_landing.euler.size() == m_bones.size() && m_landing.translation.size() == m_bones.size()) {
@@ -144,6 +198,7 @@ void Armature::endLandingBounce() {
     if (!m_landing.active) {
         return;
     }
+    settleSoftBody(); // (the breasts at rest in the landing pose)
     endIkDrag();
     if (m_landing.euler.size() == m_bones.size() && m_landing.translation.size() == m_bones.size()) {
         m_boneEuler = m_landing.euler;

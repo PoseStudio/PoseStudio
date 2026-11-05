@@ -1131,8 +1131,52 @@ private:
         int                    selected = -1;
         int                    grabBone = -1;
         glm::vec3              grabLocal{0.0f};
+        /// THE ARMS' BOUNCE (2026-11-04): each hanging arm swings forward over the dip and back —
+        /// its shoulder's forward channel (the Bend dial's) from the landing pose's value.
+        struct ArmSwing {
+            int   bone = -1;
+            int   axis = 0;
+            float sign = 1.0f;
+            float base = 0.0f;
+        };
+        std::vector<ArmSwing>  arms;
+        float                  armSwingDeg = 0.0f; ///< The swing's amplitude, sized by the impact like the dip.
+        float                  lastSeconds = 0.0f; ///< The previous tick's time (the soft body's dt).
+        bool                   tail = false;       ///< The dip is over; the breasts still settle (the pose is home).
     };
     LandingBounce                 m_landing;
+    // --- SOFT BREASTS (armaturebreasts.cpp): the pectoral bones hung by gravity, by their size ---
+    struct Breast {
+        int       bone = -1;
+        int       parent = -1;
+        float     size = 0.0f;       ///< 0 (a flat chest: no swing) .. 1 (a full breast), off the skin's protrusion.
+        glm::vec3 swing{0.0f};       ///< The dynamic swing (a rotation vector in the chest's frame, radians).
+        glm::vec3 velocity{0.0f};
+    };
+    std::vector<Breast> m_breasts;                   ///< One per side (the pectoral that carries the breast), or none.
+    bool                m_breastsReady = false;      ///< setupBreasts ran (with the rig and the body mesh).
+    bool                m_breastDynamic = false;     ///< The spring's state is in use (between ticks); else the resting swing applies.
+    glm::vec3           m_breastGravity{0.0f, -1.0f, 0.0f}; ///< Effective gravity in g (world): g less the chest's acceleration, smoothed.
+    glm::vec3           m_breastChestPos{0.0f};
+    glm::vec3           m_breastChestVel{0.0f};
+    int                 m_breastChestSamples = 0;
+    void      setupBreasts();
+    glm::vec3 breastRestingSwing(const Breast& b) const;
+    glm::mat4 breastSwingMatrix(const Breast& b, const glm::mat4& boneGlobal) const;
+public:
+    /// One tick of the soft body (the breasts' spring under effective gravity): called from the
+    /// drag and settle ticks, the landing bounce and the fall. Returns true while something still
+    /// moves (the settle waits for it). A no-op unless softbody::breastMotion is on.
+    bool  tickSoftBody(float dt);
+    /// Ends a tick sequence: the resting swing applies from here (no spring state).
+    void  settleSoftBody();
+    /// True while the spring's state is away from rest (the fall's tail keeps ticking for it).
+    bool  softBodyMoving() const;
+    /// The settings changed (the Posing preference): set up if needed and re-pose.
+    void  applySoftBodySettings();
+    /// The swing of the left (0) or right (1) breast, degrees — the scripts' `breastl` / `breastr`.
+    float breastSwingDeg(int side) const;
+private:
     // --- The bone classes and THE DIGIT DRAG (armatureikdigit.cpp) ---
     /// Per bone: its BoneClass (classifyBones, with the rig: empty until then).
     std::vector<char>             m_boneClass;

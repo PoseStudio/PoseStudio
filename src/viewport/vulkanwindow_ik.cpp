@@ -265,6 +265,20 @@ void VulkanWindow::onFallTick() {
         return;
     }
     const float t = static_cast<float>(m_fall.clock.nsecsElapsed()) * 1e-9f;
+    const float dt = t > m_fall.lastT ? t - m_fall.lastT : 1.0f / 60.0f;
+    m_fall.lastT = t;
+    if (m_fall.softTail) {
+        // Landed with nothing to absorb (not on her feet): the breasts' spring settles on.
+        if (!scene().tickSoftBody(m_fall.figure, dt) || t > m_fall.landedAt + 1.0f) {
+            scene().settleSoftBody(m_fall.figure);
+            m_fall.timer->stop();
+            m_fall.softTail = false;
+            m_fall.figure = -1;
+            commitGroundDrop();
+        }
+        requestUpdate();
+        return;
+    }
     if (m_fall.bouncing) {
         // The landing bounce: the pose for this moment, until the bounce is over — then the
         // pose she landed in, exactly.
@@ -288,6 +302,7 @@ void VulkanWindow::onFallTick() {
     if (dy > 0.0f) {
         scene().translateModelY(m_fall.figure, -dy);
         m_fall.dropped = dropped;
+        scene().tickSoftBody(m_fall.figure, dt); // (THE SOFT BREASTS: weightless on the way down)
         requestUpdate();
     }
     if (dropped >= m_fall.height) {
@@ -299,12 +314,20 @@ void VulkanWindow::onFallTick() {
         if (scene().beginLandingBounce(m_fall.figure, std::sqrt(2.0f * kGravity * height))) {
             m_fall.bouncing = true;
             m_fall.landedAt = std::sqrt(2.0f * height / kGravity);
+        } else if (scene().softBodyMoving(m_fall.figure)) {
+            m_fall.softTail = true; // (the timer runs on for the breasts' settle)
+            m_fall.landedAt = t;
         } else {
             m_fall.timer->stop();
             m_fall.figure = -1;
             commitGroundDrop();
         }
     }
+}
+
+void VulkanWindow::applySoftBodySettings() {
+    withRenderer([](VulkanRenderer& r) { r.scene().applySoftBodySettings(); });
+    requestUpdate();
 }
 
 void VulkanWindow::commitGroundDrop() {
@@ -327,9 +350,14 @@ void VulkanWindow::finishGroundFall() {
         scene().translateModelY(m_fall.figure, -(m_fall.height - m_fall.dropped));
         requestUpdate();
     }
+    if (m_renderer && m_fall.softTail) {
+        scene().settleSoftBody(m_fall.figure);
+        requestUpdate();
+    }
     m_fall.height = 0.0f;
     m_fall.dropped = 0.0f;
     m_fall.bouncing = false;
+    m_fall.softTail = false;
     m_fall.figure = -1;
     if (m_renderer) {
         commitGroundDrop();

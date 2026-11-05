@@ -142,6 +142,8 @@ public:
     /// Drops the posable figure onto the ground plane (the strip's Ground button): moves it so
     /// the current pose's lowest point rests at y = 0. No-op if the viewport degraded.
     void groundFigure();
+    /// The Posing preferences changed (the soft breasts): every figure re-posed with them.
+    void applySoftBodySettings();
 
     /// Toggles the skeleton overlay (the joint→parent bone lines drawn over the figure). Off by
     /// default — joints are grabbed directly on the figure — but joints stay clickable either way.

@@ -353,6 +353,10 @@ void ViewportWidget::groundFigure() {
     withWindow([](VulkanWindow& w) { w.groundFigure(); });
 }
 
+void ViewportWidget::applySoftBodySettings() {
+    withWindow([](VulkanWindow& w) { w.applySoftBodySettings(); });
+}
+
 void ViewportWidget::setEnvironment(const QString& hdrPath) {
     withWindow([&](VulkanWindow& w) { w.setEnvironmentFile(hdrPath); });
 }

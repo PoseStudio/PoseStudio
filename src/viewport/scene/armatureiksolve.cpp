@@ -48,6 +48,7 @@
  */
 
 #include "armature.h"
+#include "softbodysettings.h"
 #include "armatureiksolvestate.h"
 #include "armatureiksolvetuning.h"
 
@@ -847,6 +848,11 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
         const bool headMoved = rightIdleHead(); // (see THE HEAD STAYS UP)
         moved = hangMoved || headMoved || moved;
         m_jsPostStepMoving = hangMoved || headMoved; // (the settle waits for them: settleIkSolveTick)
+    }
+    if (softbody::breastMotion()) {
+        const bool breastsMoved = tickSoftBody(1.0f / 60.0f); // (THE SOFT BREASTS, armaturebreasts.cpp: after the solve and the post-steps)
+        moved = moved || breastsMoved;
+        m_jsPostStepMoving = m_jsPostStepMoving || breastsMoved;
     }
 
     // LIVE CONTACT RE-DETECTION and landings (see IkRig::updateContacts), on the solved pose.

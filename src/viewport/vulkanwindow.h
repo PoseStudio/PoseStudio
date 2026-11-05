@@ -232,6 +232,8 @@ public:
     /// lands in ~0.45s), animated on the fall timer; a figure sunk below the floor is lifted
     /// instantly (nothing falls upward). No-op before the renderer exists or mid-drag.
     void groundFigure();
+    /// The Posing preferences changed (the soft breasts): every figure re-posed with them.
+    void applySoftBodySettings();
 
     /// Loads @p hdrPath as the lighting environment and re-bakes the IBL. Remembered and applied
     /// once the renderer exists if it isn't built yet. Decoding happens in this Qt layer.
@@ -597,6 +599,8 @@ private:
         int           figure = -1;
         bool          bouncing = false;  ///< The fall has landed and the bounce is in flight.
         float         landedAt = 0.0f;   ///< When it landed, seconds on the clock.
+        bool          softTail = false;  ///< Landed with no bounce; the soft body (the breasts) still settles on this timer.
+        float         lastT = 0.0f;      ///< The previous tick's time (the soft body's dt).
     };
     GroundFall m_fall;
 

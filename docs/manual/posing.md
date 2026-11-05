@@ -194,6 +194,14 @@ Everything the body does comes from the figure you imported, not from PoseStudio
 - **Correctives** — the sculpted shapes that fix a deep elbow or knee bend — blend live while you drag, so the mesh looks right at every frame.
 - **Body proportions** set every threshold: a small character crouches, steps and kneels at her own scale.
 
+## Soft breasts
+
+A figure's breasts follow the pose. Bend her forward and they hang forward and out; lie her on her back and they lift toward the chin; on her side they fall to the lower side; hang her from a hand and they fall toward the head. While you drag they lag the chest a little and bounce as it stops, and when she lands from the [Ground button](#the-ground-button) they drop with the landing and spring back, as her arms swing forward and back with the dip. Nothing of this is in the pose: pose files, undo, the Transform tab and the joints you pick read exactly as before, and a pectoral you turn by hand adds on top.
+
+How much they move depends on the breast the figure actually has, read off her mesh at import: a full breast moves the whole amount, a small one less, a flat chest (a male figure, a child) not at all. Figures from other formats take part when their rig carries breast bones (the character-creation exports do; most game and anime rigs do not).
+
+The movement is a swing about the breast's root, so a breast lying on its back lifts rather than flattens, and the amount is a calibrated guess at a human breast's weight. Preferences → Posing turns it off or scales it (see [Preferences](preferences.md#posing)).
+
 ## Tips
 
 - Orbit to a **side view** (`3`) before pushing a figure down onto the floor or forward onto her hands — you can see the depth, and the drag plane is the one you want.

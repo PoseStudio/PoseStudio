@@ -79,6 +79,9 @@ namespace Constants {
     /// VR Mode (src/core/vrsettings.h): whether the headset runtime is consulted at startup
     /// ("1"/"0", absent = OFF — opt-in, takes a restart), and the per-eye render scale ("1.00",
     /// a fraction of the headset's recommended resolution, applied when VR Mode next starts).
+    /// The Posing preferences: the soft breasts (absent = on) and their strength in percent (absent = 100).
+    inline constexpr const char* PREF_SOFTBODY_BREASTS = "SoftBodyBreasts";
+    inline constexpr const char* PREF_SOFTBODY_BREAST_STRENGTH = "SoftBodyBreastStrength";
     inline constexpr const char* PREF_VR_ENABLED = "VrEnabled";
     inline constexpr const char* PREF_VR_RENDER_SCALE = "VrRenderScale";
     /// "1"/"0", absent = off: skip the subsurface blur and bloom in the headset (a lighter GPU's

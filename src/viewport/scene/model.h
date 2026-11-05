@@ -179,6 +179,12 @@ public:
     // --- The landing bounce (see Armature): the Ground button's fall, landed on her feet ---
     bool beginLandingBounce(float impactSpeed) { return m_armature.beginLandingBounce(impactSpeed); }
     bool landingBounceTick(float seconds) { return m_armature.landingBounceTick(seconds); }
+    // THE SOFT BREASTS (Armature::tickSoftBody): the fall's and the settings' hooks.
+    bool  tickSoftBody(float dt) { return m_armature.tickSoftBody(dt); }
+    void  settleSoftBody() { m_armature.settleSoftBody(); }
+    bool  softBodyMoving() const { return m_armature.softBodyMoving(); }
+    void  applySoftBodySettings() { m_armature.applySoftBodySettings(); }
+    float breastSwingDeg(int side) const { return m_armature.breastSwingDeg(side); }
     /// Ends the bounce: the pose she landed in, exactly, and its correctives.
     void endLandingBounce() {
         m_armature.endLandingBounce();

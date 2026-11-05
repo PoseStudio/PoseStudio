@@ -1,0 +1,43 @@
+# SOFT BREASTS (armaturebreasts.cpp): the breasts hang with the chest's orientation against
+# gravity and bounce on a landing. The Posing preference is on by default, so the app runs this
+# with it on; `breastl` / `breastr` read the swing in degrees. Standing they rest as sculpted;
+# a bow hangs them (the sag toward the belly relieved: they lift toward the head and hang out);
+# Reset Pose rests them again; the Ground button's landing bounces them and the arms, then rests.
+view right
+shot 01_standing
+expect breastl < 0.5
+expect breastr < 0.5
+
+# A bow by the chest: a static hang, there at the end of the settle as during the drag.
+press chest@0.6
+dragv -0.30 -0.25 50 40
+shot 02_bow_drag
+expect breastl > 5
+expect breastr > 5
+release
+shot 03_bow_rest
+expect breastl > 5
+reset
+expect breastl < 0.5
+
+# Lying back: the hips down onto the floor, then the chest reclined — the breasts lift toward the chin.
+press hip
+dragv 0 -0.80 60 30
+release
+press chest@0.6
+dragv 0.45 -0.35 60 40
+release
+shot 04_reclined
+expect breastl > 4
+reset
+
+# The landing: lifted half a metre and dropped, shot through the bounce, at rest afterwards.
+view home
+lift 0.5
+ground
+wait 24
+shot 05_landing
+wait 90
+shot 06_landed
+expect breastl < 0.5
+expect lowest >= -5

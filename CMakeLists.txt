@@ -480,6 +480,8 @@ add_executable(
     src/viewport/scene/armatureikpost.cpp   # the drag tick's post-steps: the idle arms' hang, the head's righting
     src/viewport/scene/armatureikdigit.cpp  # the bone classes (body / face rig / digit) and the digit drag
     src/viewport/scene/armaturelanding.cpp  # the landing bounce: a figure dropped onto her feet absorbs the landing
+    src/viewport/scene/armaturebreasts.cpp     # THE SOFT BREASTS: the pectorals hung by gravity, by their size; their bounce
+    src/viewport/scene/softbodysettings.h
     src/viewport/scene/armatureikfigure.cpp # the figure move: Ctrl + the body itself moves the figure as she is posed
     src/viewport/scene/armaturedials.cpp    # the transform dials: a joint's rotation as Bend Forward / Bend Sideways / Twist, 0-100
     src/viewport/scene/jointtransform.h     # ... and what the Transform tab shows of them (plain data)
@@ -534,6 +536,8 @@ add_executable(
     src/preferences/generalpreferencespanel.h
     src/preferences/vrpreferencespanel.cpp  # VR support toggle, headset status, render scale
     src/preferences/vrpreferencespanel.h
+    src/preferences/posingpreferencespanel.cpp # the soft breasts' switch and strength
+    src/preferences/posingpreferencespanel.h
     src/preferences/assetspreferencespanel.cpp
     src/preferences/assetspreferencespanel.h
     src/preferences/placeholderpreferencespanel.cpp # one class for every not-yet-built tab (Interface/Input/Navigation/System)
@@ -736,6 +740,7 @@ add_executable(PoseStudioIkHarness
     src/viewport/scene/armatureikpost.cpp
     src/viewport/scene/armatureikdigit.cpp
     src/viewport/scene/armaturelanding.cpp
+    src/viewport/scene/armaturebreasts.cpp
     src/viewport/scene/armatureikfigure.cpp
     src/viewport/scene/armaturedials.cpp
     src/viewport/scene/ik/ikmath.cpp

@@ -6,6 +6,8 @@
 
 #include "armature.h"
 
+#include "softbodysettings.h"
+
 #include "ikmath.h" // eulerMatrix (the pose composition)
 #include "ikrig.h"  // complete type for the unique_ptr
 #include "jointsolver.h" // likewise
@@ -248,6 +250,15 @@ void Armature::setBodyMesh(std::vector<BodyMeshPoint> mesh) {
     m_bodyMesh = std::move(mesh);
     m_ikRig.reset(); // rebuilt with the mesh on the next use (ensureIkRig)
     m_boneClass.clear(); // (... and the bone classes with it)
+    m_breasts.clear();
+    m_breastsReady = false;
+    // THE SOFT BREASTS need the rig (the pectorals' roles) and this mesh (the breasts' size):
+    // with the preference on, the rig is built here, once the mesh is in — a figure loaded
+    // bowed from a pose file hangs them from its first frame. (The harness never turns it on.)
+    if (softbody::breastMotion() && !m_bodyMesh.empty() && ensureIkRig()) {
+        setupBreasts();
+        computeSkinMatrices();
+    }
 }
 
 bool Armature::loadDump(const std::string& path, std::vector<ArmatureBone>& out) {
@@ -384,6 +395,17 @@ void Armature::computeSkinMatrices() {
         const Bone& bone = m_bones[i];
         poseGlobal[i] =
             (bone.parent >= 0) ? poseGlobal[bone.parent] * bone.poseLocal : bone.poseLocal;
+        // THE SOFT BREASTS (armaturebreasts.cpp): a pectoral that carries a breast is turned
+        // about its own joint by what gravity does to it in this pose — the skin and whatever
+        // hangs below it follow; the joint's place and the pose's channels do not.
+        if (!m_breasts.empty() && softbody::breastMotion()) {
+            for (const Breast& b : m_breasts) {
+                if (b.bone == static_cast<int>(i)) {
+                    poseGlobal[i] = breastSwingMatrix(b, poseGlobal[i]) * poseGlobal[i];
+                    break;
+                }
+            }
+        }
         const glm::mat4 skin = poseGlobal[i] * bone.inverseBind;
         const glm::quat q = glm::normalize(glm::quat_cast(glm::mat3(skin)));
         const glm::vec3 t = glm::vec3(skin[3]);

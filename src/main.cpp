@@ -11,6 +11,7 @@
 #include "importformats.h"
 #include "database.h"
 #include "menumanager.h"
+#include "posingpreferencespanel.h"
 #include "splashoverlay.h"
 #include "whatsnewdialog.h"
 #include "helpwindow.h"
@@ -102,6 +103,7 @@ int main(int argc, char *argv[]) {
     }
 
     PreferencesManager::instance().loadFromDatabase();
+    PosingPreferencesPanel::applyStoredSettings(); // (the soft breasts' switches, before any figure is imported)
 
     // --- 2. Branding & theming (window icon, Fusion proxy style, the QSS modules, menu shadows) ---
     AppTheme::install(app);
