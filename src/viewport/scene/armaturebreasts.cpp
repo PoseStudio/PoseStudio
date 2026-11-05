@@ -15,12 +15,13 @@
  * EFFECTIVE gravity (g less the chest's acceleration), and its resting displacement from the
  * sculpt is that change times a COMPLIANCE per axis (kBreastDown, kBreastSide, kBreastHangOut:
  * metres per g at fullness 1, by the breast's weight): softest along the chest — the bounce —
- * firm sideways, and out along the tether the hang, which never goes INTO the chest (lying on
- * the back gravity presses the breast flat, a morph's job). Rendered, a displacement ACROSS the
- * tether is a swing about the breast's upper attachment (kBreastLever over the nipple on the
- * chest wall: the pendulum's point) that carries the nipple there, one ALONG it a translation;
- * a dropping breast also splays outward by kBreastSplay of its drop — the figure of eight a
- * bouncing breast traces. Bowed forward the sag toward the belly is relieved and the breast is
+ * firm sideways, and out along the tether the hang, which goes INTO the chest only as a bounded
+ * press-in (on her back: flatter and wider, with a spread outward). Rendered, a displacement
+ * ACROSS the tether is mostly a SHIFT of the whole breast — a solid body moves as one piece —
+ * and kBreastTiltShare of it a tilt about the breast's upper attachment (kBreastLever over the
+ * nipple on the chest wall) that carries the nipple the rest of the way; one ALONG it a
+ * translation. Rendered wholly as the tilt it swung like a bag on a strap (the user's seventh
+ * look); the sideways splay of a dropping breast is off for the same reason. Bowed forward the sag toward the belly is relieved and the breast is
  * drawn out toward the floor, the nipple leading; lying on the back it lifts toward the chin; on
  * the side it falls to the lower side; upside down it falls toward the head.
  *
@@ -91,7 +92,8 @@ constexpr float kFoldBand = 0.015f;           ///< The fold: the breast patch's 
 constexpr float kBreastDownDefault = 0.015f;        ///< Compliance along the chest (m per g): a landing's 2 g drops the base female's breast 30 mm, a large bust 50.
 constexpr float kBreastSideDefault = 0.020f;        ///< Compliance sideways (m per g): on her side the breasts fall toward the lower side — the upper one in toward the sternum, the lower one out onto the surface (8 until the fifth look: "laying on her side should cause the breasts to fall naturally").
 constexpr float kBreastHangOutDefault = 0.030f;     ///< Compliance out along the tether (m per g): a level-chested bow hangs the base female's breast 30 mm (25 and 35 looked at, 30 between).
-constexpr float kBreastSplayDefault = 0.10f;        ///< (0.35, then 0.25: the sideways slosh of a dropping breast read as a sack of fluid — the user's sixth look.)        ///< Sideways OUTWARD displacement per unit of downward displacement: a breast that drops splays, one that rises comes in — the figure of eight a bouncing breast traces.
+constexpr float kBreastSplayDefault = 0.0f;         ///< Sideways OUTWARD displacement per unit of downward displacement. OFF: at 0.35, 0.25 and 0.10 the sideways slosh of a dropping breast read as a sack of fluid (the user's sixth and seventh looks); a solid breast drops straight.
+constexpr float kBreastTiltShareDefault = 0.25f;    ///< RENDERING a displacement across the tether: this share of it as a TILT about the upper attachment (the nipple leads a little), the rest as a SHIFT of the whole breast. Rendered wholly as a tilt — a pendulum from the attachment — a breast that dropped swung its lower half forward and back on a hinge, which is how a bag on a strap moves (the seventh look: "too much like a bag filled with liquid… breasts are more solid, but do move"); a solid breast shifts as one piece.        ///< Sideways OUTWARD displacement per unit of downward displacement: a breast that drops splays, one that rises comes in — the figure of eight a bouncing breast traces.
 constexpr float kBreastLeverDefault = 0.050f;       ///< The swing's pivot stands this far over the nipple on the chest wall (m, figure-scaled): the breast's upper attachment, the pendulum's point. A displacement across the tether is rendered as a swing about it (the nipple follows the mass), one along the tether as a translation.
 constexpr float kBreastBounceCapDefault = 0.030f;   ///< A stiffening spring: the displacement from the sculpt costs more past this (m at fullness 1, by the square root of the weight) — tissue runs out, and a 3 m/s landing would otherwise fling the mass a quarter of a metre.
 constexpr float kBreastHzDefault = 2.4f;            ///< The bounce's frequency at fullness 1; a fuller breast slower by the fourth root of its weight (a large bust at 2.1 Hz, a small one at 3.8). Tissue answers quickly and stops; fluid sloshes slowly (2.0 read as a sack of fluid).
@@ -122,6 +124,7 @@ const float kBreastDown = envOrF("POSESTUDIO_BREAST_DOWN", kBreastDownDefault * 
 const float kBreastSide = envOrF("POSESTUDIO_BREAST_SIDE", kBreastSideDefault * 1000.0f) / 1000.0f;
 const float kBreastHangOut = envOrF("POSESTUDIO_BREAST_HANG", kBreastHangOutDefault * 1000.0f) / 1000.0f;
 const float kBreastSplay = envOrF("POSESTUDIO_BREAST_SPLAY", kBreastSplayDefault);
+const float kBreastTiltShare = envOrF("POSESTUDIO_BREAST_TILT", kBreastTiltShareDefault);
 const float kBreastSpreadOnBack = envOrF("POSESTUDIO_BREAST_SPREAD", kBreastSpreadOnBackDefault * 1000.0f) / 1000.0f;
 const float kBreastLever = envOrF("POSESTUDIO_BREAST_LEVER", kBreastLeverDefault * 1000.0f) / 1000.0f;
 const float kBreastBounceCap = envOrF("POSESTUDIO_BREAST_CAP", kBreastBounceCapDefault * 1000.0f) / 1000.0f;
@@ -451,16 +454,17 @@ glm::mat4 Armature::breastSwingMatrix(const Breast& b, const glm::mat4& boneGlob
     // the tether (the chest's forward axis) as the chest stands.
     const Bone&     parent = m_bones[static_cast<std::size_t>(b.parent)];
     const glm::vec3 pivot(m_poseGlobal[static_cast<std::size_t>(b.parent)] * parent.inverseBind * glm::vec4(b.pivotTopBind, 1.0f));
-    const glm::vec3 out = chest[2] * d.z;
+    // A displacement across the tether is mostly a SHIFT of the whole breast (a solid body moves as
+    // one piece) and in part a TILT about the upper attachment that carries the nipple the rest of
+    // the way (kBreastTiltShare); one along the tether is a translation.
+    const glm::vec3 shift = chest * (across * (1.0f - kBreastTiltShare)) + chest[2] * d.z;
     (void)boneGlobal;
-    if (acrossLen < 1e-5f) {
-        return glm::translate(glm::mat4(1.0f), out);
+    if (acrossLen * kBreastTiltShare < 1e-5f) {
+        return glm::translate(glm::mat4(1.0f), shift);
     }
-    // A displacement across the tether is a SWING about the upper attachment that carries the nipple
-    // there: the angle it subtends at the pivot's distance from the nipple.
-    const float     angle = std::atan2(acrossLen, b.lever);
+    const float     angle = std::atan2(acrossLen * kBreastTiltShare, b.lever);
     const glm::vec3 axis = chest * glm::normalize(glm::cross(glm::vec3(0.0f, 0.0f, 1.0f), across / acrossLen)); // (in the chest's frame: a turned chest carries it)
-    return glm::translate(glm::mat4(1.0f), pivot + out) * glm::rotate(glm::mat4(1.0f), angle, axis) * glm::translate(glm::mat4(1.0f), -pivot);
+    return glm::translate(glm::mat4(1.0f), pivot + shift) * glm::rotate(glm::mat4(1.0f), angle, axis) * glm::translate(glm::mat4(1.0f), -pivot);
 }
 
 bool Armature::tickSoftBody(float dt) {

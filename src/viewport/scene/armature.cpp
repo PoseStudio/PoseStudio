@@ -395,18 +395,23 @@ void Armature::computeSkinMatrices() {
         const Bone& bone = m_bones[i];
         poseGlobal[i] =
             (bone.parent >= 0) ? poseGlobal[bone.parent] * bone.poseLocal : bone.poseLocal;
-        // THE SOFT BREASTS (armaturebreasts.cpp): a pectoral that carries a breast is turned
-        // about its own joint by what gravity does to it in this pose — the skin and whatever
-        // hangs below it follow; the joint's place and the pose's channels do not.
+        // THE SOFT BREASTS (armaturebreasts.cpp): a pectoral that carries a breast is shifted
+        // and tilted by what gravity does to it in this pose — ON ITS SKIN TRANSFORM ALONE. Its
+        // joint (poseGlobal, m_boneWorldPos) stays where the pose has it: a click that lands on a
+        // pectoral measures its grab offset from that joint every tick, and with the breast's
+        // displacement in it (as it was until 2026-11-05) the offset moved as the chest tilted and
+        // an un-bow by a pectoral grab rested 27 degrees from upright. Whatever hangs below a
+        // pectoral (nothing, on the rigs seen) rides the joint, not the breast.
+        glm::mat4 skinBase = poseGlobal[i];
         if (!m_breasts.empty() && softbody::breastMotion()) {
             for (const Breast& b : m_breasts) {
                 if (b.bone == static_cast<int>(i)) {
-                    poseGlobal[i] = breastSwingMatrix(b, poseGlobal[i]) * poseGlobal[i];
+                    skinBase = breastSwingMatrix(b, poseGlobal[i]) * poseGlobal[i];
                     break;
                 }
             }
         }
-        const glm::mat4 skin = poseGlobal[i] * bone.inverseBind;
+        const glm::mat4 skin = skinBase * bone.inverseBind;
         const glm::quat q = glm::normalize(glm::quat_cast(glm::mat3(skin)));
         const glm::vec3 t = glm::vec3(skin[3]);
         const glm::quat d = glm::quat(0.0f, t.x, t.y, t.z) * q; // (0,t)·q
