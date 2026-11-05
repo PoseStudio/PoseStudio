@@ -1168,6 +1168,7 @@ private:
     bool                m_breastsReady = false;      ///< setupBreasts ran (with the rig and the body mesh).
     bool                m_breastDynamic = false;     ///< The spring's state is in use (between ticks); else the resting swing applies.
     glm::vec3           m_breastGravity{0.0f, -1.0f, 0.0f}; ///< Effective gravity in g (world): g less the chest's acceleration, smoothed.
+    glm::vec3           m_breastAccel{0.0f};         ///< The chest's acceleration in g (world), smoothed: what the mass feels, before the dead band and the cap.
     glm::vec3           m_breastChestPos{0.0f};
     glm::vec3           m_breastChestVel{0.0f};
     int                 m_breastChestSamples = 0;

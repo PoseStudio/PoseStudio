@@ -45,8 +45,11 @@
  * landing bounce) the mass is a damped spring toward its resting displacement (kBreastHz, a
  * fuller breast slower; kBreastDamping 0.6: one swing past the rest after a QUICK move, none
  * after a slow one — the bounce is speed-dependent because what drives it is the chest's
- * ACCELERATION, read off the chest joint's motion tick to tick up to kBreastAccelMaxG; a slow bow
- * moves the rest slowly and the mass follows it), STIFFENING past kBreastBounceCap (tissue runs
+ * ACCELERATION, read off the chest joint's motion: its velocity smoothed (kBreastVelSmooth),
+ * differenced, smoothed again (kBreastAccelSmooth), under kBreastAccelDeadG read as none, up to
+ * kBreastAccelMaxG, and kBreastJoltShare of it felt — a trembling hand moves the chest a
+ * millimetre a tick, which raw is a g and a half (the ninth look: "too sensitive … glitchy jerky
+ * movements when posing"); a slow bow moves the rest slowly and the mass follows it), STIFFENING past kBreastBounceCap (tissue runs
  * out), the right breast a little slower than the left (kBreastDetune: they never move quite
  * together). A falling figure's breasts float up weightless; at the LANDING they keep
  * kBreastImpactShare of the impact speed as the chest stops (kickSoftBody, from
@@ -111,11 +114,15 @@ constexpr float kBreastHzDefault = 2.4f;            ///< The bounce's frequency 
 constexpr float kBreastDampingDefault = 0.6f;       ///< Its damping ratio across the tether: one swing past the rest and a settle — tissue, not gel (0.25 rang three or four times and read as jello, the user's fifth look: "breasts are a bit more solid than a springy gel"; 0.45 still read as "sacks filled with fluid", the sixth; 0.6 at the old joint pivot had shown nothing, but that model moved a tenth as far).
 constexpr float kBreastTetherDamping = 1.0f;        ///< ... and ALONG the tether critically damped, at one and a half times the frequency: the hang follows the pose and never bounces in its length.
 constexpr float kBaseBelowFold = 0.03f;             ///< The chest wall under the breast: the wall bone's skin within this below the patch's bottom (m, figure-scaled).
-constexpr float kBreastImpactShare = 0.3f;         ///< THE LANDING'S KICK: the share of the impact speed the breasts keep as the chest stops (the whole of it flung a large bust a hand's length down the chest, past what tissue allows; 0.3 drops it 5 cm and bounces it three times).
+constexpr float kBreastImpactShare = 0.5f;         ///< THE LANDING'S KICK: the share of the impact speed the breasts keep as the chest stops (the whole of it flung a large bust a hand's length down the chest, past what tissue allows; 0.3 while the acceleration reader counted the stop as well, 0.5 since the kick is the whole of it — the damping eats a kick's velocity within four ticks, so the depth grows slowly with the share: a 50 cm landing drops a large bust about 25 mm from its float and rebounds once).
 constexpr float kBreastDetune = 0.985f;              ///< The right breast's frequency against the left's: the two never move quite together.
-constexpr float kBreastAccelMaxG = 2.5f;            ///< The chest's acceleration is read up to this, in g (a quick drag's start and stop, a landing's deceleration are what set the breasts bouncing).
-constexpr float kBreastGravitySmooth = 0.35f;       ///< The effective gravity's low-pass per tick (a cursor's jitter is not a force; a drag's jolt is; the IK's tick-to-tick tremble of the chest under a landing is not either).
-constexpr float kBreastAccelDeadG = 0.05f;          ///< Accelerations under this (g) are read as none.
+constexpr int   kBreastSubsteps = 4;                ///< The spring is integrated in this many substeps per tick (stability: omega × step under 0.6 at the stiffest; see tickSoftBody).
+constexpr float kBreastStiffenMax = 16.0f;          ///< The stiffening spring's factor is capped here (a kick past four caps on a small bust).
+constexpr float kBreastAccelMaxG = 1.5f;            ///< The chest's acceleration is read up to this, in g (a quick drag's start and stop are what set the breasts bouncing; a landing's deceleration is the KICK's, below; 2.5 until the ninth look).
+constexpr float kBreastVelSmooth = 0.4f;            ///< THE CHEST'S ACCELERATION IS READ OFF A SMOOTHED VELOCITY: the chest joint's velocity low-passed by this per tick, differenced, and the acceleration low-passed by kBreastAccelSmooth. A trembling hand (and the IK's own tick-to-tick tremble) moves the chest a millimetre a tick, which raw is 4 mm/tick² = 1.5 g — the "jumping around" of the ninth look; through the two filters it is a twentieth of a g, under the dead band, while a real jolt keeps its impulse and lands three ticks later.
+constexpr float kBreastAccelSmooth = 0.3f;          ///< ... (0.35 on the raw acceleration until the ninth look: a cursor's jitter is not a force; a drag's jolt is).
+constexpr float kBreastAccelDeadG = 0.15f;          ///< Accelerations under this (g) are read as none (0.05 until the ninth look).
+constexpr float kBreastJoltShareDefault = 0.7f;     ///< The share of the chest's acceleration the mass feels: the compliances are sized for the POSE (a bust falling onto her side), and a drag's jolts — a mouse moving a chest 15 cm in a tenth of a second is 1.5 g — would throw the mass further than a body's. POSESTUDIO_BREAST_JOLT.
 // ON HER BACK (the fifth look, with photographs: "when a character is laying flat on their back,
 // the breasts should flatten a bit and fall a bit to the sides"): gravity INTO the chest presses
 // the breast back toward the wall — the nipple by kBreastPressShare of the breast's own depth per
@@ -142,6 +149,7 @@ const float kBreastLever = envOrF("POSESTUDIO_BREAST_LEVER", kBreastLeverDefault
 const float kBreastBounceCap = envOrF("POSESTUDIO_BREAST_CAP", kBreastBounceCapDefault * 1000.0f) / 1000.0f;
 const float kBreastHz = envOrF("POSESTUDIO_BREAST_HZ", kBreastHzDefault);
 const float kBreastDamping = envOrF("POSESTUDIO_BREAST_DAMPING", kBreastDampingDefault);
+const float kBreastJoltShare = envOrF("POSESTUDIO_BREAST_JOLT", kBreastJoltShareDefault);
 
 /// The weight a breast's motion is scaled by: its fullness (0 flat .. 1 the base female .. 3) to kBreastFullnessPower.
 float breastWeight(float fullness) {
@@ -399,6 +407,7 @@ void Armature::setupBreasts() {
     m_breastDynamic = false;
     m_breastChestSamples = 0;
     m_breastGravity = glm::vec3(0.0f, -1.0f, 0.0f);
+    m_breastAccel = glm::vec3(0.0f);
 }
 
 void Armature::applySoftBodySettings() {
@@ -449,8 +458,8 @@ glm::vec3 Armature::breastRestDisplacement(const Breast& b, bool effective) cons
 }
 
 glm::mat4 Armature::breastSwingMatrix(const Breast& b, const glm::mat4& boneGlobal) const {
-    const glm::vec3 rest = breastRestDisplacement(b);
-    const glm::vec3 d = m_breastDynamic ? b.disp : rest;
+    const glm::vec3 rest = breastRestDisplacement(b, false); // (the POSE's: the tilt is the static hang's, never a jolt's — tilted up by a jolt about the attachment the nipple swung FORWARD, the ninth look)
+    const glm::vec3 d = m_breastDynamic ? b.disp : breastRestDisplacement(b);
     const glm::vec3 across(d.x, d.y, 0.0f); // (the mass's displacement across the tether)
     const float     acrossLen = glm::length(across);
     if ((acrossLen < 1e-5f && std::abs(d.z) < 1e-5f) || b.parent < 0) {
@@ -496,12 +505,16 @@ bool Armature::tickSoftBody(float dt) {
             b.vel = glm::vec3(0.0f);
         }
     }
-    // EFFECTIVE GRAVITY: g less the chest's acceleration, off the chest joint's motion.
+    // EFFECTIVE GRAVITY: g less the chest's acceleration, off the chest joint's motion — the
+    // velocity SMOOTHED before it is differenced, and the acceleration smoothed after (a millimetre
+    // of tick-to-tick tremble is a g and a half raw; the two filters keep a jolt's impulse and lose
+    // the tremble), the dead band, the cap, and the share of it the mass feels.
     const std::size_t chestBone = static_cast<std::size_t>(m_breasts.front().parent);
     const glm::vec3   chest = glm::vec3(m_transform * m_poseGlobal[chestBone][3]);
     glm::vec3         accel(0.0f);
     if (m_breastChestSamples >= 1) {
-        const glm::vec3 vel = (chest - m_breastChestPos) / dt;
+        const glm::vec3 velRaw = (chest - m_breastChestPos) / dt;
+        const glm::vec3 vel = m_breastChestSamples >= 2 ? glm::mix(m_breastChestVel, velRaw, kBreastVelSmooth) : velRaw;
         if (m_breastChestSamples >= 2) {
             accel = (vel - m_breastChestVel) / dt;
         }
@@ -510,15 +523,17 @@ bool Armature::tickSoftBody(float dt) {
     m_breastChestPos = chest;
     ++m_breastChestSamples;
     constexpr float g = 9.81f;
-    float           mag = glm::length(accel) / g;
+    m_breastAccel = glm::mix(m_breastAccel, accel / g, kBreastAccelSmooth);
+    glm::vec3 felt = m_breastAccel;
+    float     mag = glm::length(felt);
     if (mag < kBreastAccelDeadG) {
-        accel = glm::vec3(0.0f);
+        felt = glm::vec3(0.0f);
         mag = 0.0f;
     } else if (mag > kBreastAccelMaxG) {
-        accel *= kBreastAccelMaxG / mag;
+        felt *= kBreastAccelMaxG / mag;
+        mag = kBreastAccelMaxG;
     }
-    const glm::vec3 effective = glm::vec3(0.0f, -1.0f, 0.0f) - accel / g;
-    m_breastGravity = glm::mix(m_breastGravity, effective, kBreastGravitySmooth);
+    m_breastGravity = glm::vec3(0.0f, -1.0f, 0.0f) - felt * kBreastJoltShare;
     // THE SPRING: the mass toward its resting displacement, stiffening past the cap (the tissue runs
     // out), a fuller breast slower, the right breast a little slower than the left.
     bool moving = false;
@@ -526,29 +541,45 @@ bool Armature::tickSoftBody(float dt) {
         const float     w = std::max(0.05f, breastWeight(b.size));
         const float     omega = 2.0f * 3.14159265f * kBreastHz / std::pow(w, 0.25f) * (b.side < 0.0f ? kBreastDetune : 1.0f);
         const float     cap = kBreastBounceCap * std::sqrt(w);
-        glm::vec3 rest = breastRestDisplacement(b);
-        // THE FIGURE OF EIGHT: the sideways rest follows the mass's drop below (rise above) the POSE's
-        // rest, outward (inward) by kBreastSplay — a bounce sways the breasts apart and together, the
-        // sideways spring lagging the drop by its own phase. The pose's rest, not the effective one:
-        // under a landing the effective rest dives ahead of the mass, and read against it a dropping
-        // breast came INWARD.
-        rest.x += b.side * kBreastSplay * (breastRestDisplacement(b, false).y - b.disp.y);
-        // The stiffening is on the EXCURSION from the rest, not on the displacement from the sculpt:
-        // on the displacement it held the mass short of its rest while it ticked (a bow's hang 37 mm
-        // of 54 through the drag, snapping to 54 at the settle's end) — the rest is a static fact,
-        // the cap is for what a kick or a jolt swings beyond it.
-        const glm::vec3 excursion = b.disp - rest;
-        const float     stiffen = 1.0f + glm::dot(excursion, excursion) / (cap * cap);
+        const glm::vec3 restEffective = breastRestDisplacement(b);
+        const float     restPoseY = breastRestDisplacement(b, false).y;
         // ALONG the tether the spring is stiffer and critically damped: its rest is the pose's hang,
         // which it follows and never bounces about (the eighth look: no in/out jiggle).
         const glm::vec3 damping(kBreastDamping, kBreastDamping, kBreastTetherDamping);
         const glm::vec3 omegaAxis(omega, omega, 1.5f * omega);
-        b.vel += (omegaAxis * omegaAxis * stiffen * (rest - b.disp) - 2.0f * damping * omegaAxis * b.vel) * dt;
-        b.disp += b.vel * dt;
-        const float pressMost = kBreastPressMax * b.protrusion; // (the press-in never past a share of the breast's depth)
-        if (b.disp.z < -pressMost) {
-            b.disp.z = -pressMost;
-            b.vel.z = std::max(0.0f, b.vel.z);
+        const float     pressMost = kBreastPressMax * b.protrusion; // (the press-in never past a share of the breast's depth)
+        // INTEGRATED IN SUBSTEPS: semi-implicit Euler holds only while omega × step is well under 2,
+        // and a small bust's spring (omega 32 at the weight floor) stiffened sixteenfold by a
+        // landing's kick is 128 — one 60 Hz step blew it up, the displacement running away to
+        // infinity and the skin with it. Four substeps and the stiffening capped keep it under 0.6.
+        const float h = dt / static_cast<float>(kBreastSubsteps);
+        glm::vec3   rest = restEffective;
+        for (int k = 0; k < kBreastSubsteps; ++k) {
+            // THE FIGURE OF EIGHT: the sideways rest follows the mass's drop below (rise above) the
+            // POSE's rest, outward (inward) by kBreastSplay — a bounce sways the breasts apart and
+            // together, the sideways spring lagging the drop by its own phase. The pose's rest, not
+            // the effective one: under a landing the effective rest dives ahead of the mass, and read
+            // against it a dropping breast came INWARD.
+            rest = restEffective;
+            rest.x += b.side * kBreastSplay * (restPoseY - b.disp.y);
+            // The stiffening is on the EXCURSION from the rest, not on the displacement from the
+            // sculpt: on the displacement it held the mass short of its rest while it ticked (a bow's
+            // hang 37 mm of 54 through the drag, snapping to 54 at the settle's end) — the rest is a
+            // static fact, the cap is for what a kick or a jolt swings beyond it.
+            const glm::vec3 excursion = b.disp - rest;
+            const float     stiffen = std::min(kBreastStiffenMax, 1.0f + glm::dot(excursion, excursion) / (cap * cap));
+            b.vel += (omegaAxis * omegaAxis * stiffen * (rest - b.disp) - 2.0f * damping * omegaAxis * b.vel) * h;
+            b.disp += b.vel * h;
+            if (b.disp.z < -pressMost) {
+                b.disp.z = -pressMost;
+                b.vel.z = std::max(0.0f, b.vel.z);
+            }
+        }
+        if (!std::isfinite(b.disp.x + b.disp.y + b.disp.z + b.vel.x + b.vel.y + b.vel.z)) {
+            // Never on a finite rest with the substeps above; the guard keeps a figure whose numbers
+            // went wrong (a NaN bone, a zero-length chest axis) from carrying it into the skin.
+            b.disp = restEffective;
+            b.vel = glm::vec3(0.0f);
         }
         if (glm::length(rest - b.disp) > 0.0003f || glm::length(b.vel) > 0.003f) {
             moving = true;
@@ -563,7 +594,7 @@ bool Armature::tickSoftBody(float dt) {
         // quick move's bounce against a slow one, a landing's drop.
         const Breast&   b = m_breasts.front();
         const glm::vec3 rest = breastRestDisplacement(b);
-        std::fprintf(stderr, "[breast-tick] accel %.2f g | disp %+.1f %+.1f %+.1f mm (rest %+.1f %+.1f %+.1f)\n", mag,
+        std::fprintf(stderr, "[breast-tick] accel %.2f g | disp %+.1f %+.1f %+.1f mm (rest %+.1f %+.1f %+.1f)\n", mag * kBreastJoltShare,
                      b.disp.x * 1000.0f, b.disp.y * 1000.0f, b.disp.z * 1000.0f, rest.x * 1000.0f, rest.y * 1000.0f, rest.z * 1000.0f);
     }
     return moving;
@@ -582,6 +613,13 @@ void Armature::kickSoftBody(float impactSpeed) {
         }
         m_breastDynamic = true;
     }
+    // THE KICK IS THE LANDING'S DECELERATION: the acceleration reader forgets the fall (its
+    // smoothed velocity would otherwise read the stop as a g and more over the next ten ticks, on
+    // top of the kick — a 50 cm landing dropped a large bust 47 mm where the kick alone drops it
+    // 30) and the float's weightlessness ends with the impact.
+    m_breastChestSamples = 0;
+    m_breastAccel = glm::vec3(0.0f);
+    m_breastGravity = glm::vec3(0.0f, -1.0f, 0.0f);
     static const float kShare = envOrF("POSESTUDIO_BREAST_IMPACT", kBreastImpactShare);
     const glm::mat3    toModel = glm::inverse(glm::mat3(m_transform));
     const glm::vec3    downModel = toModel * glm::vec3(0.0f, -1.0f, 0.0f);
@@ -596,7 +634,11 @@ void Armature::kickSoftBody(float impactSpeed) {
                 chest[c] /= len;
             }
         }
-        b.vel += glm::transpose(chest) * downModel * (impactSpeed * kShare);
+        // By the breast's weight (to its square root, capped at the base female's): a kick is a
+        // velocity, the same for every bust, and resolved in substeps it dropped a modest bust
+        // (weight 0.15) 20 mm against a large one's 36 — "none for very small" is the user's rule.
+        const float bySize = std::min(1.0f, std::sqrt(std::max(0.0f, breastWeight(b.size))));
+        b.vel += glm::transpose(chest) * downModel * (impactSpeed * kShare * bySize);
     }
 }
 
@@ -607,6 +649,7 @@ void Armature::settleSoftBody() {
     m_breastDynamic = false;
     m_breastChestSamples = 0;
     m_breastGravity = glm::vec3(0.0f, -1.0f, 0.0f);
+    m_breastAccel = glm::vec3(0.0f);
     for (Breast& b : m_breasts) {
         b.vel = glm::vec3(0.0f);
     }
