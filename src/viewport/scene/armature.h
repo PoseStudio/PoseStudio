@@ -1172,8 +1172,8 @@ private:
     glm::vec3           m_breastChestVel{0.0f};
     int                 m_breastChestSamples = 0;
     void      setupBreasts();
-    glm::vec3 breastGravityInChest(const Breast& b) const; ///< Effective gravity (g) in the chest's frame.
-    glm::vec3 breastRestDisplacement(const Breast& b) const; ///< Where the mass rests under that gravity (m, chest frame).
+    glm::vec3 breastGravityInChest(const Breast& b, bool effective) const; ///< Gravity (g) in the chest's frame: effective (less the chest's acceleration) or the pose's own.
+    glm::vec3 breastRestDisplacement(const Breast& b, bool effective = true) const; ///< Where the mass rests under that gravity (m, chest frame): the effective one, or the pose's own.
     glm::mat4 breastSwingMatrix(const Breast& b, const glm::mat4& boneGlobal) const;
 public:
     /// One tick of the soft body (the breasts' spring under effective gravity): called from the
