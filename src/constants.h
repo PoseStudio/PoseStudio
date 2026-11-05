@@ -82,6 +82,7 @@ namespace Constants {
     /// The Posing preferences: the soft breasts (absent = on) and their strength in percent (absent = 100).
     inline constexpr const char* PREF_SOFTBODY_BREASTS = "SoftBodyBreasts";
     inline constexpr const char* PREF_SOFTBODY_BREAST_STRENGTH = "SoftBodyBreastStrength";
+    inline constexpr const char* PREF_SOFTBODY_BUTTOCKS = "SoftBodyButtocks";
     inline constexpr const char* PREF_VR_ENABLED = "VrEnabled";
     inline constexpr const char* PREF_VR_RENDER_SCALE = "VrRenderScale";
     /// "1"/"0", absent = off: skip the subsurface blur and bloom in the headset (a lighter GPU's

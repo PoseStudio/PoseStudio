@@ -418,6 +418,7 @@ void Armature::applySoftBodySettings() {
     }
     m_breastDynamic = false;
     m_breastChestSamples = 0;
+    settleButtocks(); // (the buttocks' field exists from the import; off, its weights read 0)
     computeSkinMatrices(); // (on: the resting swing; off: the bind's pectorals again)
 }
 
@@ -494,10 +495,27 @@ glm::mat4 Armature::breastSwingMatrix(const Breast& b, const glm::mat4& boneGlob
 }
 
 bool Armature::tickSoftBody(float dt) {
-    if (!softbody::breastMotion() || !m_breastsReady || m_breasts.empty()) {
+    // ONE TICK OF THE SOFT BODY: the breasts (here) and the buttocks (armaturebuttocks.cpp), then
+    // the skin matrices once — the breasts' skin transform, and the version bump the corrective
+    // weights (the buttocks' field) are re-read on at the next recorded frame.
+    dt = glm::clamp(dt, 1.0f / 240.0f, 1.0f / 20.0f);
+    const bool breasts = softbody::breastMotion() && m_breastsReady && !m_breasts.empty();
+    const bool buttocks = softbody::buttockMotion() && m_buttocksReady && !m_buttocks.empty();
+    if (!breasts && !buttocks) {
         return false;
     }
-    dt = glm::clamp(dt, 1.0f / 240.0f, 1.0f / 20.0f);
+    bool moving = false;
+    if (breasts) {
+        tickBreasts(dt, moving);
+    }
+    if (buttocks) {
+        tickButtocks(dt, moving);
+    }
+    computeSkinMatrices();
+    return moving;
+}
+
+void Armature::tickBreasts(float dt, bool& movingOut) {
     if (!m_breastDynamic) {
         m_breastChestSamples = 0; // (the first tick of a sequence: no velocity to read yet)
         for (Breast& b : m_breasts) {
@@ -586,7 +604,7 @@ bool Armature::tickSoftBody(float dt) {
         }
     }
     m_breastDynamic = true;
-    computeSkinMatrices();
+    movingOut = movingOut || moving;
     static const bool kTickTrace = std::getenv("POSESTUDIO_BREAST_TRACE") && std::getenv("POSESTUDIO_BREAST_TRACE")[0] == '2';
     if (kTickTrace && !m_breasts.empty()) {
         // POSESTUDIO_BREAST_TRACE=2: the first breast per tick — the chest's acceleration (g), the
@@ -597,10 +615,14 @@ bool Armature::tickSoftBody(float dt) {
         std::fprintf(stderr, "[breast-tick] accel %.2f g | disp %+.1f %+.1f %+.1f mm (rest %+.1f %+.1f %+.1f)\n", mag * kBreastJoltShare,
                      b.disp.x * 1000.0f, b.disp.y * 1000.0f, b.disp.z * 1000.0f, rest.x * 1000.0f, rest.y * 1000.0f, rest.z * 1000.0f);
     }
-    return moving;
 }
 
 void Armature::kickSoftBody(float impactSpeed) {
+    kickBreasts(impactSpeed);
+    kickButtocks(impactSpeed);
+}
+
+void Armature::kickBreasts(float impactSpeed) {
     if (!softbody::breastMotion() || !m_breastsReady || m_breasts.empty() || impactSpeed <= 0.0f) {
         return;
     }
@@ -638,11 +660,20 @@ void Armature::kickSoftBody(float impactSpeed) {
         // velocity, the same for every bust, and resolved in substeps it dropped a modest bust
         // (weight 0.15) 20 mm against a large one's 36 — "none for very small" is the user's rule.
         const float bySize = std::min(1.0f, std::sqrt(std::max(0.0f, breastWeight(b.size))));
-        b.vel += glm::transpose(chest) * downModel * (impactSpeed * kShare * bySize);
+        b.vel += glm::transpose(chest) * downModel * (impactSpeed * kShare * bySize * softbody::breastStrength());
     }
 }
 
 void Armature::settleSoftBody() {
+    const bool was = m_breastDynamic || m_buttockDynamic;
+    settleBreasts();
+    settleButtocks();
+    if (was) {
+        computeSkinMatrices(); // (the resting displacement; the buttocks' weights back to 0)
+    }
+}
+
+void Armature::settleBreasts() {
     if (!m_breastDynamic) {
         return;
     }
@@ -653,10 +684,13 @@ void Armature::settleSoftBody() {
     for (Breast& b : m_breasts) {
         b.vel = glm::vec3(0.0f);
     }
-    computeSkinMatrices(); // (the resting displacement)
 }
 
 bool Armature::softBodyMoving() const {
+    return breastsMoving() || buttocksMoving();
+}
+
+bool Armature::breastsMoving() const {
     if (!m_breastDynamic || !softbody::breastMotion()) {
         return false;
     }

@@ -1,9 +1,10 @@
 /**
  * @file softbodysettings.h
  * @brief The process-wide soft-body switches the posing engine reads (Qt-free): whether the
- *        breasts follow the pose (armaturebreasts.cpp) and how strongly. Set by the Posing
- *        preferences page (PosingPreferencesPanel) from the stored preferences; OFF by default,
- *        so the IK harness and every tool that never sets them run the engine as it was.
+ *        breasts follow the pose (armaturebreasts.cpp), whether the buttocks jiggle with movement
+ *        (armaturebuttocks.cpp), and how strongly. Set by the Posing preferences page
+ *        (PosingPreferencesPanel) from the stored preferences; OFF by default, so the IK harness
+ *        and every tool that never sets them run the engine as it was.
  */
 
 #ifndef SOFTBODYSETTINGS_H
@@ -16,7 +17,12 @@ inline bool  g_breastMotion = false;
 /// A multiplier on the swing (1 = the calibrated amount; the preference's 0-200 %).
 inline float g_breastStrength = 1.0f;
 
+/// The buttocks jiggle with the hips' movement (never a hang), at the same strength.
+inline bool  g_buttockMotion = false;
+
 inline bool  breastMotion() { return g_breastMotion; }
+inline bool  buttockMotion() { return g_buttockMotion; }
+inline void  setButtockMotion(bool on) { g_buttockMotion = on; }
 inline float breastStrength() { return g_breastStrength; }
 inline void  setBreastMotion(bool on, float strength) {
     g_breastMotion = on;

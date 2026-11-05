@@ -187,6 +187,7 @@ public:
     float breastSwingDeg(int side) const { return m_armature.breastSwingDeg(side); }
     float breastHangMm(int side) const { return m_armature.breastHangMm(side); }
     float breastSideMm(int side) const { return m_armature.breastSideMm(side); }
+    float buttockMoveMm(int side) const { return m_armature.buttockMoveMm(side); }
     // THE FIGURE'S PLACE AND HEADING (the Transform tab's Figure group): pose edits like a dial's.
     void setFigurePosition(const glm::vec3& world) { m_armature.setFigurePosition(world); refreshCorrectives(); }
     void setFigureRotationDeg(const glm::vec3& turnTipTilt) { m_armature.setFigureRotationDeg(turnTipTilt); refreshCorrectives(); }

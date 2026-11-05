@@ -62,7 +62,7 @@ float evalSpline(const std::vector<CorrectiveKnot>& knots, float x) {
 } // namespace
 
 void CorrectiveSet::build(const ModelData& data, std::vector<std::vector<uint32_t>>& perMeshRanges,
-                          std::vector<CorrectiveEntry>& entries) {
+                          std::vector<CorrectiveEntry>& entries, const std::vector<SoftBodyField>& softFields) {
     // Bone names -> indices, resolved once (the armature is built from data.bones in this same
     // order, so these ARE the runtime bone indices the pose is read by).
     std::unordered_map<std::string, int> boneOf;
@@ -157,6 +157,30 @@ void CorrectiveSet::build(const ModelData& data, std::vector<std::vector<uint32_
             m_correctives.push_back(std::move(rc));
         }
     }
+    // The SOFT-BODY FIELDS join the table as correctives of their own, after the pose
+    // correctives (their deltas are per render vertex already; their weights come from the
+    // armature's soft body, not the pose).
+    std::vector<int> softCompact(softFields.size(), -1);
+    for (std::size_t si = 0; si < softFields.size(); ++si) {
+        const SoftBodyField& sf = softFields[si];
+        bool                 landed = false;
+        for (uint32_t k = 0; k < meshCount && k < sf.perMesh.size(); ++k) {
+            for (const auto& [lv, delta] : sf.perMesh[k]) {
+                if (lv < count[k].size()) {
+                    ++count[k][lv];
+                    ++total;
+                    landed = true;
+                }
+            }
+        }
+        if (landed) {
+            softCompact[si] = static_cast<int>(m_correctives.size());
+            RuntimeCorrective rc;
+            rc.id = sf.id;
+            rc.softIndex = sf.softIndex;
+            m_correctives.push_back(std::move(rc));
+        }
+    }
     m_weight.assign(m_correctives.size(), 0.0f);
     if (m_correctives.empty()) {
         return;
@@ -235,6 +259,20 @@ void CorrectiveSet::build(const ModelData& data, std::vector<std::vector<uint32_
             }
         }
     }
+    for (std::size_t si = 0; si < softFields.size(); ++si) {
+        if (softCompact[si] < 0) {
+            continue;
+        }
+        const auto gpuIndex = static_cast<uint32_t>(softCompact[si]);
+        for (uint32_t k = 0; k < meshCount && k < softFields[si].perMesh.size(); ++k) {
+            for (const auto& [lv, delta] : softFields[si].perMesh[k]) {
+                if (lv >= count[k].size() || filled[k][lv] >= kMaxPerVertex) {
+                    continue;
+                }
+                entries[start[k][lv] + filled[k][lv]++] = {gpuIndex, delta};
+            }
+        }
+    }
     if (std::getenv("POSESTUDIO_DUMP_CORRECTIVES") != nullptr) {
         std::fprintf(stderr, "[correctives] %zu correctives -> %zu GPU delta entries (%.1f MB)\n",
                      m_correctives.size(), entries.size(),
@@ -265,6 +303,9 @@ void CorrectiveSet::createBuffers(VulkanContext& context,
 }
 
 float CorrectiveSet::evalWeight(std::size_t correctiveIndex, const Armature& armature) const {
+    if (m_correctives[correctiveIndex].softIndex >= 0) {
+        return armature.softBodyWeight(m_correctives[correctiveIndex].softIndex); // (a soft-body field: the mass's displacement)
+    }
     const RuntimeCorrective& rc = m_correctives[correctiveIndex];
     float sum = 0.0f;
     // A fixed-capacity stack: the authored formulas are push/push/spline/mult shapes of depth

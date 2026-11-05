@@ -21,6 +21,11 @@ bool storedBreastMotion() {
     return v.isEmpty() ? true : v != QStringLiteral("0"); // (absent = on)
 }
 
+bool storedButtockMotion() {
+    const QString v = PreferencesManager::instance().getValue(Constants::PREF_SOFTBODY_BUTTOCKS).toString();
+    return v.isEmpty() ? true : v != QStringLiteral("0"); // (absent = on)
+}
+
 int storedBreastStrengthPercent() {
     bool      ok = false;
     const int v = PreferencesManager::instance().getValue(Constants::PREF_SOFTBODY_BREAST_STRENGTH).toString().toInt(&ok);
@@ -31,6 +36,7 @@ int storedBreastStrengthPercent() {
 
 void PosingPreferencesPanel::applyStoredSettings() {
     pose::softbody::setBreastMotion(storedBreastMotion(), static_cast<float>(storedBreastStrengthPercent()) / 100.0f);
+    pose::softbody::setButtockMotion(storedButtockMotion());
 }
 
 PosingPreferencesPanel::PosingPreferencesPanel(QWidget* parent)
@@ -51,6 +57,20 @@ PosingPreferencesPanel::PosingPreferencesPanel(QWidget* parent)
         emit softBodyChanged();
     });
 
+    // --- Soft buttocks ---
+    auto* buttockToggle = new QCheckBox(tr("Soft buttocks jiggle with movement"), this);
+    buttockToggle->setChecked(storedButtockMotion());
+    contentLayout()->addWidget(buttockToggle);
+    addDescription(
+        tr("A figure's buttocks bounce a little with the hips' movement — a quick drag, a landing from "
+           "the Ground button — at about half the breasts' amount, and never hang: a pose by itself "
+           "leaves them as sculpted. Nothing of it is written into the pose or a pose file."));
+    connect(buttockToggle, &QCheckBox::toggled, this, [this](bool on) {
+        PreferencesManager::instance().setValue(Constants::PREF_SOFTBODY_BUTTOCKS, on ? QStringLiteral("1") : QStringLiteral("0"));
+        applyStoredSettings();
+        emit softBodyChanged();
+    });
+
     // --- Strength ---
     auto* form = new QFormLayout();
     form->setContentsMargins(0, 8, 0, 0);
@@ -63,7 +83,7 @@ PosingPreferencesPanel::PosingPreferencesPanel(QWidget* parent)
     strengthBox->setFixedWidth(120);
     form->addRow(tr("Strength (%)"), strengthBox);
     contentLayout()->addLayout(form);
-    addDescription(tr("How far the breasts swing: 100 is the calibrated amount, 0 holds them as the figure was sculpted."));
+    addDescription(tr("How far the soft body moves — the breasts and the buttocks alike: 100 is the calibrated amount, 0 holds them as the figure was sculpted."));
     connect(strengthBox, &pose::DragNumberBox::valueChanged, this, [this](double value) {
         PreferencesManager::instance().setValue(Constants::PREF_SOFTBODY_BREAST_STRENGTH, QString::number(static_cast<int>(value + 0.5)));
         applyStoredSettings();

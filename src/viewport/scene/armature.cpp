@@ -252,6 +252,8 @@ void Armature::setBodyMesh(std::vector<BodyMeshPoint> mesh) {
     m_boneClass.clear(); // (... and the bone classes with it)
     m_breasts.clear();
     m_breastsReady = false;
+    m_buttocks.clear();
+    m_buttocksReady = false;
     // THE SOFT BREASTS need the rig (the pectorals' roles) and this mesh (the breasts' size):
     // with the preference on, the rig is built here, once the mesh is in — a figure loaded
     // bowed from a pose file hangs them from its first frame. (The harness never turns it on.)

@@ -102,3 +102,20 @@ wait 90
 shot 06_landed
 expect breastl < 0.5
 expect lowest >= -5
+
+# SOFT BUTTOCKS (armaturebuttocks.cpp): the glutes' skin jiggles with the hips' movement at half
+# the breasts' amounts and NEVER hangs — standing, bowed or lying they read 0 at rest (`buttl` /
+# `buttr`, mm) — and a quick sideways drag of the hips sets them swaying; the settle rests them.
+reset
+expect buttl < 0.01
+view back
+closeup hip 0.40
+press hip
+dragv 0.10 0 6 10
+expect buttl > 2.5
+expect buttr > 2.5
+shot 09_hips_jolt_back
+release
+expect buttl < 0.5
+expect buttr < 0.5
+reset

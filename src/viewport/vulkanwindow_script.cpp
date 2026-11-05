@@ -801,6 +801,10 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         // THE SOFT BREASTS: how far the left / right breast has moved sideways, mm, + outward toward the armpit
         // (on her back the spread, on her side the fall toward the lower side).
         value = static_cast<double>(scene().breastSideMm(key == QLatin1String("breastsidel") ? 0 : 1));
+    } else if (key == QLatin1String("buttl") || key == QLatin1String("buttr")) {
+        // THE SOFT BUTTOCKS: how far the left / right cheek has moved from the sculpt, mm (0 at
+        // rest in any pose — they never hang — and while the Posing preference is off).
+        value = static_cast<double>(scene().buttockMoveMm(key == QLatin1String("buttl") ? 0 : 1));
     } else if (key == QLatin1String("lowest")) {
         // (Not the figure node and its like: parentless, or hanging straight off a parentless node
         // at the origin — the hip's own parent.)

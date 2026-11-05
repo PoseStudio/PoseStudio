@@ -221,6 +221,10 @@ How much they move depends on the breast the figure actually has, read off her m
 
 The breast moves as one piece — it shifts and hangs with a slight tilt, it does not swing like a bag — and in a bow it is drawn out toward the floor with the nipple leading. The amount is the breast's own: a large bust hangs and bounces a great deal, a modest one a little, a flat chest not at all. The bounce is speed-dependent and firm: a quick move sets the breasts swinging once and settling, a slow or a trembling one does not move them at all, and the two breasts never move quite together. It is an up-and-down and side-to-side motion — a drop sways the breasts a little apart, a rise brings them together — and never in and out: the breast moves as a solid mass inside the skin, not as a bag swinging from its top, and how far it hangs out from the chest follows the pose alone. When she lands from the Ground button her breasts drop and bounce, her knees take the landing, and her hanging arms swing forward with the elbows bending before they settle. Preferences → Posing turns it off or scales it (see [Preferences](preferences.md#posing)).
 
+## Soft buttocks
+
+A figure's buttocks jiggle with the hips' movement at about half the breasts' amount, and never hang: a pose by itself — a bow, a sit, lying down — leaves them exactly as sculpted. A quick drag of the hips or a landing from the Ground button sets them swaying and settling, sideways and up and down, a drop spreading them a little; a slow drag moves them not at all. It works on every rigged figure, whether or not its rig has a bone there, and as with the breasts nothing of it is in the pose or a pose file. Preferences → Posing has its own switch for it, and the Strength dial scales both (see [Preferences](preferences.md#posing)).
+
 ## Tips
 
 - Orbit to a **side view** (`3`) before pushing a figure down onto the floor or forward onto her hands — you can see the depth, and the drag plane is the one you want.

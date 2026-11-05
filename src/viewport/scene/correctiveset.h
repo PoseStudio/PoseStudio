@@ -51,6 +51,16 @@ struct CorrectiveEntry {
 };
 static_assert(sizeof(CorrectiveEntry) == 16, "must match the shaders' CorrectiveDelta");
 
+/// A SOFT-BODY DELTA FIELD (armaturebuttocks.cpp), blended as a corrective is: per non-empty mesh
+/// (the Model's order) the render vertices it touches with their bind-space deltas at weight 1,
+/// and its weight each frame is Armature::softBodyWeight(softIndex) — a displacement in metres —
+/// rather than a driver formula of the pose.
+struct SoftBodyField {
+    std::string                                                    id;
+    int                                                            softIndex = 0;
+    std::vector<std::vector<std::pair<uint32_t, glm::vec3>>>       perMesh;
+};
+
 class CorrectiveSet {
 public:
     /// Resolves the model's correctives for the GPU: keeps each one's driver formulas (bone
@@ -61,7 +71,7 @@ public:
     /// untouched mesh's vector stays empty). Runs once at construction, BEFORE the meshes
     /// upload, because the ranges ride in the vertex data.
     void build(const ModelData& data, std::vector<std::vector<uint32_t>>& perMeshRanges,
-               std::vector<CorrectiveEntry>& entries);
+               std::vector<CorrectiveEntry>& entries, const std::vector<SoftBodyField>& softFields = {});
 
     /// Creates the GPU side: the static delta table from @p entries (device-local, riding
     /// @p batch — or a 16-byte zero placeholder when empty) and the per-frame-slot weight
@@ -102,6 +112,7 @@ private:
         bool                           clamped = false; // clamp the driven weight to [min,max]
         float                          clampMin = 0.0f;
         float                          clampMax = 1.0f;
+        int                            softIndex = -1; ///< A soft-body field's weight index (Armature::softBodyWeight); -1 for a pose corrective.
     };
 
     /// Evaluates one corrective's blend weight from the pose (Σ sumFormulas × gateScale).

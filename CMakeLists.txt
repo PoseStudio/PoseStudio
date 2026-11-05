@@ -481,6 +481,7 @@ add_executable(
     src/viewport/scene/armatureikdigit.cpp  # the bone classes (body / face rig / digit) and the digit drag
     src/viewport/scene/armaturelanding.cpp  # the landing bounce: a figure dropped onto her feet absorbs the landing
     src/viewport/scene/armaturebreasts.cpp     # THE SOFT BREASTS: the pectorals hung by gravity, by their size; their bounce
+    src/viewport/scene/armaturebuttocks.cpp    # THE SOFT BUTTOCKS: the glutes' skin as a delta field the GPU blends, jiggling with the hips' movement
     src/viewport/scene/softbodysettings.h
     src/viewport/scene/armatureikfigure.cpp # the figure move: Ctrl + the body itself moves the figure as she is posed
     src/viewport/scene/armaturedials.cpp    # the transform dials: a joint's rotation as Bend Forward / Bend Sideways / Twist, 0-100
@@ -741,6 +742,7 @@ add_executable(PoseStudioIkHarness
     src/viewport/scene/armatureikdigit.cpp
     src/viewport/scene/armaturelanding.cpp
     src/viewport/scene/armaturebreasts.cpp
+    src/viewport/scene/armaturebuttocks.cpp
     src/viewport/scene/armatureikfigure.cpp
     src/viewport/scene/armaturedials.cpp
     src/viewport/scene/ik/ikmath.cpp

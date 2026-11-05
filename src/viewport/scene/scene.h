@@ -294,6 +294,7 @@ public:
     float breastSwingDeg(int side) const;
     float breastHangMm(int side) const;
     float breastSideMm(int side) const;
+    float buttockMoveMm(int side) const; ///< THE SOFT BUTTOCKS: how far the left (0) / right (1) cheek has moved (mm).
     /// THE FIGURE'S PLACE AND HEADING on the active figure (the Transform tab's Figure group):
     /// position in world centimetres; the rotation as turn / tip / tilt (`axis` 0/1/2) in degrees.
     /// True when something moved.

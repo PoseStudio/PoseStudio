@@ -74,70 +74,13 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
     // through this cache — one staging upload + mip chain per unique image instead of per mesh.
     TextureUploadCache uploads;
     m_meshes.reserve(meshCount);
-    // Pose correctives resolve BEFORE the meshes upload: each touched vertex's packed range into
-    // the GPU delta table rides in its vertex data (see Mesh's correctiveRanges parameter).
-    std::vector<std::vector<uint32_t>> perMeshRanges; // parallel to m_meshes; empty = untouched mesh
-    std::vector<CorrectiveEntry>       correctiveEntries;
-    if (!data.correctives.empty()) {
-        m_correctives.build(data, perMeshRanges, correctiveEntries);
-    }
     const bool skinned = !data.bones.empty();
-    if (skinned) {
-        // Ground samples: the skinning inputs groundGap() needs to find the posed lowest point
-        // (the GPU buffers are device-local and unreadable). Reserved once, summed across meshes
-        // (see GroundSampler::reserve).
-        std::size_t totalVerts = 0;
-        std::size_t totalTris = 0;
-        for (const MeshData& meshData : data.meshes) {
-            if (!meshData.indices.empty()) {
-                totalVerts += meshData.vertices.size();
-                if (meshData.opacity >= 0.999f && !meshData.hasOpacityMask) {
-                    totalTris += meshData.indices.size() / 3; // (the pickable surface: Model::pickSurface)
-                }
-            }
-        }
-        m_ground.reserve(totalVerts, totalTris);
-    }
-    // The BODY MESH SAMPLE for the self-collision volumes (bodymesh.h): every skinned vertex's
-    // bind position with the bone that weighs most on it, handed to the armature below.
-    std::vector<BodyMeshPoint> bodyMesh;
-    for (const MeshData& meshData : data.meshes) {
-        if (meshData.indices.empty()) {
-            continue;
-        }
-        const std::size_t mi = m_meshes.size();
-        const std::vector<uint32_t>* ranges =
-            (mi < perMeshRanges.size() && !perMeshRanges[mi].empty()) ? &perMeshRanges[mi] : nullptr;
-        m_meshes.emplace_back(context, meshData, materialSetLayout, m_descriptorPool.get(),
-                              fallbackDiffuse, fallbackNormal, uploads, batch, ranges);
-        if (skinned) {
-            // (Opaque skin only is pickable: a click on the eye's clear shells is a click on the eye.)
-            m_ground.add(meshData.vertices, meshData.indices, meshData.opacity >= 0.999f && !meshData.hasOpacityMask);
-            for (const Vertex& v : meshData.vertices) {
-                int best = 0;
-                for (int j = 1; j < 4; ++j) {
-                    if (v.weights[j] > v.weights[best]) {
-                        best = j;
-                    }
-                }
-                if (v.weights[best] > 0.0f && v.joints[best] < data.bones.size()) {
-                    bodyMesh.push_back({v.pos, static_cast<int>(v.joints[best])});
-                }
-            }
-        }
-    }
-    m_correctives.createBuffers(context, correctiveEntries, batch);
-    batch.submitAndWait();
-
-    // Partition the meshes for the record paths (m_meshes is complete and never reallocates
-    // again, so the pointers stay valid).
-    for (const Mesh& mesh : m_meshes) {
-        (mesh.isTransparent() ? m_transparentMeshes : m_opaqueMeshes).push_back(&mesh);
-    }
-
     // The armature — the runtime skeleton + pose (see armature.h) — built from the model's bones
-    // (empty for a static model: one identity joint). Bind transforms are translation-only, so
-    // each bone's local rest offset is the difference of the global rest positions.
+    // (empty for a static model: one identity joint) BEFORE the meshes upload: the soft-body delta
+    // fields it lays over the skin (the buttocks, armaturebuttocks.cpp) ride in the vertex data
+    // as the pose correctives' ranges do, and they need the rig's roles and the body mesh sample.
+    // Bind transforms are translation-only, so each bone's local rest offset is the difference of
+    // the global rest positions.
     for (const MeshData& mesh : data.meshes) {
         m_linearSkinning = m_linearSkinning || mesh.linearSkinning; // (an FBX importer sets it on every mesh)
     }
@@ -162,16 +105,122 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
         dst.roleHint = src.roleHint;
     }
     m_armature.build(armatureBones);
-    if (!bodyMesh.empty()) {
-        m_armature.setBodyMesh(std::move(bodyMesh));
+    // The BODY MESH SAMPLE for the self-collision volumes (bodymesh.h): every skinned vertex's
+    // bind position with the bone that weighs most on it, handed to the armature.
+    auto dominantJoint = [&](const Vertex& v) -> int {
+        int best = 0;
+        for (int j = 1; j < 4; ++j) {
+            if (v.weights[j] > v.weights[best]) {
+                best = j;
+            }
+        }
+        return (v.weights[best] > 0.0f && v.joints[best] < data.bones.size()) ? static_cast<int>(v.joints[best]) : -1;
+    };
+    if (skinned) {
+        std::vector<BodyMeshPoint> bodyMesh;
+        for (const MeshData& meshData : data.meshes) {
+            if (meshData.indices.empty()) {
+                continue;
+            }
+            for (const Vertex& v : meshData.vertices) {
+                const int bone = dominantJoint(v);
+                if (bone >= 0) {
+                    bodyMesh.push_back({v.pos, bone});
+                }
+            }
+        }
+        if (!bodyMesh.empty()) {
+            m_armature.setBodyMesh(std::move(bodyMesh));
+        }
     }
     m_armature.prepareIkRig(); // (the rig and the standard's roles exist from the import on)
+    m_armature.setupSoftBodyFields();
     // Debug hook: POSESTUDIO_DUMP_SKELETON=<path> dumps the imported skeleton (one bone per
     // line) so the IK harness (tools/ikharness/) can run its drag-loop tests against REAL figure
     // rigs instead of synthetic approximations. No-op unless the environment variable is set.
     if (const char* dumpPath = std::getenv("POSESTUDIO_DUMP_SKELETON");
         dumpPath != nullptr && m_armature.hasSkeleton()) {
         m_armature.dump(dumpPath);
+    }
+
+    // THE SOFT-BODY DELTA FIELDS (armaturebuttocks.cpp): per cheek two correctives — a delta of
+    // the field's weight along the lateral axis and one along the trunk — on every render vertex
+    // the field reaches, blended by the GPU at the mass's displacement.
+    std::vector<SoftBodyField> softFields;
+    if (skinned) {
+        softFields.resize(4);
+        for (std::size_t f = 0; f < softFields.size(); ++f) {
+            softFields[f].id = std::string("softbody:buttock_") + (f < 2 ? "l_" : "r_") + (f % 2 == 0 ? "x" : "y");
+            softFields[f].softIndex = static_cast<int>(f);
+            softFields[f].perMesh.resize(meshCount);
+        }
+        uint32_t k = 0;
+        bool     any = false;
+        for (const MeshData& meshData : data.meshes) {
+            if (meshData.indices.empty()) {
+                continue;
+            }
+            for (uint32_t lv = 0; lv < meshData.vertices.size(); ++lv) {
+                const Vertex& v = meshData.vertices[lv];
+                int           side = -1;
+                const float   w = m_armature.softBodyFieldWeight(v.pos, dominantJoint(v), side);
+                if (w > 1e-3f && side >= 0) {
+                    softFields[static_cast<std::size_t>(side) * 2].perMesh[k].push_back({lv, glm::vec3(w, 0.0f, 0.0f)});
+                    softFields[static_cast<std::size_t>(side) * 2 + 1].perMesh[k].push_back({lv, glm::vec3(0.0f, w, 0.0f)});
+                    any = true;
+                }
+            }
+            ++k;
+        }
+        if (!any) {
+            softFields.clear();
+        }
+    }
+    // Pose correctives (and the soft-body fields) resolve BEFORE the meshes upload: each touched
+    // vertex's packed range into the GPU delta table rides in its vertex data (see Mesh's
+    // correctiveRanges parameter).
+    std::vector<std::vector<uint32_t>> perMeshRanges; // parallel to m_meshes; empty = untouched mesh
+    std::vector<CorrectiveEntry>       correctiveEntries;
+    if (!data.correctives.empty() || !softFields.empty()) {
+        m_correctives.build(data, perMeshRanges, correctiveEntries, softFields);
+    }
+    if (skinned) {
+        // Ground samples: the skinning inputs groundGap() needs to find the posed lowest point
+        // (the GPU buffers are device-local and unreadable). Reserved once, summed across meshes
+        // (see GroundSampler::reserve).
+        std::size_t totalVerts = 0;
+        std::size_t totalTris = 0;
+        for (const MeshData& meshData : data.meshes) {
+            if (!meshData.indices.empty()) {
+                totalVerts += meshData.vertices.size();
+                if (meshData.opacity >= 0.999f && !meshData.hasOpacityMask) {
+                    totalTris += meshData.indices.size() / 3; // (the pickable surface: Model::pickSurface)
+                }
+            }
+        }
+        m_ground.reserve(totalVerts, totalTris);
+    }
+    for (const MeshData& meshData : data.meshes) {
+        if (meshData.indices.empty()) {
+            continue;
+        }
+        const std::size_t mi = m_meshes.size();
+        const std::vector<uint32_t>* ranges =
+            (mi < perMeshRanges.size() && !perMeshRanges[mi].empty()) ? &perMeshRanges[mi] : nullptr;
+        m_meshes.emplace_back(context, meshData, materialSetLayout, m_descriptorPool.get(),
+                              fallbackDiffuse, fallbackNormal, uploads, batch, ranges);
+        if (skinned) {
+            // (Opaque skin only is pickable: a click on the eye's clear shells is a click on the eye.)
+            m_ground.add(meshData.vertices, meshData.indices, meshData.opacity >= 0.999f && !meshData.hasOpacityMask);
+        }
+    }
+    m_correctives.createBuffers(context, correctiveEntries, batch);
+    batch.submitAndWait();
+
+    // Partition the meshes for the record paths (m_meshes is complete and never reallocates
+    // again, so the pointers stay valid).
+    for (const Mesh& mesh : m_meshes) {
+        (mesh.isTransparent() ? m_transparentMeshes : m_opaqueMeshes).push_back(&mesh);
     }
     m_jointCount = m_armature.jointCount();
 

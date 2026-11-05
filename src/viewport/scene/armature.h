@@ -1176,6 +1176,31 @@ private:
     glm::vec3 breastGravityInChest(const Breast& b, bool effective) const; ///< Gravity (g) in the chest's frame: effective (less the chest's acceleration) or the pose's own.
     glm::vec3 breastRestDisplacement(const Breast& b, bool effective = true) const; ///< Where the mass rests under that gravity (m, chest frame): the effective one, or the pose's own.
     glm::mat4 breastSwingMatrix(const Breast& b, const glm::mat4& boneGlobal) const;
+    void      tickBreasts(float dt, bool& movingOut);
+    void      kickBreasts(float impactSpeed);
+    void      settleBreasts();
+    bool      breastsMoving() const;
+    // --- SOFT BUTTOCKS (armaturebuttocks.cpp): the glutes' skin as a soft-body delta field the GPU blends ---
+    struct Buttock {
+        float     side = 1.0f;     ///< +1 the left cheek (outward is +x), -1 the right.
+        glm::vec3 apexBind{0.0f};  ///< The cheek's fullest point at bind (model space): the field's centre.
+        glm::vec3 disp{0.0f};      ///< The mass's displacement (m, hips frame: sideways, along the trunk; z unused).
+        glm::vec3 vel{0.0f};
+    };
+    std::vector<Buttock>       m_buttocks;              ///< The two cheeks, or none.
+    std::vector<unsigned char> m_buttockAllowed;        ///< Per bone: 0 no field on its skin, 1 either cheek (the hips, the pelvis bone), 2 the left (its thigh), 3 the right.
+    bool                       m_buttocksReady = false; ///< setupButtocks ran (with the rig and the body mesh).
+    bool                       m_buttockDynamic = false;
+    int                        m_buttockRoot = -1;      ///< The hips joint: the field's frame and the acceleration read.
+    float                      m_buttockRadius = 0.13f; ///< The field's reach about an apex (m, figure-scaled).
+    float                      m_buttockFront = 0.0f;   ///< The field reaches no further forward than this depth (bind z).
+    glm::vec3                  m_buttockHipsPos{0.0f}, m_buttockHipsVel{0.0f}, m_buttockAccel{0.0f};
+    int                        m_buttockSamples = 0;
+    void setupButtocks();
+    void tickButtocks(float dt, bool& movingOut);
+    void kickButtocks(float impactSpeed);
+    void settleButtocks();
+    bool buttocksMoving() const;
 public:
     /// One tick of the soft body (the breasts' spring under effective gravity): called from the
     /// drag and settle ticks, the landing bounce and the fall. Returns true while something still
@@ -1195,6 +1220,20 @@ public:
     float breastHangMm(int side) const;
     /// How far that breast has moved sideways as rendered (mm, + outward toward the armpit): on her back the spread, on her side the fall.
     float breastSideMm(int side) const;
+    // --- SOFT BUTTOCKS (armaturebuttocks.cpp) ---
+    /// Sets up the soft-body delta fields the Model bakes into its vertex data at import (the
+    /// buttocks: the cheeks' apexes and the skin that may carry the field); needs the rig and the
+    /// body mesh. The fields exist whether or not the preference is on; the weights read 0 off.
+    void  setupSoftBodyFields();
+    /// The soft-body delta field's weight at a render vertex (its bind position and the bone that
+    /// weighs most on it): 0 outside the glutes, 1 at a cheek's fullest point; @p side is the
+    /// cheek (0 left, 1 right) or -1.
+    float softBodyFieldWeight(const glm::vec3& bindPos, int dominantBone, int& side) const;
+    /// A soft-body corrective's weight the GPU blends (metres): index = cheek × 2 + axis (0
+    /// sideways, 1 along the trunk). 0 unless the buttocks are on and moving.
+    float softBodyWeight(int index) const;
+    /// How far the left (0) or right (1) cheek has moved (mm): the scripts' `buttl` / `buttr`.
+    float buttockMoveMm(int side) const;
 
     // --- THE FIGURE'S PLACE AND HEADING (armaturedials.cpp; the Transform tab's Figure group) ---
     /// The rig root (the hips): the rig's root node, or without a rig the first bone with two
