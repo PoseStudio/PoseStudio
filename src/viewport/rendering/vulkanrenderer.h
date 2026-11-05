@@ -30,6 +30,7 @@
 #include "vulkancommon.h"
 #include "vulkanhandles.h"
 
+#include <glm/glm.hpp>
 #include <memory>
 #include <string>
 #include <utility>
@@ -43,6 +44,7 @@ class HdrTarget;
 class OutlineMask;
 class PostProcess;
 class ShaderLibrary;
+struct SplatData;
 class Grid;
 class Scene;
 struct ModelData;
@@ -96,6 +98,8 @@ public:
     /// GUI thread (the upload blocks briefly). Throws on Vulkan failure. Parsing + image decoding
     /// happen in the Qt layer (VulkanWindow), keeping this core free of file/codec concerns.
     void addModel(const ModelData& data);
+    /// Uploads a Gaussian splat scene (splatcloud.h) as a static model at @p transform.
+    void addSplatModel(const SplatData& data, const glm::mat4& transform);
 
     /// Removes the model at @p index from the scene, waiting for the GPU to go idle first so its
     /// buffers/descriptors aren't freed while an in-flight frame still references them.

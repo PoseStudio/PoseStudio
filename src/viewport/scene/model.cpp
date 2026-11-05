@@ -6,6 +6,9 @@
 
 #include "model.h"
 
+#include "splatcloud.h"
+#include "splatimporter.h"
+
 #include "descriptorutil.h"
 #include "modeldata.h"
 #include "ray.h"
@@ -252,6 +255,18 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
     }
 }
 
+Model::Model(VulkanContext& context, const SplatData& data, VkDescriptorSetLayout splatSetLayout) {
+    // A splat scene: the cloud in place of meshes, the bounds its centres', a static armature
+    // (no bones: the identity joint and the model transform).
+    m_splats = std::make_unique<SplatCloud>(context, data, splatSetLayout);
+    if (m_splats->count() > 0) {
+        m_boundsMin = m_splats->boundsMin();
+        m_boundsMax = m_splats->boundsMax();
+        m_hasBounds = true;
+    }
+    m_armature.build({});
+}
+
 // The pool frees every set it issued; the meshes (textures + buffers) and the pose buffers are
 // freed as members before it (reverse declaration order). The device is idle by the time a
 // Model dies (Scene waits before tearing models down), so nothing in flight references them.
@@ -484,6 +499,16 @@ bool Model::intersectRay(const Ray& ray, float& tOut) const {
         }
         tOut = tMin;
         return true;
+    }
+    if (m_splats) {
+        // A splat scene is an environment the camera usually stands INSIDE: from within its box
+        // no click is on it (what the user means is the figure in it), so it neither steals the
+        // selection nor the context menu.
+        glm::vec3 lo, hi;
+        if (worldBounds(lo, hi) && glm::all(glm::greaterThanEqual(ray.origin, lo)) &&
+            glm::all(glm::lessThanEqual(ray.origin, hi))) {
+            return false;
+        }
     }
     // Transform the ray into local space so we can slab-test the AABB directly (equivalent to an
     // oriented-box test in world space, but cheaper). The transform is affine, so the ray

@@ -69,7 +69,7 @@ private:
     QLabel*            m_jointName = nullptr; // the selected joint's name, or "No joint selected"
     QLabel*            m_hint = nullptr;      // how to get a joint selected (shown while none is)
     std::array<Row, 3> m_rows;                // indexed by JointDialKind
-    std::array<Row, 6> m_figureRows;          // the Figure group: x, y, z (cm), turn, tip, tilt (deg)
+    std::array<Row, 7> m_figureRows;          // the Figure group: x, y, z (cm), turn, tip, tilt (deg), scale (%, a static model's)
     QPushButton*       m_reset = nullptr;
 };
 

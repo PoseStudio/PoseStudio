@@ -108,6 +108,10 @@ public:
     /// importObj; routed to the FigureImportService.
     void importFigure(const QString& path);
 
+    /// Imports a Gaussian splat scene (`.ply` / `.splat`) as a static model. Same queue-until-ready
+    /// behaviour; routed to the SplatImportService.
+    void importSplat(const QString& path);
+
     /// Whether the scene holds a posable figure (gates the pose save/load actions).
     bool hasPosableFigure() const;
     /// Saves / loads the posed figure's joint rotations to/from @p path. Returns false if there's
@@ -192,6 +196,8 @@ public:
     /// turn / tip / tilt in degrees for the rotation (see JointTransform::Figure).
     void setFigurePosition(int axis, double cm);
     void setFigureRotation(int axis, double degrees);
+    /// The Figure group's Scale row (a static model's uniform scale, percent).
+    void setFigureScale(double pct);
 
     /// THE JOINT MOUSE MODE, as the rest of the application drives it (the mode itself is
     /// described with its members below). toggleJointModal is the B / S / T key (@p kind 0/1/2 =
@@ -368,7 +374,7 @@ private:
     /// An import requested before the renderer existed, replayed in request order once it does
     /// (command-line "open with" hands several in a row — the order must survive).
     struct PendingImport {
-        enum class Kind { Obj, Figure };
+        enum class Kind { Obj, Figure, Splat };
         Kind    kind = Kind::Obj;
         QString path;
     };

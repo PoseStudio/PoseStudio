@@ -114,6 +114,7 @@ void MenuManager::setupMenus() {
         {".FBX (FBX File)",                   &MenuManager::importFbxFile},
         {".GLB (GL Transmission Format .glTF)", &MenuManager::importGltfFile},
         {".OBJ (Wavefront)",                  &MenuManager::importObjFile},
+        {".PLY / .SPLAT (Gaussian Splat)",    &MenuManager::importSplatFile},
         {".USD (Universal Scene Description)", &MenuManager::importUsdFile},
         {".VRM (VRM Avatar)",                 &MenuManager::importVrmFile},
     };
@@ -602,6 +603,20 @@ void MenuManager::importUsdFile() {
 void MenuManager::importVrmFile() {
     // A VRM avatar: a GLB with a humanoid bone map, read by the glTF reader through the same route.
     importRiggedFile(tr("Import VRM Avatar"), tr("VRM Avatars (*.vrm)"));
+}
+
+void MenuManager::importSplatFile() {
+    // A Gaussian splat scene — the trained .ply or the compact .splat — as a static, unlit model
+    // (SplatImportService; drawn by the scene's splat pass).
+    if (!viewportWidget) return;
+    const QString path = QFileDialog::getOpenFileName(
+        mainWindow, tr("Import Gaussian Splat"), rememberedStartDir(Constants::PREF_LAST_IMPORT_DIR),
+        tr("Gaussian Splat Files (*.ply *.splat)"));
+    if (path.isEmpty()) return; // user cancelled
+
+    PreferencesManager::instance().setValue(Constants::PREF_LAST_IMPORT_DIR,
+                                            QFileInfo(path).absolutePath());
+    viewportWidget->importSplat(path);
 }
 
 void MenuManager::importRiggedFile(const QString &title, const QString &filter) {

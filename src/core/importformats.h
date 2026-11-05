@@ -2,7 +2,8 @@
  * @file importformats.h
  * @brief The one place that says which file extensions take which import route.
  *
- * Three routes exist: a static model (ModelImportService: `.obj`), a native figure preset
+ * Four routes exist: a static model (ModelImportService: `.obj`), a Gaussian splat scene
+ * (SplatImportService: `.ply` / `.splat`), a native figure preset
  * (FigureImportService: `.duf` / `.dsf`), and a rigged character in an interchange format
  * (RiggedImportService: `.fbx`, `.glb` / `.gltf`, `.usd` / `.usda` / `.usdc` / `.usdz`), the
  * last two sharing the "figure" entry points (ViewportWidget::importFigure, the Asset Manager's
@@ -47,6 +48,12 @@ inline bool isRiggedFile(const QString& path) {
         }
     }
     return false;
+}
+
+/// A Gaussian splat scene: the trained `.ply` or the compact `.splat` (SplatImportService).
+inline bool isSplatFile(const QString& path) {
+    return path.endsWith(QStringLiteral(".ply"), Qt::CaseInsensitive) ||
+           path.endsWith(QStringLiteral(".splat"), Qt::CaseInsensitive);
 }
 
 /// Anything the figure route imports: a native figure or a rigged interchange file.

@@ -107,7 +107,8 @@ VulkanRenderer::VulkanRenderer(VulkanContext& context, VkExtent2D initialExtent,
                                       shaders.get("shadow.vert"), shaders.get("shadow.frag"),
                                       shaders.get("background.vert"),
                                       shaders.get("background.frag"),
-                                      shaders.get("outlinemask.frag"));
+                                      shaders.get("outlinemask.frag"),
+                                      shaders.get("splat.vert"), shaders.get("splat.frag"));
 
     // The grid samples the scene's shadow map (ground/contact shadow) through the scene-wide
     // set 3, so its pipeline is built against that layout — Scene must exist first.
@@ -289,6 +290,10 @@ void VulkanRenderer::notifyResize(VkExtent2D newExtent) {
 
 void VulkanRenderer::addModel(const ModelData& data) {
     m_scene->addModel(data);
+}
+
+void VulkanRenderer::addSplatModel(const SplatData& data, const glm::mat4& transform) {
+    m_scene->addSplatModel(data, transform);
 }
 
 void VulkanRenderer::deleteModel(std::size_t index) {
@@ -560,6 +565,9 @@ bool VulkanRenderer::recordScenePasses(VkCommandBuffer cmd, const Camera& camera
     m_grid->record(cmd, camera, m_scene->iblSet(), m_scene->lightViewProj(),
                    glm::vec4(lighting.shadowIntensity, lighting.shadowSoftness,
                              lighting.shadowReach, 0.0f));
+    // Then the Gaussian splats (far-first, alpha-blended, depth-tested against the meshes): after
+    // the grid, so a capture's floor covers the grid's lines rather than wearing them.
+    m_scene->recordSplats(cmd, camera, frameSlot);
     vkCmdEndRenderPass(cmd);
 
     // --- SSSSS then bloom (PBR mode only — the stylized modes author display-ready values;

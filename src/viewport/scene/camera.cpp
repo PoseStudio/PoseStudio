@@ -24,6 +24,8 @@ constexpr float kPi = 3.14159265f;
 } // namespace
 
 void Camera::setViewportSize(float width, float height) {
+    m_viewportWidth = width > 0.0f ? width : 1.0f;
+    m_viewportHeight = height > 0.0f ? height : 1.0f;
     m_aspect = (height > 0.0f) ? (width / height) : 1.0f;
     rebuildProjection();
 }

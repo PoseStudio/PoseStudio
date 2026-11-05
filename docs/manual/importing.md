@@ -75,6 +75,16 @@ What to expect, compared with a native figure:
 
 A static file (no skeleton) in any of the three formats imports as a model, like an `.obj` — a prop, a helmet, a building — with its textures and materials; it can be selected, framed and deleted, not posed.
 
+## Gaussian splat scenes (.ply, .splat)
+
+A Gaussian splat scene — a photographed place or person reconstructed as hundreds of thousands of soft, coloured, translucent points — imports as a static object: **File → Import → .PLY / .SPLAT (Gaussian Splat)**, a double-click on the file in the Asset Manager, or the file on the command line. PoseStudio reads the `.ply` the reference 3D Gaussian Splatting trainers write (positions, scales, rotations, opacity and spherical-harmonic colour up to degree 3) and the compact `.splat`. A compressed splat file (a chunked `.ply`, `.spz`, `.ksplat`) is refused with a message naming it; export an uncompressed `.ply` from your splat tool instead.
+
+The scene is drawn as the trainers meant it: every splat sorted far to near for the current view and blended over what is behind it, its colour evaluated for the direction you look from, so highlights shift as you orbit. It keeps its photographed colours whatever the lighting dials say — a splat scene carries its own light, so the Environment tab's exposure, tonemap and lights leave it alone, and it casts and receives no shadow. Figures stand in it and in front of it as solid objects do: a figure between you and the scene hides that part of it, and a splat scene between you and the figure covers her. (In the PBR mode a very bright sky may glow a little; the Environment tab's Bloom dial turns that down.)
+
+A trained scene almost always comes out of its camera frame upside down, so PoseStudio turns it over on import; most captures then stand the way they were photographed, at their trained scale (a scene trained from phone video is usually roughly life-size). If yours stands wrong, select it and use the Transform tab's **Figure** group: Turn, Tip and Tilt set its orientation, Left-Right / Up-Down / Back-Forward place it, and **Scale** sizes it in percent of the size it was imported at (see [Posing](posing.md#placing-the-figure)). A splat scene you are standing inside cannot be clicked — a click there goes to the figure in it — so select it from outside its extent or right after import, and remove it with Edit → Delete Selected Object.
+
+Half a million splats sort in a few milliseconds when the camera moves; a scene of several million takes a moment per view change and a few hundred megabytes of graphics memory. A project (`.pss`) carries the scene by its file path and its placement.
+
 ## When the figure's data cannot be found
 
 A preset only works together with its content folder — the folder that directly contains a `data` folder. PoseStudio finds it by walking up from the file you imported. Content is often split, though: a folder of character presets may not contain the `data` folder they refer to. Then the import stops with the message *"PoseStudio couldn't find the geometry and morph data for…"* and the button **Locate Content Folder…**:

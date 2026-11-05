@@ -177,6 +177,8 @@ int main(int argc, char *argv[]) {
                      viewport, &pose::ViewportWidget::importObj);
     QObject::connect(assetsTab, &AssetManagerWidget::importFigureRequested,
                      viewport, &pose::ViewportWidget::importFigure);
+    QObject::connect(assetsTab, &AssetManagerWidget::importSplatRequested,
+                     viewport, &pose::ViewportWidget::importSplat);
 
     mainSplitter->addWidget(viewport);
     mainSplitter->addWidget(sidePanel);
@@ -236,6 +238,8 @@ int main(int argc, char *argv[]) {
             restoreClean = true;
         } else if (pose::ImportFormats::isModelFile(arg)) {
             viewport->importObj(arg);
+        } else if (pose::ImportFormats::isSplatFile(arg)) {
+            viewport->importSplat(arg);
         } else if (pose::ImportFormats::isFigureRouteFile(arg)) {
             viewport->importFigure(arg); // (an FBX / glTF / USD character takes the figure route too)
         } else if (arg.endsWith(QStringLiteral(".pose"), Qt::CaseInsensitive)) {

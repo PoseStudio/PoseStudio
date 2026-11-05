@@ -124,7 +124,7 @@ The **Transform** tab on the side panel places the whole figure and sets the sel
 
 ### Placing the figure
 
-The **Figure** group at the top of the tab moves and turns the active figure as a whole, as she is posed:
+The **Figure** group at the top of the tab moves and turns the active figure as a whole, as she is posed — or, with a static object selected and no figure active (an OBJ, a [Gaussian splat scene](importing.md#gaussian-splat-scenes-ply-splat)), that object:
 
 | Row | What it does |
 | --- | --- |
@@ -134,8 +134,9 @@ The **Figure** group at the top of the tab moves and turns the active figure as 
 | **Turn** | Turns her about the vertical, in degrees: 0 faces the way she was imported, positive turns her toward her left. |
 | **Tip** | Tips her forward (positive, face down) or back, about her own left-right axis. |
 | **Tilt** | Tilts her toward her left (positive) or right, about her own front-back axis. |
+| **Scale** | A static object's size, in percent of the size it was imported at. A figure keeps her own size: the row is off for her. |
 
-The three rotations compose in that order — turn, then tip, then tilt — each about her own axis as she then stands, and all three are about the hip joint, so a turn alone keeps the feet at their heights. The rows are scrub fields like the dials below them, and each scrub or typed value is one undo step. The place and the rotation are part of the pose: a pose file and a project carry them, and **Reset Pose** puts her back where she was imported, upright and facing the way she came. A `Ctrl` drag on the hips moves her the same way with the mouse, and the Ground button drops her to the floor from any height.
+The three rotations compose in that order — turn, then tip, then tilt — each about her own axis as she then stands, and all three are about the hip joint, so a turn alone keeps the feet at their heights. The rows are scrub fields like the dials below them, and each scrub or typed value is one undo step. The place and the rotation are part of the pose: a pose file and a project carry them, and **Reset Pose** puts her back where she was imported, upright and facing the way she came. A `Ctrl` drag on the hips moves her the same way with the mouse, and the Ground button drops her to the floor from any height. For a static object the rows read and set its placement directly rather than a pose: those edits are not undoable and a pose file does not carry them (a project does), and Reset Pose leaves the object where it is.
 
 ### The selected joint
 

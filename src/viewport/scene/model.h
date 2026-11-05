@@ -29,6 +29,7 @@
 #include <vulkan/vulkan.h>
 
 #include <array>
+#include <memory>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -41,6 +42,8 @@ class VulkanContext;
 class VulkanTexture;
 struct ModelData;
 struct Ray;
+class SplatCloud;
+struct SplatData;
 
 class Model {
 public:
@@ -51,7 +54,14 @@ public:
     Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayout materialSetLayout,
           VkDescriptorSetLayout poseSetLayout, const VulkanTexture& fallbackDiffuse,
           const VulkanTexture& fallbackNormal);
+    /// A GAUSSIAN SPLAT scene (splatcloud.h): a static model with no meshes and no skeleton,
+    /// drawn by the Scene's splat pass; its bounds are the splats' centres'.
+    Model(VulkanContext& context, const SplatData& data, VkDescriptorSetLayout splatSetLayout);
     ~Model();
+
+    /// The splat cloud of a splat-scene model, else null.
+    SplatCloud*       splats() { return m_splats.get(); }
+    const SplatCloud* splats() const { return m_splats.get(); }
 
     Model(const Model&) = delete;
     Model& operator=(const Model&) = delete;
@@ -292,6 +302,7 @@ private:
     Armature                 m_armature;
 
     std::string              m_sourcePath; // the import source file (the .pss document's reference)
+    std::unique_ptr<SplatCloud> m_splats;    // a Gaussian splat scene's cloud (splatcloud.h); null for a mesh model
 
     // Skinning upload: the armature's dual quaternions (see Armature::skinDualQuats) reach the
     // GPU through a storage buffer (set 2) bound per draw — ONE PER FRAME IN FLIGHT: interactive

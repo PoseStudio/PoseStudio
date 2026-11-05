@@ -16,6 +16,7 @@
 #include "figureimportservice.h"
 #include "importformats.h"
 #include "riggedimportservice.h"
+#include "splatimportservice.h"
 #include "ikdiagnostics.h"
 #include "ikscript.h"
 #include "modelimportservice.h"
@@ -277,6 +278,9 @@ bool VulkanWindow::runImport(const PendingImport& import, bool showProgress) {
                  ? RiggedImportService::importInto(*m_renderer, import.path, showProgress)
                  : FigureImportService::importInto(*m_renderer, import.path, showProgress);
         break;
+    case PendingImport::Kind::Splat:
+        ok = SplatImportService::importInto(*m_renderer, import.path, showProgress);
+        break;
     }
     if (ok) {
         markProjectDirty(); // a new model is a document change
@@ -308,6 +312,10 @@ void VulkanWindow::importObj(const QString& path) {
 
 void VulkanWindow::importFigure(const QString& path) {
     importOrQueue({PendingImport::Kind::Figure, path});
+}
+
+void VulkanWindow::importSplat(const QString& path) {
+    importOrQueue({PendingImport::Kind::Splat, path});
 }
 
 bool VulkanWindow::hasPosableFigure() const {

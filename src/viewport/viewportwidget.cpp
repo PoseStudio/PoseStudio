@@ -221,6 +221,10 @@ void ViewportWidget::importFigure(const QString& path) {
     withWindow([&](VulkanWindow& w) { w.importFigure(path); });
 }
 
+void ViewportWidget::importSplat(const QString& path) {
+    withWindow([&](VulkanWindow& w) { w.importSplat(path); });
+}
+
 bool ViewportWidget::hasPosableFigure() const {
     return m_window && m_window->hasPosableFigure();
 }
@@ -313,6 +317,10 @@ void ViewportWidget::setFigurePosition(int axis, double cm) {
 
 void ViewportWidget::setFigureRotation(int axis, double degrees) {
     withWindow([axis, degrees](VulkanWindow& w) { w.setFigureRotation(axis, degrees); });
+}
+
+void ViewportWidget::setFigureScale(double pct) {
+    withWindow([pct](VulkanWindow& w) { w.setFigureScale(pct); });
 }
 
 void ViewportWidget::setJointTransformDial(int dial, double value) {

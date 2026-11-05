@@ -36,12 +36,19 @@ struct JointTransform {
     /// about her own lateral axis (positive = forward, face down), then a TILT about her own
     /// forward axis (positive = toward her left). All of it is POSE: a pose file and a project
     /// carry it, Reset Pose takes it back, undo steps over it.
+    /// A STATIC model selected instead (an OBJ, a Gaussian splat scene) shows the same rows off
+    /// its MODEL TRANSFORM — plus Scale, in percent of the size it was imported at — with
+    /// isStatic set; those edits are not pose edits (no undo entry, not a pose file's), though a
+    /// project carries the transform.
     struct Figure {
-        bool  valid = false; ///< A posable figure is active (a joint need not be selected).
+        bool  valid = false; ///< A posable figure is active (a joint need not be selected), or a static model is selected.
         float x = 0.0f, y = 0.0f, z = 0.0f; ///< cm
         float turnDeg = 0.0f, tipDeg = 0.0f, tiltDeg = 0.0f;
+        float scalePct = 100.0f; ///< A static model's uniform scale (100 = as imported); a figure's reads 100 and is not editable.
+        bool  isStatic = false;  ///< The rows read and set a static model's transform.
         bool  operator==(const Figure& o) const {
-            return valid == o.valid && x == o.x && y == o.y && z == o.z && turnDeg == o.turnDeg && tipDeg == o.tipDeg && tiltDeg == o.tiltDeg;
+            return valid == o.valid && x == o.x && y == o.y && z == o.z && turnDeg == o.turnDeg && tipDeg == o.tipDeg &&
+                   tiltDeg == o.tiltDeg && scalePct == o.scalePct && isStatic == o.isStatic;
         }
     };
 

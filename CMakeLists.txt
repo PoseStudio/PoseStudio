@@ -397,6 +397,12 @@ add_executable(
     src/viewport/import/gltf/gltffigureimporter.h
     src/viewport/import/usd/usdfigureimporter.cpp   # the USD / USDZ figure reader (LightUSD + its render-scene layer)
     src/viewport/import/usd/usdfigureimporter.h
+    src/viewport/import/splat/splatimporter.cpp     # GAUSSIAN SPLATS: the .ply / .splat reader
+    src/viewport/import/splat/splatimporter.h
+    src/viewport/splatimportservice.cpp             # the Qt-facing splat import (reader, progress, upload)
+    src/viewport/splatimportservice.h
+    src/viewport/scene/splatcloud.cpp               # the splats on the GPU: buffers, the far-first sort, the draw
+    src/viewport/scene/splatcloud.h
     src/viewport/scene/ik/rigconformer.cpp          # the rig standard's conformer: frames, orders and limits per role
     src/viewport/scene/ik/rigconformer.h
     src/viewport/riggedimportservice.cpp            # the Qt-facing rigged-character import (reader by extension, conform, upload)
@@ -633,6 +639,7 @@ target_include_directories(PoseStudio PRIVATE
     src/viewport/import/fbx
     src/viewport/import/gltf
     src/viewport/import/usd
+    src/viewport/import/splat
     src/viewport/import/rigged
     src/viewport/vr
     ${ufbx_SOURCE_DIR}                       # so <ufbx.h> resolves
@@ -939,6 +946,8 @@ set(SHADER_SOURCES
     sssblur.frag
     outlinemask.frag
     depthresolve.frag
+    splat.vert
+    splat.frag
 )
 
 set(COMPILED_SPV_FILES "")

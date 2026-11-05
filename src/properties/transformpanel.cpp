@@ -55,16 +55,17 @@ void TransformPanel::buildUi() {
     // "we have to be able to easily position the character (up down left right) and twist the
     // entire character") — the rig root's pose translation and heading, a pose edit like a dial's.
     QFormLayout* figure = propertyrows::addGroup(col, tr("Figure"));
-    const std::array<QString, 6> figureLabels = {tr("Left-Right"), tr("Up-Down"), tr("Back-Forward"), tr("Turn"), tr("Tip"), tr("Tilt")};
-    const std::array<QString, 6> figureTips = {
+    const std::array<QString, 7> figureLabels = {tr("Left-Right"), tr("Up-Down"), tr("Back-Forward"), tr("Turn"), tr("Tip"), tr("Tilt"), tr("Scale")};
+    const std::array<QString, 7> figureTips = {
         tr("Moves the whole figure, as posed, to her left (positive) or right, in centimetres."),
         tr("Moves the whole figure up (positive) or down, in centimetres. The Ground button puts her back on the floor."),
         tr("Moves the whole figure forward (positive, the way an unturned figure faces) or back, in centimetres."),
         tr("Turns the whole figure about the vertical, in degrees: 0 faces the way she was imported, positive turns her toward her left."),
         tr("Tips the whole figure forward (positive, face down) or back, in degrees, about her own left-right axis."),
         tr("Tilts the whole figure toward her left (positive) or right, in degrees, about her own front-back axis."),
+        tr("A static model's size (an OBJ, a Gaussian splat scene), in percent of the size it was imported at. A figure keeps her own."),
     };
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 7; ++i) {
         Row& row = m_figureRows[static_cast<std::size_t>(i)];
         row.label = new QLabel(figureLabels[static_cast<std::size_t>(i)]);
         row.label->setToolTip(figureTips[static_cast<std::size_t>(i)]);
@@ -73,12 +74,18 @@ void TransformPanel::buildUi() {
             row.box->setRange(-500.0, 500.0);
             row.box->setSingleStep(1.0);
             row.box->setDecimals(1);
-        } else {
+            row.box->setOrigin(0.0);
+        } else if (i < 6) {
             row.box->setRange(-180.0, 180.0);
             row.box->setSingleStep(1.0);
             row.box->setDecimals(0);
+            row.box->setOrigin(0.0);
+        } else {
+            row.box->setRange(1.0, 2000.0);
+            row.box->setSingleStep(5.0);
+            row.box->setDecimals(0);
+            row.box->setOrigin(100.0); // (as imported)
         }
-        row.box->setOrigin(0.0);
         row.box->setToolTip(figureTips[static_cast<std::size_t>(i)]);
         connect(row.box, &DragNumberBox::editingStarted, this, [this]() {
             if (m_viewport) {
@@ -94,20 +101,26 @@ void TransformPanel::buildUi() {
             if (m_viewport) {
                 if (i < 3) {
                     m_viewport->setFigurePosition(i, value);
-                } else {
+                } else if (i < 6) {
                     m_viewport->setFigureRotation(i - 3, value);
+                } else {
+                    m_viewport->setFigureScale(value);
                 }
                 refresh();
             }
         });
         row.restore = propertyrows::makeRestoreButton();
-        row.restore->setToolTip(i < 3 ? tr("Back to 0: where she was imported") : tr("Back to 0: as she was imported"));
+        row.restore->setToolTip(i < 3 ? tr("Back to 0: where she was imported")
+                                : i < 6 ? tr("Back to 0: as she was imported")
+                                        : tr("Back to 100: the size it was imported at"));
         connect(row.restore, &QToolButton::clicked, this, [this, i]() {
             if (m_viewport && m_viewport->beginJointTransformEdit()) {
                 if (i < 3) {
                     m_viewport->setFigurePosition(i, 0.0);
-                } else {
+                } else if (i < 6) {
                     m_viewport->setFigureRotation(i - 3, 0.0);
+                } else {
+                    m_viewport->setFigureScale(100.0);
                 }
                 m_viewport->endJointTransformEdit();
                 refresh();
@@ -197,16 +210,17 @@ void TransformPanel::refresh() {
     const JointTransform state = m_viewport ? m_viewport->jointTransform() : JointTransform{};
     {
         const JointTransform::Figure& fig = state.figure;
-        const std::array<double, 6>   values = {fig.x, fig.y, fig.z, fig.turnDeg, fig.tipDeg, fig.tiltDeg};
+        const std::array<double, 7>   values = {fig.x, fig.y, fig.z, fig.turnDeg, fig.tipDeg, fig.tiltDeg, fig.scalePct};
         for (std::size_t i = 0; i < m_figureRows.size(); ++i) {
-            Row& row = m_figureRows[i];
+            Row&       row = m_figureRows[i];
+            const bool on = fig.valid && (i < 6 || fig.isStatic); // (Scale is a static model's row)
             {
                 const QSignalBlocker blocker(row.box);
-                row.box->setValue(fig.valid ? values[i] : 0.0);
+                row.box->setValue(fig.valid ? values[i] : (i == 6 ? 100.0 : 0.0));
             }
-            row.box->setEnabled(fig.valid);
-            row.label->setEnabled(fig.valid);
-            row.restore->setEnabled(fig.valid);
+            row.box->setEnabled(on);
+            row.label->setEnabled(on);
+            row.restore->setEnabled(on);
         }
     }
     m_jointName->setText(state.valid ? QString::fromStdString(state.name) : tr("No joint selected"));

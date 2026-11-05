@@ -45,7 +45,8 @@ public:
     ScenePipelines(VulkanContext& context, VkRenderPass renderPass,
                    const std::vector<char>& vertSpirv, const std::vector<char>& fragSpirv,
                    const std::vector<char>& backgroundVertSpirv,
-                   const std::vector<char>& backgroundFragSpirv);
+                   const std::vector<char>& backgroundFragSpirv,
+                   const std::vector<char>& splatVertSpirv, const std::vector<char>& splatFragSpirv);
     ~ScenePipelines();
 
     ScenePipelines(const ScenePipelines&) = delete;
@@ -56,6 +57,7 @@ public:
     VkDescriptorSetLayout materialSetLayout() const { return m_materialSetLayout.get(); }
     VkDescriptorSetLayout poseSetLayout() const { return m_poseSetLayout.get(); }
     VkDescriptorSetLayout iblSetLayout() const { return m_iblSetLayout.get(); }
+    VkDescriptorSetLayout splatSetLayout() const { return m_splatSetLayout.get(); } ///< The splat pipeline's set 1 (splatcloud.h).
 
     // --- Per-frame camera/lighting UBO (set 0, binding 0): one buffer + set per frame in flight ---
     VkDescriptorSet cameraSet(uint32_t frameIndex) const { return m_cameraSets[frameIndex]; }
@@ -82,6 +84,7 @@ public:
     const VulkanPipeline* wire() const { return m_wire.get(); }          // triangle EDGES; null: device can't
     const VulkanPipeline& hiddenLine() const { return *m_hiddenLine; }   // depth-only surface fill
     const VulkanPipeline& background() const { return *m_background; }   // HDRI backdrop (PBR mode)
+    const VulkanPipeline& splat() const { return *m_splat; }             // Gaussian splats, far-first alpha-blended (splatcloud.h)
 
 private:
     VkDevice m_device = VK_NULL_HANDLE;
@@ -106,6 +109,9 @@ private:
     // SAME shadow map through the non-comparison sampler (raw depths for the ground shadow's
     // PCSS blocker search). All fragment-stage; one static set for the whole scene.
     UniqueDescriptorSetLayout m_iblSetLayout;
+    // The Gaussian splat pipeline's set 1: the splats, their harmonics and this frame's draw order
+    // — three storage buffers read in the vertex stage; each SplatCloud owns its sets.
+    UniqueDescriptorSetLayout m_splatSetLayout;
     UniqueDescriptorPool      m_cameraPool;
     UniqueDescriptorPool      m_iblPool;
     std::vector<VulkanBuffer>    m_cameraBuffers;
@@ -119,6 +125,7 @@ private:
     std::unique_ptr<VulkanPipeline> m_transparent;
     std::unique_ptr<VulkanPipeline> m_wire;
     std::unique_ptr<VulkanPipeline> m_hiddenLine;
+    std::unique_ptr<VulkanPipeline> m_splat;
     std::unique_ptr<VulkanPipeline> m_background;
 };
 

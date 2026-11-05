@@ -131,6 +131,7 @@ along the bone's limb segment — the flesh, where a user clicks — instead of 
 | `dialjoint.<bone>` | 1 if the Transform tab shows that joint (a selected twist bone shows its bend joint), else 0. |
 | `modal` | The dial the joint mouse mode is turning (0 / 1 / 2 = bend / side / twist), -1 with the mode off. |
 | `figures` / `dirty` | The models in the scene / 1 while the `.pss` document has unsaved changes. Neither needs a figure. |
+| `figure.scale` / `figure.static` | The Figure group's Scale row (percent) / 1 while the group reads a selected STATIC model (a Gaussian splat scene, an OBJ) instead of a figure. The `figure.*` metrics need no figure. |
 | `palm.<bone>.<x\|y\|z>` | A hand's palm normal, that world component (+1/-1): where a hand laid on the body faces. The figures face +z, their right side is -x. |
 
 Expectations are regression guards set from what the app does today, with margin — not

@@ -19,6 +19,7 @@
 #include "outlinepass.h"
 #include "scenepipelines.h"
 #include "shadowpass.h"
+#include "splatcloud.h"
 #include "vulkancontext.h"
 #include "vulkanpipeline.h"
 
@@ -40,11 +41,13 @@ Scene::Scene(VulkanContext& context, VkRenderPass renderPass, VkRenderPass outli
              const std::vector<char>& shadowVertSpirv, const std::vector<char>& shadowFragSpirv,
              const std::vector<char>& backgroundVertSpirv,
              const std::vector<char>& backgroundFragSpirv,
-             const std::vector<char>& outlineMaskFragSpirv)
+             const std::vector<char>& outlineMaskFragSpirv,
+             const std::vector<char>& splatVertSpirv, const std::vector<char>& splatFragSpirv)
     : m_context(context) {
     // The shared plumbing first: every pass below builds against its layouts.
     m_pipelines = std::make_unique<ScenePipelines>(m_context, renderPass, vertSpirv, fragSpirv,
-                                                   backgroundVertSpirv, backgroundFragSpirv);
+                                                   backgroundVertSpirv, backgroundFragSpirv,
+                                                   splatVertSpirv, splatFragSpirv);
 
     // The shadow pass (map + pipeline) needs the pose set layout; the scene-wide set 3 needs the
     // map — so the pass is built right after the layouts and its map written into set 3 next,
@@ -110,6 +113,40 @@ void Scene::addModel(const ModelData& data) {
                                                m_pipelines->fallbackDiffuse(),
                                                m_pipelines->fallbackNormal()));
     setSelectedModel(static_cast<int>(m_models.size()) - 1); // the new arrival is the selection
+}
+
+void Scene::addSplatModel(const SplatData& data, const glm::mat4& transform) {
+    m_models.push_back(std::make_unique<Model>(m_context, data, m_pipelines->splatSetLayout()));
+    m_models.back()->setTransform(transform);
+    setSelectedModel(static_cast<int>(m_models.size()) - 1);
+}
+
+void Scene::recordSplats(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex) {
+    bool any = false;
+    for (const std::unique_ptr<Model>& model : m_models) {
+        if (model->splats() != nullptr) {
+            any = true;
+            break;
+        }
+    }
+    if (!any) {
+        return;
+    }
+    const VulkanPipeline& pipeline = m_pipelines->splat();
+    const VkDescriptorSet cameraSet = m_pipelines->cameraSet(frameIndex);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0, 1, &cameraSet, 0, nullptr);
+    // The composite will ACES-tonemap the HDR target in the PBR mode (with the dial on): the
+    // splats' display-referred colours go in through the inverse curve and come out as trained.
+    const bool inverseTonemap = isPbr() && m_lighting.tonemap;
+    for (const std::unique_ptr<Model>& model : m_models) {
+        SplatCloud* cloud = model->splats();
+        if (cloud == nullptr) {
+            continue;
+        }
+        cloud->prepareFrame(camera, model->transform(), frameIndex);
+        cloud->record(cmd, pipeline.layout(), frameIndex, camera, model->transform(), inverseTonemap);
+    }
 }
 
 int Scene::selectedModelIndex() const {

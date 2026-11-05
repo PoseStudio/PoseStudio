@@ -57,7 +57,9 @@ ScenePipelines::ScenePipelines(VulkanContext& context, VkRenderPass renderPass,
                                const std::vector<char>& vertSpirv,
                                const std::vector<char>& fragSpirv,
                                const std::vector<char>& backgroundVertSpirv,
-                               const std::vector<char>& backgroundFragSpirv)
+                               const std::vector<char>& backgroundFragSpirv,
+                               const std::vector<char>& splatVertSpirv,
+                               const std::vector<char>& splatFragSpirv)
     : m_device(context.device()) {
     // --- Layouts (see the member comments for what each set carries) ---
     m_cameraSetLayout = createDescriptorSetLayout(
@@ -71,6 +73,8 @@ ScenePipelines::ScenePipelines(VulkanContext& context, VkRenderPass renderPass,
     m_iblSetLayout = createDescriptorSetLayout(
         m_device, uniformBindings(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                   VK_SHADER_STAGE_FRAGMENT_BIT));
+    m_splatSetLayout = createDescriptorSetLayout(
+        m_device, uniformBindings(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT));
 
     // --- The scene-wide IBL/shadow set: one static set, its bindings written by
     // writeShadowMap (once) and writeEnvironment (per environment). ---
@@ -168,6 +172,24 @@ ScenePipelines::ScenePipelines(VulkanContext& context, VkRenderPass renderPass,
         config.descriptorSetLayouts = {m_cameraSetLayout.get(), m_iblSetLayout.get()};
         m_background = std::make_unique<VulkanPipeline>(context, renderPass, backgroundVertSpirv,
                                                         backgroundFragSpirv, config);
+    }
+
+    // GAUSSIAN SPLATS (splatcloud.h): six vertices a splat from gl_VertexIndex (no vertex buffer),
+    // alpha-blended far-first over the opaque geometry — depth-tested against it, never written
+    // (a translucent cloud must not occlude), the HDR target's alpha (the SSS mask) left alone,
+    // the specular attachment masked. Its own two-set layout: 0 = camera UBO, 1 = the cloud's
+    // buffers; the push block is splat.vert's (vertex stage only).
+    {
+        PipelineConfig config;
+        config.pushConstantSize = 112; // sizeof(SplatPushConstants)
+        config.pushConstantStages = VK_SHADER_STAGE_VERTEX_BIT;
+        config.blendEnable = true;
+        config.depthTestEnable = true;
+        config.depthWriteEnable = false;
+        config.colorWriteAlpha = false;
+        config.colorAttachmentCount = 2;
+        config.descriptorSetLayouts = {m_cameraSetLayout.get(), m_splatSetLayout.get()};
+        m_splat = std::make_unique<VulkanPipeline>(context, renderPass, splatVertSpirv, splatFragSpirv, config);
     }
 }
 

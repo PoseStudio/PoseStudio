@@ -45,6 +45,7 @@ class ShadowPass;
 class VulkanContext;
 struct ModelData;
 struct Ray;
+struct SplatData;
 
 /**
  * @class Scene
@@ -61,7 +62,8 @@ public:
           const std::vector<char>& shadowVertSpirv, const std::vector<char>& shadowFragSpirv,
           const std::vector<char>& backgroundVertSpirv,
           const std::vector<char>& backgroundFragSpirv,
-          const std::vector<char>& outlineMaskFragSpirv);
+          const std::vector<char>& outlineMaskFragSpirv,
+          const std::vector<char>& splatVertSpirv, const std::vector<char>& splatFragSpirv);
     ~Scene();
 
     Scene(const Scene&) = delete;
@@ -72,6 +74,9 @@ public:
     /// import landed). Call from the GUI thread between frames (the upload blocks briefly on its
     /// own one-time submit; it touches no in-flight state).
     void addModel(const ModelData& data);
+    /// Adds a Gaussian splat scene (splatcloud.h) as a static model at @p transform (the import
+    /// service turns the capture's y-down frame over); it becomes the selection.
+    void addSplatModel(const SplatData& data, const glm::mat4& transform);
 
     // --- Object selection (the outlined model) ---
     /// The selected model's index, or -1 when nothing is selected. The selection is what the
@@ -141,6 +146,11 @@ public:
     /// (skeleton / pins / the orthographic floor line — always, even with no models). The caller
     /// has begun the render pass and set the dynamic viewport/scissor.
     void record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex);
+    /// The GAUSSIAN SPLAT pass (splatcloud.h): every splat model's cloud, sorted far-first for
+    /// this view and alpha-blended, depth-tested against the opaque geometry. Recorded by the
+    /// renderer AFTER the grid, so the floor's lines lie under a capture's floor instead of
+    /// drawing across its legs (a splat writes no depth). No-op without a splat model.
+    void recordSplats(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex);
 
     // The grid's ground shadow samples the scene's shadow map through the scene-wide set 3 (the
     // IBL set — binding 2 is the shadow map). Grid's pipeline is built against this layout and
@@ -300,6 +310,9 @@ public:
     /// True when something moved.
     bool  setFigurePosition(int axis, float cm);
     bool  setFigureRotationDeg(int axis, float degrees);
+    /// A STATIC model's uniform scale in percent of its imported size (the Transform tab's Scale
+    /// row); false for a figure or with nothing static selected.
+    bool setFigureScalePct(float pct);
 
     // --- Pose snapshot (for undo/redo) ---
     std::vector<std::pair<std::string, glm::vec3>> capturePose() const;
@@ -319,6 +332,10 @@ private:
     /// that isn't the outlined selection.
     Model*       figureModel();
     const Model* figureModel() const;
+    /// The selected model when it is STATIC (no skeleton: an OBJ, a splat scene) and no figure is
+    /// active — what the Transform tab's Figure group places then; else null.
+    Model*       selectedStaticModel();
+    const Model* selectedStaticModel() const;
 
     VulkanContext& m_context;
 

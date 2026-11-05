@@ -71,6 +71,11 @@ public:
     /// an axis view is a locked drawing only until the user turns it).
     void setOrthographic(bool on);
     bool orthographic() const { return m_orthographic; }
+    /// The projection as built (perspective or orthographic — or the explicit one in VR Mode).
+    const glm::mat4& projection() const { return m_projection; }
+    /// The viewport the projection was built for (pixels): the splat pass sizes its footprints by it.
+    float viewportWidth() const { return m_viewportWidth; }
+    float viewportHeight() const { return m_viewportHeight; }
 
     const glm::vec3& target() const { return m_target; }
     float            pitch() const { return m_pitch; }
@@ -113,6 +118,8 @@ private:
     float m_pitch = glm::radians(kDefaultPitchDegrees);
     float m_fovYRadians = glm::radians(50.0f);
     float m_aspect = 1.0f;
+    float m_viewportWidth = 1.0f;
+    float m_viewportHeight = 1.0f;
     float m_nearPlane = 0.05f;
     float m_farPlane = 1000.0f;
     bool  m_orthographic = false; // see setOrthographic(); the projection depends on m_distance then

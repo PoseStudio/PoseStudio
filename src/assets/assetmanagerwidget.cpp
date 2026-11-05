@@ -994,6 +994,8 @@ void AssetManagerWidget::onGridItemDoubleClicked(QListWidgetItem *item) {
         // Character figure (native, or a rigged FBX / glTF / USD): import it into the 3D viewport
         // (same path as File -> Import / open-with).
         emit importFigureRequested(path);
+    } else if (pose::ImportFormats::isSplatFile(path)) {
+        emit importSplatRequested(path); // a Gaussian splat scene, as a static model
     } else {
         QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     }

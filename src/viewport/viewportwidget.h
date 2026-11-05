@@ -63,6 +63,9 @@ public:
     /// degraded to the Vulkan-unavailable message.
     void importFigure(const QString& path);
 
+    /// Imports a Gaussian splat scene (`.ply` / `.splat`) into the 3D scene as a static model.
+    void importSplat(const QString& path);
+
     /// Whether the scene holds a posable figure (gates the pose save/load menu actions).
     bool hasPosableFigure() const;
     /// Saves / loads the posed figure's joint rotations to/from @p path. Returns false on failure
@@ -121,6 +124,7 @@ public:
     void endJointTransformEdit();
     void setFigurePosition(int axis, double cm); ///< The Figure group: see VulkanWindow::setFigurePosition.
     void setFigureRotation(int axis, double degrees);
+    void setFigureScale(double pct); ///< A static model's Scale row (percent).
     /// The B / S / T key, wherever the keyboard focus is (the Edit menu's actions carry the keys
     /// application-wide): the joint mouse mode on dial @p kind (0/1/2 = Bend / Side-Side /
     /// Twist) of the selected joint — on, off again, or switched to it

@@ -241,6 +241,15 @@ void VulkanWindow::scriptStep() {
             } else {
                 say("[ikscript]   move refused (a drag owns the pose)\n");
             }
+        } else if (cmd == QLatin1String("scale") && w.size() > 1) {
+            // scale <percent>: a STATIC model's uniform scale (the Figure group's Scale row; a
+            // figure keeps her own size).
+            if (beginJointTransformEdit()) {
+                setFigureScale(num(1));
+                endJointTransformEdit();
+            } else {
+                say("[ikscript]   scale refused (a drag owns the pose)\n");
+            }
         } else if ((cmd == QLatin1String("turn") || cmd == QLatin1String("tip") || cmd == QLatin1String("tilt")) && w.size() > 1) {
             // turn / tip / tilt <degrees>: the whole figure's rotation about the vertical, about
             // her own lateral axis (forward positive), about her own forward axis (her left down
@@ -722,6 +731,17 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         value = isProjectDirty() ? 1.0 : 0.0;
         return true;
     }
+    if (name.startsWith(QLatin1String("figure."), Qt::CaseInsensitive)) {
+        // (The Figure group's rows: a posable figure's, or a selected STATIC model's — a splat
+        // scene, an OBJ — which has no armature.)
+        const JointTransform::Figure fig = jointTransform().figure;
+        const QString                which = name.mid(7).toLower();
+        value = which == QLatin1String("x") ? fig.x : which == QLatin1String("y") ? fig.y : which == QLatin1String("z") ? fig.z
+                : which == QLatin1String("tip") ? fig.tipDeg : which == QLatin1String("tilt") ? fig.tiltDeg
+                : which == QLatin1String("scale") ? fig.scalePct : which == QLatin1String("static") ? (fig.isStatic ? 1.0f : 0.0f)
+                                                                                                   : fig.turnDeg;
+        return true;
+    }
     const Armature* arm = scene().figureArmature();
     if (arm == nullptr) {
         return false;
@@ -740,11 +760,6 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
             return false;
         }
         value = glm::length(grab - s.cursorWorld) * 1000.0;
-    } else if (key == QLatin1String("figure") && part.size() > 1) {
-        const JointTransform::Figure fig = jointTransform().figure;
-        const QString                which = part[1].toLower();
-        value = which == QLatin1String("x") ? fig.x : which == QLatin1String("y") ? fig.y : which == QLatin1String("z") ? fig.z
-                : which == QLatin1String("tip") ? fig.tipDeg : which == QLatin1String("tilt") ? fig.tiltDeg : fig.turnDeg;
     } else if ((key == QLatin1String("dial") || key == QLatin1String("dialmin") || key == QLatin1String("dialmax")) &&
                part.size() > 1) {
         const JointTransform transform = jointTransform();

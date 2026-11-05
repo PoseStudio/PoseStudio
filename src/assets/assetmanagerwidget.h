@@ -84,6 +84,9 @@ signals:
     /// the owner can import it into the 3D viewport. Carries the asset's absolute file path.
     void importFigureRequested(const QString& path);
 
+    /// Emitted when the user double-clicks a Gaussian splat scene (`.ply` / `.splat`) in the grid.
+    void importSplatRequested(const QString& path);
+
 private slots:
     /// A tree row was clicked: section headers toggle their expansion, everything browsable
     /// is shown in the grid.
