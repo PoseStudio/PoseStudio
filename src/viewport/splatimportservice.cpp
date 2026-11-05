@@ -30,11 +30,14 @@ bool SplatImportService::importInto(VulkanRenderer& renderer, const QString& pat
             throw std::runtime_error("the file holds no splats");
         }
         progress.phase(QObject::tr("Uploading to the GPU"));
-        // The capture's frame is y-down (the reference implementation's camera convention):
+        // A `.ply` or `.splat` is y-down (the reference implementation's camera convention):
         // turned over about x — in the DATA, so the model transform starts at the identity and
         // the Transform tab reads 0 for this orientation — the scene stands the way its
-        // photographs did. The user turns, tips, moves and scales it from there.
-        turnOverYDown(data);
+        // photographs did (an `.spz` is y-up as written). The user turns, tips, moves and
+        // scales it from there.
+        if (data.yDown) {
+            turnOverYDown(data);
+        }
         renderer.addSplatModel(data, glm::mat4(1.0f));
         Scene& scene = renderer.scene();
         scene.modelAt(scene.modelCount() - 1)->setSourcePath(path.toStdString());

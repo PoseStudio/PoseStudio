@@ -2,18 +2,21 @@
 
 // GAUSSIAN SPLATS — the fragment stage: the Gaussian's falloff off the corner's σ-unit
 // coordinates (the quad spans ±3σ along the 2D covariance's eigenvectors; past 3σ the footprint
-// is cut round), times the splat's opacity, blended over what is behind it in far-first order
-// (standard alpha blending; the HDR target's alpha, the SSS mask, is not written — the
-// pipeline masks it).
+// is cut round), times the splat's opacity, blended far-first into the PHOTO LAYER — the HDR
+// pass's third colour attachment, where the splats accumulate display-referred, in the trainers'
+// own colour space, as premultiplied colour + coverage (the pipeline's "over" blend); the
+// composite lays the layer over the tonemapped scene. The HDR colour, the SSS mask and the
+// specular (attachments 0 and 1) are not written: a figure inside a capture is shaded as ever
+// underneath and covered where the splats cover her.
 //
 // Pass:    the HDR scene pass (see splat.vert).
-// Inputs:  vLocal, vColor from splat.vert.
-// Outputs: location 0 -> the HDR colour (attachment 1, the specular target, is masked off).
+// Inputs:  vLocal, vColor from splat.vert (the colour as trained, sRGB-encoded 0..1).
+// Outputs: location 2 -> the photo layer (colour, coverage).
 
 layout(location = 0) in vec2 vLocal;
 layout(location = 1) in vec4 vColor;
 
-layout(location = 0) out vec4 outColor;
+layout(location = 2) out vec4 outPhoto;
 
 void main() {
     float r2 = dot(vLocal, vLocal);
@@ -24,5 +27,5 @@ void main() {
     if (alpha < 1.0 / 255.0) {
         discard;
     }
-    outColor = vec4(vColor.rgb, alpha);
+    outPhoto = vec4(vColor.rgb, alpha);
 }

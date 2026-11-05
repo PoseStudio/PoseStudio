@@ -114,18 +114,20 @@ double movedSincePress(const Armature& arm, const IkScript& s, int bone) {
 
 } // namespace
 
-/// The script's first step, once a posable figure exists (polled: a command-line figure imports
-/// through the progress dialog, whose event loop fires this timer mid-import).
+/// The script's first step, once a posable figure — or, for a look at a static model alone (a
+/// splat capture), any model — exists (polled: a command-line figure imports through the
+/// progress dialog, whose event loop fires this timer mid-import).
 void VulkanWindow::startScript() {
     IkScript& s = *m_script;
     // (As the bench: a command-line figure imports through the progress dialog, whose event loop
-    // fires this timer mid-import. Poll until a posable figure exists.)
-    if ((!m_renderer || !scene().hasPosableFigure()) && s.retries++ < 120) {
+    // fires this timer mid-import. Poll until a posable figure, or any model, exists.)
+    const auto ready = [&] { return m_renderer && (scene().hasPosableFigure() || scene().modelCount() > 0); };
+    if (!ready() && s.retries++ < 120) {
         QTimer::singleShot(500, this, &VulkanWindow::startScript);
         return;
     }
-    if (!m_renderer || !scene().hasPosableFigure()) {
-        say("[ikscript] no posable figure: give one on the command line\n");
+    if (!ready()) {
+        say("[ikscript] no figure or model: give one on the command line\n");
         std::_Exit(2);
     }
     say("[ikscript] %d commands, output in %s\n", static_cast<int>(s.lines.size()), qPrintable(s.outDir));
@@ -186,6 +188,11 @@ void VulkanWindow::scriptStep() {
             requestUpdate();
         } else if (cmd == QLatin1String("frame")) {
             frameSelected();
+        } else if (cmd == QLatin1String("lookat") && w.size() > 4) {
+            // lookat <x> <y> <z> <radius m>: the camera framed on a WORLD point — a splat scene's
+            // face or hands, which no bone names (closeup frames a joint).
+            m_renderer->camera().frame(glm::vec3(num(1), num(2), num(3)), std::max(0.02f, num(4)));
+            requestUpdate();
         } else if (cmd == QLatin1String("closeup") && w.size() > 2) {
             // closeup <bone> <radius m>: the camera framed on that joint — a hand, a foot, the face
             // (what a user does with the wheel and a pan before posing a finger).

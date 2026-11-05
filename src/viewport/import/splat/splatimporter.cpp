@@ -5,6 +5,10 @@
 
 #include "splatimporter.h"
 
+#include "figuredocument.h" // gunzip (miniz): an .spz is one gzip stream
+
+#include <glm/gtc/packing.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -310,6 +314,148 @@ SplatData loadSplat(const std::string& path) {
     return data;
 }
 
+/// The Niantic SPZ layout, versions 1-3 (one gzip stream): a 16-byte header — the magic "NGSP"
+/// (0x5053474e little-endian), the version, the point count, the harmonics' degree, the
+/// positions' fractional bits, a flags byte (bit 0: trained antialiased) and a reserved byte —
+/// then the attributes as WHOLE ARRAYS in this order: positions (version 1: three float16; else
+/// three 24-bit signed fixed-point integers over 2^fractionalBits), alphas (one byte: the opacity
+/// × 255), colours (three bytes: the degree-0 coefficient × 0.15 + 0.5, × 255), scales (three
+/// bytes: (log scale + 10) × 16), rotations (version 2: the quaternion's x, y, z as v × 127.5 +
+/// 127.5 with w ≥ 0 derived; version 3: "smallest three" in one 32-bit word — the top two bits the
+/// index of the largest component, then three 10-bit fields, a sign bit over a 9-bit magnitude
+/// of the component over 1/√2, the largest derived) and the harmonics (one byte a coefficient,
+/// v × 128 + 128, coefficient-major with r, g, b interleaved, the reference's basis order). The
+/// frame is RUB — x right, y up, z toward the viewer — which is where turnOverYDown puts a
+/// `.ply`, so an `.spz` is not turned. Version 4 (ZSTD streams behind a plaintext "NGSP" header)
+/// is refused with a message.
+SplatData loadSpz(const std::string& path) {
+    const std::vector<char> file = readWholeFile(path);
+    const auto*             raw = reinterpret_cast<const uint8_t*>(file.data());
+    if (file.size() >= 4 && raw[0] == 'N' && raw[1] == 'G' && raw[2] == 'S' && raw[3] == 'P') {
+        throw std::runtime_error("this .spz is version 4 (ZSTD-compressed), which is not read yet; save it as SPZ version 3 or earlier, or as a .ply: " + path);
+    }
+    if (file.size() < 2 || raw[0] != 0x1f || raw[1] != 0x8b) {
+        throw std::runtime_error("not an .spz file (no gzip stream): " + path);
+    }
+    const std::vector<uint8_t> bytes = gunzip(raw, file.size());
+    if (bytes.size() < 16) {
+        throw std::runtime_error("the .spz is truncated (no header): " + path);
+    }
+    const auto u32 = [&](std::size_t o) {
+        return static_cast<uint32_t>(bytes[o]) | (static_cast<uint32_t>(bytes[o + 1]) << 8) |
+               (static_cast<uint32_t>(bytes[o + 2]) << 16) | (static_cast<uint32_t>(bytes[o + 3]) << 24);
+    };
+    if (u32(0) != 0x5053474eu) {
+        throw std::runtime_error("not an .spz file (bad magic): " + path);
+    }
+    const uint32_t version = u32(4);
+    if (version < 1 || version > 3) {
+        throw std::runtime_error("SPZ version " + std::to_string(version) + " is not read (versions 1 to 3 are): " + path);
+    }
+    const std::size_t count = u32(8);
+    const int         fileDegree = bytes[12];
+    const int         fracBits = std::min<int>(bytes[13], 30);
+    const uint8_t     flags = bytes[14];
+    if (fileDegree < 0 || fileDegree > 4) {
+        throw std::runtime_error("the .spz names a harmonics degree of " + std::to_string(fileDegree) + " (0 to 4 are defined): " + path);
+    }
+    if (count == 0) {
+        throw std::runtime_error("the .spz holds no splats: " + path);
+    }
+    const int         shDim = fileDegree == 0 ? 0 : fileDegree == 1 ? 3 : fileDegree == 2 ? 8 : fileDegree == 3 ? 15 : 24;
+    const std::size_t posBytes = version == 1 ? 6 : 9;
+    const std::size_t rotBytes = version >= 3 ? 4 : 3;
+    const std::size_t perPoint = posBytes + 1 + 3 + 3 + rotBytes + static_cast<std::size_t>(shDim) * 3;
+    if (bytes.size() < 16 + count * perPoint) {
+        throw std::runtime_error("the .spz is truncated (" + std::to_string(bytes.size()) + " bytes for " + std::to_string(count) +
+                                 " splats of " + std::to_string(perPoint) + "): " + path);
+    }
+    const uint8_t* positions = bytes.data() + 16;
+    const uint8_t* alphas = positions + count * posBytes;
+    const uint8_t* colors = alphas + count;
+    const uint8_t* scales = colors + count * 3;
+    const uint8_t* rotations = scales + count * 3;
+    const uint8_t* harmonics = rotations + count * rotBytes;
+
+    SplatData data;
+    data.format = "spz";
+    data.yDown = false;
+    data.antialiased = (flags & 0x1u) != 0;
+    data.shDegree = std::min(fileDegree, 3); // (a degree-4 band is left out: the renderer evaluates to 3)
+    const int coeffs = data.coefficients();
+    data.positions.resize(count);
+    data.scales.resize(count);
+    data.rotations.resize(count);
+    data.opacities.resize(count);
+    data.sh.resize(count * static_cast<std::size_t>(coeffs) * 3);
+    const float posScale = 1.0f / static_cast<float>(1u << fracBits);
+    constexpr float kColorScale = 0.15f;
+    constexpr float kInvSqrt2 = 0.70710678118654752f;
+    for (std::size_t i = 0; i < count; ++i) {
+        const uint8_t* p = positions + i * posBytes;
+        glm::vec3      pos;
+        for (int c = 0; c < 3; ++c) {
+            if (version == 1) {
+                const uint16_t h = static_cast<uint16_t>(p[c * 2] | (p[c * 2 + 1] << 8));
+                pos[c] = glm::unpackHalf1x16(h);
+            } else {
+                int32_t v = static_cast<int32_t>(p[c * 3]) | (static_cast<int32_t>(p[c * 3 + 1]) << 8) |
+                            (static_cast<int32_t>(p[c * 3 + 2]) << 16);
+                if (v & 0x800000) {
+                    v -= 0x1000000; // sign-extend the 24 bits
+                }
+                pos[c] = static_cast<float>(v) * posScale;
+            }
+        }
+        data.positions[i] = pos;
+        data.opacities[i] = static_cast<float>(alphas[i]) / 255.0f;
+        const uint8_t* s = scales + i * 3;
+        glm::vec3      scale(std::exp(static_cast<float>(s[0]) / 16.0f - 10.0f), std::exp(static_cast<float>(s[1]) / 16.0f - 10.0f),
+                             std::exp(static_cast<float>(s[2]) / 16.0f - 10.0f));
+        data.scales[i] = glm::clamp(scale, glm::vec3(1e-6f), glm::vec3(2.0f));
+        const uint8_t* r = rotations + i * rotBytes;
+        float          q[4]; // x, y, z, w — the SPZ order
+        if (version >= 3) {
+            const uint32_t word = static_cast<uint32_t>(r[0]) | (static_cast<uint32_t>(r[1]) << 8) |
+                                  (static_cast<uint32_t>(r[2]) << 16) | (static_cast<uint32_t>(r[3]) << 24);
+            const int largest = static_cast<int>(word >> 30);
+            float     sum = 0.0f;
+            int       field = 0;
+            for (int j = 0; j < 4; ++j) {
+                if (j == largest) {
+                    continue;
+                }
+                const uint32_t g = (word >> (20 - 10 * field)) & 0x3ffu;
+                ++field;
+                const float mag = static_cast<float>(g & 0x1ffu) / 511.0f * kInvSqrt2;
+                q[j] = (g & 0x200u) ? -mag : mag;
+                sum += q[j] * q[j];
+            }
+            q[largest] = std::sqrt(std::max(0.0f, 1.0f - sum));
+        } else {
+            for (int c = 0; c < 3; ++c) {
+                q[c] = (static_cast<float>(r[c]) - 127.5f) / 127.5f;
+            }
+            q[3] = std::sqrt(std::max(0.0f, 1.0f - (q[0] * q[0] + q[1] * q[1] + q[2] * q[2])));
+        }
+        glm::vec4 rot(q[3], q[0], q[1], q[2]); // (w, x, y, z)
+        finishRotation(rot);
+        data.rotations[i] = rot;
+        float*         sh = &data.sh[i * static_cast<std::size_t>(coeffs) * 3];
+        const uint8_t* col = colors + i * 3;
+        for (int c = 0; c < 3; ++c) {
+            sh[c] = (static_cast<float>(col[c]) / 255.0f - 0.5f) / kColorScale;
+        }
+        const uint8_t* h = harmonics + i * static_cast<std::size_t>(shDim) * 3;
+        for (int k = 1; k < coeffs; ++k) {
+            for (int c = 0; c < 3; ++c) {
+                sh[k * 3 + c] = (k - 1) < shDim ? (static_cast<float>(h[(k - 1) * 3 + c]) - 128.0f) / 128.0f : 0.0f;
+            }
+        }
+    }
+    return data;
+}
+
 } // namespace
 
 void turnOverYDown(SplatData& data) {
@@ -351,10 +497,13 @@ SplatData loadSplatFile(const std::string& path) {
     if (ext == ".splat") {
         return loadSplat(path);
     }
-    if (ext == ".spz" || ext == ".ksplat") {
-        throw std::runtime_error("the " + ext + " splat format is not supported yet; export an uncompressed .ply or a .splat: " + path);
+    if (ext == ".spz") {
+        return loadSpz(path);
     }
-    throw std::runtime_error("not a Gaussian splat file (.ply or .splat): " + path);
+    if (ext == ".ksplat") {
+        throw std::runtime_error("the .ksplat format is not supported yet; export a .ply, a .splat or an .spz: " + path);
+    }
+    throw std::runtime_error("not a Gaussian splat file (.ply, .splat or .spz): " + path);
 }
 
 } // namespace pose

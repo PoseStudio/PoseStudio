@@ -41,6 +41,7 @@ struct PostPush {
 PostProcess::PostProcess(VulkanContext& context, VkRenderPass swapchainRenderPass,
                          const VkDescriptorImageInfo& hdrResolve,
                          const VkDescriptorImageInfo& hdrSpecResolve,
+                         const VkDescriptorImageInfo& hdrPhotoResolve,
                          const VkDescriptorImageInfo& outlineMask, VkExtent2D extent,
                          const std::vector<char>& fullscreenVertSpirv,
                          const std::vector<char>& brightFragSpirv,
@@ -63,12 +64,12 @@ PostProcess::PostProcess(VulkanContext& context, VkRenderPass swapchainRenderPas
 
     m_sampler = m_context.samplers().get(SamplerDesc::linearClamp());
 
-    // --- Descriptors: one 3-sampler layout, seven sets (bright/blurH/blurV/composite/sssH/sssV
+    // --- Descriptors: one 4-sampler layout, seven sets (bright/blurH/blurV/composite/sssH/sssV
     // + the mirror composite over another chain's images, see setMirrorSource). ----------------
     m_setLayout = createDescriptorSetLayout(
-        device, uniformBindings(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT));
+        device, uniformBindings(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT));
     // (+ an eighth for VR Mode's depth resolve over the eye target's MSAA depth.)
-    m_pool = createDescriptorPool(device, {poolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 24)}, 8);
+    m_pool = createDescriptorPool(device, {poolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32)}, 8);
     std::array<VkDescriptorSet, 8> sets{};
     allocateDescriptorSets(device, m_pool.get(), m_setLayout.get(), static_cast<uint32_t>(sets.size()),
                            sets.data());
@@ -101,19 +102,20 @@ PostProcess::PostProcess(VulkanContext& context, VkRenderPass swapchainRenderPas
         m_context, swapchainRenderPass, fullscreenVertSpirv, compositeFragSpirv, postConfig);
 
     createTargets();
-    updateDescriptors(hdrResolve, hdrSpecResolve, outlineMask);
+    updateDescriptors(hdrResolve, hdrSpecResolve, hdrPhotoResolve, outlineMask);
 }
 
 PostProcess::~PostProcess() = default; // members clean up in reverse declaration order
 
 void PostProcess::resize(VkExtent2D extent, const VkDescriptorImageInfo& hdrResolve,
                          const VkDescriptorImageInfo& hdrSpecResolve,
+                         const VkDescriptorImageInfo& hdrPhotoResolve,
                          const VkDescriptorImageInfo& outlineMask) {
     m_extent = extent;
     m_hdrResolveView = hdrResolve.imageView;
     destroyTargets();
     createTargets();
-    updateDescriptors(hdrResolve, hdrSpecResolve, outlineMask);
+    updateDescriptors(hdrResolve, hdrSpecResolve, hdrPhotoResolve, outlineMask);
 }
 
 void PostProcess::createTargets() {
@@ -155,16 +157,18 @@ void PostProcess::destroyTargets() {
 
 void PostProcess::updateDescriptors(const VkDescriptorImageInfo& hdrResolve,
                                     const VkDescriptorImageInfo& hdrSpecResolve,
+                            const VkDescriptorImageInfo& hdrPhotoResolve,
                                     const VkDescriptorImageInfo& outlineMask) {
     const VkDescriptorImageInfo aInfo = sampledImageInfo(m_bloomA.image.view(), m_sampler);
     const VkDescriptorImageInfo bInfo = sampledImageInfo(m_bloomB.image.view(), m_sampler);
     const VkDescriptorImageInfo sssInfo = sampledImageInfo(m_sssScratch.image.view(), m_sampler);
 
     // (set, binding, image): bright reads HDR; blurH reads A; blurV reads B; composite reads
-    // HDR + A + the selection-outline mask; sssH reads HDR; sssV reads the SSS scratch + the
-    // SPECULAR resolve (added back after the blur — the blur must never smear glints).
+    // HDR + A + the selection-outline mask + the PHOTO layer (the splats, laid over at the end);
+    // sssH reads HDR; sssV reads the SSS scratch + the SPECULAR resolve (added back after the
+    // blur — the blur must never smear glints).
     //
-    // The DUPLICATE-WRITE trick: every set uses the same three-binding layout, but most shaders
+    // The DUPLICATE-WRITE trick: every set uses the same four-binding layout, but most shaders
     // declare only binding 0 (or 0 and 1). Vulkan requires every binding a pipeline's layout
     // declares to hold a valid descriptor when the set is bound (VUID-vkCmdDraw-None-02699 and
     // kin), whether or not the shader reads it — so a pass's unused bindings are written with its
@@ -180,35 +184,43 @@ void PostProcess::updateDescriptors(const VkDescriptorImageInfo& hdrResolve,
     const VkDescriptorImageInfo* mirrorHdr = m_hasMirror ? &m_mirrorInfos[0] : &hdrResolve;
     const VkDescriptorImageInfo* mirrorBloom = m_hasMirror ? &m_mirrorInfos[1] : &aInfo;
     const VkDescriptorImageInfo* mirrorOutline = m_hasMirror ? &m_mirrorInfos[2] : &outlineMask;
+    const VkDescriptorImageInfo* mirrorPhoto = m_hasMirror ? &m_mirrorInfos[3] : &hdrPhotoResolve;
     // (The depth-resolve set is written by enableDepthResolve, from a target that never resizes;
     // until then it holds this chain's HDR image so a stray bind is valid.)
     const VkDescriptorImageInfo* depthSource = m_depthResolvePipeline ? nullptr : &hdrResolve;
     if (depthSource != nullptr) {
-        const VkDescriptorImageInfo infos[3] = {*depthSource, *depthSource, *depthSource};
-        writeCombinedImageSamplers(m_context.device(), m_depthResolveSet, 0, infos, 3);
+        const VkDescriptorImageInfo infos[4] = {*depthSource, *depthSource, *depthSource, *depthSource};
+        writeCombinedImageSamplers(m_context.device(), m_depthResolveSet, 0, infos, 4);
     }
-    const std::array<Entry, 21> entries{{{m_brightSet, 0, &hdrResolve},
+    const std::array<Entry, 28> entries{{{m_brightSet, 0, &hdrResolve},
                                          {m_brightSet, 1, &hdrResolve},
                                          {m_brightSet, 2, &hdrResolve},
+                                         {m_brightSet, 3, &hdrResolve},
                                          {m_blurHSet, 0, &aInfo},
                                          {m_blurHSet, 1, &aInfo},
                                          {m_blurHSet, 2, &aInfo},
+                                         {m_blurHSet, 3, &aInfo},
                                          {m_blurVSet, 0, &bInfo},
                                          {m_blurVSet, 1, &bInfo},
                                          {m_blurVSet, 2, &bInfo},
+                                         {m_blurVSet, 3, &bInfo},
                                          {m_compositeSet, 0, &hdrResolve},
                                          {m_compositeSet, 1, &aInfo},
                                          {m_compositeSet, 2, &outlineMask},
+                                         {m_compositeSet, 3, &hdrPhotoResolve},
                                          {m_sssHSet, 0, &hdrResolve},
                                          {m_sssHSet, 1, &hdrResolve},
                                          {m_sssHSet, 2, &hdrResolve},
+                                         {m_sssHSet, 3, &hdrResolve},
                                          {m_sssVSet, 0, &sssInfo},
                                          {m_sssVSet, 1, &hdrSpecResolve},
                                          {m_sssVSet, 2, &sssInfo},
+                                         {m_sssVSet, 3, &sssInfo},
                                          {m_mirrorSet, 0, mirrorHdr},
                                          {m_mirrorSet, 1, mirrorBloom},
-                                         {m_mirrorSet, 2, mirrorOutline}}};
-    std::array<VkWriteDescriptorSet, 21> writes{};
+                                         {m_mirrorSet, 2, mirrorOutline},
+                                         {m_mirrorSet, 3, mirrorPhoto}}};
+    std::array<VkWriteDescriptorSet, 28> writes{};
     for (std::size_t i = 0; i < entries.size(); ++i) {
         writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet = entries[i].set;
@@ -295,12 +307,13 @@ void PostProcess::recordComposite(VkCommandBuffer cmd, bool tonemap, bool bloom,
 }
 
 void PostProcess::setMirrorSource(const VkDescriptorImageInfo& hdrResolve, const VkDescriptorImageInfo& bloom,
-                                  const VkDescriptorImageInfo& outlineMask) {
+                                  const VkDescriptorImageInfo& outlineMask, const VkDescriptorImageInfo& photo) {
     m_mirrorInfos[0] = hdrResolve;
     m_mirrorInfos[1] = bloom;
     m_mirrorInfos[2] = outlineMask;
+    m_mirrorInfos[3] = photo;
     m_hasMirror = true;
-    writeCombinedImageSamplers(m_context.device(), m_mirrorSet, 0, m_mirrorInfos, 3);
+    writeCombinedImageSamplers(m_context.device(), m_mirrorSet, 0, m_mirrorInfos, 4);
 }
 
 void PostProcess::clearMirrorSource() {
@@ -310,8 +323,8 @@ void PostProcess::clearMirrorSource() {
     m_hasMirror = false;
     // Point the set back at this chain's own images (they outlive the mirror's) so it stays valid.
     const VkDescriptorImageInfo aInfo = sampledImageInfo(m_bloomA.image.view(), m_sampler);
-    const VkDescriptorImageInfo infos[3] = {aInfo, aInfo, aInfo};
-    writeCombinedImageSamplers(m_context.device(), m_mirrorSet, 0, infos, 3);
+    const VkDescriptorImageInfo infos[4] = {aInfo, aInfo, aInfo, aInfo};
+    writeCombinedImageSamplers(m_context.device(), m_mirrorSet, 0, infos, 4);
 }
 
 VkDescriptorImageInfo PostProcess::bloomInfo() const {
@@ -323,8 +336,8 @@ void PostProcess::enableDepthResolve(VkRenderPass depthRenderPass, const VkDescr
                                      const std::vector<char>& depthResolveFragSpirv) {
     m_depthResolvePass = depthRenderPass;
     m_depthSamples = sampleCount;
-    const VkDescriptorImageInfo infos[3] = {msaaDepth, msaaDepth, msaaDepth}; // (binding 0 read; the rest valid)
-    writeCombinedImageSamplers(m_context.device(), m_depthResolveSet, 0, infos, 3);
+    const VkDescriptorImageInfo infos[4] = {msaaDepth, msaaDepth, msaaDepth, msaaDepth}; // (binding 0 read; the rest valid)
+    writeCombinedImageSamplers(m_context.device(), m_depthResolveSet, 0, infos, 4);
 
     // A depth-only single-sample pipeline: the fullscreen triangle writes gl_FragDepth and the
     // depth test (LESS against the pass's clear of 1.0) lets every nearer value land.

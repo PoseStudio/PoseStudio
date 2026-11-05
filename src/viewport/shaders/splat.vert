@@ -7,15 +7,15 @@
 // 0.3 px low-pass dilation), whose eigenvectors and ±3σ extents place the quad's corner in
 // pixels; the fragment then reads the Gaussian off the corner's local (σ-unit) coordinates. The
 // colour is the splat's spherical harmonics evaluated along the eye→splat direction IN THE
-// SPLAT'S OWN FRAME (the model matrix never touches the harmonics), sRGB-decoded, and — when the
-// composite will tonemap the HDR target — put through the INVERSE of its ACES curve, so the
-// capture's colours come out of the display as they went into training.
+// SPLAT'S OWN FRAME (the model matrix never touches the harmonics), handed on AS TRAINED — the
+// trainers' display-referred values — to the pass's photo layer, where the splats blend in that
+// space and the composite lays them over the tonemapped scene (see splat.frag).
 //
-// Pass:    the HDR scene pass, after the opaque meshes (depth-tested against them, no depth
-//          write), before the transparent meshes.
+// Pass:    the HDR scene pass, after the grid (depth-tested against the opaque meshes, no depth
+//          write), into the photo layer (colour attachment 2).
 // Inputs:  set 0 the camera UBO; set 1 the splat buffers (0 = position+opacity / covariance,
 //          1 = the harmonics as packed halves, 2 = this frame's draw order); push constants.
-// Outputs: vLocal (the corner in σ units), vColor (linear rgb + the splat's opacity).
+// Outputs: vLocal (the corner in σ units), vColor (the colour as trained + the splat's opacity).
 
 #extension GL_GOOGLE_include_directive : enable
 #include "camera_ubo.glsl"
@@ -27,8 +27,8 @@ layout(set = 1, binding = 2) readonly buffer Order { uint index[]; } order;     
 layout(push_constant) uniform PC {
     mat4 model;
     vec4 focal;  // x = fx, y = fy (pixels per unit of NDC·w), z = viewport width, w = height
-    vec4 params; // x = SH degree, y = harmonics uints per splat, z = inverse-tonemap (0/1), w = orthographic (0/1)
-    vec4 camPos; // xyz = the eye in the splat's own (model) space; w unused
+    vec4 params; // x = SH degree, y = harmonics uints per splat, z unused, w = orthographic (0/1)
+    vec4 camPos; // xyz = the eye in the splat's own (model) space; w = 1 for a scene trained antialiased
 } pc;
 
 layout(location = 0) out vec2 vLocal;
@@ -55,21 +55,7 @@ vec3 shCoeff(uint base, uint k) {
     return c;
 }
 
-vec3 srgbToLinear(vec3 c) {
-    vec3 lo = c / 12.92;
-    vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
-    return mix(lo, hi, step(vec3(0.04045), c));
-}
 
-// The inverse of colour.glsl's tonemapACES, per channel: y = x(ax+b) / (x(cx+d)+e) solved for x.
-vec3 acesInverse(vec3 y) {
-    const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
-    y = min(y, vec3(0.99));
-    vec3 A = a - c * y;
-    vec3 B = b - d * y;
-    vec3 C = -e * y;
-    return (-B + sqrt(max(B * B - 4.0 * A * C, vec3(0.0)))) / (2.0 * A);
-}
 
 void cull() {
     gl_Position = vec4(0.0, 0.0, 2.0, 1.0); // outside the clip box: no fragments
@@ -116,9 +102,15 @@ void main() {
         j0 = vec3(fx / tz, 0.0, -fx * posV.x / z2);
         j1 = vec3(0.0, fy / tz, -fy * posV.y / z2);
     }
-    float a = dot(j0, covV * j0) + 0.3;
+    float a0 = dot(j0, covV * j0);
     float b = dot(j0, covV * j1);
-    float d = dot(j1, covV * j1) + 0.3;
+    float d0 = dot(j1, covV * j1);
+    float a = a0 + 0.3;
+    float d = d0 + 0.3;
+    // A scene trained with the antialiasing (mip-splatting) formulation expects the opacity
+    // scaled by what the dilation did to the footprint — sqrt(det before / det after) — so a
+    // sub-pixel splat does not come out brighter than it was trained.
+    float aaScale = pc.camPos.w > 0.5 ? sqrt(max((a0 * d0 - b * b) / max(a * d - b * b, 1e-12), 0.0)) : 1.0;
     float mid = 0.5 * (a + d);
     float disc = sqrt(max(mid * mid - (a * d - b * b), 0.0));
     float l1 = max(mid + disc, 1e-4);
@@ -157,10 +149,10 @@ void main() {
             }
         }
     }
+    // The colour AS TRAINED — the trainers' display-referred 0..1 values, sRGB-encoded as their
+    // photographs were — goes to the photo layer untouched: the splats must blend in that space
+    // to come out as the training did (decoded, or put through the inverse tonemap, before the
+    // blend, every bright splat weighed more than it was trained to: speckles, a sheen).
     col = clamp(col + 0.5, 0.0, 1.0);
-    vec3 lin = srgbToLinear(col);
-    if (pc.params.z > 0.5) {
-        lin = min(acesInverse(lin), vec3(3.0)); // (a white sky stays bright but does not bloom like a lamp)
-    }
-    vColor = vec4(lin, p0.w);
+    vColor = vec4(col, p0.w * aaScale);
 }

@@ -50,11 +50,15 @@ public:
     /// @param hdrSpecResolve      The HDR target's resolved SPECULAR descriptor — sampled by the
     ///                            SSS V-pass, which adds it back after diffusing (the blur must
     ///                            never smear glints; smeared specular reads as wet skin).
+    /// @param hdrPhotoResolve     The HDR target's resolved PHOTO LAYER — the Gaussian splats,
+    ///                            premultiplied colour + coverage in the trainers' own colour
+    ///                            space, which the composite lays over the tonemapped scene.
     /// @param outlineMask         The selection-outline coverage mask (OutlineMask) the composite
     ///                            dilates into the outline (re-fed on resize).
     PostProcess(VulkanContext& context, VkRenderPass swapchainRenderPass,
                 const VkDescriptorImageInfo& hdrResolve,
                 const VkDescriptorImageInfo& hdrSpecResolve,
+                const VkDescriptorImageInfo& hdrPhotoResolve,
                 const VkDescriptorImageInfo& outlineMask, VkExtent2D extent,
                 const std::vector<char>& fullscreenVertSpirv,
                 const std::vector<char>& brightFragSpirv, const std::vector<char>& blurFragSpirv,
@@ -69,6 +73,7 @@ public:
     /// target and outline mask. Caller must have made the device idle.
     void resize(VkExtent2D extent, const VkDescriptorImageInfo& hdrResolve,
                 const VkDescriptorImageInfo& hdrSpecResolve,
+                const VkDescriptorImageInfo& hdrPhotoResolve,
                 const VkDescriptorImageInfo& outlineMask);
 
     /// Records the screen-space subsurface scattering blur: two full-res masked passes, HDR
@@ -101,11 +106,11 @@ public:
                          const CompositeOptions& options = {});
 
     /// Points the MIRROR composite (CompositeOptions::fromMirror) at another chain's outputs: its
-    /// HDR resolve, its bloom target (bloomInfo()) and its outline mask — the desktop viewport's
-    /// window onto what the headset sees. Kept across resize(); clearMirrorSource() drops it
-    /// (call before those images are destroyed).
+    /// HDR resolve, its bloom target (bloomInfo()), its outline mask and its photo layer — the
+    /// desktop viewport's window onto what the headset sees. Kept across resize();
+    /// clearMirrorSource() drops it (call before those images are destroyed).
     void setMirrorSource(const VkDescriptorImageInfo& hdrResolve, const VkDescriptorImageInfo& bloom,
-                         const VkDescriptorImageInfo& outlineMask);
+                         const VkDescriptorImageInfo& outlineMask, const VkDescriptorImageInfo& photo);
     void clearMirrorSource();
     /// The final bloom target (sampled, SHADER_READ_ONLY after recordBloom) — a mirror source.
     VkDescriptorImageInfo bloomInfo() const;
@@ -132,6 +137,7 @@ private:
     void destroyTargets();
     void updateDescriptors(const VkDescriptorImageInfo& hdrResolve,
                            const VkDescriptorImageInfo& hdrSpecResolve,
+                   const VkDescriptorImageInfo& hdrPhotoResolve,
                            const VkDescriptorImageInfo& outlineMask);
     void runFullscreenPass(VkCommandBuffer cmd, VkFramebuffer framebuffer, VkExtent2D extent,
                            const VulkanPipeline& pipeline, VkDescriptorSet set,
@@ -167,7 +173,7 @@ private:
     VkDescriptorSet           m_sssVSet = VK_NULL_HANDLE;      // 0 = SSS scratch, 1 = spec resolve
     VkDescriptorSet           m_mirrorSet = VK_NULL_HANDLE;    // the composite over setMirrorSource's images
     bool                      m_hasMirror = false;
-    VkDescriptorImageInfo     m_mirrorInfos[3]{};              // hdr, bloom, outline (re-written on resize)
+    VkDescriptorImageInfo     m_mirrorInfos[4]{};              // hdr, bloom, outline, photo (re-written on resize)
     VkDescriptorSet           m_depthResolveSet = VK_NULL_HANDLE; // 0 = the MSAA depth (enableDepthResolve)
     VkRenderPass              m_depthResolvePass = VK_NULL_HANDLE; // borrowed (the session's)
     uint32_t                  m_depthSamples = 1;

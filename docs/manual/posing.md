@@ -124,7 +124,7 @@ The **Transform** tab on the side panel places the whole figure and sets the sel
 
 ### Placing the figure
 
-The **Figure** group at the top of the tab moves and turns the active figure as a whole, as she is posed — or, with a static object selected and no figure active (an OBJ, a [Gaussian splat scene](importing.md#gaussian-splat-scenes-ply-splat)), that object:
+The **Figure** group at the top of the tab moves and turns the active figure as a whole, as she is posed — or, with a static object selected and no figure active (an OBJ, a [Gaussian splat scene](importing.md#gaussian-splat-scenes-ply-splat-spz)), that object:
 
 | Row | What it does |
 | --- | --- |

@@ -114,7 +114,7 @@ void MenuManager::setupMenus() {
         {".FBX (FBX File)",                   &MenuManager::importFbxFile},
         {".GLB (GL Transmission Format .glTF)", &MenuManager::importGltfFile},
         {".OBJ (Wavefront)",                  &MenuManager::importObjFile},
-        {".PLY / .SPLAT (Gaussian Splat)",    &MenuManager::importSplatFile},
+        {".PLY / .SPLAT / .SPZ (Gaussian Splat)",    &MenuManager::importSplatFile},
         {".USD (Universal Scene Description)", &MenuManager::importUsdFile},
         {".VRM (VRM Avatar)",                 &MenuManager::importVrmFile},
     };
@@ -611,7 +611,7 @@ void MenuManager::importSplatFile() {
     if (!viewportWidget) return;
     const QString path = QFileDialog::getOpenFileName(
         mainWindow, tr("Import Gaussian Splat"), rememberedStartDir(Constants::PREF_LAST_IMPORT_DIR),
-        tr("Gaussian Splat Files (*.ply *.splat)"));
+        tr("Gaussian Splat Files (*.ply *.splat *.spz)"));
     if (path.isEmpty()) return; // user cancelled
 
     PreferencesManager::instance().setValue(Constants::PREF_LAST_IMPORT_DIR,

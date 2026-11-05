@@ -21,7 +21,8 @@
 // the eye's near-square image fills the viewport's wider aspect without stretching.
 //
 // Pass:    the swapchain present pass (single-sample), the frame's only draw there.
-// Inputs:  set 0.0 the (SSS-diffused) HDR resolve, 0.1 the bloom target, 0.2 the outline mask;
+// Inputs:  set 0.0 the (SSS-diffused) HDR resolve, 0.1 the bloom target, 0.2 the outline mask,
+//          0.3 the PHOTO layer (the Gaussian splats: premultiplied colour + coverage, sRGB-encoded);
 //          push: params (tonemap, bloom strength, bloom on, outline width px), the outline colour
 //          (+ the sRGB-encode flag in .w), the UV crop (scale.xy, offset.xy).
 // Outputs: location 0 -> the swapchain image (the sRGB store gamma-encodes, unless outline.w).
@@ -32,6 +33,7 @@
 layout(set = 0, binding = 0) uniform sampler2D uHdr;
 layout(set = 0, binding = 1) uniform sampler2D uBloom;
 layout(set = 0, binding = 2) uniform sampler2D uOutline;
+layout(set = 0, binding = 3) uniform sampler2D uPhoto;
 
 layout(push_constant) uniform PC {
     vec4 params;  // x = tonemap (0/1), y = bloom strength, z = bloom on (0/1),
@@ -74,11 +76,27 @@ vec3 encodeSrgb(vec3 c) {
     return mix(lo, hi, step(vec3(0.0031308), c));
 }
 
+// Its inverse: an sRGB-encoded value back to linear.
+vec3 decodeSrgb(vec3 c) {
+    vec3 lo = c / 12.92;
+    vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
+    return mix(lo, hi, step(vec3(0.04045), c));
+}
+
 void main() {
     vec2 uv = vUv * pc.uvRect.xy + pc.uvRect.zw;
     vec3 color = texture(uHdr, uv).rgb;
     color += texture(uBloom, uv).rgb * pc.params.y * pc.params.z;
     color = pc.params.x > 0.5 ? tonemapACES(color) : clamp(color, vec3(0.0), vec3(1.0));
+    // THE PHOTO LAYER: the Gaussian splats, accumulated in the HDR pass as premultiplied colour +
+    // coverage in the trainers' own display-referred space, laid OVER the tonemapped scene in
+    // that space — so a capture's photographed colours come out as they went into training,
+    // whatever the lighting dials, and a figure inside it is covered exactly as the splats
+    // cover her.
+    vec4 photo = texture(uPhoto, uv);
+    if (photo.a > 0.0) {
+        color = decodeSrgb(photo.rgb + (1.0 - photo.a) * encodeSrgb(clamp(color, vec3(0.0), vec3(1.0))));
+    }
     if (pc.params.w > 0.0) {
         color = mix(color, pc.outline.rgb, outlineWeight(uv, pc.params.w));
     }

@@ -5,6 +5,8 @@
 
 #include "hdrtarget.h"
 
+#include <array>
+
 #include "renderpassbuilder.h"
 #include "samplercache.h"
 #include "vulkancommon.h"
@@ -23,14 +25,17 @@ HdrTarget::HdrTarget(VulkanContext& context, VkExtent2D extent, bool storeDepth)
     const VkSampleCountFlagBits samples = m_context.sampleCount();
     const bool msaa = samples != VK_SAMPLE_COUNT_1_BIT;
 
-    // Render pass: TWO colour attachments in RGBA16F, both ending SHADER_READ_ONLY for the post
+    // Render pass: THREE colour attachments in RGBA16F, all ending SHADER_READ_ONLY for the post
     // passes. Colour 0 = the scene (diffuse for the PBR mode — the SSS blur diffuses it in
     // place); colour 1 = the PBR mode's SPECULAR, which the blur must never smear (smeared glints
-    // read as a wet film on skin) — the SSS V-pass adds it back after diffusing. Under MSAA each
-    // colour attachment is a transient multisampled target resolved into its own single-sample
-    // image; single-sample, the colour images are stored and sampled directly. Attachment order
-    // (see attachmentCount()): colourMS(0)/depth(1)/resolve(2)/specMS(3)/specResolve(4), or
-    // colour(0)/depth(1)/spec(2).
+    // read as a wet film on skin) — the SSS V-pass adds it back after diffusing; colour 2 = the
+    // PHOTO LAYER, the Gaussian splats accumulated display-referred (premultiplied colour +
+    // coverage, in the trainers' own colour space) that the composite lays over the tonemapped
+    // scene. Under MSAA each colour attachment is a transient multisampled target resolved into
+    // its own single-sample image; single-sample, the colour images are stored and sampled
+    // directly. Attachment order (see attachmentCount()):
+    // colourMS(0)/depth(1)/resolve(2)/specMS(3)/specResolve(4)/photoMS(5)/photoResolve(6), or
+    // colour(0)/depth(1)/spec(2)/photo(3).
     const VkAttachmentStoreOp colorStore = msaa ? VK_ATTACHMENT_STORE_OP_DONT_CARE
                                                : VK_ATTACHMENT_STORE_OP_STORE;
     const VkImageLayout colorFinal = msaa ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
@@ -47,6 +52,10 @@ HdrTarget::HdrTarget(VulkanContext& context, VkExtent2D extent, bool storeDepth)
         pass.resolve(kColorFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
     pass.color(kColorFormat, samples, VK_ATTACHMENT_LOAD_OP_CLEAR, colorStore, colorFinal); // spec
+    if (msaa) {
+        pass.resolve(kColorFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
+    pass.color(kColorFormat, samples, VK_ATTACHMENT_LOAD_OP_CLEAR, colorStore, colorFinal); // photo
     if (msaa) {
         pass.resolve(kColorFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
@@ -89,24 +98,34 @@ void HdrTarget::createImages() {
     m_depth = AttachmentImage(m_context, kDepthFormat, m_extent, samples, depthUsage, VK_IMAGE_ASPECT_DEPTH_BIT);
     m_spec = AttachmentImage(m_context, kColorFormat, m_extent, samples, colorUsage,
                              VK_IMAGE_ASPECT_COLOR_BIT);
+    m_photo = AttachmentImage(m_context, kColorFormat, m_extent, samples, colorUsage,
+                              VK_IMAGE_ASPECT_COLOR_BIT);
     if (msaa) {
         m_resolve = AttachmentImage(m_context, kColorFormat, m_extent, VK_SAMPLE_COUNT_1_BIT,
                                     kResolveUsage, VK_IMAGE_ASPECT_COLOR_BIT);
         m_specResolve = AttachmentImage(m_context, kColorFormat, m_extent, VK_SAMPLE_COUNT_1_BIT,
                                         kResolveUsage, VK_IMAGE_ASPECT_COLOR_BIT);
+        m_photoResolve = AttachmentImage(m_context, kColorFormat, m_extent, VK_SAMPLE_COUNT_1_BIT,
+                                         kResolveUsage, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
-    // Attachment order matches the render pass: MSAA = colourMS/depth/resolve/specMS/specResolve;
-    // single-sample = colour/depth/spec.
-    const VkImageView views[5] = {m_color.view(), m_depth.view(),
-                                  msaa ? m_resolve.view() : m_spec.view(), m_spec.view(),
-                                  m_specResolve.view()};
-    m_framebuffer = createFramebuffer(m_context.device(), m_renderPass.get(), views,
+    // Attachment order matches the render pass: MSAA = colourMS/depth/resolve/specMS/specResolve/
+    // photoMS/photoResolve; single-sample = colour/depth/spec/photo.
+    std::array<VkImageView, 7> views{};
+    if (msaa) {
+        views = {m_color.view(), m_depth.view(),    m_resolve.view(), m_spec.view(),
+                 m_specResolve.view(), m_photo.view(), m_photoResolve.view()};
+    } else {
+        views = {m_color.view(), m_depth.view(), m_spec.view(), m_photo.view()};
+    }
+    m_framebuffer = createFramebuffer(m_context.device(), m_renderPass.get(), views.data(),
                                       m_attachmentCount, m_extent);
 }
 
 void HdrTarget::destroyImages() {
     m_framebuffer.reset();
+    m_photoResolve.reset();
+    m_photo.reset();
     m_specResolve.reset();
     m_spec.reset();
     m_resolve.reset();
@@ -129,6 +148,14 @@ VkDescriptorImageInfo HdrTarget::resolveInfo() const {
     // stored (storeOp STORE, final layout SHADER_READ_ONLY) and is the sampleable result, so the
     // "resolve" descriptor aliases the colour view. Callers never need to know which case holds.
     info.imageView = m_resolve ? m_resolve.view() : m_color.view();
+    info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    return info;
+}
+
+VkDescriptorImageInfo HdrTarget::photoResolveInfo() const {
+    VkDescriptorImageInfo info{};
+    info.sampler = m_sampler;
+    info.imageView = m_photoResolve ? m_photoResolve.view() : m_photo.view(); // the same aliasing as resolveInfo
     info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     return info;
 }

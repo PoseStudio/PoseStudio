@@ -68,6 +68,7 @@ SplatCloud::SplatCloud(VulkanContext& context, const SplatData& data, VkDescript
     // The harmonics as halves, two to a uint, one run of (coefficients × 3) a splat.
     const std::size_t elements = static_cast<std::size_t>(data.coefficients()) * 3;
     m_shStride = static_cast<uint32_t>((elements + 1) / 2);
+    m_antialiased = data.antialiased;
     std::vector<uint32_t> packed(std::max<std::size_t>(n * m_shStride, 1), 0);
     for (std::size_t i = 0; i < n; ++i) {
         const float* sh = &data.sh[i * elements];
@@ -229,7 +230,7 @@ void SplatCloud::prepareFrame(const Camera& camera, const glm::mat4& model, uint
 }
 
 void SplatCloud::record(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t frameIndex, const Camera& camera,
-                        const glm::mat4& model, bool inverseTonemap) const {
+                        const glm::mat4& model) const {
     if (m_count == 0) {
         return;
     }
@@ -242,9 +243,14 @@ void SplatCloud::record(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t f
     // The focal lengths in pixels off the projection: for a perspective P[0][0] = 1 / (aspect ·
     // tan(fov/2)) and P[1][1] its negated twin (Vulkan's y), for an orthographic 1 / half-extent.
     push.focal = glm::vec4(std::abs(proj[0][0]) * w * 0.5f, std::abs(proj[1][1]) * h * 0.5f, w, h);
-    push.params = glm::vec4(static_cast<float>(m_shDegree), static_cast<float>(m_shStride), inverseTonemap ? 1.0f : 0.0f,
+    // POSESTUDIO_SPLAT_SH_DEGREE=<0..3> caps the harmonics evaluated (a diagnostic: the colour
+    // with its view dependence off).
+    static const int kDegreeCap = std::getenv("POSESTUDIO_SPLAT_SH_DEGREE") ? std::atoi(std::getenv("POSESTUDIO_SPLAT_SH_DEGREE")) : 3;
+    push.params = glm::vec4(static_cast<float>(std::min(m_shDegree, kDegreeCap)), static_cast<float>(m_shStride), 0.0f,
                             ortho ? 1.0f : 0.0f);
-    push.camPos = glm::vec4(glm::vec3(glm::inverse(model) * glm::vec4(camera.position(), 1.0f)), 0.0f);
+    // POSESTUDIO_SPLAT_NO_AA=1: the antialiased compensation off (the A/B on a scene trained with it).
+    static const bool kNoAa = std::getenv("POSESTUDIO_SPLAT_NO_AA") != nullptr;
+    push.camPos = glm::vec4(glm::vec3(glm::inverse(model) * glm::vec4(camera.position(), 1.0f)), m_antialiased && !kNoAa ? 1.0f : 0.0f);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 1, 1, &m_sets[frameIndex], 0, nullptr);
     vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
     vkCmdDraw(cmd, static_cast<uint32_t>(m_count * 6), 1, 0, 0);

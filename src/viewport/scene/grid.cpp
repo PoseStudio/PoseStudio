@@ -24,7 +24,7 @@ Grid::Grid(VulkanContext& context, VkRenderPass renderPass,
     config.depthTestEnable = true;    // scene geometry in front occludes the grid
     config.depthWriteEnable = false;  // but the transparent ground plane must not occlude
     config.colorWriteAlpha = false;   // the HDR target's alpha is the SSS mask — leave it alone
-    config.colorAttachmentCount = 2;  // the pass's spec target is present but masked off for the grid
+    config.colorAttachmentCount = 3;  // the pass's spec and photo targets are present but masked off for the grid
     // Set 0 = the scene's set-3 layout: the fragment shader samples only its binding 2 (the key
     // light's shadow map) for the ground/contact shadow under the figure.
     config.descriptorSetLayouts = {sceneSet3Layout};

@@ -47,7 +47,7 @@ struct SplatPushConstants {
     glm::mat4 model;
     glm::vec4 focal;  ///< x = fx, y = fy (pixels), z = viewport width, w = height
     glm::vec4 params; ///< x = SH degree, y = harmonics uints per splat, z = inverse-tonemap (0/1), w = orthographic (0/1)
-    glm::vec4 camPos; ///< xyz = the eye in the splat's own (model) frame
+    glm::vec4 camPos; ///< xyz = the eye in the splat's own (model) frame; w = 1 when the scene was trained antialiased (the opacity compensation on)
 };
 static_assert(sizeof(SplatPushConstants) == 112, "must match splat.vert's push block");
 
@@ -74,10 +74,9 @@ public:
     /// Records the draw: binds this frame slot's set at index 1 (the caller has bound the splat
     /// pipeline and the camera set at 0), pushes the constants (the focal lengths off the
     /// camera's projection and viewport, the eye in the splat frame) and draws six vertices a
-    /// splat. @p inverseTonemap: the composite will ACES-tonemap the HDR target, so the colours go
-    /// in through the inverse curve.
+    /// splat (into the pass's photo layer: the colours as trained, the composite lays them over).
     void record(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t frameIndex, const Camera& camera,
-                const glm::mat4& model, bool inverseTonemap) const;
+                const glm::mat4& model) const;
 
 private:
     void sortForView(const glm::mat4& view, const glm::mat4& model);
@@ -86,6 +85,7 @@ private:
     std::size_t    m_count = 0;
     int            m_shDegree = 0;
     uint32_t       m_shStride = 2; ///< Harmonics uints per splat.
+    bool           m_antialiased = false; ///< Trained with the antialiasing formulation (an .spz flag): the shader compensates the dilation.
     glm::vec3      m_boundsMin{0.0f};
     glm::vec3      m_boundsMax{0.0f};
 

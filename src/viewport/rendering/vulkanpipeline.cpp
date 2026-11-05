@@ -104,13 +104,21 @@ VulkanPipeline::VulkanPipeline(VulkanContext& context, VkRenderPass renderPass,
 
     // Attachment 1 (the HDR pass's specular target — see PipelineConfig): plainly written by the
     // opaque mesh pipeline, fully masked off for every other pipeline in that pass.
-    VkPipelineColorBlendAttachmentState blendAttachments[2] = {blendAttachment, {}};
-    blendAttachments[1].colorWriteMask =
-        config.writeColorAttachment1
-            ? (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
-               VK_COLOR_COMPONENT_A_BIT)
-            : 0u;
+    constexpr VkColorComponentFlags kRgba =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    VkPipelineColorBlendAttachmentState blendAttachments[3] = {blendAttachment, {}, {}};
+    blendAttachments[1].colorWriteMask = config.writeColorAttachment1 ? kRgba : 0u;
     blendAttachments[1].blendEnable = VK_FALSE;
+    // Attachment 2 (the HDR pass's PHOTO layer): the splat pipeline accumulates premultiplied
+    // colour + coverage with the straight "over" operator; every other pipeline is masked off.
+    blendAttachments[2].colorWriteMask = config.writeColorAttachment2 ? kRgba : 0u;
+    blendAttachments[2].blendEnable = config.writeColorAttachment2 ? VK_TRUE : VK_FALSE;
+    blendAttachments[2].srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    blendAttachments[2].dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    blendAttachments[2].colorBlendOp = VK_BLEND_OP_ADD;
+    blendAttachments[2].srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    blendAttachments[2].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    blendAttachments[2].alphaBlendOp = VK_BLEND_OP_ADD;
     if (config.colorAttachmentCount > 1 && !m_context.supportsIndependentBlend()) {
         // Without the independentBlend feature every element of pAttachments must be IDENTICAL
         // (VUID-VkPipelineColorBlendStateCreateInfo-pAttachments-00605), so the specular
@@ -121,14 +129,15 @@ VulkanPipeline::VulkanPipeline(VulkanContext& context, VkRenderPass renderPass,
         // diffused image: a visual degradation of the skin's specular, not a crash. Every desktop
         // GPU and MoltenVK has the feature; this keeps an exotic device conformant.
         blendAttachments[1] = blendAttachments[0];
+        blendAttachments[2] = blendAttachments[0];
     }
 
     VkPipelineColorBlendStateCreateInfo colorBlend{};
     colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    // Clamped to the blendAttachments array's 2 entries — a future config asking for more must
+    // Clamped to the blendAttachments array's 3 entries — a future config asking for more must
     // grow that array, not silently read past it. 0 = depth-only pass.
     colorBlend.attachmentCount =
-        config.hasColorAttachment ? std::min(config.colorAttachmentCount, 2u) : 0;
+        config.hasColorAttachment ? std::min(config.colorAttachmentCount, 3u) : 0;
     colorBlend.pAttachments = config.hasColorAttachment ? blendAttachments : nullptr;
 
     const std::array<VkDynamicState, 2> dynamicStates = {

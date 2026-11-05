@@ -80,6 +80,7 @@ along the bone's limb segment — the flesh, where a user clicks — instead of 
 | `orbit <yaw°> <pitch°>` | An orbit drag, in degrees (back to perspective, like one). |
 | `frame` | Frame the selection. |
 | `closeup <bone> <radius m>` | Frame the camera on that joint, the given radius filling the view — a hand, a foot, the face, before posing a finger. |
+| `lookat <x> <y> <z> <radius m>` | Frame the camera on a world point — a splat scene's face or hands, which no bone names. A script with no figure (a splat scene alone) starts once any model is in. |
 | `shade <row>` | Shade mode, a row of the picker. |
 | `pose <file>` / `reset` / `undo` / `ground` | Load a pose file, Reset Pose, Undo, the Ground button. |
 | `saveproject <name.pss>` / `openproject <name.pss>` / `new` | File → Save As into the run's folder / File → Open from it (the scene reset, every figure re-imported and restored; the missing-file dialog is not driven) / File → New's scene reset (no prompt, no panel reset). |

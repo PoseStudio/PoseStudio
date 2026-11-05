@@ -55,6 +55,11 @@ public:
     /// smear glints into a wet-looking film; the blur's V pass adds it back after diffusing.
     VkDescriptorImageInfo specResolveInfo() const;
 
+    /// The resolved PHOTO LAYER (colour attachment 2) — the Gaussian splats, accumulated
+    /// display-referred in the trainers' own colour space (premultiplied colour + coverage),
+    /// which the composite lays over the tonemapped scene.
+    VkDescriptorImageInfo photoResolveInfo() const;
+
     /// The depth attachment (at the context's MSAA count) through a NEAREST non-comparison
     /// sampler, in DEPTH_STENCIL_READ_ONLY layout after the pass — only with storeDepth.
     VkDescriptorImageInfo depthInfo() const;
@@ -62,7 +67,8 @@ public:
 
     /// Number of attachments in the pass — the render-pass-begin clear array must cover them.
     /// Attachment order (the clear array follows it): MSAA = colourMS(0) / depth(1) /
-    /// resolve(2) / specMS(3) / specResolve(4); single-sample = colour(0) / depth(1) / spec(2).
+    /// resolve(2) / specMS(3) / specResolve(4) / photoMS(5) / photoResolve(6);
+    /// single-sample = colour(0) / depth(1) / spec(2) / photo(3).
     uint32_t attachmentCount() const { return m_attachmentCount; }
 
     static constexpr VkFormat kColorFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -86,6 +92,8 @@ private:
     AttachmentImage   m_resolve;
     AttachmentImage   m_spec;
     AttachmentImage   m_specResolve;
+    AttachmentImage   m_photo;
+    AttachmentImage   m_photoResolve;
     UniqueFramebuffer m_framebuffer; // last: it references the views above
 };
 

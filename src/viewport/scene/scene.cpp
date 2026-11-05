@@ -136,16 +136,13 @@ void Scene::recordSplats(VkCommandBuffer cmd, const Camera& camera, uint32_t fra
     const VkDescriptorSet cameraSet = m_pipelines->cameraSet(frameIndex);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0, 1, &cameraSet, 0, nullptr);
-    // The composite will ACES-tonemap the HDR target in the PBR mode (with the dial on): the
-    // splats' display-referred colours go in through the inverse curve and come out as trained.
-    const bool inverseTonemap = isPbr() && m_lighting.tonemap;
     for (const std::unique_ptr<Model>& model : m_models) {
         SplatCloud* cloud = model->splats();
         if (cloud == nullptr) {
             continue;
         }
         cloud->prepareFrame(camera, model->transform(), frameIndex);
-        cloud->record(cmd, pipeline.layout(), frameIndex, camera, model->transform(), inverseTonemap);
+        cloud->record(cmd, pipeline.layout(), frameIndex, camera, model->transform());
     }
 }
 

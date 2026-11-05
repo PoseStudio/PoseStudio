@@ -5,6 +5,8 @@
 
 #include "vulkanrenderer.h"
 
+#include <cstdlib>
+
 #include "hdrtarget.h"
 #include "outlinemask.h"
 #include "postprocess.h"
@@ -22,6 +24,13 @@
 #include <limits>
 
 namespace pose {
+
+namespace {
+// POSESTUDIO_NO_BLOOM=1: the bloom chain off — a diagnostic, for what of a bright image is the
+// bloom's (a Gaussian splat capture's highlights, put back above 1.0 by the inverse tonemap,
+// bloom as a lamp would).
+const bool kNoBloom = std::getenv("POSESTUDIO_NO_BLOOM") != nullptr;
+} // namespace
 
 namespace {
 
@@ -118,7 +127,8 @@ VulkanRenderer::VulkanRenderer(VulkanContext& context, VkExtent2D initialExtent,
 
     m_postProcess = std::make_unique<PostProcess>(
         m_context, m_swapchain->renderPass(), m_hdrTarget->resolveInfo(),
-        m_hdrTarget->specResolveInfo(), m_outlineMask->descriptorInfo(), m_swapchain->extent(),
+        m_hdrTarget->specResolveInfo(), m_hdrTarget->photoResolveInfo(), m_outlineMask->descriptorInfo(),
+        m_swapchain->extent(),
         shaders.get("fullscreen.vert"), shaders.get("bloombright.frag"),
         shaders.get("bloomblur.frag"), shaders.get("composite.frag"),
         shaders.get("sssblur.frag"));
@@ -175,7 +185,7 @@ void VulkanRenderer::beginVr(VkRenderPass eyeRenderPass, VkExtent2D eyeExtent, b
     ShaderLibrary& shaders = *m_shaders;
     vr->post = std::make_unique<PostProcess>(
         m_context, eyeRenderPass, vr->hdr->resolveInfo(), vr->hdr->specResolveInfo(),
-        vr->outline->descriptorInfo(), eyeExtent, shaders.get("fullscreen.vert"),
+        vr->hdr->photoResolveInfo(), vr->outline->descriptorInfo(), eyeExtent, shaders.get("fullscreen.vert"),
         shaders.get("bloombright.frag"), shaders.get("bloomblur.frag"), shaders.get("composite.frag"),
         shaders.get("sssblur.frag"));
     if (depthResolve) {
@@ -193,7 +203,8 @@ void VulkanRenderer::beginVr(VkRenderPass eyeRenderPass, VkExtent2D eyeExtent, b
     vr->fence = makeSignalledFence(m_context.device());
 
     // The desktop composite mirrors the eye targets from now on.
-    m_postProcess->setMirrorSource(vr->hdr->resolveInfo(), vr->post->bloomInfo(), vr->outline->descriptorInfo());
+    m_postProcess->setMirrorSource(vr->hdr->resolveInfo(), vr->post->bloomInfo(), vr->outline->descriptorInfo(),
+                                   vr->hdr->photoResolveInfo());
     m_vr = std::move(vr);
 }
 
@@ -397,7 +408,7 @@ void VulkanRenderer::recreateSwapchain() {
     // (the device is idle here).
     m_hdrTarget->resize(extent);
     m_outlineMask->resize(extent);
-    m_postProcess->resize(extent, m_hdrTarget->resolveInfo(), m_hdrTarget->specResolveInfo(),
+    m_postProcess->resize(extent, m_hdrTarget->resolveInfo(), m_hdrTarget->specResolveInfo(), m_hdrTarget->photoResolveInfo(),
                           m_outlineMask->descriptorInfo());
     m_camera.setViewportSize(static_cast<float>(extent.width), static_cast<float>(extent.height));
     m_framebufferResized = false;
@@ -536,7 +547,7 @@ bool VulkanRenderer::recordScenePasses(VkCommandBuffer cmd, const Camera& camera
     // colourMS/depth/resolve/specMS/specResolve; single-sample: colour/depth/spec) — the
     // SPECULAR attachments clear to zero (no specular where nothing draws). The swapchain pass
     // below needs none: its one attachment loads DONT_CARE.
-    std::array<VkClearValue, 5> clears{};
+    std::array<VkClearValue, 7> clears{};
     // Viewport background #3E4042 = (62, 64, 66) as LINEAR values (sRGB->linear of each channel).
     // The HDR target is a linear format and the composite's sRGB swapchain store does the final
     // encode, so the displayed pixel comes back out as exactly #3E4042. Alpha clears to 0: the
@@ -546,6 +557,8 @@ bool VulkanRenderer::recordScenePasses(VkCommandBuffer cmd, const Camera& camera
     clears[2].color = {{0.0f, 0.0f, 0.0f, 0.0f}}; // single-sample: the spec attachment
     clears[3].color = {{0.0f, 0.0f, 0.0f, 0.0f}}; // MSAA: the spec MS attachment
     clears[4].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    clears[5].color = {{0.0f, 0.0f, 0.0f, 0.0f}}; // the photo layer (coverage 0: nothing over the scene)
+    clears[6].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
 
     VkRenderPassBeginInfo scenePass{};
     scenePass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -573,8 +586,10 @@ bool VulkanRenderer::recordScenePasses(VkCommandBuffer cmd, const Camera& camera
     // --- SSSSS then bloom (PBR mode only — the stylized modes author display-ready values;
     // VR Mode's reduced-effects preference skips both). -------------------------------------
     if (m_scene->isPbr() && postEffects) {
-        post.recordSss(cmd);   // diffuses skin in place (HDR alpha = the SSS mask)
-        post.recordBloom(cmd); // then blooms the diffused image
+        post.recordSss(cmd); // diffuses skin in place (HDR alpha = the SSS mask)
+        if (!kNoBloom) {
+            post.recordBloom(cmd); // then blooms the diffused image
+        }
     }
     return outlined;
 }
@@ -588,7 +603,7 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageInde
     const bool pbr = m_scene->isPbr();
     const bool tonemap = pbr && m_scene->lightingSettings().tonemap;
     // The mirror shows the eye frame as rendered: with reduced effects there is no bloom in it.
-    const bool bloom = pbr && !(m_vr && m_vr->hasFrame && m_vr->reducedEffects);
+    const bool bloom = pbr && !kNoBloom && !(m_vr && m_vr->hasFrame && m_vr->reducedEffects);
     float outlineWidthPx = 0.0f;
     PostProcess::CompositeOptions composite;
 
