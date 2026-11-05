@@ -785,8 +785,8 @@ constexpr float kDigitMinReachShare = 0.10f;
 // tanh, so a higher drop always dips deeper), and under kLandingDipMin there is no bounce at all
 // (a drop of a millimetre). (0.030 first: a 5cm drop then folded the knees 30 degrees — near
 // straight a leg's height goes as the SQUARE of the knee's angle, so a shallow dip is a deep bend.)
-constexpr float kLandingDipPerSpeed = 0.020f;
-constexpr float kLandingDipMax = 0.20f;
+constexpr float kLandingDipPerSpeed = 0.028f; // (0.020 until 2026-11-05: the user, of a 50cm drop, "the bounce seems too slight")
+constexpr float kLandingDipMax = 0.24f;
 constexpr float kLandingDipMin = 0.003f;
 // ... its SHAPE: down over the first kLandingDownShare of its time (sin^2: deepest a third of
 // the way in, a landing's absorption) and back up over the rest (cos^2), so the dip begins and

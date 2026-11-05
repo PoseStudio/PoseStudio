@@ -527,6 +527,7 @@ public:
     /// The bounce @p seconds after the landing: the pose for that moment. False once it is over
     /// (or none is in flight): the caller then calls endLandingBounce().
     bool landingBounceTick(float seconds);
+    float landingArmAngle(float seconds) const; ///< The arms' swing at that moment of the bounce (deg, forward).
     /// Ends the bounce, wherever it is: the pose she landed in, exactly, and the user's selection.
     void endLandingBounce();
     bool landingBounceActive() const { return m_landing.active; }
@@ -1139,6 +1140,10 @@ private:
             int   axis = 0;
             float sign = 1.0f;
             float base = 0.0f;
+            int   elbowBone = -1; ///< The arm's elbow, bending with the forward swing (none where the arm has no fold dial).
+            int   elbowAxis = 0;
+            float elbowSign = 1.0f;
+            float elbowBase = 0.0f;
         };
         std::vector<ArmSwing>  arms;
         float                  armSwingDeg = 0.0f; ///< The swing's amplitude, sized by the impact like the dip.
@@ -1151,12 +1156,13 @@ private:
         int       bone = -1;
         int       parent = -1;
         float     size = 0.0f;       ///< 0 (a flat chest: no swing) .. 1 (a full breast), off the skin's protrusion.
-        glm::vec3 pivotBind{0.0f};   ///< The breast's base on the chest wall behind the nipple (model space at bind): the swing's pivot.
+        glm::vec3 pivotBind{0.0f};   ///< The breast's base on the chest wall behind the nipple (model space at bind).
+        glm::vec3 pivotTopBind{0.0f}; ///< Its upper attachment on the chest wall, kBreastLever over the nipple: the swing's pivot.
         float     protrusion = 0.0f; ///< The nipple's distance forward of the base (m).
-        glm::vec3 swing{0.0f};       ///< The dynamic swing (a rotation vector in the chest's frame, radians).
-        glm::vec3 velocity{0.0f};
-        float     hang = 0.0f;       ///< The dynamic hang: how far the breast is drawn out along its tether (m).
-        float     hangVel = 0.0f;
+        float     lever = 0.05f;     ///< The nipple's distance from the swing's pivot (m).
+        float     side = 1.0f;       ///< +1 the left breast (outward is +x), -1 the right.
+        glm::vec3 disp{0.0f};        ///< The mass's displacement from the sculpt (m, chest frame: sideways, along the chest, out along the tether).
+        glm::vec3 vel{0.0f};
     };
     std::vector<Breast> m_breasts;                   ///< One per side (the pectoral that carries the breast), or none.
     bool                m_breastsReady = false;      ///< setupBreasts ran (with the rig and the body mesh).
@@ -1167,8 +1173,7 @@ private:
     int                 m_breastChestSamples = 0;
     void      setupBreasts();
     glm::vec3 breastGravityInChest(const Breast& b) const; ///< Effective gravity (g) in the chest's frame.
-    glm::vec3 breastRestingSwing(const Breast& b) const;
-    float     breastRestingHang(const Breast& b) const;
+    glm::vec3 breastRestDisplacement(const Breast& b) const; ///< Where the mass rests under that gravity (m, chest frame).
     glm::mat4 breastSwingMatrix(const Breast& b, const glm::mat4& boneGlobal) const;
 public:
     /// One tick of the soft body (the breasts' spring under effective gravity): called from the
@@ -1177,6 +1182,8 @@ public:
     bool  tickSoftBody(float dt);
     /// Ends a tick sequence: the resting swing applies from here (no spring state).
     void  settleSoftBody();
+    /// A landing: the breasts keep falling at a share of the impact speed as the chest stops.
+    void  kickSoftBody(float impactSpeed);
     /// True while the spring's state is away from rest (the fall's tail keeps ticking for it).
     bool  softBodyMoving() const;
     /// The settings changed (the Posing preference): set up if needed and re-pose.

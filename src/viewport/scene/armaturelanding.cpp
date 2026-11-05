@@ -30,7 +30,13 @@ namespace pose {
 
 namespace {
 
-constexpr float kLandingArmSwingDeg = 10.0f; ///< THE ARMS' BOUNCE: how far a hanging arm swings forward at the deepest dip a drop makes.
+constexpr float kLandingArmSwingDeg = 25.0f;  ///< THE ARMS' BOUNCE: how far a hanging arm swings forward at the deepest dip a drop makes (10 until 2026-11-05: the user, "the arms should react as well").
+constexpr float kLandingArmHz = 1.2f;         ///< The arm swing is a damped oscillation kicked by the landing: forward to its peak in 0.18 s, back past hanging by a quarter, and out.
+constexpr float kLandingArmDamping = 0.3f;    ///< Its damping ratio.
+constexpr float kLandingArmPeak = 0.64f;      ///< The oscillation's first peak as a share of its drive (e^-zw t sin(wd t) at t_peak for the damping above): the amplitude is divided by it.
+constexpr float kLandingArmElbowShare = 0.5f; ///< The elbow bends by this share of the arm's forward swing (the hands come up a little) and straightens as it swings back.
+constexpr float kLandingArmRestDeg = 0.3f;    ///< The swing is over under this.
+constexpr float kLandingTailSeconds = 1.5f;   ///< The bounce's TAIL after the dip: the arms' swing and the breasts' spring run on, for at most this.
 
 /// The bounce's SHAPE, 0..1, at @p seconds of @p duration: down over the first kLandingDownShare
 /// (sin^2), back up over the rest (cos^2) — see the tuning header.
@@ -52,6 +58,7 @@ bool Armature::beginLandingBounce(float impactSpeed) {
         return false;
     }
     static const float kPerSpeed = envOr("POSESTUDIO_LANDING_DIP", kLandingDipPerSpeed); // metres per m/s
+    kickSoftBody(impactSpeed); // (THE SOFT BREASTS keep falling as the chest stops, whatever the legs do)
     const float scale = m_ikRig->sizeScale();
     const float most = kLandingDipMax * scale;
     const float dip = most * std::tanh(kPerSpeed * std::max(0.0f, impactSpeed) / most);
@@ -127,6 +134,13 @@ bool Armature::beginLandingBounce(float impactSpeed) {
         swing.axis = dial.axis;
         swing.sign = dial.fullDeg > 0.0f ? 1.0f : -1.0f;
         swing.base = m_landing.euler[static_cast<std::size_t>(dial.bone)][dial.axis];
+        const JointDial elbow = arm.elbow >= 0 ? jointDial(arm.elbow, JointDialKind::BendForward) : JointDial{};
+        if (elbow.valid() && elbow.bone >= 0 && static_cast<std::size_t>(elbow.bone) < m_bones.size() && elbow.fullDeg != 0.0f) {
+            swing.elbowBone = elbow.bone;
+            swing.elbowAxis = elbow.axis;
+            swing.elbowSign = elbow.fullDeg > 0.0f ? 1.0f : -1.0f;
+            swing.elbowBase = m_landing.euler[static_cast<std::size_t>(elbow.bone)][elbow.axis];
+        }
         m_landing.arms.push_back(swing);
     }
     m_landing.translation = m_jsStartTranslation;
@@ -136,16 +150,46 @@ bool Armature::beginLandingBounce(float impactSpeed) {
     return true;
 }
 
+float Armature::landingArmAngle(float seconds) const {
+    // e^(-zeta w t) sin(wd t), scaled so its first peak is the swing's amplitude.
+    const float omega = 2.0f * 3.14159265f * kLandingArmHz;
+    const float wd = omega * std::sqrt(1.0f - kLandingArmDamping * kLandingArmDamping);
+    return m_landing.armSwingDeg / kLandingArmPeak * std::exp(-kLandingArmDamping * omega * seconds) * std::sin(wd * seconds);
+}
+
 bool Armature::landingBounceTick(float seconds) {
     if (!m_landing.active) {
         return false;
     }
     const float dt = seconds > m_landing.lastSeconds ? seconds - m_landing.lastSeconds : 1.0f / 60.0f;
     m_landing.lastSeconds = seconds;
+    // THE ARMS' SWING: a damped oscillation kicked by the landing — forward to its peak in a fifth
+    // of a second, back past hanging by a quarter of that, and out over a second; the elbow bends
+    // with the forward swing. It runs through the dip and on through the tail (the pose home
+    // under it), and endLandingBounce puts the landing pose back exactly.
+    const float armAngle = landingArmAngle(seconds);
+    const auto  applyArms = [&]() {
+        if (m_landing.arms.empty()) {
+            return false;
+        }
+        for (const LandingBounce::ArmSwing& arm : m_landing.arms) {
+            m_boneEuler[static_cast<std::size_t>(arm.bone)][arm.axis] = arm.base + arm.sign * armAngle;
+            clampBoneEuler(arm.bone);
+            recomposePoseLocal(static_cast<std::size_t>(arm.bone));
+            if (arm.elbowBone >= 0) {
+                m_boneEuler[static_cast<std::size_t>(arm.elbowBone)][arm.elbowAxis] = arm.elbowBase + arm.elbowSign * kLandingArmElbowShare * std::max(0.0f, armAngle);
+                clampBoneEuler(arm.elbowBone);
+                recomposePoseLocal(static_cast<std::size_t>(arm.elbowBone));
+            }
+        }
+        return true;
+    };
     if (seconds >= m_landing.seconds) {
-        // THE TAIL: the dip is over and the pose is home; the breasts' spring settles on, for
-        // up to a second, then the bounce ends (endLandingBounce rests it exactly).
-        if (!softbody::breastMotion() || seconds >= m_landing.seconds + 1.0f) {
+        // THE TAIL: the dip is over and the pose is home; the arms' swing and the breasts' spring
+        // run on, for up to kLandingTailSeconds, then the bounce ends (endLandingBounce rests it
+        // exactly).
+        const bool armsSwinging = !m_landing.arms.empty() && std::abs(armAngle) > kLandingArmRestDeg;
+        if (seconds >= m_landing.seconds + kLandingTailSeconds || (!armsSwinging && !softbody::breastMotion())) {
             return false;
         }
         if (!m_landing.tail) {
@@ -158,17 +202,14 @@ bool Armature::landingBounceTick(float seconds) {
                 }
             }
         }
-        return tickSoftBody(dt);
+        if (applyArms()) {
+            computeSkinMatrices();
+        }
+        const bool breasts = softbody::breastMotion() && tickSoftBody(dt);
+        return armsSwinging || breasts;
     }
     dragIkTo(m_landing.hipStart - glm::vec3(0.0f, m_landing.dip * landingShape(seconds, m_landing.seconds), 0.0f));
-    if (!m_landing.arms.empty()) {
-        const float p = seconds / m_landing.seconds;
-        const float angle = m_landing.armSwingDeg * std::sin(3.14159265f * p); // (forward over the dip, back by its end)
-        for (const LandingBounce::ArmSwing& arm : m_landing.arms) {
-            m_boneEuler[static_cast<std::size_t>(arm.bone)][arm.axis] = arm.base + arm.sign * angle;
-            clampBoneEuler(arm.bone);
-            recomposePoseLocal(static_cast<std::size_t>(arm.bone));
-        }
+    if (applyArms()) {
         computeSkinMatrices();
     }
     if (softbody::breastMotion()) {
