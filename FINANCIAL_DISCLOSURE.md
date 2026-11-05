@@ -26,7 +26,7 @@ Our development, infrastructure, and operations are supported by our community.
 | 06/19/2026 | Ion Hatzithomas | Other one-time contribution | $250.00 | - | $250.00 |
 | 06/04/2026 | Everwild | Patreon tier 1 monthly | $5.00 | $0.96 | $4.04 |
 | 06/04/2026 | bu_es | Patreon tier 1 monthly | $5.00 | $0.97 | $4.03 |
-| 05/28/2026 | TaterTot | Patreon tier 1 monthly | $5.00 | $0.96 | $4.04 |
+| 05/28/2026 | VulcanStarDrives | Patreon tier 1 monthly | $5.00 | $0.96 | $4.04 |
 | 05/13/2026 | Ion Hatzithomas | Other one-time contribution | $500.00 | - | $500.00 |
 |  |  |  |  | **Total Income** | **$762.11** |
 
