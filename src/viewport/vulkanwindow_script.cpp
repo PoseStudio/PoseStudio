@@ -769,6 +769,10 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         // THE SOFT BREASTS: how far the left / right breast is drawn out along its tether, mm (0
         // standing, where the tether is level; a level-chested bow reads 30 on a full breast).
         value = static_cast<double>(scene().breastHangMm(key == QLatin1String("breasthangl") ? 0 : 1));
+    } else if (key == QLatin1String("breastsidel") || key == QLatin1String("breastsider")) {
+        // THE SOFT BREASTS: how far the left / right breast has moved sideways, mm, + outward toward the armpit
+        // (on her back the spread, on her side the fall toward the lower side).
+        value = static_cast<double>(scene().breastSideMm(key == QLatin1String("breastsidel") ? 0 : 1));
     } else if (key == QLatin1String("lowest")) {
         // (Not the figure node and its like: parentless, or hanging straight off a parentless node
         // at the origin — the hip's own parent.)

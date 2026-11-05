@@ -175,6 +175,11 @@ float Scene::breastHangMm(int side) const {
     return fig ? fig->breastHangMm(side) : 0.0f;
 }
 
+float Scene::breastSideMm(int side) const {
+    const Model* fig = figureModel();
+    return fig ? fig->breastSideMm(side) : 0.0f;
+}
+
 void Scene::endLandingBounce(int index) {
     if (index >= 0 && static_cast<std::size_t>(index) < m_models.size()) {
         m_models[static_cast<std::size_t>(index)]->endLandingBounce();

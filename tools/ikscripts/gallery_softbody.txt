@@ -69,6 +69,29 @@ expect breastl > 3
 expect breasthangl < 0.5
 reset
 
+# ON HER BACK (the hip rolled back 90 degrees, in the air: the floor is not the point) the breasts
+# flatten a little — pressed back toward the chest wall, `breasthangl` reads NEGATIVE — and fall a
+# little to the sides (`breastsidel` / `breastsider` + outward); ON HER SIDE they fall toward the
+# lower side: the upper breast in toward the sternum, the lower one out. More on a fuller bust.
+view home
+fk hip -90 0 0
+expect breasthangl < -4
+expect breastsidel > 8
+expect breastsider > 8
+view top
+closeup chest 0.34
+shot 07_on_her_back_from_above
+reset
+view home
+fk hip 0 0 90
+expect breastsidel < -5
+expect breastsider > 5
+view top
+closeup chest 0.34
+shot 08_on_her_side_from_above
+reset
+view home
+
 # The landing: lifted half a metre and dropped, shot through the bounce, at rest afterwards.
 view home
 lift 0.5

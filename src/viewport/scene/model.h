@@ -186,6 +186,7 @@ public:
     void  applySoftBodySettings() { m_armature.applySoftBodySettings(); }
     float breastSwingDeg(int side) const { return m_armature.breastSwingDeg(side); }
     float breastHangMm(int side) const { return m_armature.breastHangMm(side); }
+    float breastSideMm(int side) const { return m_armature.breastSideMm(side); }
     /// Ends the bounce: the pose she landed in, exactly, and its correctives.
     void endLandingBounce() {
         m_armature.endLandingBounce();

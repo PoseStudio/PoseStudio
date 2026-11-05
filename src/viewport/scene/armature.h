@@ -1192,6 +1192,8 @@ public:
     float breastSwingDeg(int side) const;
     /// How far that breast is drawn out along its tether (mm): the hang, dynamic or resting.
     float breastHangMm(int side) const;
+    /// How far that breast has moved sideways as rendered (mm, + outward toward the armpit): on her back the spread, on her side the fall.
+    float breastSideMm(int side) const;
 private:
     // --- The bone classes and THE DIGIT DRAG (armatureikdigit.cpp) ---
     /// Per bone: its BoneClass (classifyBones, with the rig: empty until then).
