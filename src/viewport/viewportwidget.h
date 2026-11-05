@@ -120,7 +120,7 @@ public:
     void setJointTransformDial(int dial, double value);
     void endJointTransformEdit();
     void setFigurePosition(int axis, double cm); ///< The Figure group: see VulkanWindow::setFigurePosition.
-    void setFigureTurn(double degrees);
+    void setFigureRotation(int axis, double degrees);
     /// The B / S / T key, wherever the keyboard focus is (the Edit menu's actions carry the keys
     /// application-wide): the joint mouse mode on dial @p kind (0/1/2 = Bend / Side-Side /
     /// Twist) of the selected joint — on, off again, or switched to it

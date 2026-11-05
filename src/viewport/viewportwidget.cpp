@@ -311,8 +311,8 @@ void ViewportWidget::setFigurePosition(int axis, double cm) {
     withWindow([axis, cm](VulkanWindow& w) { w.setFigurePosition(axis, cm); });
 }
 
-void ViewportWidget::setFigureTurn(double degrees) {
-    withWindow([degrees](VulkanWindow& w) { w.setFigureTurn(degrees); });
+void ViewportWidget::setFigureRotation(int axis, double degrees) {
+    withWindow([axis, degrees](VulkanWindow& w) { w.setFigureRotation(axis, degrees); });
 }
 
 void ViewportWidget::setJointTransformDial(int dial, double value) {

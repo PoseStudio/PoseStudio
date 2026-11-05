@@ -132,8 +132,10 @@ The **Figure** group at the top of the tab moves and turns the active figure as 
 | **Up-Down** | Moves her up or down. The [Ground button](#the-ground-button) puts her back on the floor. |
 | **Back-Forward** | Moves her forward (the way she faced when imported) or back. |
 | **Turn** | Turns her about the vertical, in degrees: 0 faces the way she was imported, positive turns her toward her left. |
+| **Tip** | Tips her forward (positive, face down) or back, about her own left-right axis. |
+| **Tilt** | Tilts her toward her left (positive) or right, about her own front-back axis. |
 
-The rows are scrub fields like the dials below them, and each scrub or typed value is one undo step. The place and the turn are part of the pose: a pose file and a project carry them, and **Reset Pose** puts her back where she was imported, facing the way she came. A `Ctrl` drag on the hips moves her the same way with the mouse, and the Ground button drops her to the floor from any height.
+The three rotations compose in that order — turn, then tip, then tilt — each about her own axis as she then stands, and all three are about the hip joint, so a turn alone keeps the feet at their heights. The rows are scrub fields like the dials below them, and each scrub or typed value is one undo step. The place and the rotation are part of the pose: a pose file and a project carry them, and **Reset Pose** puts her back where she was imported, upright and facing the way she came. A `Ctrl` drag on the hips moves her the same way with the mouse, and the Ground button drops her to the floor from any height.
 
 ### The selected joint
 

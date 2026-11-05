@@ -188,10 +188,10 @@ public:
     void setJointTransformDial(int dial, double value);
     void endJointTransformEdit();
     /// THE FIGURE'S PLACE AND HEADING (the Transform tab's Figure group): the same bracket as the
-    /// dials — one undo entry per scrub. `axis` 0/1/2 = x/y/z in world centimetres; the turn in
-    /// degrees (0 = facing +z, positive toward her left).
+    /// dials — one undo entry per scrub. `axis` 0/1/2 = x/y/z in world centimetres for the place;
+    /// turn / tip / tilt in degrees for the rotation (see JointTransform::Figure).
     void setFigurePosition(int axis, double cm);
-    void setFigureTurn(double degrees);
+    void setFigureRotation(int axis, double degrees);
 
     /// THE JOINT MOUSE MODE, as the rest of the application drives it (the mode itself is
     /// described with its members below). toggleJointModal is the B / S / T key (@p kind 0/1/2 =

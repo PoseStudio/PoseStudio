@@ -31,20 +31,24 @@ struct JointTransform {
     /// THE FIGURE (2026-11-05; the user: "we have to be able to easily position the character (up
     /// down left right) and twist the entire character"): where the active figure stands and which
     /// way she faces — the rig root's pose translation in centimetres (world axes: x her left,
-    /// y up, z the way an unturned figure faces) and the heading of its rotation in degrees (0 =
-    /// facing +z as imported, positive = turned toward her left). Both are POSE: a pose file and a
-    /// project carry them, Reset Pose takes them back, undo steps over them.
+    /// y up, z the way an unturned figure faces) and its rotation as three angles in degrees: a
+    /// TURN about the vertical (0 = facing +z as imported, positive = toward her left), then a TIP
+    /// about her own lateral axis (positive = forward, face down), then a TILT about her own
+    /// forward axis (positive = toward her left). All of it is POSE: a pose file and a project
+    /// carry it, Reset Pose takes it back, undo steps over it.
     struct Figure {
         bool  valid = false; ///< A posable figure is active (a joint need not be selected).
         float x = 0.0f, y = 0.0f, z = 0.0f; ///< cm
-        float turnDeg = 0.0f;
-        bool  operator==(const Figure& o) const { return valid == o.valid && x == o.x && y == o.y && z == o.z && turnDeg == o.turnDeg; }
+        float turnDeg = 0.0f, tipDeg = 0.0f, tiltDeg = 0.0f;
+        bool  operator==(const Figure& o) const {
+            return valid == o.valid && x == o.x && y == o.y && z == o.z && turnDeg == o.turnDeg && tipDeg == o.tipDeg && tiltDeg == o.tiltDeg;
+        }
     };
 
     bool        valid = false; ///< A joint is selected on the posable figure.
     std::string name;          ///< The joint's name (the bend bone's, for a selected twist bone).
     Dial        dials[3];      ///< Indexed by JointDialKind: BendForward, BendSideways, Twist (the tab labels them Bend, Side-Side, Twist).
-    Figure      figure;        ///< The active figure's place and heading, valid with any posable figure.
+    Figure      figure;        ///< The active figure's place and orientation, valid with any posable figure.
 
     bool operator==(const JointTransform& o) const {
         return valid == o.valid && name == o.name && dials[0] == o.dials[0] && dials[1] == o.dials[1] &&

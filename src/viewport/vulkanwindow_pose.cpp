@@ -150,11 +150,11 @@ void VulkanWindow::setFigurePosition(int axis, double cm) {
     }
 }
 
-void VulkanWindow::setFigureTurn(double degrees) {
+void VulkanWindow::setFigureRotation(int axis, double degrees) {
     if (!beginJointTransformEdit()) {
         return;
     }
-    if (scene().setFigureTurnDeg(static_cast<float>(degrees))) {
+    if (scene().setFigureRotationDeg(axis, static_cast<float>(degrees))) {
         requestUpdate();
     }
 }

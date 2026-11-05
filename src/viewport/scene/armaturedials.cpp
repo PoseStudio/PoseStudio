@@ -524,47 +524,41 @@ void Armature::setFigurePosition(const glm::vec3& world) {
     computeSkinMatrices();
 }
 
-float Armature::figureTurnDeg() const {
+glm::vec3 Armature::figureRotationDeg() const {
     const int root = figureRoot();
     if (root < 0 || static_cast<std::size_t>(root) >= m_poseGlobal.size()) {
-        return 0.0f;
+        return glm::vec3(0.0f);
     }
     // The root's world rotation (binds are translation-only, so poseGlobal's rotation part is the
-    // pose's) applied to the figure's forward: its heading about the vertical.
-    const glm::vec3 fwd = glm::mat3(m_transform) * glm::mat3(m_poseGlobal[static_cast<std::size_t>(root)]) * glm::vec3(0.0f, 0.0f, 1.0f);
-    if (std::abs(fwd.x) < 1e-6f && std::abs(fwd.z) < 1e-6f) {
-        return 0.0f; // (facing straight up or down: no heading)
-    }
-    return glm::degrees(std::atan2(fwd.x, fwd.z));
+    // pose's), read as yaw about the world's vertical, then pitch about the figure's own lateral
+    // axis, then roll about her own forward axis ("YXZ": leftmost outermost). The tilt is shown
+    // with her left side DOWN positive, which is a negative roll about +z.
+    const glm::mat3 world = glm::mat3(m_transform) * glm::mat3(m_poseGlobal[static_cast<std::size_t>(root)]);
+    const glm::vec3 e = eulerFromMatrix(world, "YXZ"); // (e.x pitch, e.y yaw, e.z roll)
+    return glm::vec3(e.y, e.x, -e.z);
 }
 
-void Armature::setFigureTurnDeg(float degrees) {
+void Armature::setFigureRotationDeg(const glm::vec3& turnTipTilt) {
     const int root = figureRoot();
     if (root < 0 || static_cast<std::size_t>(root) >= m_bones.size()) {
         return;
     }
-    float delta = degrees - figureTurnDeg();
-    while (delta > 180.0f) {
-        delta -= 360.0f;
-    }
-    while (delta < -180.0f) {
-        delta += 360.0f;
-    }
-    if (std::abs(delta) < 1e-4f) {
+    const glm::vec3 now = figureRotationDeg();
+    if (glm::length(now - turnTipTilt) < 1e-4f) {
         return;
     }
-    // A world yaw Y on the root's world rotation W = OR * R * OR^-1 (its parent, the figure node,
-    // unrotated): the new local R' = OR^-1 * Y * OR * R, read back into the root's channels.
+    // The wanted world rotation W' from the three angles; the root's local R' from it: with W =
+    // T * P * OR * R * OR^-1 (T the model transform's rotation, P the parent's — the figure node,
+    // unrotated), R' = OR^-1 * P^-1 * T^-1 * W' * OR, read back into the root's channels.
     Bone&           bone = m_bones[static_cast<std::size_t>(root)];
     const glm::mat3 orient(bone.orient);
     const glm::mat3 invOrient(bone.invOrient);
-    const glm::mat3 yaw(glm::rotate(glm::mat4(1.0f), glm::radians(delta), glm::inverse(glm::mat3(m_transform)) * glm::vec3(0.0f, 1.0f, 0.0f)));
+    const glm::mat3 target(eulerMatrix(glm::vec3(turnTipTilt.y, turnTipTilt.x, -turnTipTilt.z), "YXZ"));
     glm::mat3       parentRot(1.0f);
     if (bone.parent >= 0 && static_cast<std::size_t>(bone.parent) < m_poseGlobal.size()) {
         parentRot = glm::mat3(m_poseGlobal[static_cast<std::size_t>(bone.parent)]);
     }
-    const glm::mat3 local = glm::mat3(eulerMatrix(m_boneEuler[static_cast<std::size_t>(root)], bone.rotationOrder));
-    const glm::mat3 next = invOrient * glm::transpose(parentRot) * yaw * parentRot * orient * local;
+    const glm::mat3 next = invOrient * glm::transpose(parentRot) * glm::inverse(glm::mat3(m_transform)) * target * orient;
     m_boneEuler[static_cast<std::size_t>(root)] = eulerFromMatrix(next, bone.rotationOrder);
     clampBoneEuler(root);
     recomposePoseLocal(static_cast<std::size_t>(root));

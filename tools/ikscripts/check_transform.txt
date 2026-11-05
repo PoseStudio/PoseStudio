@@ -268,3 +268,34 @@ uishot 30_figure_turned
 reset
 expect figure.turn < 0.01
 expect figure.x < 0.01
+
+# ... and its TIP (forward positive, about her own lateral axis) and TILT (her left down positive,
+# about her own forward axis). Each reads back; tipped 90 she lies face down with her hips where
+# they were (the rotation is about the root joint), tilted 30 her left shoulder is lower than her
+# right; the three compose: turned 90 and then tipped 45 the tip still reads 45; reset takes all back.
+expect figure.tip == 0
+expect figure.tilt == 0
+tip 90
+expect figure.tip > 89.9
+expect figure.tip < 90.1
+expect figure.turn < 0.1
+expect y.hip > 980
+expect y.hip < 1120
+reset
+tilt 30
+expect figure.tilt > 29.9
+expect figure.tilt < 30.1
+expect y.lShldr < 1340
+expect y.rShldr > 1390
+reset
+turn 90
+tip 45
+expect figure.turn > 89.9
+expect figure.tip > 44.9
+expect figure.tip < 45.1
+expect figure.tilt < 0.1
+view home
+uishot 31_figure_turned_and_tipped
+reset
+expect figure.tip < 0.01
+expect figure.tilt < 0.01

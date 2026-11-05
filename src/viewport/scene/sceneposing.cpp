@@ -32,7 +32,8 @@ JointTransform Scene::selectedJointTransform() const {
     if (arm.figureRoot() >= 0) {
         // The figure's place and heading: valid with any posable figure, a joint selected or not.
         const glm::vec3 at = arm.figurePosition() * 100.0f;
-        out.figure = {true, at.x, at.y, at.z, arm.figureTurnDeg()};
+        const glm::vec3 rot = arm.figureRotationDeg();
+        out.figure = {true, at.x, at.y, at.z, rot.x, rot.y, rot.z};
     }
     const int joint = arm.dialJoint(arm.highlightBone());
     if (joint < 0) {
@@ -69,12 +70,14 @@ bool Scene::setFigurePosition(int axis, float cm) {
     return true;
 }
 
-bool Scene::setFigureTurnDeg(float degrees) {
+bool Scene::setFigureRotationDeg(int axis, float degrees) {
     Model* fig = figureModel();
-    if (fig == nullptr || fig->armature().figureRoot() < 0) {
+    if (fig == nullptr || axis < 0 || axis > 2 || fig->armature().figureRoot() < 0) {
         return false;
     }
-    fig->setFigureTurnDeg(degrees);
+    glm::vec3 rot = fig->armature().figureRotationDeg();
+    rot[axis] = degrees;
+    fig->setFigureRotationDeg(rot);
     return true;
 }
 

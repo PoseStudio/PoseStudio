@@ -55,14 +55,16 @@ void TransformPanel::buildUi() {
     // "we have to be able to easily position the character (up down left right) and twist the
     // entire character") — the rig root's pose translation and heading, a pose edit like a dial's.
     QFormLayout* figure = propertyrows::addGroup(col, tr("Figure"));
-    const std::array<QString, 4> figureLabels = {tr("Left-Right"), tr("Up-Down"), tr("Back-Forward"), tr("Turn")};
-    const std::array<QString, 4> figureTips = {
+    const std::array<QString, 6> figureLabels = {tr("Left-Right"), tr("Up-Down"), tr("Back-Forward"), tr("Turn"), tr("Tip"), tr("Tilt")};
+    const std::array<QString, 6> figureTips = {
         tr("Moves the whole figure, as posed, to her left (positive) or right, in centimetres."),
         tr("Moves the whole figure up (positive) or down, in centimetres. The Ground button puts her back on the floor."),
         tr("Moves the whole figure forward (positive, the way an unturned figure faces) or back, in centimetres."),
         tr("Turns the whole figure about the vertical, in degrees: 0 faces the way she was imported, positive turns her toward her left."),
+        tr("Tips the whole figure forward (positive, face down) or back, in degrees, about her own left-right axis."),
+        tr("Tilts the whole figure toward her left (positive) or right, in degrees, about her own front-back axis."),
     };
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 6; ++i) {
         Row& row = m_figureRows[static_cast<std::size_t>(i)];
         row.label = new QLabel(figureLabels[static_cast<std::size_t>(i)]);
         row.label->setToolTip(figureTips[static_cast<std::size_t>(i)]);
@@ -93,19 +95,19 @@ void TransformPanel::buildUi() {
                 if (i < 3) {
                     m_viewport->setFigurePosition(i, value);
                 } else {
-                    m_viewport->setFigureTurn(value);
+                    m_viewport->setFigureRotation(i - 3, value);
                 }
                 refresh();
             }
         });
         row.restore = propertyrows::makeRestoreButton();
-        row.restore->setToolTip(i < 3 ? tr("Back to 0: where she was imported") : tr("Back to 0: facing the way she was imported"));
+        row.restore->setToolTip(i < 3 ? tr("Back to 0: where she was imported") : tr("Back to 0: as she was imported"));
         connect(row.restore, &QToolButton::clicked, this, [this, i]() {
             if (m_viewport && m_viewport->beginJointTransformEdit()) {
                 if (i < 3) {
                     m_viewport->setFigurePosition(i, 0.0);
                 } else {
-                    m_viewport->setFigureTurn(0.0);
+                    m_viewport->setFigureRotation(i - 3, 0.0);
                 }
                 m_viewport->endJointTransformEdit();
                 refresh();
@@ -195,7 +197,7 @@ void TransformPanel::refresh() {
     const JointTransform state = m_viewport ? m_viewport->jointTransform() : JointTransform{};
     {
         const JointTransform::Figure& fig = state.figure;
-        const std::array<double, 4>   values = {fig.x, fig.y, fig.z, fig.turnDeg};
+        const std::array<double, 6>   values = {fig.x, fig.y, fig.z, fig.turnDeg, fig.tipDeg, fig.tiltDeg};
         for (std::size_t i = 0; i < m_figureRows.size(); ++i) {
             Row& row = m_figureRows[i];
             {

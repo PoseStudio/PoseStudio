@@ -1203,11 +1203,14 @@ public:
     /// and the Ground button's quantity, a pose file's `@trans:` row).
     glm::vec3 figurePosition() const;
     void      setFigurePosition(const glm::vec3& world);
-    /// Which way the figure faces: the heading of the root's rotation, degrees (0 = facing +z as
-    /// imported, positive = turned toward her left); setting it turns the whole pose about the
-    /// vertical through the root joint, in the root's own unlimited channels.
-    float     figureTurnDeg() const;
-    void      setFigureTurnDeg(float degrees);
+    /// Which way the figure faces and leans: the root's world rotation as (turn, tip, tilt) in
+    /// degrees — a TURN about the vertical (0 = facing +z as imported, positive = toward her
+    /// left), then a TIP about her own lateral axis (positive = forward, face down), then a TILT
+    /// about her own forward axis (positive = toward her left). Setting them turns the whole pose
+    /// about the root joint, in the root's own unlimited channels; the feet keep their heights
+    /// under a turn alone.
+    glm::vec3 figureRotationDeg() const;
+    void      setFigureRotationDeg(const glm::vec3& turnTipTilt);
 private:
     // --- The bone classes and THE DIGIT DRAG (armatureikdigit.cpp) ---
     /// Per bone: its BoneClass (classifyBones, with the rig: empty until then).

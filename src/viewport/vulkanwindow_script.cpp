@@ -241,13 +241,15 @@ void VulkanWindow::scriptStep() {
             } else {
                 say("[ikscript]   move refused (a drag owns the pose)\n");
             }
-        } else if (cmd == QLatin1String("turn") && w.size() > 1) {
-            // turn <degrees>: the whole figure faced that way (the Figure group's Turn).
+        } else if ((cmd == QLatin1String("turn") || cmd == QLatin1String("tip") || cmd == QLatin1String("tilt")) && w.size() > 1) {
+            // turn / tip / tilt <degrees>: the whole figure's rotation about the vertical, about
+            // her own lateral axis (forward positive), about her own forward axis (her left down
+            // positive) — the Figure group's three rows.
             if (beginJointTransformEdit()) {
-                setFigureTurn(num(1));
+                setFigureRotation(cmd == QLatin1String("turn") ? 0 : cmd == QLatin1String("tip") ? 1 : 2, num(1));
                 endJointTransformEdit();
             } else {
-                say("[ikscript]   turn refused (a drag owns the pose)\n");
+                say("[ikscript]   %s refused (a drag owns the pose)\n", qPrintable(cmd));
             }
         } else if (cmd == QLatin1String("dial") && w.size() > 2) {
             // dial <forward|sideways|twist> <value>: the selected joint's Transform-tab dial set to
@@ -704,7 +706,7 @@ void VulkanWindow::scriptFrameRendered() {
 ///   selected.<bone> 1 if the selected joint is that bone or a bone of its rigid segment (a click's pick), else 0
 ///   lit.<bone>      1 if the selection highlight tints that bone's flesh (the selected joint, or its twist twin), else 0
 ///   palm.<bone>.<x|y|z>  a HAND's palm normal, that world component (where a laid hand faces)
-///   figure.<x|y|z|turn>    the figure's place (cm, world) and heading (deg): the Transform tab's Figure group
+///   figure.<x|y|z|turn|tip|tilt>  the figure's place (cm, world) and rotation (deg): the Transform tab's Figure group
 ///   dial.<forward|sideways|twist>  the selected joint's Transform-tab dial, as it reads now
 ///   dialmin.<kind>, dialmax.<kind>  that dial's range     dialjoint.<bone>  1 if the tab shows that joint
 ///   modal                  the dial the joint mouse mode turns (0/1/2 = bend / side / twist), -1 when off
@@ -741,7 +743,8 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
     } else if (key == QLatin1String("figure") && part.size() > 1) {
         const JointTransform::Figure fig = jointTransform().figure;
         const QString                which = part[1].toLower();
-        value = which == QLatin1String("x") ? fig.x : which == QLatin1String("y") ? fig.y : which == QLatin1String("z") ? fig.z : fig.turnDeg;
+        value = which == QLatin1String("x") ? fig.x : which == QLatin1String("y") ? fig.y : which == QLatin1String("z") ? fig.z
+                : which == QLatin1String("tip") ? fig.tipDeg : which == QLatin1String("tilt") ? fig.tiltDeg : fig.turnDeg;
     } else if ((key == QLatin1String("dial") || key == QLatin1String("dialmin") || key == QLatin1String("dialmax")) &&
                part.size() > 1) {
         const JointTransform transform = jointTransform();
