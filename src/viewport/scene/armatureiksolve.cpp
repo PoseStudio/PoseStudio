@@ -849,10 +849,15 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
         moved = hangMoved || headMoved || moved;
         m_jsPostStepMoving = hangMoved || headMoved; // (the settle waits for them: settleIkSolveTick)
     }
+    m_jsSoftBodyMoving = false;
     if (softbody::breastMotion()) {
-        const bool breastsMoved = tickSoftBody(1.0f / 60.0f); // (THE SOFT BREASTS, armaturebreasts.cpp: after the solve and the post-steps)
-        moved = moved || breastsMoved;
-        m_jsPostStepMoving = m_jsPostStepMoving || breastsMoved;
+        // THE SOFT BREASTS (armaturebreasts.cpp): after the solve and the post-steps. Their motion is
+        // NOT a post-step for the settle's purposes — folded into m_jsPostStepMoving it kept the
+        // settle SOLVING while they bounced, and the pose a drag ended in then depended on how long
+        // they bounced (a calmer spring moved a knife-edge prone-up's hand 2 mm past its gate); the
+        // settle ticks them alone once the pose is at rest (settleIkSolveTick's tail).
+        m_jsSoftBodyMoving = tickSoftBody(1.0f / 60.0f);
+        moved = moved || m_jsSoftBodyMoving;
     }
 
     // LIVE CONTACT RE-DETECTION and landings (see IkRig::updateContacts), on the solved pose.
@@ -991,7 +996,16 @@ bool Armature::settleIkSolveTick() {
     // IK_JS_SETTLE_PINS_ONLY restores the settle that ended with the pins.)
     static const bool kPinsOnly = std::getenv("IK_JS_SETTLE_PINS_ONLY") != nullptr; // A/B probe
     const bool        postStepsMoving = !kPinsOnly && m_jsPostStepMoving;
-    if ((!m_jsPinsEasing && !postStepsMoving) || ++m_ikSettleTicks > 120) {
+    if (++m_ikSettleTicks > 120) {
+        return false;
+    }
+    if (!m_jsPinsEasing && !postStepsMoving) {
+        // THE SOFT BODY'S TAIL: the pose is at rest; the breasts, if they still bounce, tick on by
+        // themselves — no solve, so the pose does not depend on how long they take (2026-11-05).
+        if (softbody::breastMotion() && m_jsSoftBodyMoving) {
+            m_jsSoftBodyMoving = tickSoftBody(1.0f / 60.0f);
+            return m_jsSoftBodyMoving;
+        }
         return false;
     }
     static const bool kOldSettle = std::getenv("IK_JS_OLD_SETTLE") != nullptr; // A/B probe
@@ -1002,7 +1016,7 @@ bool Armature::settleIkSolveTick() {
     m_jsSettling = true;
     dragIkTick(m_jsSettleTarget);
     m_jsSettling = false;
-    return m_jsPinsEasing || (!kPinsOnly && m_jsPostStepMoving);
+    return m_jsPinsEasing || (!kPinsOnly && m_jsPostStepMoving) || m_jsSoftBodyMoving;
 }
 
 } // namespace pose

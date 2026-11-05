@@ -18,11 +18,14 @@
  * it falls to the lower side; upside down it falls toward the head, twice as far. A rotation
  * about the pectoral joint swings and sags; it cannot flatten a volume (that is a morph's).
  *
- * THE SIZE: the body mesh sample (the skin the pectoral bone dominates) says how far the breast
- * stands out from its joint along the chest's forward; a flat chest (a male figure, a child)
- * reads under kBreastFlat and moves nothing, a full breast over kBreastFull moves the whole
- * amount, figure-scaled. One pectoral per side carries the breast (the one that stands out
- * furthest: a rib twist beside it reads a few centimetres); the rest ride as before.
+ * THE SIZE: the body mesh sample (the skin the pectoral bone dominates) says how FULL the breast
+ * is — its PROFILE, the skin's bulge beyond the chest wall integrated over its height at the
+ * nipple's x (kBreastAreaFlat .. kBreastAreaFull is flat .. the base female, and it runs on to
+ * kBreastFullnessMax for a large bust), or for a game rig's dome-alone patch its depth. The hang
+ * and the swing scale with that fullness to kBreastFullnessPower: a large breast hangs and
+ * bounces a great deal, a small one little, a flat chest (a male figure, a child) not at all.
+ * One pectoral per side carries the breast (the one with the biggest patch of skin: a rib twist
+ * beside it owns a few points); the rest ride as before.
  *
  * THE MOTION: while the engine ticks (a drag, its settle, the Ground button's fall and landing
  * bounce) the swing is a damped spring toward the resting swing (kBreastHz, kBreastDamping),
@@ -55,21 +58,29 @@ namespace pose {
 
 namespace {
 
-constexpr float kBreastFlat = 0.002f;         ///< Overhang (m, figure-scaled) under which the chest is flat: no swing (the base males read 0).
-constexpr float kBreastFull = 0.010f;         ///< ... over which the breast swings the whole amount (the base female reads 10 mm).
+constexpr float kBreastAreaFlat = 12.0f;      ///< THE BREAST'S PROFILE (cm², figure-scaled: the skin's bulge beyond the chest wall, integrated over the breast's height at the nipple's x) under which the chest is flat: no motion (the base males read 6-10, the androgynous base 9).
+constexpr float kBreastAreaFull = 39.0f;      ///< ... at which the breast is the base female's: fullness 1. It is NOT capped there — a large-busted character reads 52-64 (fullness 1.5-1.9).
+constexpr float kBreastFullnessMax = 3.0f;    ///< Fullness runs on to this.
+constexpr float kBreastFullnessPower = 1.5f;  ///< The hang and the swing scale with fullness to this power (a larger breast is heavier for its stiffness: the user's "more pronounced if the breasts are larger, none for very small").
+constexpr float kBulgeBand = 0.03f;           ///< The profile is read within this of the nipple's x, the chest wall within this above and below the patch (m, figure-scaled).
 constexpr float kDomeFlat = 0.036f;           ///< A dome-alone patch's depth under which the chest is flat (a game rig's male reads 39).
 constexpr float kDomeFull = 0.054f;           ///< ... over which it swings the whole amount (a game rig's woman reads 54).
 constexpr float kFlushBand = 0.012f;          ///< A patch whose bottom row stands within this of the chest wall reaches the ribs (the native figures').
 constexpr float kWallBand = 0.035f;           ///< The sternum: the chest wall's skin within this of the midline (m, figure-scaled).
 constexpr float kWallHeight = 0.02f;          ///< ... and within this of the nipple's height.
 constexpr float kFoldBand = 0.015f;           ///< The fold: the breast patch's skin within this of its lowest point (m, figure-scaled).
-constexpr float kBreastSwingGainDegDefault = 12.0f; ///< Degrees of swing per unit of gravity change perpendicular to the tether (24 pointed the nipple at the head in a bow: the hang below is what lengthens a breast toward the floor).
-constexpr float kBreastSwingMaxDegDefault = 30.0f;  ///< The swing's cap (a figure upside down: two units of gravity change).
-constexpr float kBreastHangOutDefault = 0.030f;     ///< THE HANG: metres a full breast is drawn out along its tether per g of gravity along it (a bow: the breast lengthens toward the floor; 25 and 35 looked at, 30 between).
+constexpr float kBreastSwingGainDegDefault = 12.0f; ///< Degrees of swing per unit of gravity change perpendicular to the tether at fullness 1 (24 pointed the nipple at the head in a bow: the hang below is what lengthens a breast toward the floor).
+constexpr float kBreastSwingMaxDegDefault = 45.0f;  ///< The swing's cap.
+constexpr float kBreastHangOutDefault = 0.030f;     ///< THE HANG: metres the base female's breast is drawn out along its tether per g of gravity along it (a bow: the breast lengthens toward the floor; 25 and 35 looked at, 30 between); a fuller breast by its fullness to the power above.
 constexpr float kBreastPivotUpDefault = 0.0f;       ///< The pivot's height over the nipple, as a share of the breast's protrusion from its base.
 constexpr float kBaseBelowFold = 0.03f;             ///< The chest wall under the breast: the wall bone's skin within this below the patch's bottom (m, figure-scaled).
 
-/// A/B levers for the look (POSESTUDIO_BREAST_GAIN deg, _CAP deg, _HANG mm, _PIVOT_UP share): read once.
+constexpr float kBreastHzDefault = 2.5f;      ///< The bounce's frequency at fullness 1; a fuller breast slower by the square root of its fullness.
+constexpr float kBreastDampingDefault = 0.4f; ///< Its damping ratio: two visible swings after a quick move, none after a slow one (0.6 showed nothing — the user: "there should be some jiggle, but speed dependent"; 0.28 at the old joint pivot jiggled).
+constexpr float kBreastAccelMaxG = 2.5f;      ///< The chest's acceleration is read up to this, in g (a quick drag's start and stop are what set the breasts bouncing).
+constexpr float kBreastGravitySmooth = 0.5f;  ///< The effective gravity's low-pass per tick (a cursor's jitter is not a force; a drag's jolt is).
+
+/// A/B levers for the look (POSESTUDIO_BREAST_GAIN deg, _CAP deg, _HANG mm, _PIVOT_UP share, _HZ, _DAMPING): read once.
 float envOrF(const char* name, float fallback) {
     const char* v = std::getenv(name);
     return v && *v ? static_cast<float>(std::atof(v)) : fallback;
@@ -78,10 +89,13 @@ const float kBreastSwingGainDeg = envOrF("POSESTUDIO_BREAST_GAIN", kBreastSwingG
 const float kBreastSwingMaxDeg = envOrF("POSESTUDIO_BREAST_CAP", kBreastSwingMaxDegDefault);
 const float kBreastHangOut = envOrF("POSESTUDIO_BREAST_HANG", kBreastHangOutDefault * 1000.0f) / 1000.0f;
 const float kBreastPivotUp = envOrF("POSESTUDIO_BREAST_PIVOT_UP", kBreastPivotUpDefault);
-constexpr float kBreastHz = 2.0f;             ///< The bounce's frequency.
-constexpr float kBreastDamping = 0.6f;        ///< Its damping ratio: one soft overshoot and done (0.28 jiggled, which breasts do not).
-constexpr float kBreastAccelMaxG = 0.8f;      ///< The chest's acceleration is read up to this, in g (a drag's jolts are not a fall's).
-constexpr float kBreastGravitySmooth = 0.3f;  ///< The effective gravity's low-pass per tick (a cursor's jitter is not a force).
+const float kBreastHz = envOrF("POSESTUDIO_BREAST_HZ", kBreastHzDefault);
+const float kBreastDamping = envOrF("POSESTUDIO_BREAST_DAMPING", kBreastDampingDefault);
+
+/// The weight a breast's motion is scaled by: its fullness (0 flat .. 1 the base female .. 3) to kBreastFullnessPower.
+float breastWeight(float fullness) {
+    return fullness <= 0.0f ? 0.0f : std::pow(fullness, kBreastFullnessPower);
+}
 constexpr float kTick = 1.0f / 60.0f;
 
 } // namespace
@@ -111,7 +125,8 @@ void Armature::setupBreasts() {
     struct Reading {
         int   bone = -1, parent = -1, points = 0, underPoints = 0, wallPoints = 0;
         float overhang = 0.0f, depth = 0.0f, zUnder = 0.0f, wallZ = 0.0f, bindZ = 0.0f, xTip = 0.0f, yTip = 0.0f;
-        float zMax = 0.0f, yMin = 0.0f;
+        float zMax = 0.0f, yMin = 0.0f, yMax = 0.0f;
+        float area = 0.0f; ///< THE PROFILE: the skin's bulge beyond the chest wall integrated over the breast's height at the nipple's x (cm², figure-scaled).
         float baseZ = -std::numeric_limits<float>::max(); ///< The chest wall's skin at the breast's x just below the patch (the ribs under the fold), where found.
         int   basePoints = 0;
         bool  flush = true; ///< The patch's bottom row within kFlushBand of the chest wall (or no wall / no bottom row read).
@@ -135,13 +150,14 @@ void Armature::setupBreasts() {
             r.parent = m_bones[static_cast<std::size_t>(bone)].parent;
             r.bindZ = bind[static_cast<std::size_t>(bone)].z;
             float zMin = std::numeric_limits<float>::max(), zMax = -std::numeric_limits<float>::max();
-            float yMin = std::numeric_limits<float>::max();
+            float yMin = std::numeric_limits<float>::max(), yMax = -std::numeric_limits<float>::max();
             for (const BodyMeshPoint& p : m_bodyMesh) {
                 if (p.bone != bone) {
                     continue;
                 }
                 zMin = std::min(zMin, p.pos.z);
                 yMin = std::min(yMin, p.pos.y);
+                yMax = std::max(yMax, p.pos.y);
                 if (p.pos.z > zMax) {
                     zMax = p.pos.z;
                     r.zMax = zMax;
@@ -154,6 +170,7 @@ void Armature::setupBreasts() {
                 continue;
             }
             r.yMin = yMin;
+            r.yMax = yMax;
             // THE OVERHANG: the breast's tip against the skin at the BOTTOM of its own patch — the
             // fold, where the breast meets the ribs. A full breast hangs over its fold by a few
             // centimetres; a man's pectoral is flush with the ribs below it.
@@ -202,11 +219,72 @@ void Armature::setupBreasts() {
             }
             r.depth = zMax - zMin;
             r.flush = r.wallPoints == 0 || r.underPoints == 0 || r.zUnder - r.wallZ < kFlushBand * scale;
+            // THE PROFILE AREA — the breast's size as the eye reads it from the side. The chest wall
+            // is a LINE through the ribs under the fold (above) and the wall bone's skin just over the
+            // patch's top where it has any in front of the patch's own rearmost skin, else the patch's
+            // own top rows (a native pectoral's top is the upper chest by the collarbone, flush with
+            // the wall); every patch point within kBulgeBand of the nipple's x contributes what it
+            // stands forward of that line, summed over the patch's height. The nipple's protrusion
+            // alone under-read every heavy build (the ribs under the fold bulge forward: one read 18 mm
+            // against the base female's 22 while plainly fuller, 46 cm² against 39 here) and the
+            // overhang could not tell a large breast from the base at all (9.6 against 10.0 mm).
+            if (r.basePoints > 0) {
+                const float band = kBulgeBand * scale;
+                float yUp = 0.0f, zUp = -std::numeric_limits<float>::max();
+                int   upPoints = 0;
+                if (wall >= 0) {
+                    for (const BodyMeshPoint& p : m_bodyMesh) {
+                        if (p.bone != wall || std::abs(p.pos.x - r.xTip) > band || p.pos.y < yMax || p.pos.y > yMax + band || p.pos.z <= zMin) {
+                            continue;
+                        }
+                        yUp += p.pos.y;
+                        zUp = std::max(zUp, p.pos.z);
+                        ++upPoints;
+                    }
+                }
+                if (upPoints == 0) {
+                    for (const BodyMeshPoint& p : m_bodyMesh) {
+                        if (p.bone != bone || std::abs(p.pos.x - r.xTip) > band || p.pos.y < yMax - 0.02f * scale) {
+                            continue;
+                        }
+                        yUp += p.pos.y;
+                        zUp = std::max(zUp, p.pos.z);
+                        ++upPoints;
+                    }
+                }
+                float yRibs = 0.0f;
+                int   ribPoints = 0;
+                for (const BodyMeshPoint& p : m_bodyMesh) {
+                    if (p.bone != wall || std::abs(p.pos.x - r.xTip) > kWallHeight * scale || p.pos.y > yMin || p.pos.y < yMin - kBaseBelowFold * scale) {
+                        continue;
+                    }
+                    yRibs += p.pos.y;
+                    ++ribPoints;
+                }
+                if (upPoints > 0 && ribPoints > 0) {
+                    yUp /= static_cast<float>(upPoints);
+                    yRibs /= static_cast<float>(ribPoints);
+                    const float zRibs = r.baseZ;
+                    float       bulge = 0.0f;
+                    int         bandPoints = 0;
+                    for (const BodyMeshPoint& p : m_bodyMesh) {
+                        if (p.bone != bone || std::abs(p.pos.x - r.xTip) > band) {
+                            continue;
+                        }
+                        const float zLine = zRibs + (zUp - zRibs) * (p.pos.y - yRibs) / std::max(1e-4f, yUp - yRibs);
+                        bulge += std::max(0.0f, p.pos.z - zLine);
+                        ++bandPoints;
+                    }
+                    if (bandPoints > 0) {
+                        r.area = bulge * ((yMax - yMin) / static_cast<float>(bandPoints)) * 1e4f / (scale * scale);
+                    }
+                }
+            }
             if (kTrace) {
                 const float beyondWall = r.wallPoints > 0 ? std::max(0.0f, zMax - r.wallZ) : 0.0f;
-                std::fprintf(stderr, "[breast] %s %-24s bottom row %s: overhang %.1f mm (bottom row %.1f forward of the wall), depth %.1f, beyond the wall %.1f (%s), %d points, scale %.2f\n",
+                std::fprintf(stderr, "[breast] %s %-24s bottom row %s: profile %.1f cm2, overhang %.1f mm (bottom row %.1f forward of the wall), depth %.1f, beyond the wall %.1f (%s), %d points, scale %.2f\n",
                              side == RigSide::Left ? "L" : "R", m_boneNames[static_cast<std::size_t>(bone)].c_str(), r.flush ? "flush with the ribs" : "forward of the wall",
-                             r.overhang * 1000.0f, r.underPoints > 0 && r.wallPoints > 0 ? (r.zUnder - r.wallZ) * 1000.0f : 0.0f, r.depth * 1000.0f, beyondWall * 1000.0f,
+                             r.area, r.overhang * 1000.0f, r.underPoints > 0 && r.wallPoints > 0 ? (r.zUnder - r.wallZ) * 1000.0f : 0.0f, r.depth * 1000.0f, beyondWall * 1000.0f,
                              wall >= 0 ? m_boneNames[static_cast<std::size_t>(wall)].c_str() : "-", r.points, scale);
             }
             if (r.points > pick.points || (r.points == pick.points && r.depth > pick.depth)) {
@@ -234,13 +312,15 @@ void Armature::setupBreasts() {
         if (r.points == 0) {
             continue;
         }
-        const float out = holdsFold ? r.overhang : r.depth;
-        const float flat = holdsFold ? kBreastFlat : kDomeFlat;
-        const float full = holdsFold ? kBreastFull : kDomeFull;
-        Breast      best;
+        // THE FULLNESS: a patch that reaches the ribs is read by its PROFILE AREA against the base
+        // female's (1.0, running on to kBreastFullnessMax for a large bust); a dome-alone patch by its
+        // DEPTH (a dome's rim is the spine's skin, so the profile under-reads it — 8 cm² on a modest
+        // game-rig woman whose dome reads 0.25), capped at 1.
+        Breast best;
         best.bone = r.bone;
         best.parent = r.parent;
-        best.size = glm::clamp((out / scale - flat) / (full - flat), 0.0f, 1.0f);
+        best.size = holdsFold ? glm::clamp((r.area - kBreastAreaFlat) / (kBreastAreaFull - kBreastAreaFlat), 0.0f, kBreastFullnessMax)
+                              : glm::clamp((r.depth / scale - kDomeFlat) / (kDomeFull - kDomeFlat), 0.0f, 1.0f);
         // THE PIVOT: the breast's base on the chest wall, straight behind the nipple — at the
         // depth of the ribs its patch reaches, else of the sternum beside it. The bone's joint is
         // no pivot: a native pectoral's sits seven centimetres behind the breast by the spine, and
@@ -250,8 +330,8 @@ void Armature::setupBreasts() {
         best.protrusion = std::max(0.005f, r.zMax - wallDepth);
         best.pivotBind = glm::vec3(r.xTip, r.yTip + kBreastPivotUp * best.protrusion, wallDepth);
         if (kTrace) {
-            std::fprintf(stderr, "[breast] %s chosen %-24s %s -> size %.2f; base %.1f mm behind the nipple (%s), pivot %.1f mm over it\n", &r == &chosen[0] ? "L" : "R",
-                         m_boneNames[static_cast<std::size_t>(r.bone)].c_str(), holdsFold ? "reaches the ribs" : "the dome alone", best.size,
+            std::fprintf(stderr, "[breast] %s chosen %-24s %s -> fullness %.2f (weight %.2f); base %.1f mm behind the nipple (%s), pivot %.1f mm over it\n", &r == &chosen[0] ? "L" : "R",
+                         m_boneNames[static_cast<std::size_t>(r.bone)].c_str(), holdsFold ? "reaches the ribs: the profile" : "the dome alone: its depth", best.size, breastWeight(best.size),
                          best.protrusion * 1000.0f, r.basePoints > 0 ? "the ribs under the fold" : "the fold / the sternum", kBreastPivotUp * best.protrusion * 1000.0f);
         }
         if (best.parent >= 0 && best.size > 0.0f) {
@@ -303,7 +383,7 @@ glm::vec3 Armature::breastRestingSwing(const Breast& b) const {
     if (amount < 1e-4f) {
         return glm::vec3(0.0f);
     }
-    const float angle = std::min(kBreastSwingMaxDeg, kBreastSwingGainDeg * amount) * b.size * softbody::breastStrength();
+    const float angle = std::min(kBreastSwingMaxDeg, kBreastSwingGainDeg * amount * breastWeight(b.size)) * softbody::breastStrength();
     return glm::normalize(glm::cross(r0, perp / amount)) * glm::radians(angle);
 }
 
@@ -319,7 +399,7 @@ float Armature::breastRestingHang(const Breast& b) const {
     // a morph's job, like flattening): clamped at none.
     const glm::vec3 gChest = breastGravityInChest(b);
     const float     along = std::max(0.0f, gChest.z);
-    return kBreastHangOut * along * b.size * softbody::breastStrength();
+    return kBreastHangOut * along * breastWeight(b.size) * softbody::breastStrength();
 }
 
 glm::mat4 Armature::breastSwingMatrix(const Breast& b, const glm::mat4& boneGlobal) const {
@@ -384,9 +464,11 @@ bool Armature::tickSoftBody(float dt) {
     const glm::vec3 effective = glm::vec3(0.0f, -1.0f, 0.0f) - accel / g;
     m_breastGravity = glm::mix(m_breastGravity, effective, kBreastGravitySmooth);
     // THE SPRING toward the resting swing under that gravity.
-    const float omega = 2.0f * 3.14159265f * kBreastHz;
-    bool        moving = false;
+    bool moving = false;
     for (Breast& b : m_breasts) {
+        // A fuller breast bounces slower (a heavier mass on the same tissue): the frequency falls
+        // with the square root of its fullness.
+        const float     omega = 2.0f * 3.14159265f * kBreastHz / std::sqrt(std::max(0.5f, b.size));
         const glm::vec3 target = breastRestingSwing(b);
         b.velocity += (omega * omega * (target - b.swing) - 2.0f * kBreastDamping * omega * b.velocity) * dt;
         b.swing += b.velocity * dt;
@@ -404,6 +486,14 @@ bool Armature::tickSoftBody(float dt) {
     }
     m_breastDynamic = true;
     computeSkinMatrices();
+    static const bool kTickTrace = std::getenv("POSESTUDIO_BREAST_TRACE") && std::getenv("POSESTUDIO_BREAST_TRACE")[0] == '2';
+    if (kTickTrace && !m_breasts.empty()) {
+        // POSESTUDIO_BREAST_TRACE=2: the first breast per tick — the chest's acceleration (g), the
+        // swing and its rest, the hang and its rest — to read a quick move's bounce against a slow one.
+        const Breast& b = m_breasts.front();
+        std::fprintf(stderr, "[breast-tick] accel %.2f g | swing %.2f deg (rest %.2f) | hang %.1f mm (rest %.1f)\n", mag,
+                     glm::degrees(glm::length(b.swing)), glm::degrees(glm::length(breastRestingSwing(b))), b.hang * 1000.0f, breastRestingHang(b) * 1000.0f);
+    }
     return moving;
 }
 

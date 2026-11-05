@@ -200,7 +200,7 @@ A figure's breasts follow the pose. Bend her forward and they hang forward and o
 
 How much they move depends on the breast the figure actually has, read off her mesh at import: a full breast moves the whole amount, a small one less, a flat chest (a male figure, a child) not at all. Figures from other formats take part when their rig carries breast bones (the character-creation exports do; most game and anime rigs do not).
 
-The movement is a swing about the breast's base on the chest wall together with a hang along it — in a bow the breast is drawn out toward the floor with the nipple leading — so a breast lying on its back lifts rather than flattens, and the amount is a calibrated guess at a human breast's weight. Preferences → Posing turns it off or scales it (see [Preferences](preferences.md#posing)).
+The movement is a swing about the breast's base on the chest wall together with a hang along it — in a bow the breast is drawn out toward the floor with the nipple leading — so a breast lying on its back lifts rather than flattens. The amount is the breast's own: a large bust hangs and bounces a great deal, a modest one a little, a flat chest not at all. The bounce is speed-dependent: a quick move sets the breasts swinging for a moment, a slow one does not. Preferences → Posing turns it off or scales it (see [Preferences](preferences.md#posing)).
 
 ## Tips
 

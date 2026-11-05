@@ -818,6 +818,7 @@ private:
     std::vector<char>             m_jsPinTargetValid;
     bool                          m_jsPinsEasing = false; ///< A pin target is still en route.
     bool                          m_jsPostStepMoving = false; ///< The last tick's post-steps (the arms' hang, the head's righting) turned something: the settle goes on (settleIkSolveTick).
+    bool                          m_jsSoftBodyMoving = false; ///< The soft breasts still bounce: the settle ticks them alone once the pose is at rest (no solve).
     /// The release SETTLE is the drag continued under a still cursor (settleIkSolveTick): the
     /// followed target the last drag tick solved to, and the flag that keeps the rig from
     /// reading new intents or beginning new steps meanwhile.

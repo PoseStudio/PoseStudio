@@ -3,9 +3,9 @@
 # with it on; `breastl` / `breastr` read the swing in degrees, `breasthangl` / `breasthangr` the
 # hang along the tether in mm. Standing they rest as sculpted; a bow swings them (the sag toward
 # the belly relieved) and draws them out toward the floor, the nipple leading; Reset Pose rests
-# them again; the Ground button's landing bounces them and the arms, then rests. The gates are
-# sized for a quarter-size bust (a game rig's modest woman reads 3 degrees and 8 mm in the deep
-# bow, and the base-sized level bow leans her only 37 degrees: 4.5 mm); a flat chest reads 0 of both.
+# them again; the Ground button's landing bounces them and the arms, then rests. The amounts are
+# the BASE FIGURE'S (fullness 1: a large-busted character hangs twice as far, a modest one a
+# quarter, a flat chest not at all), and so are the gates: run on another body, read the numbers.
 view right
 shot 01_standing
 closeup chest 0.30
@@ -23,8 +23,9 @@ press chest@0.6
 dragv -0.17 -0.12 50 40
 release
 shot 02b_level_bow
-expect breasthangl > 3
-expect breasthangr > 3
+expect breastl > 5
+expect breasthangl > 15
+expect breasthangr > 15
 closeup chest 0.30
 shot 02c_level_bow_closeup
 orbit 40 -12
@@ -41,12 +42,12 @@ expect breasthangl < 0.5
 press chest@0.6
 dragv -0.30 -0.25 50 40
 shot 02_bow_drag
-expect breastl > 2.5
-expect breastr > 2.5
+expect breastl > 10
+expect breastr > 10
 release
 shot 03_bow_rest
-expect breastl > 2.5
-expect breasthangl > 5
+expect breastl > 10
+expect breasthangl > 10
 # ... and in close-up: the nipples lead, pointing at the floor, the breast's base where it was.
 closeup chest 0.30
 shot 03b_bow_closeup
@@ -57,8 +58,6 @@ expect breastl < 0.5
 
 # Lying back: the hips down onto the floor, then the chest reclined — the breasts lift toward the
 # chin (a swing; no hang into the chest: lying down gravity presses them, which is a morph's job).
-# The gate only says the recline moved them: the base reads 6, a game rig that this base-sized sit
-# merely squats reads 1.
 press hip
 dragv 0 -0.80 60 30
 release
@@ -66,7 +65,7 @@ press chest@0.6
 dragv 0.45 -0.35 60 40
 release
 shot 04_reclined
-expect breastl > 0.8
+expect breastl > 3
 expect breasthangl < 0.5
 reset
 
