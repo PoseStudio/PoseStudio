@@ -1,8 +1,11 @@
 # SOFT BREASTS (armaturebreasts.cpp): the breasts hang with the chest's orientation against
 # gravity and bounce on a landing. The Posing preference is on by default, so the app runs this
-# with it on; `breastl` / `breastr` read the swing in degrees. Standing they rest as sculpted;
-# a bow hangs them (the sag toward the belly relieved: they lift toward the head and hang out);
-# Reset Pose rests them again; the Ground button's landing bounces them and the arms, then rests.
+# with it on; `breastl` / `breastr` read the swing in degrees, `breasthangl` / `breasthangr` the
+# hang along the tether in mm. Standing they rest as sculpted; a bow swings them (the sag toward
+# the belly relieved) and draws them out toward the floor, the nipple leading; Reset Pose rests
+# them again; the Ground button's landing bounces them and the arms, then rests. The gates are
+# sized for a quarter-size bust (a game rig's modest woman reads 3 degrees and 8 mm in the deep
+# bow, and the base-sized level bow leans her only 37 degrees: 4.5 mm); a flat chest reads 0 of both.
 view right
 shot 01_standing
 closeup chest 0.30
@@ -11,16 +14,39 @@ view home
 view right
 expect breastl < 0.5
 expect breastr < 0.5
+expect breasthangl < 0.5
 
-# A bow by the chest: a static hang, there at the end of the settle as during the drag.
+# A LEVEL-CHESTED BOW — the user's pose (the chest horizontal, a hand reaching for the floor): the
+# breast hangs off the chest wall as a teardrop, the nipple at its lowest point pointing at the
+# floor; looked at from the side, from three-quarters and from below.
+press chest@0.6
+dragv -0.17 -0.12 50 40
+release
+shot 02b_level_bow
+expect breasthangl > 3
+expect breasthangr > 3
+closeup chest 0.30
+shot 02c_level_bow_closeup
+orbit 40 -12
+shot 02d_level_bow_threeq
+orbit -80 0
+shot 02e_level_bow_below
+reset
+view home
+view right
+expect breastl < 0.5
+expect breasthangl < 0.5
+
+# A deep bow by the chest: a static hang, there at the end of the settle as during the drag.
 press chest@0.6
 dragv -0.30 -0.25 50 40
 shot 02_bow_drag
-expect breastl > 5
-expect breastr > 5
+expect breastl > 2.5
+expect breastr > 2.5
 release
 shot 03_bow_rest
-expect breastl > 5
+expect breastl > 2.5
+expect breasthangl > 5
 # ... and in close-up: the nipples lead, pointing at the floor, the breast's base where it was.
 closeup chest 0.30
 shot 03b_bow_closeup
@@ -29,7 +55,10 @@ view home
 view right
 expect breastl < 0.5
 
-# Lying back: the hips down onto the floor, then the chest reclined — the breasts lift toward the chin.
+# Lying back: the hips down onto the floor, then the chest reclined — the breasts lift toward the
+# chin (a swing; no hang into the chest: lying down gravity presses them, which is a morph's job).
+# The gate only says the recline moved them: the base reads 6, a game rig that this base-sized sit
+# merely squats reads 1.
 press hip
 dragv 0 -0.80 60 30
 release
@@ -37,7 +66,8 @@ press chest@0.6
 dragv 0.45 -0.35 60 40
 release
 shot 04_reclined
-expect breastl > 4
+expect breastl > 0.8
+expect breasthangl < 0.5
 reset
 
 # The landing: lifted half a metre and dropped, shot through the bounce, at rest afterwards.

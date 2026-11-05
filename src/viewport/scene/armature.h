@@ -1151,8 +1151,11 @@ private:
         int       parent = -1;
         float     size = 0.0f;       ///< 0 (a flat chest: no swing) .. 1 (a full breast), off the skin's protrusion.
         glm::vec3 pivotBind{0.0f};   ///< The breast's base on the chest wall behind the nipple (model space at bind): the swing's pivot.
+        float     protrusion = 0.0f; ///< The nipple's distance forward of the base (m).
         glm::vec3 swing{0.0f};       ///< The dynamic swing (a rotation vector in the chest's frame, radians).
         glm::vec3 velocity{0.0f};
+        float     hang = 0.0f;       ///< The dynamic hang: how far the breast is drawn out along its tether (m).
+        float     hangVel = 0.0f;
     };
     std::vector<Breast> m_breasts;                   ///< One per side (the pectoral that carries the breast), or none.
     bool                m_breastsReady = false;      ///< setupBreasts ran (with the rig and the body mesh).
@@ -1162,7 +1165,9 @@ private:
     glm::vec3           m_breastChestVel{0.0f};
     int                 m_breastChestSamples = 0;
     void      setupBreasts();
+    glm::vec3 breastGravityInChest(const Breast& b) const; ///< Effective gravity (g) in the chest's frame.
     glm::vec3 breastRestingSwing(const Breast& b) const;
+    float     breastRestingHang(const Breast& b) const;
     glm::mat4 breastSwingMatrix(const Breast& b, const glm::mat4& boneGlobal) const;
 public:
     /// One tick of the soft body (the breasts' spring under effective gravity): called from the
@@ -1177,6 +1182,8 @@ public:
     void  applySoftBodySettings();
     /// The swing of the left (0) or right (1) breast, degrees — the scripts' `breastl` / `breastr`.
     float breastSwingDeg(int side) const;
+    /// How far that breast is drawn out along its tether (mm): the hang, dynamic or resting.
+    float breastHangMm(int side) const;
 private:
     // --- The bone classes and THE DIGIT DRAG (armatureikdigit.cpp) ---
     /// Per bone: its BoneClass (classifyBones, with the rig: empty until then).

@@ -292,6 +292,7 @@ public:
     void  settleSoftBody(int index);
     void  applySoftBodySettings();
     float breastSwingDeg(int side) const;
+    float breastHangMm(int side) const;
 
     // --- Pose snapshot (for undo/redo) ---
     std::vector<std::pair<std::string, glm::vec3>> capturePose() const;

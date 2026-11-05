@@ -63,8 +63,21 @@ constexpr float kFlushBand = 0.012f;          ///< A patch whose bottom row stan
 constexpr float kWallBand = 0.035f;           ///< The sternum: the chest wall's skin within this of the midline (m, figure-scaled).
 constexpr float kWallHeight = 0.02f;          ///< ... and within this of the nipple's height.
 constexpr float kFoldBand = 0.015f;           ///< The fold: the breast patch's skin within this of its lowest point (m, figure-scaled).
-constexpr float kBreastSwingGainDeg = 24.0f;  ///< Degrees of swing per unit of gravity change perpendicular to the tether (57 would follow gravity in full; a breast is elastic).
-constexpr float kBreastSwingMaxDeg = 40.0f;   ///< The swing's cap (a figure upside down).
+constexpr float kBreastSwingGainDegDefault = 12.0f; ///< Degrees of swing per unit of gravity change perpendicular to the tether (24 pointed the nipple at the head in a bow: the hang below is what lengthens a breast toward the floor).
+constexpr float kBreastSwingMaxDegDefault = 30.0f;  ///< The swing's cap (a figure upside down: two units of gravity change).
+constexpr float kBreastHangOutDefault = 0.030f;     ///< THE HANG: metres a full breast is drawn out along its tether per g of gravity along it (a bow: the breast lengthens toward the floor; 25 and 35 looked at, 30 between).
+constexpr float kBreastPivotUpDefault = 0.0f;       ///< The pivot's height over the nipple, as a share of the breast's protrusion from its base.
+constexpr float kBaseBelowFold = 0.03f;             ///< The chest wall under the breast: the wall bone's skin within this below the patch's bottom (m, figure-scaled).
+
+/// A/B levers for the look (POSESTUDIO_BREAST_GAIN deg, _CAP deg, _HANG mm, _PIVOT_UP share): read once.
+float envOrF(const char* name, float fallback) {
+    const char* v = std::getenv(name);
+    return v && *v ? static_cast<float>(std::atof(v)) : fallback;
+}
+const float kBreastSwingGainDeg = envOrF("POSESTUDIO_BREAST_GAIN", kBreastSwingGainDegDefault);
+const float kBreastSwingMaxDeg = envOrF("POSESTUDIO_BREAST_CAP", kBreastSwingMaxDegDefault);
+const float kBreastHangOut = envOrF("POSESTUDIO_BREAST_HANG", kBreastHangOutDefault * 1000.0f) / 1000.0f;
+const float kBreastPivotUp = envOrF("POSESTUDIO_BREAST_PIVOT_UP", kBreastPivotUpDefault);
 constexpr float kBreastHz = 2.0f;             ///< The bounce's frequency.
 constexpr float kBreastDamping = 0.6f;        ///< Its damping ratio: one soft overshoot and done (0.28 jiggled, which breasts do not).
 constexpr float kBreastAccelMaxG = 0.8f;      ///< The chest's acceleration is read up to this, in g (a drag's jolts are not a fall's).
@@ -98,6 +111,9 @@ void Armature::setupBreasts() {
     struct Reading {
         int   bone = -1, parent = -1, points = 0, underPoints = 0, wallPoints = 0;
         float overhang = 0.0f, depth = 0.0f, zUnder = 0.0f, wallZ = 0.0f, bindZ = 0.0f, xTip = 0.0f, yTip = 0.0f;
+        float zMax = 0.0f, yMin = 0.0f;
+        float baseZ = -std::numeric_limits<float>::max(); ///< The chest wall's skin at the breast's x just below the patch (the ribs under the fold), where found.
+        int   basePoints = 0;
         bool  flush = true; ///< The patch's bottom row within kFlushBand of the chest wall (or no wall / no bottom row read).
     };
     Reading chosen[2];
@@ -128,6 +144,7 @@ void Armature::setupBreasts() {
                 yMin = std::min(yMin, p.pos.y);
                 if (p.pos.z > zMax) {
                     zMax = p.pos.z;
+                    r.zMax = zMax;
                     r.yTip = p.pos.y; // (the breast's furthest point forward: the nipple)
                     r.xTip = p.pos.x;
                 }
@@ -136,6 +153,7 @@ void Armature::setupBreasts() {
             if (r.points == 0) {
                 continue;
             }
+            r.yMin = yMin;
             // THE OVERHANG: the breast's tip against the skin at the BOTTOM of its own patch — the
             // fold, where the breast meets the ribs. A full breast hangs over its fold by a few
             // centimetres; a man's pectoral is flush with the ribs below it.
@@ -154,6 +172,18 @@ void Armature::setupBreasts() {
             }
             r.wallZ = -std::numeric_limits<float>::max();
             if (wall >= 0) {
+                // THE BASE'S DEPTH: the chest wall's skin at the breast's own x just BELOW the patch —
+                // the ribs under the fold, which the spine link owns on every rig. On the base
+                // female they stand 25 mm behind the nipple where the fold's own skin (the patch's
+                // bottom row, the first pivot depth) stands 13: a pivot at the fold tilted the
+                // breast about a point a finger's breadth behind the nipple.
+                for (const BodyMeshPoint& p : m_bodyMesh) {
+                    if (p.bone != wall || std::abs(p.pos.x - r.xTip) > kWallHeight * scale || p.pos.y > yMin || p.pos.y < yMin - kBaseBelowFold * scale) {
+                        continue;
+                    }
+                    r.baseZ = std::max(r.baseZ, p.pos.z);
+                    ++r.basePoints;
+                }
                 // The sternum AT THE NIPPLE'S HEIGHT (a band of kWallHeight about it; twice that if
                 // the skin is sparse there): over the breast's whole height the upper chest's bulge
                 // stood in for the wall, and every figure read 1-18 mm.
@@ -216,11 +246,13 @@ void Armature::setupBreasts() {
         // no pivot: a native pectoral's sits seven centimetres behind the breast by the spine, and
         // a swing about it slid the whole breast up the chest (the user's close-up: the nipple
         // along the chest, not toward the floor).
-        const float wallDepth = holdsFold && r.underPoints > 0 ? r.zUnder : r.wallPoints > 0 ? r.wallZ : r.bindZ;
-        best.pivotBind = glm::vec3(r.xTip, r.yTip, wallDepth);
+        const float wallDepth = r.basePoints > 0 ? r.baseZ : holdsFold && r.underPoints > 0 ? r.zUnder : r.wallPoints > 0 ? r.wallZ : r.bindZ;
+        best.protrusion = std::max(0.005f, r.zMax - wallDepth);
+        best.pivotBind = glm::vec3(r.xTip, r.yTip + kBreastPivotUp * best.protrusion, wallDepth);
         if (kTrace) {
-            std::fprintf(stderr, "[breast] %s chosen %-24s %s -> size %.2f\n", &r == &chosen[0] ? "L" : "R",
-                         m_boneNames[static_cast<std::size_t>(r.bone)].c_str(), holdsFold ? "reaches the ribs" : "the dome alone", best.size);
+            std::fprintf(stderr, "[breast] %s chosen %-24s %s -> size %.2f; base %.1f mm behind the nipple (%s), pivot %.1f mm over it\n", &r == &chosen[0] ? "L" : "R",
+                         m_boneNames[static_cast<std::size_t>(r.bone)].c_str(), holdsFold ? "reaches the ribs" : "the dome alone", best.size,
+                         best.protrusion * 1000.0f, r.basePoints > 0 ? "the ribs under the fold" : "the fold / the sternum", kBreastPivotUp * best.protrusion * 1000.0f);
         }
         if (best.parent >= 0 && best.size > 0.0f) {
             m_breasts.push_back(best);
@@ -243,10 +275,7 @@ void Armature::applySoftBodySettings() {
     computeSkinMatrices(); // (on: the resting swing; off: the bind's pectorals again)
 }
 
-glm::vec3 Armature::breastRestingSwing(const Breast& b) const {
-    if (b.parent < 0 || static_cast<std::size_t>(b.parent) >= m_poseGlobal.size()) {
-        return glm::vec3(0.0f);
-    }
+glm::vec3 Armature::breastGravityInChest(const Breast& b) const {
     // Gravity (effective, in g) in the chest's frame; the chest's rotation is its world rotation
     // away from the bind (binds are translation-only), the model transform taken off first.
     const glm::mat3 toModel = glm::inverse(glm::mat3(m_transform));
@@ -258,7 +287,14 @@ glm::vec3 Armature::breastRestingSwing(const Breast& b) const {
             chest[c] /= len;
         }
     }
-    const glm::vec3 gChest = glm::transpose(chest) * gModel;
+    return glm::transpose(chest) * gModel;
+}
+
+glm::vec3 Armature::breastRestingSwing(const Breast& b) const {
+    if (b.parent < 0 || static_cast<std::size_t>(b.parent) >= m_poseGlobal.size()) {
+        return glm::vec3(0.0f);
+    }
+    const glm::vec3 gChest = breastGravityInChest(b);
     const glm::vec3 d0(0.0f, -1.0f, 0.0f); // (standing: what the sculpt already shows)
     const glm::vec3 r0(0.0f, 0.0f, 1.0f);  // (the tether: forward out of the chest)
     const glm::vec3 delta = gChest - d0;
@@ -271,10 +307,26 @@ glm::vec3 Armature::breastRestingSwing(const Breast& b) const {
     return glm::normalize(glm::cross(r0, perp / amount)) * glm::radians(angle);
 }
 
+float Armature::breastRestingHang(const Breast& b) const {
+    if (b.parent < 0 || static_cast<std::size_t>(b.parent) >= m_poseGlobal.size()) {
+        return 0.0f;
+    }
+    // THE HANG: gravity ALONG the tether draws the breast out from the chest — a bow lengthens it
+    // toward the floor, the nipple leading (the user's second look: "breasts would hang a bit
+    // more, led by the nipples" — a swing alone turns the breast, it cannot lengthen it).
+    // Standing there is none (the tether is level), lying on the back gravity presses the
+    // breast into the chest, which a translation must not do (the skin would go inside the ribs:
+    // a morph's job, like flattening): clamped at none.
+    const glm::vec3 gChest = breastGravityInChest(b);
+    const float     along = std::max(0.0f, gChest.z);
+    return kBreastHangOut * along * b.size * softbody::breastStrength();
+}
+
 glm::mat4 Armature::breastSwingMatrix(const Breast& b, const glm::mat4& boneGlobal) const {
     const glm::vec3 rv = m_breastDynamic ? b.swing : breastRestingSwing(b);
+    const float     hang = m_breastDynamic ? b.hang : breastRestingHang(b);
     const float     angle = glm::length(rv);
-    if (angle < 1e-5f || b.parent < 0) {
+    if ((angle < 1e-5f && hang < 1e-5f) || b.parent < 0) {
         return glm::mat4(1.0f);
     }
     glm::mat3 chest(m_poseGlobal[static_cast<std::size_t>(b.parent)]);
@@ -284,12 +336,17 @@ glm::mat4 Armature::breastSwingMatrix(const Breast& b, const glm::mat4& boneGlob
             chest[c] /= len;
         }
     }
-    const glm::vec3 axis = chest * (rv / angle); // (the swing is in the chest's frame: a turned chest carries it)
-    // The pivot rides the chest: its bind place through the chest's skin transform.
+    // The pivot rides the chest: its bind place through the chest's skin transform; the hang is
+    // along the tether (the chest's forward axis) as the chest stands.
     const Bone&     parent = m_bones[static_cast<std::size_t>(b.parent)];
     const glm::vec3 pivot(m_poseGlobal[static_cast<std::size_t>(b.parent)] * parent.inverseBind * glm::vec4(b.pivotBind, 1.0f));
+    const glm::vec3 out = chest[2] * hang;
     (void)boneGlobal;
-    return glm::translate(glm::mat4(1.0f), pivot) * glm::rotate(glm::mat4(1.0f), angle, axis) * glm::translate(glm::mat4(1.0f), -pivot);
+    if (angle < 1e-5f) {
+        return glm::translate(glm::mat4(1.0f), out);
+    }
+    const glm::vec3 axis = chest * (rv / angle); // (the swing is in the chest's frame: a turned chest carries it)
+    return glm::translate(glm::mat4(1.0f), pivot + out) * glm::rotate(glm::mat4(1.0f), angle, axis) * glm::translate(glm::mat4(1.0f), -pivot);
 }
 
 bool Armature::tickSoftBody(float dt) {
@@ -302,6 +359,8 @@ bool Armature::tickSoftBody(float dt) {
         for (Breast& b : m_breasts) {
             b.swing = breastRestingSwing(b);
             b.velocity = glm::vec3(0.0f);
+            b.hang = breastRestingHang(b);
+            b.hangVel = 0.0f;
         }
     }
     // EFFECTIVE GRAVITY: g less the chest's acceleration, off the chest joint's motion.
@@ -336,7 +395,10 @@ bool Armature::tickSoftBody(float dt) {
         if (len > most) {
             b.swing *= most / len;
         }
-        if (glm::length(target - b.swing) > glm::radians(0.1f) || glm::length(b.velocity) > glm::radians(1.0f)) {
+        const float hangTarget = breastRestingHang(b);
+        b.hangVel += (omega * omega * (hangTarget - b.hang) - 2.0f * kBreastDamping * omega * b.hangVel) * dt;
+        b.hang = std::max(0.0f, b.hang + b.hangVel * dt);
+        if (glm::length(target - b.swing) > glm::radians(0.1f) || glm::length(b.velocity) > glm::radians(1.0f) || std::abs(hangTarget - b.hang) > 0.0003f || std::abs(b.hangVel) > 0.003f) {
             moving = true;
         }
     }
@@ -354,8 +416,9 @@ void Armature::settleSoftBody() {
     m_breastGravity = glm::vec3(0.0f, -1.0f, 0.0f);
     for (Breast& b : m_breasts) {
         b.velocity = glm::vec3(0.0f);
+        b.hangVel = 0.0f;
     }
-    computeSkinMatrices(); // (the resting swing)
+    computeSkinMatrices(); // (the resting swing and hang)
 }
 
 bool Armature::softBodyMoving() const {
@@ -363,7 +426,8 @@ bool Armature::softBodyMoving() const {
         return false;
     }
     for (const Breast& b : m_breasts) {
-        if (glm::length(breastRestingSwing(b) - b.swing) > glm::radians(0.1f) || glm::length(b.velocity) > glm::radians(1.0f)) {
+        if (glm::length(breastRestingSwing(b) - b.swing) > glm::radians(0.1f) || glm::length(b.velocity) > glm::radians(1.0f)
+            || std::abs(breastRestingHang(b) - b.hang) > 0.0003f || std::abs(b.hangVel) > 0.003f) {
             return true;
         }
     }
@@ -378,6 +442,19 @@ float Armature::breastSwingDeg(int side) const {
         const bool left = m_ikRig && m_ikRig->roles().side(b.bone) == RigSide::Left;
         if ((side == 0) == left) {
             return glm::degrees(glm::length(m_breastDynamic ? b.swing : breastRestingSwing(b)));
+        }
+    }
+    return 0.0f;
+}
+
+float Armature::breastHangMm(int side) const {
+    if (!softbody::breastMotion() || !m_breastsReady) {
+        return 0.0f;
+    }
+    for (const Breast& b : m_breasts) {
+        const bool left = m_ikRig && m_ikRig->roles().side(b.bone) == RigSide::Left;
+        if ((side == 0) == left) {
+            return 1000.0f * (m_breastDynamic ? b.hang : breastRestingHang(b));
         }
     }
     return 0.0f;
