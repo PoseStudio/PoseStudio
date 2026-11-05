@@ -13,7 +13,7 @@
 **Count camera changes as unsaved** (off by default). Moving the camera — orbiting, panning, dollying, switching named views, framing the selection — does not mark a project dirty, so closing the window or starting a new scene after a camera move asks nothing. Turn this on if you want a changed framing to count as an unsaved change; the camera is always saved with the project file either way.
 ## Posing
 
-**Soft breasts follow the pose** — on by default: a figure's breasts hang and swing with the chest's orientation against gravity, by the size she has, and bounce on a landing (see [Posing](posing.md#soft-breasts)). Off, every figure keeps the breasts as sculpted. **Soft buttocks jiggle with movement** — on by default: the buttocks bounce a little with the hips' movement and on a landing, at about half the breasts' amount, and never hang in a pose (see [Posing](posing.md#soft-buttocks)). **Strength (%)** scales both: 100 is the calibrated amount, 0 holds them still, 200 doubles it. All three apply to the figures in the scene at once.
+**Soft breasts follow the pose** — on by default: a figure's breasts hang and swing with the chest's orientation against gravity, by the size she has, and bounce on a landing (see [Posing](posing.md#soft-breasts)). Off, every figure keeps the breasts as sculpted. **Soft buttocks jiggle with movement** — on by default: the buttocks bounce a little with the hips' movement and on a landing (sideways about half as far as the breasts, up and down about as far) and never hang in a pose (see [Posing](posing.md#soft-buttocks)). **Strength (%)** scales both: 100 is the calibrated amount, 0 holds them still, 200 doubles it. All three apply to the figures in the scene at once.
 
 ## VR
 

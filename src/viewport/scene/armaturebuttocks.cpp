@@ -23,8 +23,9 @@
  * breasts' pose term is left out), only the hips' ACCELERATION moves it, read as the breasts'
  * chest is (the hip joint's velocity smoothed, differenced, smoothed again, a dead band, a cap,
  * kButtockJoltShare of it felt), with the breasts' figure of eight (a drop spreads the cheeks a
- * little) and the landing's KICK at half the breasts' share. Compliance half the breasts' at
- * fullness 1 (kButtockDown, kButtockSide), the breasts' frequency and damping, substepped, the
+ * little) and the landing's KICK. Compliance half the breasts' sideways and the breasts' own
+ * along the trunk (kButtockSide, kButtockDown: the first look read the up-and-down too subtle
+ * at half), the breasts' frequency and damping, substepped, the
  * stiffening capped. Nothing of it is in the pose. POSESTUDIO_BREAST_TRACE=2 prints the left
  * cheek per tick beside the breast; POSESTUDIO_BUTTOCK_DOWN / _SIDE (mm per g) and _IMPACT are
  * the levers.
@@ -50,7 +51,7 @@ constexpr float kButtockRadius = 0.13f;        ///< The field's reach about a ch
 constexpr float kButtockBehind = 0.02f;        ///< The field reaches at most this far in front of the hip joint's depth (m, figure-scaled): the belly is not a buttock.
 constexpr float kButtockApexBand = 0.25f;      ///< The apex is looked for from this far below the hip joint ... (m, figure-scaled)
 constexpr float kButtockApexAbove = 0.10f;     ///< ... to this far above it.
-constexpr float kButtockDownDefault = 0.009f;  ///< Compliance along the trunk (m per g): half the breasts' 18 at fullness 1.
+constexpr float kButtockDownDefault = 0.018f;  ///< Compliance along the trunk (m per g): the breasts' 18 at fullness 1 (9, half, at the first look: "side by side looks good, up and down is too subtle").
 constexpr float kButtockSideDefault = 0.015f;  ///< Compliance sideways (m per g): half the breasts' 30.
 constexpr float kButtockHz = 2.4f;             ///< The bounce's frequency (the breasts' at fullness 1).
 constexpr float kButtockDamping = 0.6f;        ///< Its damping ratio: one swing past the rest and a settle.
@@ -59,7 +60,7 @@ constexpr float kButtockStiffenMax = 16.0f;    ///< The stiffening factor is cap
 constexpr int   kButtockSubsteps = 4;          ///< The spring's substeps per tick (semi-implicit Euler: omega × step well under 2).
 constexpr float kButtockSplay = 0.3f;          ///< THE FIGURE OF EIGHT: the sideways rest moves outward by this share of the drop.
 constexpr float kButtockDetune = 0.985f;       ///< The right cheek's frequency against the left's.
-constexpr float kButtockImpactShareDefault = 0.25f; ///< THE LANDING'S KICK: the share of the impact speed the cheeks keep (half the breasts' 0.5).
+constexpr float kButtockImpactShareDefault = 0.4f; ///< THE LANDING'S KICK: the share of the impact speed the cheeks keep (0.25, half the breasts' 0.5, at the first look: the drop read too subtle).
 constexpr float kButtockJoltShare = 0.7f;      ///< The share of the hips' acceleration the mass feels (the breasts' rule).
 constexpr float kButtockVelSmooth = 0.4f;      ///< The hip joint's velocity low-passed by this per tick before it is differenced ...
 constexpr float kButtockAccelSmooth = 0.3f;    ///< ... and the acceleration by this after (a trembling hand is a g and a half raw).

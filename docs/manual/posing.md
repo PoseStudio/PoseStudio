@@ -223,7 +223,7 @@ The breast moves as one piece — it shifts and hangs with a slight tilt, it doe
 
 ## Soft buttocks
 
-A figure's buttocks jiggle with the hips' movement at about half the breasts' amount, and never hang: a pose by itself — a bow, a sit, lying down — leaves them exactly as sculpted. A quick drag of the hips or a landing from the Ground button sets them swaying and settling, sideways and up and down, a drop spreading them a little; a slow drag moves them not at all. It works on every rigged figure, whether or not its rig has a bone there, and as with the breasts nothing of it is in the pose or a pose file. Preferences → Posing has its own switch for it, and the Strength dial scales both (see [Preferences](preferences.md#posing)).
+A figure's buttocks jiggle with the hips' movement — sideways about half as far as the breasts, up and down about as far — and never hang: a pose by itself — a bow, a sit, lying down — leaves them exactly as sculpted. A quick drag of the hips or a landing from the Ground button sets them swaying and settling, sideways and up and down, a drop spreading them a little; a slow drag moves them not at all. It works on every rigged figure, whether or not its rig has a bone there, and as with the breasts nothing of it is in the pose or a pose file. Preferences → Posing has its own switch for it, and the Strength dial scales both (see [Preferences](preferences.md#posing)).
 
 ## Tips
 
