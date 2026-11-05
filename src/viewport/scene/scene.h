@@ -294,6 +294,10 @@ public:
     float breastSwingDeg(int side) const;
     float breastHangMm(int side) const;
     float breastSideMm(int side) const;
+    /// THE FIGURE'S PLACE AND HEADING on the active figure (the Transform tab's Figure group):
+    /// position in world centimetres, the heading in degrees. True when something moved.
+    bool  setFigurePosition(int axis, float cm);
+    bool  setFigureTurnDeg(float degrees);
 
     // --- Pose snapshot (for undo/redo) ---
     std::vector<std::pair<std::string, glm::vec3>> capturePose() const;

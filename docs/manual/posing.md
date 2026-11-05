@@ -120,7 +120,24 @@ Rotations stop at the joint's limits, and a rotation that would push a limb into
 
 ## The Transform tab
 
-The **Transform** tab on the side panel shows the selected joint's rotation as three dials, and lets you set it by number. Click a joint on the figure; its name appears at the top of the tab with:
+The **Transform** tab on the side panel places the whole figure and sets the selected joint's rotation by number.
+
+### Placing the figure
+
+The **Figure** group at the top of the tab moves and turns the active figure as a whole, as she is posed:
+
+| Row | What it does |
+| --- | --- |
+| **Left-Right** | Moves her to her left (positive) or right, in centimetres. |
+| **Up-Down** | Moves her up or down. The [Ground button](#the-ground-button) puts her back on the floor. |
+| **Back-Forward** | Moves her forward (the way she faced when imported) or back. |
+| **Turn** | Turns her about the vertical, in degrees: 0 faces the way she was imported, positive turns her toward her left. |
+
+The rows are scrub fields like the dials below them, and each scrub or typed value is one undo step. The place and the turn are part of the pose: a pose file and a project carry them, and **Reset Pose** puts her back where she was imported, facing the way she came. A `Ctrl` drag on the hips moves her the same way with the mouse, and the Ground button drops her to the floor from any height.
+
+### The selected joint
+
+Below the Figure group the tab shows the selected joint's rotation as three dials. Click a joint on the figure; its name appears with:
 
 | Dial | What it turns |
 | --- | --- |

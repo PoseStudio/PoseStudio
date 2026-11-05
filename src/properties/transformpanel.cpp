@@ -51,6 +51,69 @@ void TransformPanel::buildUi() {
     m_jointName->setObjectName(QStringLiteral("TransformJointName"));
     col->addWidget(m_jointName);
 
+    // --- Figure: where the active figure stands and which way she faces (2026-11-05; the user:
+    // "we have to be able to easily position the character (up down left right) and twist the
+    // entire character") — the rig root's pose translation and heading, a pose edit like a dial's.
+    QFormLayout* figure = propertyrows::addGroup(col, tr("Figure"));
+    const std::array<QString, 4> figureLabels = {tr("Left-Right"), tr("Up-Down"), tr("Back-Forward"), tr("Turn")};
+    const std::array<QString, 4> figureTips = {
+        tr("Moves the whole figure, as posed, to her left (positive) or right, in centimetres."),
+        tr("Moves the whole figure up (positive) or down, in centimetres. The Ground button puts her back on the floor."),
+        tr("Moves the whole figure forward (positive, the way an unturned figure faces) or back, in centimetres."),
+        tr("Turns the whole figure about the vertical, in degrees: 0 faces the way she was imported, positive turns her toward her left."),
+    };
+    for (int i = 0; i < 4; ++i) {
+        Row& row = m_figureRows[static_cast<std::size_t>(i)];
+        row.label = new QLabel(figureLabels[static_cast<std::size_t>(i)]);
+        row.label->setToolTip(figureTips[static_cast<std::size_t>(i)]);
+        row.box = new DragNumberBox;
+        if (i < 3) {
+            row.box->setRange(-500.0, 500.0);
+            row.box->setSingleStep(1.0);
+            row.box->setDecimals(1);
+        } else {
+            row.box->setRange(-180.0, 180.0);
+            row.box->setSingleStep(1.0);
+            row.box->setDecimals(0);
+        }
+        row.box->setOrigin(0.0);
+        row.box->setToolTip(figureTips[static_cast<std::size_t>(i)]);
+        connect(row.box, &DragNumberBox::editingStarted, this, [this]() {
+            if (m_viewport) {
+                m_viewport->beginJointTransformEdit();
+            }
+        });
+        connect(row.box, &DragNumberBox::editingFinished, this, [this]() {
+            if (m_viewport) {
+                m_viewport->endJointTransformEdit();
+            }
+        });
+        connect(row.box, &DragNumberBox::valueChanged, this, [this, i](double value) {
+            if (m_viewport) {
+                if (i < 3) {
+                    m_viewport->setFigurePosition(i, value);
+                } else {
+                    m_viewport->setFigureTurn(value);
+                }
+                refresh();
+            }
+        });
+        row.restore = propertyrows::makeRestoreButton();
+        row.restore->setToolTip(i < 3 ? tr("Back to 0: where she was imported") : tr("Back to 0: facing the way she was imported"));
+        connect(row.restore, &QToolButton::clicked, this, [this, i]() {
+            if (m_viewport && m_viewport->beginJointTransformEdit()) {
+                if (i < 3) {
+                    m_viewport->setFigurePosition(i, 0.0);
+                } else {
+                    m_viewport->setFigureTurn(0.0);
+                }
+                m_viewport->endJointTransformEdit();
+                refresh();
+            }
+        });
+        figure->addRow(row.label, propertyrows::rowWithRestore(row.box, row.restore));
+    }
+
     // --- Rotation: the three dials, in JointDialKind order ---
     QFormLayout* rotation = propertyrows::addGroup(col, tr("Rotation"));
     const std::array<QString, 3> labels = {tr("Bend"), tr("Side-Side"), tr("Twist")};
@@ -130,6 +193,20 @@ void TransformPanel::buildUi() {
 
 void TransformPanel::refresh() {
     const JointTransform state = m_viewport ? m_viewport->jointTransform() : JointTransform{};
+    {
+        const JointTransform::Figure& fig = state.figure;
+        const std::array<double, 4>   values = {fig.x, fig.y, fig.z, fig.turnDeg};
+        for (std::size_t i = 0; i < m_figureRows.size(); ++i) {
+            Row& row = m_figureRows[i];
+            {
+                const QSignalBlocker blocker(row.box);
+                row.box->setValue(fig.valid ? values[i] : 0.0);
+            }
+            row.box->setEnabled(fig.valid);
+            row.label->setEnabled(fig.valid);
+            row.restore->setEnabled(fig.valid);
+        }
+    }
     m_jointName->setText(state.valid ? QString::fromStdString(state.name) : tr("No joint selected"));
     m_hint->setVisible(!state.valid);
     m_reset->setEnabled(state.valid);

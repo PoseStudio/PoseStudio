@@ -307,6 +307,14 @@ bool ViewportWidget::beginJointTransformEdit() {
     return m_window && m_window->beginJointTransformEdit();
 }
 
+void ViewportWidget::setFigurePosition(int axis, double cm) {
+    withWindow([axis, cm](VulkanWindow& w) { w.setFigurePosition(axis, cm); });
+}
+
+void ViewportWidget::setFigureTurn(double degrees) {
+    withWindow([degrees](VulkanWindow& w) { w.setFigureTurn(degrees); });
+}
+
 void ViewportWidget::setJointTransformDial(int dial, double value) {
     withWindow([dial, value](VulkanWindow& w) { w.setJointTransformDial(dial, value); });
 }

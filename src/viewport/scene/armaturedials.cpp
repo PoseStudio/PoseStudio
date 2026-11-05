@@ -447,3 +447,128 @@ bool Armature::jointDialSweep(const JointDial& dial, JointDialSweep& sweep) cons
 }
 
 } // namespace pose
+
+// ============================================================================================
+// THE FIGURE'S PLACE AND HEADING (2026-11-05; the user: "we have to be able to easily position the
+// character (up down left right) and twist the entire character"). Both live in the POSE: the
+// place is the root's pose translation — what the figure move (Ctrl+drag of the hips) and the
+// Ground button write, what a pose file carries as `@trans:` — and the heading is the root's own
+// rotation, which the hips' unlimited channels carry exactly. A turn is applied as a WORLD yaw
+// about the vertical through the root joint, so a lying figure spins on the floor rather than
+// about her spine, and the feet keep their heights.
+// ============================================================================================
+
+namespace pose {
+
+int Armature::figureRoot() const {
+    if (m_bones.empty()) {
+        return -1;
+    }
+    if (m_ikRig) {
+        return m_ikRig->rootNode();
+    }
+    // Without a rig: the rig's own rule — the first bone with two children or more below the
+    // anatomical root (a figure node at the origin with the hip as its lone child).
+    int node = -1;
+    for (std::size_t i = 0; i < m_bones.size(); ++i) {
+        if (m_bones[i].parent < 0) {
+            node = static_cast<int>(i);
+            break;
+        }
+    }
+    for (int guard = 0; node >= 0 && guard < 64; ++guard) {
+        int child = -1, children = 0;
+        for (std::size_t i = 0; i < m_bones.size(); ++i) {
+            if (m_bones[i].parent == node) {
+                ++children;
+                child = static_cast<int>(i);
+            }
+        }
+        if (children != 1) {
+            return node;
+        }
+        node = child;
+    }
+    return node;
+}
+
+glm::vec3 Armature::figurePosition() const {
+    const int root = figureRoot();
+    if (root < 0 || static_cast<std::size_t>(root) >= m_boneTranslation.size()) {
+        return glm::vec3(0.0f);
+    }
+    // The root's parent frame -> model -> world (the inverse of shiftPoseY's path).
+    const Bone& bone = m_bones[static_cast<std::size_t>(root)];
+    glm::vec3   t = m_boneTranslation[static_cast<std::size_t>(root)];
+    if (bone.parent >= 0 && static_cast<std::size_t>(bone.parent) < m_poseGlobal.size()) {
+        t = glm::mat3(m_poseGlobal[static_cast<std::size_t>(bone.parent)]) * t;
+    }
+    return glm::mat3(m_transform) * t;
+}
+
+void Armature::setFigurePosition(const glm::vec3& world) {
+    const int root = figureRoot();
+    if (root < 0 || static_cast<std::size_t>(root) >= m_boneTranslation.size()) {
+        return;
+    }
+    const Bone& bone = m_bones[static_cast<std::size_t>(root)];
+    glm::vec3   t = glm::inverse(glm::mat3(m_transform)) * world;
+    if (bone.parent >= 0 && static_cast<std::size_t>(bone.parent) < m_poseGlobal.size()) {
+        t = glm::transpose(glm::mat3(m_poseGlobal[static_cast<std::size_t>(bone.parent)])) * t;
+    }
+    if (t == m_boneTranslation[static_cast<std::size_t>(root)]) {
+        return;
+    }
+    m_boneTranslation[static_cast<std::size_t>(root)] = t;
+    recomposePoseLocal(static_cast<std::size_t>(root));
+    computeSkinMatrices();
+}
+
+float Armature::figureTurnDeg() const {
+    const int root = figureRoot();
+    if (root < 0 || static_cast<std::size_t>(root) >= m_poseGlobal.size()) {
+        return 0.0f;
+    }
+    // The root's world rotation (binds are translation-only, so poseGlobal's rotation part is the
+    // pose's) applied to the figure's forward: its heading about the vertical.
+    const glm::vec3 fwd = glm::mat3(m_transform) * glm::mat3(m_poseGlobal[static_cast<std::size_t>(root)]) * glm::vec3(0.0f, 0.0f, 1.0f);
+    if (std::abs(fwd.x) < 1e-6f && std::abs(fwd.z) < 1e-6f) {
+        return 0.0f; // (facing straight up or down: no heading)
+    }
+    return glm::degrees(std::atan2(fwd.x, fwd.z));
+}
+
+void Armature::setFigureTurnDeg(float degrees) {
+    const int root = figureRoot();
+    if (root < 0 || static_cast<std::size_t>(root) >= m_bones.size()) {
+        return;
+    }
+    float delta = degrees - figureTurnDeg();
+    while (delta > 180.0f) {
+        delta -= 360.0f;
+    }
+    while (delta < -180.0f) {
+        delta += 360.0f;
+    }
+    if (std::abs(delta) < 1e-4f) {
+        return;
+    }
+    // A world yaw Y on the root's world rotation W = OR * R * OR^-1 (its parent, the figure node,
+    // unrotated): the new local R' = OR^-1 * Y * OR * R, read back into the root's channels.
+    Bone&           bone = m_bones[static_cast<std::size_t>(root)];
+    const glm::mat3 orient(bone.orient);
+    const glm::mat3 invOrient(bone.invOrient);
+    const glm::mat3 yaw(glm::rotate(glm::mat4(1.0f), glm::radians(delta), glm::inverse(glm::mat3(m_transform)) * glm::vec3(0.0f, 1.0f, 0.0f)));
+    glm::mat3       parentRot(1.0f);
+    if (bone.parent >= 0 && static_cast<std::size_t>(bone.parent) < m_poseGlobal.size()) {
+        parentRot = glm::mat3(m_poseGlobal[static_cast<std::size_t>(bone.parent)]);
+    }
+    const glm::mat3 local = glm::mat3(eulerMatrix(m_boneEuler[static_cast<std::size_t>(root)], bone.rotationOrder));
+    const glm::mat3 next = invOrient * glm::transpose(parentRot) * yaw * parentRot * orient * local;
+    m_boneEuler[static_cast<std::size_t>(root)] = eulerFromMatrix(next, bone.rotationOrder);
+    clampBoneEuler(root);
+    recomposePoseLocal(static_cast<std::size_t>(root));
+    computeSkinMatrices();
+}
+
+} // namespace pose

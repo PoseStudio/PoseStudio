@@ -229,6 +229,26 @@ void VulkanWindow::scriptStep() {
             } else {
                 say("[ikscript]   unknown bone\n");
             }
+        } else if (cmd == QLatin1String("move") && w.size() > 3) {
+            // move <dx> <dy> <dz>: the whole figure moved by that, in world centimetres (the
+            // Transform tab's Figure group: her left, up, forward), one undoable edit.
+            if (beginJointTransformEdit()) {
+                const JointTransform::Figure fig = jointTransform().figure;
+                setFigurePosition(0, fig.x + num(1));
+                setFigurePosition(1, fig.y + num(2));
+                setFigurePosition(2, fig.z + num(3));
+                endJointTransformEdit();
+            } else {
+                say("[ikscript]   move refused (a drag owns the pose)\n");
+            }
+        } else if (cmd == QLatin1String("turn") && w.size() > 1) {
+            // turn <degrees>: the whole figure faced that way (the Figure group's Turn).
+            if (beginJointTransformEdit()) {
+                setFigureTurn(num(1));
+                endJointTransformEdit();
+            } else {
+                say("[ikscript]   turn refused (a drag owns the pose)\n");
+            }
         } else if (cmd == QLatin1String("dial") && w.size() > 2) {
             // dial <forward|sideways|twist> <value>: the selected joint's Transform-tab dial set to
             // that value, the way the tab does it (one bracketed, undoable edit).
@@ -684,6 +704,7 @@ void VulkanWindow::scriptFrameRendered() {
 ///   selected.<bone> 1 if the selected joint is that bone or a bone of its rigid segment (a click's pick), else 0
 ///   lit.<bone>      1 if the selection highlight tints that bone's flesh (the selected joint, or its twist twin), else 0
 ///   palm.<bone>.<x|y|z>  a HAND's palm normal, that world component (where a laid hand faces)
+///   figure.<x|y|z|turn>    the figure's place (cm, world) and heading (deg): the Transform tab's Figure group
 ///   dial.<forward|sideways|twist>  the selected joint's Transform-tab dial, as it reads now
 ///   dialmin.<kind>, dialmax.<kind>  that dial's range     dialjoint.<bone>  1 if the tab shows that joint
 ///   modal                  the dial the joint mouse mode turns (0/1/2 = bend / side / twist), -1 when off
@@ -717,6 +738,10 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
             return false;
         }
         value = glm::length(grab - s.cursorWorld) * 1000.0;
+    } else if (key == QLatin1String("figure") && part.size() > 1) {
+        const JointTransform::Figure fig = jointTransform().figure;
+        const QString                which = part[1].toLower();
+        value = which == QLatin1String("x") ? fig.x : which == QLatin1String("y") ? fig.y : which == QLatin1String("z") ? fig.z : fig.turnDeg;
     } else if ((key == QLatin1String("dial") || key == QLatin1String("dialmin") || key == QLatin1String("dialmax")) &&
                part.size() > 1) {
         const JointTransform transform = jointTransform();

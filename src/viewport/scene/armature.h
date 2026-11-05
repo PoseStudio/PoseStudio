@@ -1194,6 +1194,20 @@ public:
     float breastHangMm(int side) const;
     /// How far that breast has moved sideways as rendered (mm, + outward toward the armpit): on her back the spread, on her side the fall.
     float breastSideMm(int side) const;
+
+    // --- THE FIGURE'S PLACE AND HEADING (armaturedials.cpp; the Transform tab's Figure group) ---
+    /// The rig root (the hips): the rig's root node, or without a rig the first bone with two
+    /// children or more below the anatomical root; -1 with no skeleton.
+    int       figureRoot() const;
+    /// Where the figure stands: the root's pose translation, in world metres (the figure move's
+    /// and the Ground button's quantity, a pose file's `@trans:` row).
+    glm::vec3 figurePosition() const;
+    void      setFigurePosition(const glm::vec3& world);
+    /// Which way the figure faces: the heading of the root's rotation, degrees (0 = facing +z as
+    /// imported, positive = turned toward her left); setting it turns the whole pose about the
+    /// vertical through the root joint, in the root's own unlimited channels.
+    float     figureTurnDeg() const;
+    void      setFigureTurnDeg(float degrees);
 private:
     // --- The bone classes and THE DIGIT DRAG (armatureikdigit.cpp) ---
     /// Per bone: its BoneClass (classifyBones, with the rig: empty until then).

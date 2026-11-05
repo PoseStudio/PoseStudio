@@ -29,7 +29,12 @@ JointTransform Scene::selectedJointTransform() const {
         return out;
     }
     const Armature& arm = fig->armature();
-    const int       joint = arm.dialJoint(arm.highlightBone());
+    if (arm.figureRoot() >= 0) {
+        // The figure's place and heading: valid with any posable figure, a joint selected or not.
+        const glm::vec3 at = arm.figurePosition() * 100.0f;
+        out.figure = {true, at.x, at.y, at.z, arm.figureTurnDeg()};
+    }
+    const int joint = arm.dialJoint(arm.highlightBone());
     if (joint < 0) {
         return out;
     }
@@ -51,6 +56,26 @@ bool Scene::setSelectedJointDial(int dial, float value) {
     }
     const Armature& arm = fig->armature();
     return fig->setJointDial(arm.jointDial(arm.highlightBone(), static_cast<JointDialKind>(dial)), value);
+}
+
+bool Scene::setFigurePosition(int axis, float cm) {
+    Model* fig = figureModel();
+    if (fig == nullptr || axis < 0 || axis > 2 || fig->armature().figureRoot() < 0) {
+        return false;
+    }
+    glm::vec3 at = fig->armature().figurePosition();
+    at[axis] = cm / 100.0f;
+    fig->setFigurePosition(at);
+    return true;
+}
+
+bool Scene::setFigureTurnDeg(float degrees) {
+    Model* fig = figureModel();
+    if (fig == nullptr || fig->armature().figureRoot() < 0) {
+        return false;
+    }
+    fig->setFigureTurnDeg(degrees);
+    return true;
 }
 
 bool Scene::selectedJointDialSweep(int dial, JointDialSweep& sweep) const {

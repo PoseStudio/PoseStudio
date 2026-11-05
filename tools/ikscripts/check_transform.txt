@@ -236,3 +236,35 @@ click lForeArm
 app s
 expect modal == -1
 reset
+
+# THE FIGURE GROUP (2026-11-05): the whole figure's place (`figure.x/y/z`, cm, world: her left, up,
+# forward) and heading (`figure.turn`, degrees, positive toward her left), set as the tab's rows
+# set them — `move <dx> <dy> <dz>` and `turn <deg>`, each one undoable edit in the POSE: a pose
+# file carries them, Reset Pose takes them back. Moved up 20 cm she hangs 200 mm off the floor;
+# turned 90 she faces her left (+x) with her feet where they were in height; undo steps back.
+reset
+expect figure.x == 0
+expect figure.y == 0
+expect figure.z == 0
+expect figure.turn == 0
+move 10 20 -5
+expect figure.x > 9.99
+expect figure.y > 19.99
+expect figure.z < -4.99
+expect lowest > 195
+expect lowest < 225
+turn 90
+expect figure.turn > 89.9
+expect figure.turn < 90.1
+expect lowest > 195
+undo
+expect figure.turn < 0.01
+undo
+expect figure.y < 0.01
+turn -135
+expect figure.turn < -134.9
+view home
+uishot 30_figure_turned
+reset
+expect figure.turn < 0.01
+expect figure.x < 0.01

@@ -141,6 +141,24 @@ void VulkanWindow::setJointTransformDial(int dial, double value) {
     }
 }
 
+void VulkanWindow::setFigurePosition(int axis, double cm) {
+    if (!beginJointTransformEdit()) {
+        return;
+    }
+    if (scene().setFigurePosition(axis, static_cast<float>(cm))) {
+        requestUpdate();
+    }
+}
+
+void VulkanWindow::setFigureTurn(double degrees) {
+    if (!beginJointTransformEdit()) {
+        return;
+    }
+    if (scene().setFigureTurnDeg(static_cast<float>(degrees))) {
+        requestUpdate();
+    }
+}
+
 void VulkanWindow::endJointTransformEdit() {
     if (!m_transformEdit) {
         return;

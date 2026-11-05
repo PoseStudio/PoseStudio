@@ -187,6 +187,9 @@ public:
     float breastSwingDeg(int side) const { return m_armature.breastSwingDeg(side); }
     float breastHangMm(int side) const { return m_armature.breastHangMm(side); }
     float breastSideMm(int side) const { return m_armature.breastSideMm(side); }
+    // THE FIGURE'S PLACE AND HEADING (the Transform tab's Figure group): pose edits like a dial's.
+    void setFigurePosition(const glm::vec3& world) { m_armature.setFigurePosition(world); refreshCorrectives(); }
+    void setFigureTurnDeg(float degrees) { m_armature.setFigureTurnDeg(degrees); refreshCorrectives(); }
     /// Ends the bounce: the pose she landed in, exactly, and its correctives.
     void endLandingBounce() {
         m_armature.endLandingBounce();
