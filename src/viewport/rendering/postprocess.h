@@ -42,6 +42,19 @@ class VulkanPipeline;
 /// doesn't read as a line.
 inline constexpr float kSelectionAccentLinear[3] = {0.1046f, 0.2423f, 0.6038f};
 
+/// The composite's optional inputs (VR Mode — see VulkanRenderer::drawVrFrame): draw from the
+/// MIRROR source (setMirrorSource) instead of this chain's own targets, through a crop of its
+/// UV space (scale + offset — the desktop viewport shows a VR eye cropped to its own aspect),
+/// and encode sRGB in the shader when the target format cannot (a UNORM headset swapchain).
+/// Namespace scope because GCC refuses a nested struct with an NSDMI as a default argument
+/// (the enclosing class is incomplete there); the class re-exported the name below.
+struct PostProcessCompositeOptions {
+    bool  fromMirror = false;
+    float uvScale[2] = {1.0f, 1.0f};
+    float uvOffset[2] = {0.0f, 0.0f};
+    bool  encodeSrgb = false;
+};
+
 class PostProcess {
 public:
     /// @param swapchainRenderPass The pass the composite draws through (the swapchain's
@@ -85,16 +98,7 @@ public:
     /// resolution. Call between the HDR scene pass and the swapchain pass, PBR mode only.
     void recordBloom(VkCommandBuffer cmd);
 
-    /// The composite's optional inputs (VR Mode — see VulkanRenderer::drawVrFrame): draw from the
-    /// MIRROR source (setMirrorSource) instead of this chain's own targets, through a crop of its
-    /// UV space (scale + offset — the desktop viewport shows a VR eye cropped to its own aspect),
-    /// and encode sRGB in the shader when the target format cannot (a UNORM headset swapchain).
-    struct CompositeOptions {
-        bool  fromMirror = false;
-        float uvScale[2] = {1.0f, 1.0f};
-        float uvOffset[2] = {0.0f, 0.0f};
-        bool  encodeSrgb = false;
-    };
+    using CompositeOptions = PostProcessCompositeOptions;
 
     /// Records the fullscreen composite draw. The caller has begun the swapchain render pass and
     /// set the full-extent viewport/scissor. @p tonemap applies ACES (PBR + dial on); @p bloom
