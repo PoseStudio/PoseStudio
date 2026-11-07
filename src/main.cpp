@@ -26,6 +26,7 @@
 #include "viewport/viewportwidget.h"
 
 #include <QApplication>
+#include <clocale>
 #include <QDebug>
 #include <QMainWindow>
 #include <QScreen>
@@ -88,6 +89,12 @@ static QString windowTitleFor(const QString& path, bool dirty) {
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
 
+    // Numeric parsing and formatting must be locale-independent: Qt installs the desktop's
+    // locale (LC_NUMERIC included), and a comma-decimal one makes atof() stop at the decimal
+    // dot — cgltf then reads a glTF matrix entry like -4.37e-08 as -4, and a figure imports
+    // stretched. The UI language stays Qt-side (QLocale + the translators); the C numeric
+    // locale is the app's own business.
+    std::setlocale(LC_NUMERIC, "C");
     // App identity. Must be set before any QStandardPaths lookup: the per-user data dir the
     // database now lives in (AppDataLocation) is derived from these names, so initializeDatabase
     // below depends on it. Keep this first.
