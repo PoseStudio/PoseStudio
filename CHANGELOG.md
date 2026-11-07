@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > public repository; this changelog and `CMakeLists.txt` (whose `project(VERSION)` stamps
 > `Constants::APP_VERSION` at build time) are the authoritative version record, and releases are tagged from 0.3.0 onward.
 
-## [Unreleased]
+## [0.4.3] - 2026-11-07
 
 ### Fixed
 - **The soft body after the Ground button**: a figure dropped onto her knees or her seat now bounces the breasts and the buttocks as one landing on her feet does (they floated up through the fall and snapped to rest on impact); a fall stopped mid-air by a click no longer leaves the breasts floated up until the next drag; a figure carried with Ctrl and held still redraws the bounce as it settles; and with the breasts off and the buttocks on, the landing lets the buttocks finish their bounce.

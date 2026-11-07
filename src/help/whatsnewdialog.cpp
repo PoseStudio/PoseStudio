@@ -31,8 +31,10 @@ namespace {
 
 constexpr const char* kChangelogFile = "changelog.md";
 /// How many releases BEFORE the running one the window also shows, each under an "Also new in"
-/// heading (see the constructor). 1 while 0.4.1 (VR) follows 0.4.0 (FBX characters) by a day;
-/// 0 once the previous release is old news.
+/// heading (see the constructor). 1 while a point release follows a big one closely — 0.4.1 (VR)
+/// a day after 0.4.0 (FBX characters), 0.4.3 (the Soft Body tab, the group dials, the fixes) two
+/// days after 0.4.2 (glTF / USD / VRM, Gaussian splats, the soft body) — so whoever skips straight
+/// to the newest sees the one before it too; 0 once the previous release is old news.
 constexpr int kPreviousReleasesShown = 1;
 
 /// The one window open at a time (Help → What's New… raises it instead of stacking a second).
