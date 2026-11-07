@@ -504,6 +504,17 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                     opacity = static_cast<float>(mat->pbr.opacity.value_real);
                 } else if (mat->fbx.transparency_factor.has_value) {
                     opacity = 1.0f - static_cast<float>(mat->fbx.transparency_factor.value_real);
+                    // Degenerate 0/1 opacity needs a fallback: some exporters write
+                    // TransparencyFactor inverted (1.0 = opaque) or only as a template default,
+                    // with the real alpha in TransparentColor (black = opaque) — the factor
+                    // alone says nothing there. A factor of exactly 0 stays opaque though: in
+                    // the format's own terms transparency is the factor scaled by the colour, so
+                    // 0 is opaque whatever the colour says.
+                    if (opacity == 0.0f || opacity == 1.0f) {
+                        opacity = mat->fbx.transparency_factor.value_real == 1.0f
+                                      ? 1.0f - static_cast<float>(mat->fbx.transparency_color.value_vec4.x)
+                                      : 1.0f;
+                    }
                 }
                 out.opacity = std::max(0.0f, std::min(1.0f, opacity));
                 if (mat->pbr.opacity.texture != nullptr) {
