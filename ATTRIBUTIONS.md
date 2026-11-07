@@ -31,8 +31,34 @@ legally required by CC0 — this credit is given with gratitude. Consider
 
 ## Third-Party Libraries
 
-The build-time library dependencies (Qt 6, Vulkan SDK, GLM, Vulkan Memory Allocator,
-tinyobjloader, nlohmann/json, miniz, stb_image, tinyexr) are listed with links in the
-[README's Tech Stack section](README.md#tech-stack--resources). Each is used under its own
-license; none of their code is vendored into this repository — CMake fetches them at pinned
-versions at configure time.
+PoseStudio is built on the libraries below. None of their code is vendored into this
+repository: CMake fetches each one at a pinned version at configure time, and the parts the
+app uses are compiled into the executable. Each is used under its own license, summarized here;
+the authoritative text is the license file in the library's own repository.
+
+| Library | Used for | License |
+| --- | --- | --- |
+| [Qt 6](https://www.qt.io/) | Application framework, UI, SQLite access, networking | LGPL v3 (linked dynamically) |
+| [Vulkan SDK](https://vulkan.lunarg.com/) (Khronos Vulkan loader) | The 3D viewport's graphics API | Apache 2.0 |
+| [GLM](https://github.com/g-truc/glm) | Vector and matrix math | MIT (or the Happy Bunny License) |
+| [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) | GPU memory management | MIT |
+| [OpenXR SDK](https://github.com/KhronosGroup/OpenXR-SDK) | The OpenXR loader behind VR Mode | Apache 2.0 |
+| [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader) | Wavefront `.obj` / `.mtl` import | MIT |
+| [ufbx](https://github.com/ufbx/ufbx) | FBX rigged-character import | MIT or Unlicense (public domain) |
+| [cgltf](https://github.com/jkuhlmann/cgltf) | glTF / GLB / VRM import | MIT |
+| [LightUSD](https://github.com/lighttransport/tinyusdz) (formerly TinyUSDZ) | USD / USDA / USDC / USDZ import | Apache 2.0 |
+| [nlohmann/json](https://github.com/nlohmann/json) | JSON parsing (figure import, project files, VRM metadata) | MIT |
+| [miniz](https://github.com/richgel999/miniz) | gzip / zlib inflate (figure files, `.spz` splats, `.exr`) | MIT |
+| [stb_image](https://github.com/nothings/stb) | Radiance `.hdr` panorama decoding | MIT or public domain |
+| [tinyexr](https://github.com/syoyo/tinyexr) | OpenEXR `.exr` panorama decoding | BSD 3-Clause |
+
+LightUSD carries third-party code of its own (among them LZ4, Zstandard, pugixml, fast_float,
+Dragonbox, nanoflann, xxHash and MikkTSpace), each under its own permissive license; its
+[LICENSE.3rdparty](https://github.com/lighttransport/tinyusdz/blob/main/LICENSE.3rdparty)
+lists them. PoseStudio builds it with every optional feature off, so the parts that come with
+those features (OpenSubdiv, MaterialX) are not in the build.
+
+The release package also ships the Qt runtime, the Microsoft Visual C++ runtime and the Khronos
+Vulkan loader next to the executable. Their license texts, and those of every library above
+(LightUSD's bundled code included), are in the package's `licenses/` folder, indexed by
+`NOTICES.txt`; in the repository they live in [packaging/licenses/](packaging/licenses/).

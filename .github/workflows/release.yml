@@ -186,8 +186,9 @@ jobs:
           # a way to relink against a modified Qt (the Qt DLLs are separate, replaceable files
           # - that is the mechanism). LICENSE.txt is the GPL v3 both licenses need; licenses\
           # holds the LGPL, the notices of the runtimes windeployqt ships beside Qt (ICU,
-          # Mesa's software OpenGL, Microsoft's D3D compiler), the Vulkan loader's, and
-          # NOTICES.txt, the index, rendered with the Qt version so it names exactly what
+          # Mesa's software OpenGL, Microsoft's D3D compiler), the Vulkan loader's, those of
+          # the open-source libraries compiled into the exe (GLM, VMA, OpenXR, ufbx, cgltf,
+          # LightUSD and the rest - NOTICES.txt lists them), and NOTICES.txt, the index, rendered with the Qt version so it names exactly what
           # was shipped and where its source lives.
           Copy-Item LICENSE dist\app\LICENSE.txt
           New-Item -ItemType Directory -Force dist\app\licenses | Out-Null

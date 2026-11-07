@@ -66,3 +66,28 @@ Vulkan loader (vulkan-1.dll)
 The Khronos Vulkan loader, as built and distributed by LunarG,
 Copyright (C) The Khronos Group Inc., LunarG, Inc. and Valve Corporation.
 Apache License 2.0 and MIT: VulkanRT-License.txt.
+
+
+Libraries compiled into PoseStudio.exe
+--------------------------------------
+These open-source libraries are built into the PoseStudio executable itself
+(they are not separate files in this package). Each is used under its own
+license; the text named after each is in this folder.
+
+  GLM (math) - MIT: GLM-LICENSE.txt
+  Vulkan Memory Allocator, Advanced Micro Devices, Inc. - MIT:
+    VulkanMemoryAllocator-LICENSE.txt
+  OpenXR loader, The Khronos Group Inc. - Apache License 2.0: Apache-2.0.txt;
+    the JsonCpp code it contains: OpenXR-jsoncpp-LICENSE.txt
+  tinyobjloader (OBJ import) - MIT: tinyobjloader-LICENSE.txt
+  ufbx (FBX import) - MIT or Unlicense: ufbx-LICENSE.txt
+  cgltf (glTF / GLB / VRM import) - MIT: cgltf-LICENSE.txt
+  LightUSD, formerly TinyUSDZ (USD import) - Apache License 2.0:
+    LightUSD-LICENSE.txt and Apache-2.0.txt; the third-party code it carries
+    (LZ4, Zstandard, pugixml, xxHash, MikkTSpace and others):
+    LightUSD-third-party.txt
+  nlohmann/json - MIT: nlohmann-json-LICENSE.txt
+  miniz (gzip / zlib) - MIT: miniz-LICENSE.txt
+  stb_image (.hdr decoding) - MIT or public domain: stb-LICENSE.txt
+  tinyexr (.exr decoding), with OpenEXR code - BSD 3-Clause:
+    tinyexr-LICENSE.txt
