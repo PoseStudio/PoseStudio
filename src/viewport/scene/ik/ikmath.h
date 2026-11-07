@@ -54,6 +54,20 @@ glm::vec<3, T, Q> rotationVectorOf(const glm::mat<3, 3, T, Q>& m, T small) {
 inline glm::vec3 rotationVector(const glm::mat3& m) { return rotationVectorOf(m, 1.0e-6f); }
 inline glm::dvec3 rotationVector(const glm::dmat3& m) { return rotationVectorOf(m, 1e-12); }
 
+/// A bone's world rotation off its pose matrix with the columns normalized (a model scale taken
+/// out): the frame the soft body reads gravity and a joint's motion in (armaturebreasts.cpp,
+/// armaturebuttocks.cpp).
+inline glm::mat3 normalizedFrame(const glm::mat4& m) {
+    glm::mat3 frame(m);
+    for (int c = 0; c < 3; ++c) {
+        const float len = glm::length(frame[c]);
+        if (len > 1e-8f) {
+            frame[c] /= len;
+        }
+    }
+    return frame;
+}
+
 /// The closest points between the segments p1-q1 and p2-q2: returns their distance and writes
 /// the parameters @p s (on p1-q1) and @p t (on p2-q2), both in [0, 1]. The body volumes test
 /// a LIMB SEGMENT against a capsule with it (two limbs cross at their middles, where no joint
@@ -72,6 +86,14 @@ glm::mat4 eulerMatrix(const glm::vec3& degrees, const std::string& order);
 /// rotation_order) reproduces @p m — the exact inverse of the engine's eulerMatrix. Near gimbal
 /// lock the third-applied angle is folded into the first (the standard degenerate-case choice).
 glm::vec3 eulerFromMatrix(const glm::mat3& m, const std::string& order);
+
+/// eulerFromMatrix's twin for a value read back CONTINUOUSLY as the rotation it reads moves: of the
+/// angle triples that compose to @p m in @p order — the two branches (a, b, c) and (a+180, 180-b,
+/// c+180), and at gimbal lock every split of the folded angle — returns the one nearest @p near
+/// (degrees, each angle compared modulo 360), each angle in [-180, 180]. eulerFromMatrix alone
+/// keeps the middle angle within ±90, so a rotation carried through it flips the other two by 180
+/// in one step (the Figure group's Tip past 90, the root's channels under a Tilt past 90).
+glm::vec3 eulerFromMatrixNear(const glm::mat3& m, const std::string& order, const glm::vec3& near);
 
 } // namespace pose
 

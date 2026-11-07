@@ -429,6 +429,9 @@ public:
     /// pull: the contact pins released, the body hanging from the grabbed joint), and how far
     /// below the grab point the root hangs (the grab-to-root chain length).
     bool suspended() const { return m_suspended; }
+    /// The drag's effector is the hips or a trunk-role joint (the pelvis bone, a spine link, the
+    /// neck, the head): its lift-off needs kSuspendStrainTrunk and taut legs (updateSuspension).
+    bool trunkEffector() const;
     float suspendHang() const { return m_suspendHang; }
 
     /// Balance steps completed during the current drag (diagnostics / tests).
@@ -566,6 +569,7 @@ private:
     // Armature's solve hangs the root below the grab point (suspended() / suspendHang()).
     bool                    m_suspended = false;
     int                     m_suspendTicks = 0;
+    float                   m_suspendStrainLast = 0.0f; ///< Last tick's strain beyond reach: a trunk's count runs only while the body has stopped gaining on the cursor.
     bool                    m_lastUpIntent = false; ///< A limb pulled above itself: no new steps.
     /// The last solve ran under DOWNWARD intent — a crouching root drag (target below the
     /// drag-start pelvis) or a decisive downward pull on any other joint. The heel lift adds
@@ -760,6 +764,12 @@ public:
     /// trunk stayed down, 23cm short. (The LIFT-OFF keeps the junction's measure: it asks whether
     /// the body has left the limb's reach, not whether the limb is straight — a hand landing from a
     /// hanging arm is straight too.)
+    /// The STRETCH of the limb from @p node up to its junction toward @p target, over the limb's
+    /// rest span @p span: the best, over the path's joints with at least kStretchChainShare of the
+    /// span below them, of (the joint's distance from the target) / (the chain between) — 1 for a
+    /// dead-straight limb, less as its fold joint bends; 0 for a span of nothing. liveContactStretch
+    /// reads it for a live contact, updateSuspension for each standing leg.
+    float limbStretch(int node, const glm::vec3& target, float span, const std::vector<glm::vec3>& positions) const;
     float liveContactStretch(std::size_t pin, const std::vector<glm::vec3>& positions) const;
 
 private:

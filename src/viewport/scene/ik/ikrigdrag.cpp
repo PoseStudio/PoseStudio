@@ -319,6 +319,7 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
     // while another foot of the figure STANDS; with no foot standing the whole figure hovers,
     // and healing it is the point. At a drag's start only: a landing out of a lift plants what
     // comes down.
+    bool airborne = false; // (the floating rule below cleared the planted feet)
     if (dragStart && !planted.empty()) {
         const auto footOf = [&](int node) {
             int top = node;
@@ -351,11 +352,26 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
                 lift[k] = std::min(lift[k], over);
             }
         }
-        bool standing = false;
+        bool  standing = false;
+        float lowest = 1e9f;
         for (const float over : lift) {
             standing = standing || over < kFootLiftedHeight * m_sizeScale;
+            lowest = std::min(lowest, over);
         }
         static const bool kPlantLifted = std::getenv("IK_PLANT_LIFTED_FEET") != nullptr; // A/B probe
+        // A FLOATING FIGURE IS NOT PLANTED (2026-11-07): with no foot standing and the lowest of
+        // them kAirborneHeight or more over its floor height she is in the air — lifted off by
+        // a drag and let go of there, carried up with Ctrl, a pose with the feet up — and stays
+        // there: nothing is planted, the root keeps its place under a limb drag (its posture
+        // price) and goes where the cursor takes it under a pelvis drag, and the feet plant again
+        // as live contacts when they come down (updateContacts). Under that height she hovers by
+        // residue, and healing her onto the floor is the point (the harness's hover-heal, 3cm).
+        // Until this day every foot within the 15cm contact band was planted and healed, and a
+        // figure left floating was hauled back down by her next drag of anything.
+        if (!standing && lowest > kAirborneHeight * m_sizeScale && !kPlantLifted) {
+            planted.clear();
+            airborne = true;
+        }
         if (standing && !kPlantLifted) {
             std::vector<int> kept;
             for (std::size_t i = 0; i < planted.size(); ++i) {
@@ -534,7 +550,8 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
     }
     // Airborne fallback: nothing planted AND nothing user-pinned — pin the root in place (a
     // user-pinned hand is an anchor in its own right; the body may swing from it).
-    if (planted.empty() && userPinCount == 0 && m_effector != m_pelvis) {
+    const bool rootFallback = planted.empty() && userPinCount == 0 && m_effector != m_pelvis;
+    if (rootFallback && !airborne) {
         m_pins.push_back({m_pelvis, positions[static_cast<std::size_t>(m_pelvis)], 1.0f});
         m_pinUser.push_back(0);
     }
@@ -558,6 +575,7 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
     }
     m_suspended = false;
     m_suspendTicks = 0;
+    m_suspendStrainLast = 0.0f;
     m_lastDownIntent = false;
     m_lowestPelvisTarget = 1.0e9f;
     m_lastApplied.clear();
@@ -660,6 +678,21 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
     // The contacts the POSE made (see the top of this function), as live pins — after every
     // per-pin array above exists (addLivePin appends to them all), before the active set.
     seedPoseContacts(positions);
+    // THE FLOATING FIGURE'S ROOT PIN WAITS FOR THE POSE'S CONTACTS (2026-11-07): her feet off the
+    // floor, she is in the air only if nothing else of her rests on it — sat cross-legged with the
+    // feet on the shins she sits on her seat, kneeling with the feet tucked up she kneels — and
+    // pinned at the root she could neither rock nor roll it. With nothing seeded either, the root
+    // is pinned in place as before (every per-pin array grown with it, as addLivePin grows them).
+    if (rootFallback && airborne && m_pins.empty()) {
+        m_pins.push_back({m_pelvis, positions[static_cast<std::size_t>(m_pelvis)], 1.0f});
+        m_pinUser.push_back(0);
+        m_pinLive.push_back(0);
+        m_liveErrTicks.push_back(0);
+        m_liveSpan.push_back(0.0f);
+        m_pinSteppable.push_back(0);
+        m_pinStanceOffset.push_back(glm::vec2(0.0f));
+        m_pinFootprint.push_back({});
+    }
     // (... and the imbalance the pose BEGINS with is measured against the support they make too:
     // against the FEET alone, a kneeling body — its weight over its knees, a third of a metre
     // ahead of its feet — began every drag "30cm out of balance", and that forgiveness hid the

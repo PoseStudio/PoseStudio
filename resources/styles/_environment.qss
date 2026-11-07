@@ -4,7 +4,7 @@
  *        and Transform (src/properties/transformpanel.*).
  *
  * Concatenated after global.qss (shell/apptheme.cpp), so these rules override the base.
- * Everything is scoped under #EnvironmentPanel / #TransformPanel or the tabs' own object names so
+ * Everything is scoped under #EnvironmentPanel / #TransformPanel / #SoftBodyPanel or the tabs' own object names so
  * it can't leak into other widgets; what the tabs share — the section frames, the per-row restore
  * button, the quiet reset button (built by src/properties/propertyrows.*) — is styled ONCE, under
  * the #Property… names. Palette matches the app: pane #252627, inputs #2a2b2d, borders
@@ -14,25 +14,30 @@
 #EnvironmentPanel,
 #EnvironmentContent,
 #TransformPanel,
-#TransformContent {
+#TransformContent,
+#SoftBodyPanel,
+#SoftBodyContent {
     background-color: #252627; /* same as the QTabWidget::pane the tab sits in */
 }
 
 #EnvironmentPanel QScrollArea,
-#TransformPanel QScrollArea {
+#TransformPanel QScrollArea,
+#SoftBodyPanel QScrollArea {
     background: transparent;
     border: none;
 }
 
 /* Row labels: the global QLabel rule is white/18px — far too big here. Reset to the app's body size. */
 #EnvironmentPanel QLabel,
-#TransformPanel QLabel {
+#TransformPanel QLabel,
+#SoftBodyPanel QLabel {
     color: #c7c8cb;
     font-size: 12px;
     padding: 0;
 }
 /* A row whose dial the selected joint does not have (or no joint selected): the label dims with it. */
 #TransformPanel QLabel:disabled { color: #6f7073; }
+#SoftBodyPanel QLabel:disabled { color: #6f7073; }
 
 /* The Transform tab's heading (the selected joint's name) and its hint line under the rows. */
 #TransformPanel #TransformJointName {
@@ -41,6 +46,7 @@
     font-weight: bold;
 }
 #TransformPanel #TransformHint { color: #8b9096; }
+#SoftBodyPanel #SoftBodyHint { color: #8b9096; }
 
 /* Section frames. */
 #PropertyGroup {
@@ -143,11 +149,14 @@
 
 /* The toggles (tonemap, shadows): the label matches the row labels; the indicator itself is the
  * app-wide QCheckBox::indicator rule in global.qss. */
-#EnvironmentPanel QCheckBox {
+#EnvironmentPanel QCheckBox,
+#SoftBodyPanel QCheckBox {
     color: #c7c8cb;
     font-size: 12px;
     spacing: 6px;
 }
+/* The Soft Body Physics tab's part switches dim with the master switch off. */
+#SoftBodyPanel QCheckBox:disabled { color: #6f7073; }
 
 /* Reset button: quiet, secondary. */
 #PropertyResetButton {

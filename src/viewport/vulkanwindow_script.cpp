@@ -268,12 +268,13 @@ void VulkanWindow::scriptStep() {
                 say("[ikscript]   %s refused (a drag owns the pose)\n", qPrintable(cmd));
             }
         } else if (cmd == QLatin1String("dial") && w.size() > 2) {
-            // dial <forward|sideways|twist> <value>: the selected joint's Transform-tab dial set to
-            // that value, the way the tab does it (one bracketed, undoable edit).
+            // dial <forward|sideways|twist> <value> [abs]: the selected joint's Transform-tab dial set
+            // to that value, the way the tab does it (one bracketed, undoable edit); with a group the
+            // others turn by the same change — or, `abs`, to the value itself (the restore buttons).
             const QString which = w[1].toLower();
             const int     dial = which == QLatin1String("forward") ? 0 : which == QLatin1String("sideways") ? 1 : 2;
             if (beginJointTransformEdit()) {
-                setJointTransformDial(dial, w[2].toDouble());
+                setJointTransformDial(dial, w[2].toDouble(), w.size() > 3 && w[3].toLower() == QLatin1String("abs"));
                 endJointTransformEdit();
             } else {
                 say("[ikscript]   dial refused (a drag owns the pose)\n");
@@ -738,6 +739,10 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         value = isProjectDirty() ? 1.0 : 0.0;
         return true;
     }
+    if (name.compare(QLatin1String("selection"), Qt::CaseInsensitive) == 0) {
+        value = m_renderer ? static_cast<double>(scene().selectedModelIndex()) : -1.0; // -1 = nothing selected
+        return true;
+    }
     if (name.startsWith(QLatin1String("figure."), Qt::CaseInsensitive)) {
         // (The Figure group's rows: a posable figure's, or a selected STATIC model's — a splat
         // scene, an OBJ — which has no armature.)
@@ -813,7 +818,7 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         value = s.jumpMax * 1000.0;
     } else if (key == QLatin1String("breastl") || key == QLatin1String("breastr")) {
         // THE SOFT BREASTS: the left / right breast's swing from the sculpt, degrees (0 with the
-        // Posing preference off, or on a figure without pectoral bones).
+        // soft body switched off, or on a figure without pectoral bones).
         value = static_cast<double>(scene().breastSwingDeg(key == QLatin1String("breastl") ? 0 : 1));
     } else if (key == QLatin1String("breasthangl") || key == QLatin1String("breasthangr")) {
         // THE SOFT BREASTS: how far the left / right breast is drawn out along its tether, mm (0
@@ -823,9 +828,13 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         // THE SOFT BREASTS: how far the left / right breast has moved sideways, mm, + outward toward the armpit
         // (on her back the spread, on her side the fall toward the lower side).
         value = static_cast<double>(scene().breastSideMm(key == QLatin1String("breastsidel") ? 0 : 1));
+    } else if (key == QLatin1String("breastupl") || key == QLatin1String("breastupr")) {
+        // THE SOFT BREASTS: how far the left / right breast has moved along the chest, mm, + up toward
+        // the head (a bow's lift, a jolt's or a landing's bounce; below 0 only by the floor's give).
+        value = static_cast<double>(scene().breastUpMm(key == QLatin1String("breastupl") ? 0 : 1));
     } else if (key == QLatin1String("buttl") || key == QLatin1String("buttr")) {
         // THE SOFT BUTTOCKS: how far the left / right cheek has moved from the sculpt, mm (0 at
-        // rest in any pose — they never hang — and while the Posing preference is off).
+        // rest in any pose — they never hang — and while the soft body is switched off).
         value = static_cast<double>(scene().buttockMoveMm(key == QLatin1String("buttl") ? 0 : 1));
     } else if (key == QLatin1String("lowest")) {
         // (Not the figure node and its like: parentless, or hanging straight off a parentless node

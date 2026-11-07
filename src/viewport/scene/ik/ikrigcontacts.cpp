@@ -74,7 +74,7 @@ constexpr float kLiveFootprintBand = 0.03f;
 // exactly as at a drag start. Before this the hanging body was simply pushed on into the floor
 // (the solver folds the dangling legs up past their limits to keep the feet on the floor plane;
 // the applied pose cannot, and the feet went 21cm under).
-constexpr float kLandingAirborne = 0.05f; // every foot this far up = the figure hangs
+constexpr float kLandingAirborne = kAirborneHeight; // every foot this far up = the figure hangs (and plantContacts' floating test, the same number)
 // A/B probes read at more than one site of this TU (each a `static const` at its site before).
 const bool kHeadProps = std::getenv("IK_HEAD_PROPS") != nullptr;       // a face on the floor props the body, as before 2026-09-22
 const bool kLiftNoDefer = std::getenv("IK_LIFT_NO_DEFER") != nullptr;  // a knee lifts off mid-roll, as before 2026-10-28
@@ -274,27 +274,32 @@ bool IkRig::trailReleased(int node) const {
            (m_riseUnloaded[static_cast<std::size_t>(node)] & 4) != 0;
 }
 
-float IkRig::liveContactStretch(std::size_t pin, const std::vector<glm::vec3>& positions) const {
+float IkRig::limbStretch(int node, const glm::vec3& target, float span, const std::vector<glm::vec3>& positions) const {
     constexpr float kStretchChainShare = 0.6f; // a joint answers for the limb's stretch only with this much of it below
-    if (pin >= m_pins.size() || pin >= m_liveSpan.size() || m_liveSpan[pin] <= 1.0e-4f) {
+    if (node < 0 || span <= 1.0e-4f) {
         return 0.0f;
     }
-    const int        node = m_pins[pin].node;
-    const int        junction = limbJunction(node);
-    const glm::vec3& target = m_pins[pin].target;
-    float            chain = 0.0f;
-    float            best = 0.0f;
+    const int junction = limbJunction(node);
+    float     chain = 0.0f;
+    float     best = 0.0f;
     for (int cur = node; cur >= 0 && cur != junction; cur = m_parents[static_cast<std::size_t>(cur)]) {
         const int above = m_parents[static_cast<std::size_t>(cur)];
         if (above < 0) {
             break;
         }
         chain += m_edgeRestLen[static_cast<std::size_t>(cur)];
-        if (chain >= kStretchChainShare * m_liveSpan[pin] && chain > 1.0e-4f) {
+        if (chain >= kStretchChainShare * span && chain > 1.0e-4f) {
             best = std::max(best, glm::length(positions[static_cast<std::size_t>(above)] - target) / chain);
         }
     }
     return best;
+}
+
+float IkRig::liveContactStretch(std::size_t pin, const std::vector<glm::vec3>& positions) const {
+    if (pin >= m_pins.size() || pin >= m_liveSpan.size()) {
+        return 0.0f;
+    }
+    return limbStretch(m_pins[pin].node, m_pins[pin].target, m_liveSpan[pin], positions);
 }
 
 float IkRig::liveContactRise(std::size_t pin, const std::vector<glm::vec3>& positions) const {

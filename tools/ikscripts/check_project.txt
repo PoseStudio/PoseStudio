@@ -20,6 +20,9 @@ expect dirty == 0
 # ... and Open brings it back: the figure, its pose, the pin, and a clean document.
 openproject scene.pss
 expect figures == 1
+# ... and NOT selected (2026-11-07): File -> New / Open empty the scene, and the figure re-imported
+# into the emptied slot used to inherit the old scene's selection index (Scene::clearModels).
+expect selection == -1
 expect dirty == 0
 click lShin
 expect dialjoint.lShin == 1

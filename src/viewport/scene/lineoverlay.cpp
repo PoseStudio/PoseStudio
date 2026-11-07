@@ -39,7 +39,7 @@ LineOverlay::LineOverlay(VulkanContext& context, VkRenderPass renderPass,
     lineConfig.depthWriteEnable = false;
     lineConfig.blendEnable = false;
     lineConfig.colorWriteAlpha = false; // overlay lines must not touch the SSS mask
-    lineConfig.colorAttachmentCount = 3; // spec + photo targets present but masked off
+    lineConfig.colorAttachmentCount = 2; // the spec target is present but masked off
     lineConfig.pushConstantSize = 0;
     VkVertexInputBindingDescription lineBinding{};
     lineBinding.binding = 0;

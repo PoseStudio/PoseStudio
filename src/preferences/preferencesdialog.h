@@ -33,9 +33,6 @@ signals:
     /// Forwarded from AssetsPreferencesPanel so callers don't need to know which tab owns it.
     void assetLibrariesChanged();
 
-    /// Forwarded from PosingPreferencesPanel: a soft-body setting changed (the viewport re-poses).
-    void softBodySettingsChanged();
-
     /// Forwarded from AssetsPreferencesPanel when the user double-clicks a library row.
     /// The dialog closes itself right after, so the caller's navigation is actually visible.
     void navigateToLibraryRequested(const QString& path);

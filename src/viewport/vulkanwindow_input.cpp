@@ -100,6 +100,22 @@ void VulkanWindow::mousePressEvent(QMouseEvent* event) {
     }
 }
 
+bool VulkanWindow::hasSelection() const {
+    return m_renderer && m_renderer->scene().selectedModelIndex() >= 0;
+}
+
+void VulkanWindow::clearSelection() {
+    if (!m_renderer || m_ik.dragging || scene().selectedModelIndex() < 0) {
+        return;
+    }
+    // (A release settle, the landing bounce, an open dial edit: landed and committed first, as a
+    // press does — the bounce BORROWS the selection, and with it taken from under the bounce its
+    // drag lost its effector and gave the user's joint back on a model no longer selected.)
+    closeSettlingEdits();
+    scene().setSelectedModel(-1); // and the joint selection with it
+    requestUpdate();              // the outline goes away
+}
+
 void VulkanWindow::selectModelAtClick(const QPointF& localPos) {
     // Box-level pick (Model::intersectRay): the nearest model whose bounds the cursor's ray
     // enters, else -1 = clear the selection. Selecting a figure also makes it the posing target;

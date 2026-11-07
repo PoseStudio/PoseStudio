@@ -206,6 +206,12 @@ bool Armature::dragFigureTo(const glm::vec3& targetWorld) {
         }
         computeSkinMatrices();
     }
+    // THE SOFT BODY RIDES THE MOVE (2026-11-06): the chest and the hips go at the cursor's speed —
+    // the sharpest jolt a user makes — and the breasts and the buttocks feel its acceleration as
+    // under any drag (armaturebreasts.cpp, armaturebuttocks.cpp); the settle ticks them on alone
+    // once the figure stops (settleIkTick). Until this day the move never ticked them: a figure
+    // carried by Ctrl rode dead still. Off, tickSoftBody returns at once.
+    m_jsSoftBodyMoving = tickSoftBody(1.0f / 60.0f);
     static const bool kTrace = std::getenv("POSESTUDIO_IK_TRACE") != nullptr;
     if (kTrace) {
         const glm::vec3 point(m_poseGlobal[static_cast<std::size_t>(m_moveBone)] * glm::vec4(m_moveLocal, 1.0f));
@@ -213,7 +219,7 @@ bool Armature::dragFigureTo(const glm::vec3& targetWorld) {
                      result.iterations, result.converged ? 1 : 0, result.cost, glm::length(point - target) * 1000.0f,
                      room < 1.0e8f ? room * 1000.0f : -1.0f, changed);
     }
-    return moved || following;
+    return moved || following || m_jsSoftBodyMoving; // (a bounce under a still cursor is a frame to draw)
 }
 
 } // namespace pose

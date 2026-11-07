@@ -28,6 +28,7 @@
 #include "vrsettings.h"
 
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QSize>
 #include <QTimer>
@@ -46,6 +47,56 @@ namespace {
 // reporting a QSize and converting at the one seam.
 VkExtent2D toExtent(const QSize& size) {
     return VkExtent2D{static_cast<uint32_t>(size.width()), static_cast<uint32_t>(size.height())};
+}
+
+/// POSESTUDIO_GPU_PERF=1: once a second, the desktop frames' GPU time — the whole frame, and the
+/// Gaussian splat draw within it (VulkanRenderer::lastGpuTimings) — and, while it is set, every
+/// rendered frame asks for the next, so the readout measures continuous rendering as a headset
+/// frame is (the headset's own readout is POSESTUDIO_VR_PERF's). A diagnostic lever, like the
+/// IK bench: the number a window of eye size gives is what an eye costs.
+struct GpuPerf {
+    bool          on = qEnvironmentVariableIsSet("POSESTUDIO_GPU_PERF");
+    QElapsedTimer clock;
+    qint64        windowStart = 0;
+    int           frames = 0;
+    int           timed = 0;
+    double        frameMs = 0.0;
+    double        frameMaxMs = 0.0;
+    double        splatMs = 0.0;
+    double        splatMaxMs = 0.0;
+};
+GpuPerf g_gpuPerf;
+
+void gpuPerfFrame(const VulkanRenderer& renderer, const QSize& viewport) {
+    GpuPerf& p = g_gpuPerf;
+    if (!p.clock.isValid()) {
+        p.clock.start();
+    }
+    ++p.frames;
+    const VulkanRenderer::GpuTimings& t = renderer.lastGpuTimings();
+    if (t.valid) {
+        ++p.timed;
+        p.frameMs += t.frameMs;
+        p.frameMaxMs = std::max(p.frameMaxMs, t.frameMs);
+        p.splatMs += t.splatMs;
+        p.splatMaxMs = std::max(p.splatMaxMs, t.splatMs);
+    }
+    const qint64 now = p.clock.nsecsElapsed();
+    if (now - p.windowStart < 1'000'000'000) {
+        return;
+    }
+    qInfo().noquote() << QStringLiteral("[gpu perf] %1x%2: %3 frames/s; GPU per frame mean %4 ms, max %5 ms; "
+                                        "of it the splats mean %6 ms, max %7 ms")
+                             .arg(viewport.width())
+                             .arg(viewport.height())
+                             .arg(p.frames)
+                             .arg(p.timed > 0 ? p.frameMs / p.timed : 0.0, 0, 'f', 2)
+                             .arg(p.frameMaxMs, 0, 'f', 2)
+                             .arg(p.timed > 0 ? p.splatMs / p.timed : 0.0, 0, 'f', 2)
+                             .arg(p.splatMaxMs, 0, 'f', 2);
+    p.windowStart = now;
+    p.frames = p.timed = 0;
+    p.frameMs = p.frameMaxMs = p.splatMs = p.splatMaxMs = 0.0;
 }
 } // namespace
 
@@ -405,6 +456,10 @@ void VulkanWindow::renderFrame() {
         const qint64 f0 = perfFrame ? m_diag->frameBegin() : 0;
         if (m_renderer->drawFrame()) {
             requestUpdate();
+        }
+        if (g_gpuPerf.on) {
+            gpuPerfFrame(*m_renderer, size());
+            requestUpdate(); // continuous frames while the readout runs
         }
         if (perfFrame) {
             m_diag->frameEnd(f0);

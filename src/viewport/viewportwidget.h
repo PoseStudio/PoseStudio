@@ -120,7 +120,7 @@ public:
     /// viewport degraded; begin is false while a viewport drag owns the pose.
     JointTransform jointTransform() const;
     bool beginJointTransformEdit();
-    void setJointTransformDial(int dial, double value);
+    void setJointTransformDial(int dial, double value, bool absolute = false); ///< See VulkanWindow::setJointTransformDial.
     void endJointTransformEdit();
     void setFigurePosition(int axis, double cm); ///< The Figure group: see VulkanWindow::setFigurePosition.
     void setFigureRotation(int axis, double degrees);
@@ -148,7 +148,7 @@ public:
     /// Drops the posable figure onto the ground plane (the strip's Ground button): moves it so
     /// the current pose's lowest point rests at y = 0. No-op if the viewport degraded.
     void groundFigure();
-    /// The Posing preferences changed (the soft breasts): every figure re-posed with them.
+    /// The Soft Body Physics tab's settings changed: every figure re-posed with them.
     void applySoftBodySettings();
 
     /// Toggles the skeleton overlay (the joint→parent bone lines drawn over the figure). Off by

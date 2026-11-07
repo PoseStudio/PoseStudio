@@ -35,6 +35,16 @@ public:
     static bool reducedEffects();
     static void setReducedEffects(bool reduced);
 
+    /// Preferences → VR → "Splat scale": the MOST of the eye's size a Gaussian splat scene is
+    /// drawn at, in [kMinSplatScale, 1] (absent = kDefaultSplatScale) — the splats' fill is what
+    /// a headset frame cannot afford at the eye's full size on most GPUs, and VR Mode's dynamic
+    /// scale lowers it from here while a frame runs late and brings it back as the GPU finds
+    /// room (vulkanwindow_vr.cpp). Applies when VR Mode next starts.
+    static double splatScale();
+    static void setSplatScale(double scale);
+    static constexpr double kMinSplatScale = 0.25;
+    static constexpr double kDefaultSplatScale = 1.0;
+
     /// What the viewport found at startup, in the user's words ("VR support is off", "No OpenXR
     /// runtime is installed", "Ready: Oculus / Meta Quest 3") — the Preferences page's status
     /// line, and the explanation behind a VR Mode that cannot start.

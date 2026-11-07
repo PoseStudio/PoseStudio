@@ -30,6 +30,11 @@ namespace {
 // bloom's (a Gaussian splat capture's highlights, put back above 1.0 by the inverse tonemap,
 // bloom as a lamp would).
 const bool kNoBloom = std::getenv("POSESTUDIO_NO_BLOOM") != nullptr;
+/// POSESTUDIO_SPLAT_SCALE=<0.25..1>: the DESKTOP photo layer's size as a share of the viewport
+/// (hdrtarget.h) — the measuring lever for what the headset's splat scale buys; 1 as shipped.
+const float kDesktopSplatScale = std::getenv("POSESTUDIO_SPLAT_SCALE") != nullptr
+                                     ? static_cast<float>(std::atof(std::getenv("POSESTUDIO_SPLAT_SCALE")))
+                                     : 1.0f;
 } // namespace
 
 namespace {
@@ -81,6 +86,8 @@ struct VulkanRenderer::VrTargets {
     float                        outlineWidthPx = kOutlineWidthLogicalPx;
     bool                         hasFrame = false;     // a stereo frame has rendered: the eye targets hold one
     bool                         lastOutlined = false; // ... with an outline mask
+    bool                         lastOutlineSplat = false; // ... of a splat scene (its mask is opacity)
+    float                        lastPhotoUvScale[2] = {1.0f, 1.0f}; // ... with the photo layer at this UV scale (the mirror reads the frame's own, not the scale the next frame will draw at)
     std::unique_ptr<HdrTarget>   hdr;
     std::unique_ptr<OutlineMask> outline;
     std::unique_ptr<PostProcess> post;
@@ -104,20 +111,22 @@ VulkanRenderer::VulkanRenderer(VulkanContext& context, VkExtent2D initialExtent,
     // The scene renders offscreen into the HDR target (linear RGBA16F at the context's MSAA
     // count, resolved); scene pipelines are built against ITS render pass. The swapchain pass —
     // single-sample, no depth — then only ever runs the tonemapping composite.
-    m_hdrTarget = std::make_unique<HdrTarget>(m_context, m_swapchain->extent());
+    m_hdrTarget = std::make_unique<HdrTarget>(m_context, m_swapchain->extent(), shaders.get("fullscreen.vert"),
+                                              shaders.get("depthresolve.frag"), kDesktopSplatScale);
     // The selection-outline mask is screen-sized too; the Scene's silhouette pipeline builds
     // against its pass, so it exists before the Scene.
     m_outlineMask = std::make_unique<OutlineMask>(m_context, m_swapchain->extent());
 
     m_scene = std::make_unique<Scene>(m_context, m_hdrTarget->renderPass(),
-                                      m_outlineMask->renderPass(),
+                                      m_outlineMask->renderPass(), m_hdrTarget->photoRenderPass(),
                                       shaders.get("mesh.vert"), shaders.get("mesh.frag"),
                                       shaders.get("skeleton.vert"), shaders.get("skeleton.frag"),
                                       shaders.get("shadow.vert"), shaders.get("shadow.frag"),
                                       shaders.get("background.vert"),
                                       shaders.get("background.frag"),
                                       shaders.get("outlinemask.frag"),
-                                      shaders.get("splat.vert"), shaders.get("splat.frag"));
+                                      shaders.get("splat.vert"), shaders.get("splat.frag"),
+                                      shaders.get("splatmask.frag"));
 
     // The grid samples the scene's shadow map (ground/contact shadow) through the scene-wide
     // set 3, so its pipeline is built against that layout — Scene must exist first.
@@ -127,7 +136,7 @@ VulkanRenderer::VulkanRenderer(VulkanContext& context, VkExtent2D initialExtent,
 
     m_postProcess = std::make_unique<PostProcess>(
         m_context, m_swapchain->renderPass(), m_hdrTarget->resolveInfo(),
-        m_hdrTarget->specResolveInfo(), m_hdrTarget->photoResolveInfo(), m_outlineMask->descriptorInfo(),
+        m_hdrTarget->specResolveInfo(), m_hdrTarget->photoInfo(), m_outlineMask->descriptorInfo(),
         m_swapchain->extent(),
         shaders.get("fullscreen.vert"), shaders.get("bloombright.frag"),
         shaders.get("bloomblur.frag"), shaders.get("composite.frag"),
@@ -136,6 +145,7 @@ VulkanRenderer::VulkanRenderer(VulkanContext& context, VkExtent2D initialExtent,
     createCommandPool();
     createCommandBuffers();
     createSyncObjects();
+    createTimingPool();
 
     const VkExtent2D extent = m_swapchain->extent();
     m_camera.setViewportSize(static_cast<float>(extent.width), static_cast<float>(extent.height));
@@ -161,7 +171,7 @@ VulkanRenderer::~VulkanRenderer() {
 }
 
 void VulkanRenderer::beginVr(VkRenderPass eyeRenderPass, VkExtent2D eyeExtent, bool encodeSrgb,
-                             VkRenderPass eyeDepthRenderPass, bool reducedEffects) {
+                             VkRenderPass eyeDepthRenderPass, bool reducedEffects, float splatScale) {
     endVr();
     // Nothing may be in flight: the VR frames write the per-frame UBO slots the desktop frames
     // were using, and from here on the desktop frame only composites (the mirror).
@@ -177,15 +187,16 @@ void VulkanRenderer::beginVr(VkRenderPass eyeRenderPass, VkExtent2D eyeExtent, b
     vr->outlineWidthPx = kOutlineWidthLogicalPx * std::max(1.0f, static_cast<float>(eyeExtent.height) / 1080.0f);
     // The same pass structure as the desktop targets (same formats, same MSAA count), so every
     // scene pipeline — built against the desktop targets' passes — is compatible with these. The
-    // depth is kept (and resolved per eye) only when the session has a depth pass AND the scene
-    // is multisampled: the resolve shader reads a multisampled image.
+    // headset's depth layer is resolved per eye only when the session has a depth pass AND the
+    // scene is multisampled: the resolve shader reads a multisampled image.
     const bool depthResolve = eyeDepthRenderPass != VK_NULL_HANDLE && m_context.sampleCount() != VK_SAMPLE_COUNT_1_BIT;
-    vr->hdr = std::make_unique<HdrTarget>(m_context, eyeExtent, /*storeDepth=*/depthResolve);
-    vr->outline = std::make_unique<OutlineMask>(m_context, eyeExtent);
     ShaderLibrary& shaders = *m_shaders;
+    vr->hdr = std::make_unique<HdrTarget>(m_context, eyeExtent, shaders.get("fullscreen.vert"),
+                                          shaders.get("depthresolve.frag"), splatScale);
+    vr->outline = std::make_unique<OutlineMask>(m_context, eyeExtent);
     vr->post = std::make_unique<PostProcess>(
         m_context, eyeRenderPass, vr->hdr->resolveInfo(), vr->hdr->specResolveInfo(),
-        vr->hdr->photoResolveInfo(), vr->outline->descriptorInfo(), eyeExtent, shaders.get("fullscreen.vert"),
+        vr->hdr->photoInfo(), vr->outline->descriptorInfo(), eyeExtent, shaders.get("fullscreen.vert"),
         shaders.get("bloombright.frag"), shaders.get("bloomblur.frag"), shaders.get("composite.frag"),
         shaders.get("sssblur.frag"));
     if (depthResolve) {
@@ -204,8 +215,14 @@ void VulkanRenderer::beginVr(VkRenderPass eyeRenderPass, VkExtent2D eyeExtent, b
 
     // The desktop composite mirrors the eye targets from now on.
     m_postProcess->setMirrorSource(vr->hdr->resolveInfo(), vr->post->bloomInfo(), vr->outline->descriptorInfo(),
-                                   vr->hdr->photoResolveInfo());
+                                   vr->hdr->photoInfo());
     m_vr = std::move(vr);
+}
+
+void VulkanRenderer::setVrSplatScale(float scale) {
+    if (m_vr) {
+        m_vr->hdr->setPhotoScale(scale);
+    }
 }
 
 void VulkanRenderer::endVr() {
@@ -237,12 +254,14 @@ void VulkanRenderer::drawVrFrame(const VrEyeView views[2], const VkFramebuffer e
         const VkFence handle = desktopFence.get();
         VK_CHECK(vkWaitForFences(device, 1, &handle, VK_TRUE, UINT64_MAX));
     }
+    timingRead(kVrTimingSlot, m_vrGpuTimings); // the previous VR frame's GPU time, now complete
 
     VkCommandBuffer cmd = m_vr->cmd;
     VK_CHECK(vkResetCommandBuffer(cmd, 0));
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     VK_CHECK(vkBeginCommandBuffer(cmd, &begin));
+    timingBegin(cmd, kVrTimingSlot);
 
     // The shadow map is view-independent: once per frame, shared by both eyes.
     m_scene->recordShadowPass(cmd, 0);
@@ -255,9 +274,19 @@ void VulkanRenderer::drawVrFrame(const VrEyeView views[2], const VkFramebuffer e
     // they end the frame holding the left eye — the one the desktop mirror composites.
     for (int eye = 1; eye >= 0; --eye) {
         Camera eyeCamera;
+        // The eye's viewport size FIRST — the splats' focal lengths are read off the projection
+        // AND the viewport; a default Camera's is 1x1 px, through which every splat's quad came
+        // out several screens wide and a capture of half a million splats hung the GPU — and
+        // THEN the tracked view: setViewportSize rebuilds an orbit camera's projection, and set
+        // after the explicit view it replaced each eye's off-centre frustum with the desktop's
+        // symmetric 50° one (every eye magnified twice over: the stereo broken). The Camera
+        // keeps an explicit projection through it now as well; the order is belt and braces.
+        eyeCamera.setViewportSize(static_cast<float>(m_vr->extent.width), static_cast<float>(m_vr->extent.height));
         eyeCamera.setExplicitView(views[eye].view, views[eye].projection);
+        // The splats' far-first sort goes to its worker thread here: a headset frame cannot wait
+        // on it (sorted on this thread per head turn it was 10 ms of every 14 ms frame).
         outlined = recordScenePasses(cmd, eyeCamera, static_cast<uint32_t>(eye), *m_vr->hdr, *m_vr->outline,
-                                     *m_vr->post, m_vr->extent, post);
+                                     *m_vr->post, m_vr->extent, post, /*asyncSplatSort=*/true);
 
         VkRenderPassBeginInfo eyePass{};
         eyePass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -268,6 +297,8 @@ void VulkanRenderer::drawVrFrame(const VrEyeView views[2], const VkFramebuffer e
         setFullViewport(cmd, m_vr->extent);
         PostProcess::CompositeOptions options;
         options.encodeSrgb = m_vr->encodeSrgb;
+        m_vr->hdr->photoUvScale(options.photoUvScale);
+        options.outlineFromSplats = m_scene->selectedIsSplat();
         m_vr->post->recordComposite(cmd, tonemap, pbr && post, outlined ? m_vr->outlineWidthPx : 0.0f, options);
         vkCmdEndRenderPass(cmd);
 
@@ -278,7 +309,10 @@ void VulkanRenderer::drawVrFrame(const VrEyeView views[2], const VkFramebuffer e
         }
     }
     m_vr->lastOutlined = outlined;
+    m_vr->lastOutlineSplat = m_scene->selectedIsSplat();
+    m_vr->hdr->photoUvScale(m_vr->lastPhotoUvScale);
     m_vr->hasFrame = true;
+    timingEnd(cmd);
     VK_CHECK(vkEndCommandBuffer(cmd));
 
     VK_CHECK(vkResetFences(device, 1, &fence));
@@ -408,7 +442,7 @@ void VulkanRenderer::recreateSwapchain() {
     // (the device is idle here).
     m_hdrTarget->resize(extent);
     m_outlineMask->resize(extent);
-    m_postProcess->resize(extent, m_hdrTarget->resolveInfo(), m_hdrTarget->specResolveInfo(), m_hdrTarget->photoResolveInfo(),
+    m_postProcess->resize(extent, m_hdrTarget->resolveInfo(), m_hdrTarget->specResolveInfo(), m_hdrTarget->photoInfo(),
                           m_outlineMask->descriptorInfo());
     m_camera.setViewportSize(static_cast<float>(extent.width), static_cast<float>(extent.height));
     m_framebufferResized = false;
@@ -423,6 +457,7 @@ bool VulkanRenderer::drawFrame() {
     const VkFence inFlight = m_inFlightFences[m_currentFrame].get();
     const VkSemaphore imageAvailable = m_imageAvailableSemaphores[m_currentFrame].get();
     VK_CHECK(vkWaitForFences(device, 1, &inFlight, VK_TRUE, UINT64_MAX));
+    timingRead(m_currentFrame, m_gpuTimings); // the frame this slot last rendered, now complete
 
     uint32_t imageIndex = 0;
     VkResult acquire = vkAcquireNextImageKHR(device, m_swapchain->handle(), UINT64_MAX,
@@ -535,19 +570,109 @@ bool VulkanRenderer::takeCapture(CapturedFrame& out) {
     return true;
 }
 
+// --- GPU timing --------------------------------------------------------------------------------
+// Timestamp queries, on whenever the queue has them (a handful of stamps and one non-blocking
+// readback a frame — VR Mode's dynamic splat scale reads the result; POSESTUDIO_GPU_PERF and
+// POSESTUDIO_VR_PERF print it): a frame stamps the top of its command buffer,
+// either side of each scene pass's splat draw, and the bottom; the stamps are read back where
+// the frame's fence is waited for — the previous frame of that slot — so nothing ever waits on
+// a query. Written with the availability bit, so a stamp a frame never recorded (the desktop's
+// second scene pass; a frame recorded before timing began) is skipped, not misread.
+
+void VulkanRenderer::createTimingPool() {
+    m_gpuTimingOn = true;
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(m_context.physicalDevice(), &props);
+    uint32_t familyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(m_context.physicalDevice(), &familyCount, nullptr);
+    std::vector<VkQueueFamilyProperties> families(familyCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(m_context.physicalDevice(), &familyCount, families.data());
+    const uint32_t family = m_context.graphicsFamily();
+    if (family >= familyCount || families[family].timestampValidBits == 0 || props.limits.timestampPeriod <= 0.0f) {
+        m_gpuTimingOn = false; // a queue without timestamps: the readouts print no GPU numbers
+        return;
+    }
+    m_timestampPeriodNs = props.limits.timestampPeriod;
+    VkQueryPoolCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    info.queryCount = kTimingQueries * (static_cast<uint32_t>(kMaxFramesInFlight) + 1);
+    VkQueryPool pool = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateQueryPool(m_context.device(), &info, nullptr, &pool));
+    m_timingPool = UniqueQueryPool(m_context.device(), pool);
+}
+
+void VulkanRenderer::timingBegin(VkCommandBuffer cmd, uint32_t slot) {
+    m_timingSlot = slot;
+    m_timingPass = 0;
+    if (!m_gpuTimingOn) {
+        return;
+    }
+    const uint32_t first = slot * kTimingQueries;
+    vkCmdResetQueryPool(cmd, m_timingPool.get(), first, kTimingQueries); // outside any render pass
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_timingPool.get(), first);
+    m_timingWritten[slot] = true;
+}
+
+void VulkanRenderer::timingMark(VkCommandBuffer cmd, uint32_t query) {
+    if (!m_gpuTimingOn || query == 0 || query >= kTimingQueries - 1) {
+        return; // the first and last stamps are the frame's own; a third scene pass stamps nothing
+    }
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timingPool.get(),
+                        m_timingSlot * kTimingQueries + query);
+}
+
+void VulkanRenderer::timingEnd(VkCommandBuffer cmd) {
+    if (!m_gpuTimingOn) {
+        return;
+    }
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timingPool.get(),
+                        m_timingSlot * kTimingQueries + kTimingQueries - 1);
+}
+
+void VulkanRenderer::timingRead(uint32_t slot, GpuTimings& into) {
+    if (!m_gpuTimingOn || !m_timingWritten[slot]) {
+        return;
+    }
+    // Each query's value and availability, as a pair of 64-bit words.
+    std::array<uint64_t, kTimingQueries * 2> results{};
+    const VkResult r = vkGetQueryPoolResults(m_context.device(), m_timingPool.get(), slot * kTimingQueries,
+                                             kTimingQueries, sizeof(results), results.data(),
+                                             sizeof(uint64_t) * 2,
+                                             VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+    if (r != VK_SUCCESS && r != VK_NOT_READY) {
+        VK_CHECK(r);
+    }
+    auto available = [&](uint32_t q) { return results[q * 2 + 1] != 0; };
+    auto value = [&](uint32_t q) { return results[q * 2]; };
+    if (!available(0) || !available(kTimingQueries - 1)) {
+        return; // the frame's own stamps are not both in (a frame still running): keep the last reading
+    }
+    const double toMs = static_cast<double>(m_timestampPeriodNs) * 1.0e-6;
+    into.frameMs = static_cast<double>(value(kTimingQueries - 1) - value(0)) * toMs;
+    into.splatMs = 0.0;
+    for (uint32_t pass = 0; pass < 2; ++pass) {
+        const uint32_t b = 1 + 2 * pass;
+        if (available(b) && available(b + 1)) {
+            into.splatMs += static_cast<double>(value(b + 1) - value(b)) * toMs;
+        }
+    }
+    into.valid = true;
+}
+
 bool VulkanRenderer::recordScenePasses(VkCommandBuffer cmd, const Camera& camera, uint32_t frameSlot,
                                        HdrTarget& hdr, OutlineMask& outline, PostProcess& post,
-                                       VkExtent2D extent, bool postEffects) {
+                                       VkExtent2D extent, bool postEffects, bool asyncSplatSort) {
     // Selection-outline mask (its own small pass, skipped when nothing is selected): the
     // composite dilates it into the outline, so it too must precede the composite's pass.
-    const bool outlined = m_scene->recordOutlinePass(cmd, camera, frameSlot, outline);
+    const bool outlined = m_scene->recordOutlinePass(cmd, camera, frameSlot, outline, asyncSplatSort);
 
     // --- Offscreen HDR scene pass: backdrop + meshes + grid, in LINEAR HDR. --------------------
     // Five clear slots cover every attachment layout the HDR target uses (MSAA:
     // colourMS/depth/resolve/specMS/specResolve; single-sample: colour/depth/spec) — the
     // SPECULAR attachments clear to zero (no specular where nothing draws). The swapchain pass
     // below needs none: its one attachment loads DONT_CARE.
-    std::array<VkClearValue, 7> clears{};
+    std::array<VkClearValue, 5> clears{};
     // Viewport background #3E4042 = (62, 64, 66) as LINEAR values (sRGB->linear of each channel).
     // The HDR target is a linear format and the composite's sRGB swapchain store does the final
     // encode, so the displayed pixel comes back out as exactly #3E4042. Alpha clears to 0: the
@@ -557,8 +682,6 @@ bool VulkanRenderer::recordScenePasses(VkCommandBuffer cmd, const Camera& camera
     clears[2].color = {{0.0f, 0.0f, 0.0f, 0.0f}}; // single-sample: the spec attachment
     clears[3].color = {{0.0f, 0.0f, 0.0f, 0.0f}}; // MSAA: the spec MS attachment
     clears[4].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
-    clears[5].color = {{0.0f, 0.0f, 0.0f, 0.0f}}; // the photo layer (coverage 0: nothing over the scene)
-    clears[6].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
 
     VkRenderPassBeginInfo scenePass{};
     scenePass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -578,15 +701,36 @@ bool VulkanRenderer::recordScenePasses(VkCommandBuffer cmd, const Camera& camera
     m_grid->record(cmd, camera, m_scene->iblSet(), m_scene->lightViewProj(),
                    glm::vec4(lighting.shadowIntensity, lighting.shadowSoftness,
                              lighting.shadowReach, 0.0f));
-    // Then the Gaussian splats (far-first, alpha-blended, depth-tested against the meshes): after
-    // the grid, so a capture's floor covers the grid's lines rather than wearing them.
-    m_scene->recordSplats(cmd, camera, frameSlot);
     vkCmdEndRenderPass(cmd);
+
+    // --- The PHOTO pass: the Gaussian splats, single-sample, over the resolved scene depth (see
+    // hdrtarget.h) — far-first, alpha-blended, depth-tested against the meshes and the grid's
+    // floor line alike; the composite lays the layer over the tonemapped scene. The splats'
+    // pixel footprints are sized against the LAYER's viewport, which may be smaller than the
+    // scene's: a camera of the same view through that size (an explicit view keeps its
+    // projection through setViewportSize). Without a splat model the pass is skipped.
+    timingMark(cmd, 1 + 2 * m_timingPass); // the splat pass's GPU time, for the perf readouts
+    if (m_scene->hasSplats()) {
+        Camera photoCamera;
+        photoCamera.setExplicitView(camera.view(), camera.projection());
+        const VkExtent2D photoExtent = hdr.photoExtent();
+        photoCamera.setViewportSize(static_cast<float>(photoExtent.width), static_cast<float>(photoExtent.height));
+        hdr.recordPhotoPass(cmd, [&] { m_scene->recordSplats(cmd, photoCamera, frameSlot, asyncSplatSort); });
+    } else {
+        hdr.recordPhotoPass(cmd, {});
+    }
+    timingMark(cmd, 2 + 2 * m_timingPass);
+    ++m_timingPass;
 
     // --- SSSSS then bloom (PBR mode only — the stylized modes author display-ready values;
     // VR Mode's reduced-effects preference skips both). -------------------------------------
     if (m_scene->isPbr() && postEffects) {
-        post.recordSss(cmd); // diffuses skin in place (HDR alpha = the SSS mask)
+        // The SSS blur diffuses the skin the opaque pass drew and adds its specular back: with no
+        // mesh in the scene (a capture alone) there is neither, and its two full-res passes an
+        // eye are a third of a headset frame the splats could have (their scale follows).
+        if (m_scene->hasMeshes()) {
+            post.recordSss(cmd); // diffuses skin in place (HDR alpha = the SSS mask)
+        }
         if (!kNoBloom) {
             post.recordBloom(cmd); // then blooms the diffused image
         }
@@ -598,6 +742,7 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageInde
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     VK_CHECK(vkBeginCommandBuffer(cmd, &begin));
+    timingBegin(cmd, m_currentFrame);
 
     const VkExtent2D extent = m_swapchain->extent();
     const bool pbr = m_scene->isPbr();
@@ -624,6 +769,13 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageInde
             composite.uvOffset[0] = 0.5f * (1.0f - composite.uvScale[0]);
         }
         outlineWidthPx = m_vr->lastOutlined ? m_vr->outlineWidthPx : 0.0f;
+        // (The scale the eyes were DRAWN at: the dynamic splat scale is stepped between a headset
+        // frame and the desktop's record of its mirror, and read live the mirror sampled the layer
+        // at a scale it was not drawn at — misregistered by the step, and past the drawn rectangle
+        // into an earlier, larger frame's leftovers when the scale had grown.)
+        composite.photoUvScale[0] = m_vr->lastPhotoUvScale[0];
+        composite.photoUvScale[1] = m_vr->lastPhotoUvScale[1];
+        composite.outlineFromSplats = m_vr->lastOutlineSplat;
     } else {
         // Key-light shadow pass first (its own depth-only render pass on the shadow map), so the
         // scene pass can sample the fresh map. Also fits this frame's light matrix, which
@@ -632,6 +784,8 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageInde
         const bool outlined = recordScenePasses(cmd, m_camera, m_currentFrame, *m_hdrTarget, *m_outlineMask,
                                                 *m_postProcess, extent);
         outlineWidthPx = outlined ? kOutlineWidthLogicalPx * m_uiScale : 0.0f;
+        m_hdrTarget->photoUvScale(composite.photoUvScale);
+        composite.outlineFromSplats = m_scene->selectedIsSplat();
     }
 
     // --- Swapchain pass: the fullscreen composite (tonemap + bloom add + outline). -------------
@@ -676,6 +830,7 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageInde
                              nullptr, 0, nullptr, 1, &barrier);
     }
 
+    timingEnd(cmd);
     VK_CHECK(vkEndCommandBuffer(cmd));
 }
 

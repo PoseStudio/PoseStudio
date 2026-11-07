@@ -140,6 +140,10 @@ struct VrPerf {
     int           late = 0;
     double        workMs = 0.0;
     double        workMaxMs = 0.0;
+    int           gpuFrames = 0; // VR frames whose GPU time was read (VulkanRenderer::lastVrGpuTimings)
+    double        gpuMs = 0.0;
+    double        gpuMaxMs = 0.0;
+    double        splatMs = 0.0; // the Gaussian splat draws' share of it, both eyes
     int64_t       lastDisplayTime = 0;
     int64_t       period = 0;
 };
@@ -164,6 +168,19 @@ struct VulkanWindow::VrState {
     int       dragHand = -1;
     glm::vec3 grabOffset{0.0f};
     VrPerf    perf;
+    // THE DYNAMIC SPLAT SCALE (onVrFrameReady): the eyes' photo layer — the Gaussian splats, the
+    // dearest part of a frame with a capture in it, and a fill that grows as the wearer walks up
+    // to the capture — is drawn at a scale that follows the GPU's time: down fast while a frame
+    // runs late, up slowly toward the preference (Splat scale, the MOST it will use) while the
+    // GPU has headroom — small steps toward the budget with a dead band about it, read off the
+    // exponential average of the GPU's frame time below (adaptVrSplatScale).
+    float  splatScale = 1.0f;    // as drawn now
+    float  splatScaleMax = 1.0f; // the preference (or its env override)
+    double  gpuEmaMs = 0.0;       // the GPU's time per frame, smoothed
+    int     lateRun = 0;          // frames since the runtime last showed one late
+    int     quietRun = 0;         // frames since the GPU last asked for a smaller layer
+    int     mirrorSkip = 0;       // the desktop mirror follows every third headset frame
+    int64_t lastDisplayTime = 0;  // the previous frame's predicted display time (the late test)
 };
 
 void VulkanWindow::VrStateDeleter::operator()(VrState* state) const {
@@ -232,9 +249,16 @@ bool VulkanWindow::setVrMode(bool on) {
         vr->perf.clock.start();
     }
     try {
+        // The eyes' photo layer (the Gaussian splats, hdrtarget.h) at the splat scale preference:
+        // POSESTUDIO_VR_SPLAT_SCALE=<0.25..1> overrides it for a measuring run.
+        float splatScale = VrSettings::splatScale();
+        if (qEnvironmentVariableIsSet("POSESTUDIO_VR_SPLAT_SCALE")) {
+            splatScale = qEnvironmentVariable("POSESTUDIO_VR_SPLAT_SCALE").toFloat();
+        }
+        vr->splatScale = vr->splatScaleMax = std::clamp(splatScale, 0.25f, 1.0f);
         m_renderer->beginVr(session->renderPass(), session->eyeExtent(), !session->formatIsSrgb(),
                             session->hasDepth() ? session->depthRenderPass() : VK_NULL_HANDLE,
-                            VrSettings::reducedEffects());
+                            VrSettings::reducedEffects(), splatScale);
     } catch (const VulkanError& e) {
         qWarning() << "[vr] the eye targets could not be created:" << e.what();
         emit vrError(tr("The headset's render targets could not be created: %1").arg(e.what()));
@@ -498,7 +522,14 @@ void VulkanWindow::onVrFrameReady() {
     }
     vr.session->endFrame(time, rendered);
     if (rendered) {
-        requestUpdate(); // the desktop mirror follows the headset
+        // The desktop mirror follows the headset — every THIRD frame (24 Hz): a full-window
+        // composite a headset frame is half a millisecond of the GPU's period the eyes can
+        // have, and the monitor is a glance beside the headset, not the picture.
+        if (++vr.mirrorSkip >= 3) {
+            vr.mirrorSkip = 0;
+            requestUpdate();
+        }
+        adaptVrSplatScale(vr, period, time);
     }
 
     if (vr.perf.on) {
@@ -508,6 +539,16 @@ void VulkanWindow::onVrFrameReady() {
         perf.rendered += rendered ? 1 : 0;
         perf.workMs += workMs;
         perf.workMaxMs = std::max(perf.workMaxMs, workMs);
+        if (m_renderer) {
+            // The GPU side: the previous VR frame's, read back where this one waited its fence.
+            const VulkanRenderer::GpuTimings& gpu = m_renderer->lastVrGpuTimings();
+            if (gpu.valid) {
+                ++perf.gpuFrames;
+                perf.gpuMs += gpu.frameMs;
+                perf.gpuMaxMs = std::max(perf.gpuMaxMs, gpu.frameMs);
+                perf.splatMs += gpu.splatMs;
+            }
+        }
         perf.period = period;
         if (perf.lastDisplayTime > 0 && period > 0 && time - perf.lastDisplayTime > period + period / 2) {
             ++perf.late;
@@ -516,18 +557,84 @@ void VulkanWindow::onVrFrameReady() {
         const qint64 now = perf.clock.nsecsElapsed();
         if (now - perf.windowStart >= 1'000'000'000) {
             qInfo().noquote() << QStringLiteral("[vr perf] %1 frames/s, %2 rendered, %3 late; display period %4 ms "
-                                                "(%5 Hz); GUI work per frame mean %6 ms, max %7 ms")
+                                                "(%5 Hz); GUI work per frame mean %6 ms, max %7 ms; "
+                                                "GPU per frame mean %8 ms, max %9 ms, of it the splats %10 ms")
                                      .arg(perf.frames)
                                      .arg(perf.rendered)
                                      .arg(perf.late)
                                      .arg(perf.period * 1.0e-6, 0, 'f', 2)
                                      .arg(perf.period > 0 ? 1.0e9 / static_cast<double>(perf.period) : 0.0, 0, 'f', 1)
                                      .arg(perf.frames > 0 ? perf.workMs / perf.frames : 0.0, 0, 'f', 2)
-                                     .arg(perf.workMaxMs, 0, 'f', 2);
+                                     .arg(perf.workMaxMs, 0, 'f', 2)
+                                     .arg(perf.gpuFrames > 0 ? perf.gpuMs / perf.gpuFrames : 0.0, 0, 'f', 2)
+                                     .arg(perf.gpuMaxMs, 0, 'f', 2)
+                                     .arg(perf.gpuFrames > 0 ? perf.splatMs / perf.gpuFrames : 0.0, 0, 'f', 2)
+                                  << QStringLiteral("; splat scale %1").arg(vr.splatScale, 0, 'f', 2);
             perf.windowStart = now;
-            perf.frames = perf.rendered = perf.late = 0;
-            perf.workMs = perf.workMaxMs = 0.0;
+            perf.frames = perf.rendered = perf.late = perf.gpuFrames = 0;
+            perf.workMs = perf.workMaxMs = perf.gpuMs = perf.gpuMaxMs = perf.splatMs = 0.0;
         }
+    }
+}
+
+void VulkanWindow::adaptVrSplatScale(VrState& vr, int64_t period, int64_t displayTime) {
+    if (!m_renderer || period <= 0) {
+        return;
+    }
+    // The runtime's own verdict first, kept whether or not a capture is loaded: a predicted
+    // display time a period and a half past the previous frame's is a frame the runtime showed
+    // late (reprojected, or at half rate).
+    const bool late = vr.lastDisplayTime > 0 && displayTime - vr.lastDisplayTime > period + period / 2;
+    vr.lastDisplayTime = displayTime;
+    vr.lateRun = late ? 0 : vr.lateRun + 1;
+    if (!m_renderer->scene().hasSplats()) {
+        return;
+    }
+    const double periodMs = static_cast<double>(period) * 1.0e-6;
+    // The GPU's share of the period the scale aims for: the runtime's compositor and a Link
+    // encoder share the GPU with the frame, and at 0.80 a frame of 11 ms on a 13.9 ms period
+    // came out late every few seconds. The scale SETTLES at the budget rather than bouncing off
+    // it: small steps toward it, a dead band around it, and each frame's reading clamped to a
+    // spike-free range before it joins the average — the first two cuts (a square-root law on a
+    // quarter-weight, then tenth-weight average) saw-toothed between 0.25 and the cap every
+    // second or two on the GPU's own spikes, which the wearer saw as blur coming and going.
+    constexpr double kBudgetShare = 0.72;
+    constexpr double kDeadBand = 0.08;      // ± of the budget within which the scale holds
+    constexpr float  kDropPerFrame = 0.985f; // over the budget: a slow retreat...
+    constexpr float  kDropFast = 0.95f;      // ...well over it (or a late frame): a quicker one
+    constexpr float  kRisePerFrame = 1.008f; // under the band: a slow climb (a second to double)
+    constexpr int    kRiseAfterLate = 72;    // no growth within a second of a late frame...
+    constexpr int    kRiseAfterDrop = 45;    // ...nor within most of one of a retreat
+    constexpr float  kMinScale = 0.25f;
+    const double budget = kBudgetShare * periodMs;
+    float desired = vr.splatScale;
+    const VulkanRenderer::GpuTimings& gpu = m_renderer->lastVrGpuTimings(); // the previous frame's
+    if (gpu.valid) {
+        double frame = gpu.frameMs;
+        if (vr.gpuEmaMs > 0.0) {
+            frame = std::min(frame, 1.5 * vr.gpuEmaMs); // one stall of the queue is not a trend
+        }
+        const double k = vr.gpuEmaMs > 0.0 ? 0.06 : 1.0; // ~16 frames
+        vr.gpuEmaMs += k * (frame - vr.gpuEmaMs);
+        if (vr.gpuEmaMs > budget * (1.0 + kDeadBand)) {
+            desired = vr.splatScale * (vr.gpuEmaMs > budget * 1.2 ? kDropFast : kDropPerFrame);
+        } else if (vr.gpuEmaMs < budget * (1.0 - kDeadBand)) {
+            desired = vr.splatScale * kRisePerFrame;
+        }
+    } else if (vr.lateRun > 2 * kRiseAfterLate) {
+        desired = vr.splatScale * kRisePerFrame; // no timestamps on this queue: grow on a quiet run
+    }
+    if (late) {
+        desired = std::min(desired, vr.splatScale * kDropFast); // a late frame always retreats
+    }
+    vr.quietRun = desired < vr.splatScale ? 0 : vr.quietRun + 1;
+    if (vr.lateRun < kRiseAfterLate || vr.quietRun < kRiseAfterDrop) {
+        desired = std::min(desired, vr.splatScale); // nothing grows for a while after a retreat
+    }
+    const float next = std::clamp(desired, kMinScale, vr.splatScaleMax);
+    if (std::abs(next - vr.splatScale) > 1e-4f) {
+        vr.splatScale = next;
+        m_renderer->setVrSplatScale(next);
     }
 }
 

@@ -1166,16 +1166,24 @@ private:
     };
     std::vector<Breast> m_breasts;                   ///< One per side (the pectoral that carries the breast), or none.
     bool                m_breastsReady = false;      ///< setupBreasts ran (with the rig and the body mesh).
+    /// THE ACCELERATION READER the soft body's masses share (armaturebreasts.cpp, armaturebuttocks.cpp):
+    /// a joint's velocity SMOOTHED before it is differenced and the acceleration smoothed after, so
+    /// a millimetre of tick-to-tick tremble (a g and a half raw) reads as nothing while a jolt keeps
+    /// its impulse; then the dead band and the cap.
+    struct SoftBodyAccelReader {
+        glm::vec3 pos{0.0f}, vel{0.0f}, accel{0.0f}; ///< The last position and smoothed velocity (world), the smoothed acceleration (g).
+        int       samples = 0;
+        void      reset() { pos = vel = accel = glm::vec3(0.0f); samples = 0; }
+        /// One tick: the acceleration the mass feels (g, world) after the band and the cap, @p magOut its magnitude.
+        glm::vec3 sample(const glm::vec3& p, float dt, float velSmooth, float accelSmooth, float deadG, float maxG, float& magOut);
+    };
     bool                m_breastDynamic = false;     ///< The spring's state is in use (between ticks); else the resting swing applies.
     glm::vec3           m_breastGravity{0.0f, -1.0f, 0.0f}; ///< Effective gravity in g (world): g less the chest's acceleration, smoothed.
-    glm::vec3           m_breastAccel{0.0f};         ///< The chest's acceleration in g (world), smoothed: what the mass feels, before the dead band and the cap.
-    glm::vec3           m_breastChestPos{0.0f};
-    glm::vec3           m_breastChestVel{0.0f};
-    int                 m_breastChestSamples = 0;
+    SoftBodyAccelReader m_breastReader;              ///< The chest joint's acceleration, read off its motion: the jolt the mass feels.
     void      setupBreasts();
     glm::vec3 breastGravityInChest(const Breast& b, bool effective) const; ///< Gravity (g) in the chest's frame: effective (less the chest's acceleration) or the pose's own.
     glm::vec3 breastRestDisplacement(const Breast& b, bool effective = true) const; ///< Where the mass rests under that gravity (m, chest frame): the effective one, or the pose's own.
-    glm::mat4 breastSwingMatrix(const Breast& b, const glm::mat4& boneGlobal) const;
+    glm::mat4 breastSwingMatrix(const Breast& b) const;
     void      tickBreasts(float dt, bool& movingOut);
     void      kickBreasts(float impactSpeed);
     void      settleBreasts();
@@ -1194,8 +1202,7 @@ private:
     int                        m_buttockRoot = -1;      ///< The hips joint: the field's frame and the acceleration read.
     float                      m_buttockRadius = 0.13f; ///< The field's reach about an apex (m, figure-scaled).
     float                      m_buttockFront = 0.0f;   ///< The field reaches no further forward than this depth (bind z).
-    glm::vec3                  m_buttockHipsPos{0.0f}, m_buttockHipsVel{0.0f}, m_buttockAccel{0.0f};
-    int                        m_buttockSamples = 0;
+    SoftBodyAccelReader        m_buttockReader; ///< The hip joint's acceleration, read as the breasts read the chest's.
     void setupButtocks();
     void tickButtocks(float dt, bool& movingOut);
     void kickButtocks(float impactSpeed);
@@ -1212,7 +1219,7 @@ public:
     void  kickSoftBody(float impactSpeed);
     /// True while the spring's state is away from rest (the fall's tail keeps ticking for it).
     bool  softBodyMoving() const;
-    /// The settings changed (the Posing preference): set up if needed and re-pose.
+    /// The settings changed (the Soft Body Physics tab): set up if needed and re-pose.
     void  applySoftBodySettings();
     /// The swing of the left (0) or right (1) breast, degrees — the scripts' `breastl` / `breastr`.
     float breastSwingDeg(int side) const;
@@ -1220,6 +1227,8 @@ public:
     float breastHangMm(int side) const;
     /// How far that breast has moved sideways as rendered (mm, + outward toward the armpit): on her back the spread, on her side the fall.
     float breastSideMm(int side) const;
+    /// How far that breast has moved along the chest (mm, + up toward the head): a bow's lift, a jolt's or a landing's bounce; below 0 only by the floor's give.
+    float breastUpMm(int side) const;
     // --- SOFT BUTTOCKS (armaturebuttocks.cpp) ---
     /// Sets up the soft-body delta fields the Model bakes into its vertex data at import (the
     /// buttocks: the cheeks' apexes and the skin that may carry the field); needs the rig and the
@@ -1249,9 +1258,14 @@ public:
     /// about her own forward axis (positive = toward her left). Setting them turns the whole pose
     /// about the root joint, in the root's own unlimited channels; the feet keep their heights
     /// under a turn alone.
+    /// The three are read back on the branch nearest the values last set or read
+    /// (eulerFromMatrixNear), so a Tip carried past 90 reads 100, not 80 with the turn and the
+    /// tilt flipped by 180.
     glm::vec3 figureRotationDeg() const;
     void      setFigureRotationDeg(const glm::vec3& turnTipTilt);
 private:
+    /// The (turn, tip, tilt) last set or read: the branch figureRotationDeg reads back on.
+    mutable glm::vec3 m_figureRotationShown{0.0f};
     // --- The bone classes and THE DIGIT DRAG (armatureikdigit.cpp) ---
     /// Per bone: its BoneClass (classifyBones, with the rig: empty until then).
     std::vector<char>             m_boneClass;

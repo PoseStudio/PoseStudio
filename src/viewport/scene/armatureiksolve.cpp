@@ -808,7 +808,7 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
     // once the whole body went sideways in the same tick (a toe 71cm). The hang's target starts
     // where the root IS and swings in under the hand at the same pace.
     glm::vec3 goal = target;
-    const bool liftRising = rig.suspended() && !kNoLiftEase && rig.dragEffector() != rig.rootNode();
+    const bool liftRising = rig.suspended() && !kNoLiftEase; // (the hips' own lift-off eases in the same way, 2026-11-07: its deficit is the strain the pins stopped it at, the hang's nothing)
     if (liftRising) {
         const float step = kLiftRiseStep * rig.sizeScale();
         const auto payOff = [step](glm::vec3& owed) {
@@ -850,8 +850,8 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
         m_jsPostStepMoving = hangMoved || headMoved; // (the settle waits for them: settleIkSolveTick)
     }
     m_jsSoftBodyMoving = false;
-    if (softbody::breastMotion()) {
-        // THE SOFT BREASTS (armaturebreasts.cpp): after the solve and the post-steps. Their motion is
+    if (softbody::breastMotion() || softbody::buttockMotion()) {
+        // THE SOFT BODY (armaturebreasts.cpp, armaturebuttocks.cpp): after the solve and the post-steps. Its motion is
         // NOT a post-step for the settle's purposes — folded into m_jsPostStepMoving it kept the
         // settle SOLVING while they bounced, and the pose a drag ended in then depended on how long
         // they bounced (a calmer spring moved a knife-edge prone-up's hand 2 mm past its gate); the
@@ -1002,7 +1002,7 @@ bool Armature::settleIkSolveTick() {
     if (!m_jsPinsEasing && !postStepsMoving) {
         // THE SOFT BODY'S TAIL: the pose is at rest; the breasts, if they still bounce, tick on by
         // themselves — no solve, so the pose does not depend on how long they take (2026-11-05).
-        if (softbody::breastMotion() && m_jsSoftBodyMoving) {
+        if (m_jsSoftBodyMoving) {
             m_jsSoftBodyMoving = tickSoftBody(1.0f / 60.0f);
             return m_jsSoftBodyMoving;
         }

@@ -21,6 +21,12 @@
 #include <QEvent>
 #include <QKeyEvent>
 #include <QKeySequence>
+#include <QLineEdit>
+#include <QAbstractItemView>
+#include <QAbstractSpinBox>
+#include <QTextEdit>
+
+#include "dragnumberbox.h"
 #include <QMouseEvent>
 #include <QWindow>
 #include <QHideEvent>
@@ -323,8 +329,8 @@ void ViewportWidget::setFigureScale(double pct) {
     withWindow([pct](VulkanWindow& w) { w.setFigureScale(pct); });
 }
 
-void ViewportWidget::setJointTransformDial(int dial, double value) {
-    withWindow([dial, value](VulkanWindow& w) { w.setJointTransformDial(dial, value); });
+void ViewportWidget::setJointTransformDial(int dial, double value, bool absolute) {
+    withWindow([dial, value, absolute](VulkanWindow& w) { w.setJointTransformDial(dial, value, absolute); });
 }
 
 void ViewportWidget::endJointTransformEdit() {
@@ -504,6 +510,36 @@ bool ViewportWidget::eventFilter(QObject* watched, QEvent* event) {
         const auto* key = static_cast<const QKeyEvent*>(event);
         if (key->key() == Qt::Key_Escape && !key->isAutoRepeat()) {
             m_window->setVrMode(false);
+            return true;
+        }
+    }
+    // ESCAPE with nothing else claiming it — no joint mouse mode, no VR Mode, no text field being
+    // edited (its own Esc cancels the edit) — DESELECTS whatever the scene has selected: the
+    // model and its joint. Read at the main window and the viewport's own window only, so the
+    // manual's Esc (its own top-level window) still closes it; a modal dialog never lets a key
+    // reach either (the scripted import's progress dialog lingers as the "active modal widget"
+    // without the keyboard, which is why that test is not made here).
+    if (event->type() == QEvent::KeyPress && m_window && m_window->jointModal() < 0 && !m_window->vrModeActive() &&
+        (watched == m_window || (m_filteredWindow != nullptr && watched == m_filteredWindow->windowHandle()))) {
+        const auto* key = static_cast<const QKeyEvent*>(event);
+        // An edit in progress keeps its Esc: a scrub field's inline editor (a QLineEdit under a
+        // DragNumberBox), an item view's inline RENAME editor (the Asset Manager's collections: a
+        // QLineEdit inside the tree, whose Esc cancels the rename), a spin box, a text edit — not
+        // the Asset Manager's search field, which merely holds the focus until the viewport is clicked.
+        QWidget*   focus = QApplication::focusWidget();
+        const auto inItemView = [](QWidget* w) {
+            for (QWidget* p = w != nullptr ? w->parentWidget() : nullptr; p != nullptr; p = p->parentWidget()) {
+                if (qobject_cast<QAbstractItemView*>(p) != nullptr) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        const bool editing = (qobject_cast<QLineEdit*>(focus) != nullptr && focus->parentWidget() != nullptr &&
+                              (qobject_cast<DragNumberBox*>(focus->parentWidget()) != nullptr || inItemView(focus))) ||
+                             qobject_cast<QAbstractSpinBox*>(focus) != nullptr || qobject_cast<QTextEdit*>(focus) != nullptr;
+        if (key->key() == Qt::Key_Escape && !key->isAutoRepeat() && !editing && m_window->hasSelection()) {
+            m_window->clearSelection();
             return true;
         }
     }

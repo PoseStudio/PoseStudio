@@ -56,14 +56,17 @@ public:
     /// @param outlineMaskPass The selection-outline mask's render pass (OutlineMask; the renderer
     ///                        owns the screen-sized target) — the silhouette pipeline builds
     ///                        against it, reusing shadow.vert with @p outlineMaskFragSpirv.
-    Scene(VulkanContext& context, VkRenderPass renderPass, VkRenderPass outlineMaskPass,
+    /// @param photoPass       The HDR target's PHOTO pass (hdrtarget.h), single-sample — the
+    ///                        Gaussian splat pipeline builds against it; recordSplats runs in it.
+    Scene(VulkanContext& context, VkRenderPass renderPass, VkRenderPass outlineMaskPass, VkRenderPass photoPass,
           const std::vector<char>& vertSpirv, const std::vector<char>& fragSpirv,
           const std::vector<char>& skeletonVertSpirv, const std::vector<char>& skeletonFragSpirv,
           const std::vector<char>& shadowVertSpirv, const std::vector<char>& shadowFragSpirv,
           const std::vector<char>& backgroundVertSpirv,
           const std::vector<char>& backgroundFragSpirv,
           const std::vector<char>& outlineMaskFragSpirv,
-          const std::vector<char>& splatVertSpirv, const std::vector<char>& splatFragSpirv);
+          const std::vector<char>& splatVertSpirv, const std::vector<char>& splatFragSpirv,
+          const std::vector<char>& splatMaskFragSpirv);
     ~Scene();
 
     Scene(const Scene&) = delete;
@@ -136,9 +139,10 @@ public:
     /// Records the selection-outline mask pass — the selected model's silhouette, skinned and
     /// camera-projected, into @p mask (its own render pass, begun and ended here). Call before
     /// the main render pass, like recordShadowPass. Returns false, recording nothing, when no
-    /// model is selected (the composite then draws no outline).
+    /// model is selected (the composite then draws no outline). A selected splat scene's
+    /// silhouette is its quads (outlinepass.h): @p asyncSort as recordSplats takes it.
     bool recordOutlinePass(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex,
-                           const OutlineMask& mask);
+                           const OutlineMask& mask, bool asyncSort = false);
 
     /// Updates this frame's camera UBO, then records in order: the HDRI backdrop (PBR mode),
     /// the surface passes (opaque, then every model's transparent meshes sorted back-to-front
@@ -150,7 +154,20 @@ public:
     /// this view and alpha-blended, depth-tested against the opaque geometry. Recorded by the
     /// renderer AFTER the grid, so the floor's lines lie under a capture's floor instead of
     /// drawing across its legs (a splat writes no depth). No-op without a splat model.
-    void recordSplats(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex);
+    void recordSplats(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex, bool asyncSort = false);
+    /// The ORDER buffer's slot of a splat scene for this frame: the desktop frames alternate theirs
+    /// with the frame in flight; VR Mode's two eyes (one VR frame in flight, waited for before the
+    /// next records, the same far-first order for both) share slot 0, so the order is copied once a
+    /// frame. recordSplats and recordOutlinePass must agree on it: one definition.
+    static uint32_t splatOrderSlot(uint32_t frameIndex, bool asyncSort) { return asyncSort ? 0u : frameIndex; }
+    /// Whether any model is a Gaussian splat cloud (the renderer records the photo pass only then).
+    bool hasSplats() const;
+    /// Whether the selected model is a Gaussian splat cloud (the composite then reads the outline
+    /// mask as accumulated opacity — see outlinepass.h).
+    bool selectedIsSplat() const;
+    /// Whether any model has meshes — the opaque pass drew something, so the SSS blur and the
+    /// specular it adds back have work (a scene of splats alone, or empty, skips them).
+    bool hasMeshes() const;
 
     // The grid's ground shadow samples the scene's shadow map through the scene-wide set 3 (the
     // IBL set — binding 2 is the shadow map). Grid's pipeline is built against this layout and
@@ -235,8 +252,12 @@ public:
     /// landing bounce).
     JointTransform selectedJointTransform() const;
     /// Turns dial @p dial (a JointDialKind) of the selected joint to @p value. True if the pose
-    /// changed — the pose may rest short of the value (the limits, the FK collision stop).
-    bool setSelectedJointDial(int dial, float value);
+    /// changed — the pose may rest short of the value (the limits, the FK collision stop). The
+    /// other joints of a Shift+click selection turn with it: by the same CHANGE on their own
+    /// 0-100 scales — the change in what is ASKED, from @p previousAsk (the value last asked of
+    /// this dial in the open edit) when given, else from the primary's value as it stands — or,
+    /// @p absolute (the restore buttons), to @p value themselves.
+    bool setSelectedJointDial(int dial, float value, bool absolute = false, const float* previousAsk = nullptr);
     /// How turning dial @p dial of the selected joint moves its limb, as the pose stands
     /// (Armature::jointDialSweep) — what the viewport's mouse mode follows. False without a
     /// selected joint or for a motion the joint does not have.
@@ -304,6 +325,7 @@ public:
     float breastSwingDeg(int side) const;
     float breastHangMm(int side) const;
     float breastSideMm(int side) const;
+    float breastUpMm(int side) const;
     float buttockMoveMm(int side) const; ///< THE SOFT BUTTOCKS: how far the left (0) / right (1) cheek has moved (mm).
     /// THE FIGURE'S PLACE AND HEADING on the active figure (the Transform tab's Figure group):
     /// position in world centimetres; the rotation as turn / tip / tilt (`axis` 0/1/2) in degrees.

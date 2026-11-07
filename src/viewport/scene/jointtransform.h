@@ -54,11 +54,12 @@ struct JointTransform {
 
     bool        valid = false; ///< A joint is selected on the posable figure.
     std::string name;          ///< The joint's name (the bend bone's, for a selected twist bone).
+    int         groupCount = 0; ///< The OTHER joints of a Shift+click selection the dials turn with it (each by the same change).
     Dial        dials[3];      ///< Indexed by JointDialKind: BendForward, BendSideways, Twist (the tab labels them Bend, Side-Side, Twist).
     Figure      figure;        ///< The active figure's place and orientation, valid with any posable figure.
 
     bool operator==(const JointTransform& o) const {
-        return valid == o.valid && name == o.name && dials[0] == o.dials[0] && dials[1] == o.dials[1] &&
+        return valid == o.valid && name == o.name && groupCount == o.groupCount && dials[0] == o.dials[0] && dials[1] == o.dials[1] &&
                dials[2] == o.dials[2] && figure == o.figure;
     }
     bool operator!=(const JointTransform& o) const { return !(*this == o); }

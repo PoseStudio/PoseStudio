@@ -299,3 +299,76 @@ uishot 31_figure_turned_and_tipped
 reset
 expect figure.tip < 0.01
 expect figure.tilt < 0.01
+
+# Past 90 (2026-11-07; the user: Tilt "gets to about 90 then jumps around and causes weird value
+# changes in the other rotate sliders"): each angle reads on where it was set, the other two stay
+# put — the plain Euler read keeps the middle angle within ±90 and flipped the other two by 180 —
+# and the hips' own channels stay on their branch (they had gone to 180, the hip's Bend and Twist
+# dials jumping to ±100), so a tilt of 100 is a Side-Side of 100/180 on the hips and nothing else.
+click hip
+tilt 100
+expect figure.tilt > 99.9
+expect figure.tilt < 100.1
+expect figure.turn < 0.01
+expect figure.turn > -0.01
+expect figure.tip < 0.01
+expect figure.tip > -0.01
+expect dial.forward < 0.01
+expect dial.forward > -0.01
+expect dial.twist < 0.01
+expect dial.twist > -0.01
+reset
+tip 120
+expect figure.tip > 119.9
+expect figure.tip < 120.1
+expect figure.turn < 0.01
+expect figure.turn > -0.01
+expect figure.tilt < 0.01
+expect figure.tilt > -0.01
+reset
+turn 40
+tilt 30
+tip 90
+expect figure.turn > 39.9
+expect figure.turn < 40.1
+expect figure.tilt > 29.9
+expect figure.tilt < 30.1
+reset
+
+# THE GROUP turns with the dials (2026-11-07; the user: "when selecting multiple joints, especially
+# consecutive ones, we want to be able to use the transform sliders to alter the pose of all the
+# selected joints simultaneously"): the tab shows the primary's values and every other joint of a
+# Shift+click selection moves by the same CHANGE on its own 0-100 scale — the four spine joints
+# bend together, each by its share of its own range, and a difference already posed between them
+# (the upper chest at 30 first) is kept. The B key's mouse mode turns them the same way; the
+# restore button (`abs`) takes every one of them back to its rest pose.
+view front
+click chestUpper
+dial forward 30
+click abdomenLower
+sclick abdomenUpper
+sclick chestLower
+sclick chestUpper
+expect group == 4
+expect dialjoint.chestUpper == 1
+dial forward 80
+expect dial.forward > 79.9
+expect euler.abdomenLower.x > 17
+expect euler.abdomenUpper.x > 19
+expect euler.chestLower.x > 17
+expect euler.chestUpper.x > 11.9
+uishot 34_group_dials
+shot 34_group_bent_front
+view right
+shot 34_group_bent_side
+dial forward 0 abs
+expect euler.abdomenLower.x == 0
+expect euler.abdomenUpper.x == 0
+expect euler.chestLower.x == 0
+expect euler.chestUpper.x == 0
+modal bend
+modalmove 60 0 6
+modalkeep
+expect euler.abdomenLower.x < -1
+expect euler.chestLower.x < -1
+reset

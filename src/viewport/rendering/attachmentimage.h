@@ -100,6 +100,16 @@ inline VkImageSubresourceRange wholeImageRange(VkImageAspectFlags aspect, uint32
 /// and UB on hardware. Only for construction/resize, when the device is idle anyway.
 void initialiseToShaderRead(VulkanContext& context, std::initializer_list<VkImage> images);
 
+/// As initialiseToShaderRead, CLEARING each (colour, TRANSFER_DST-capable) image to zero on the
+/// way — for a target a later pass reads as "nothing drawn" while its own pass may never run
+/// (the photo layer's coverage 0): a fresh image's contents are undefined, not zero.
+void initialiseToShaderReadCleared(VulkanContext& context, std::initializer_list<VkImage> images);
+
+/// One blocking submit moving a DEPTH image from UNDEFINED to DEPTH_STENCIL_READ_ONLY_OPTIMAL —
+/// the layout a pass that LOADS it as a read-only attachment declares it enters in (the photo
+/// pass's depth, before any resolve has written it).
+void initialiseDepthReadOnly(VulkanContext& context, VkImage image);
+
 } // namespace pose
 
 #endif // ATTACHMENTIMAGE_H

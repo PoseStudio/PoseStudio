@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -28,12 +29,38 @@ namespace {
 
 constexpr std::size_t kBins = 65536; ///< The depth is quantized to 16 bits for the counting sort.
 
-int chunkCountFor(std::size_t n) {
+/// A view that turned less than this since the last sort keeps the order: the order is a
+/// function of the view direction alone, and so small a turn can swap only two splats whose
+/// depths differ by less than the angle times their lateral separation — a millimetre or two
+/// across a capture — while a tracked head turns by that much every frame it is held still.
+constexpr float kResortDeg = 0.05f;
+const float     kResortCos = std::cos(glm::radians(kResortDeg));
+
+/// The chunks (= threads, through parallelfor.h) a sort of @p n splats runs over, at most @p cap.
+int chunkCountFor(std::size_t n, int cap) {
     const unsigned hw = std::thread::hardware_concurrency();
     const int      workers = static_cast<int>(hw > 1 ? hw : 1);
-    const int      byWork = static_cast<int>((n + 65535) / 65536); // a chunk per 64k splats at least
-    return std::max(1, std::min({workers * 2, 32, std::max(1, byWork)}));
+    // A chunk per MILLION splats: measured 2026-11-05 on 600k (a 16-core laptop), one thread sorts
+    // in 4-6 ms where ten took 20-32 — each pass spawns its threads afresh (parallelfor.h) and
+    // every chunk zeroes and prefix-sums its own 65,536-bin histogram, so under a million the
+    // threads cost more than they save.
+    const int      byWork = static_cast<int>((n + 999999) / 1000000);
+    return std::max(1, std::min({workers * 2, 32, std::max(1, cap), std::max(1, byWork)}));
 }
+
+int envChunks(const char* name, int fallback) {
+    const char* value = std::getenv(name);
+    return value != nullptr ? std::max(1, std::atoi(value)) : fallback;
+}
+
+/// How many threads a sort runs over. parallelfor.h spawns a thread per chunk for each of a
+/// sort's three passes, and a 16-core box spawning 48 threads a sort — several hundred a second
+/// once a headset's every frame asks for one — spends as long spawning as sorting, and starves
+/// the VR runtime's own threads beside it; a few threads do the sort in the same time with no
+/// storm. POSESTUDIO_SPLAT_SORT_THREADS=<n> is the desktop frames' lever,
+/// POSESTUDIO_SPLAT_WORKER_THREADS=<n> the VR worker's (the measuring levers behind the defaults).
+const int kDesktopChunks = envChunks("POSESTUDIO_SPLAT_SORT_THREADS", 32);
+const int kWorkerChunks = envChunks("POSESTUDIO_SPLAT_WORKER_THREADS", 4);
 
 } // namespace
 
@@ -68,7 +95,6 @@ SplatCloud::SplatCloud(VulkanContext& context, const SplatData& data, VkDescript
     // The harmonics as halves, two to a uint, one run of (coefficients × 3) a splat.
     const std::size_t elements = static_cast<std::size_t>(data.coefficients()) * 3;
     m_shStride = static_cast<uint32_t>((elements + 1) / 2);
-    m_antialiased = data.antialiased;
     std::vector<uint32_t> packed(std::max<std::size_t>(n * m_shStride, 1), 0);
     for (std::size_t i = 0; i < n; ++i) {
         const float* sh = &data.sh[i * elements];
@@ -109,20 +135,36 @@ SplatCloud::SplatCloud(VulkanContext& context, const SplatData& data, VkDescript
     for (std::size_t i = 0; i < n; ++i) {
         m_order[i] = static_cast<uint32_t>(i);
     }
-    const int chunks = chunkCountFor(n);
+    const int chunks = chunkCountFor(n, 32); // the most any sort runs over: the scratch is sized for it
+    m_maxChunks = chunks;
     m_hist.resize(static_cast<std::size_t>(chunks) * kBins);
     m_chunkMin.resize(static_cast<std::size_t>(chunks));
     m_chunkMax.resize(static_cast<std::size_t>(chunks));
 }
 
-SplatCloud::~SplatCloud() = default;
+SplatCloud::~SplatCloud() {
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_quit = true;
+    }
+    m_cv.notify_all();
+    if (m_worker.joinable()) {
+        m_worker.join(); // a sort in flight finishes first (milliseconds)
+    }
+}
 
-void SplatCloud::sortForView(const glm::mat4& view, const glm::mat4& model) {
+void SplatCloud::sortForView(const glm::vec3& viewDir, const glm::mat4& model, std::vector<uint32_t>& out,
+                             int wantedChunks) {
     const std::size_t n = m_count;
     if (n == 0) {
         return;
     }
-    const int         chunks = chunkCountFor(n);
+    // POSESTUDIO_SPLAT_TRACE=1: the sort's cost per view change, the number that says when a
+    // GPU sort is due.
+    static const bool kTrace = std::getenv("POSESTUDIO_SPLAT_TRACE") != nullptr;
+    const auto        t0 = std::chrono::steady_clock::now();
+    out.resize(n);
+    const int         chunks = std::clamp(wantedChunks, 1, m_maxChunks);
     const std::size_t chunkSize = (n + static_cast<std::size_t>(chunks) - 1) / static_cast<std::size_t>(chunks);
     auto range = [&](int c, std::size_t& lo, std::size_t& hi) {
         lo = static_cast<std::size_t>(c) * chunkSize;
@@ -139,9 +181,9 @@ void SplatCloud::sortForView(const glm::mat4& view, const glm::mat4& model) {
         });
         m_worldFor = model;
     }
-    // The depth along the view direction (the view matrix's third row; view z points at the
-    // eye, so the distance is its negative), and each chunk's range of it.
-    const glm::vec4 row(view[0][2], view[1][2], view[2][2], view[3][2]);
+    // The depth along the view direction (the view matrix's third row's direction; view z
+    // points at the eye, so the distance is its negative — the row's constant term orders
+    // nothing and is left out), and each chunk's range of it.
     parallelFor(chunks, [&](int c) {
         std::size_t lo, hi;
         range(c, lo, hi);
@@ -149,7 +191,7 @@ void SplatCloud::sortForView(const glm::mat4& view, const glm::mat4& model) {
         float cmax = std::numeric_limits<float>::lowest();
         for (std::size_t i = lo; i < hi; ++i) {
             const glm::vec3& w = m_world[i];
-            const float      d = -(row.x * w.x + row.y * w.y + row.z * w.z + row.w);
+            const float      d = -(viewDir.x * w.x + viewDir.y * w.y + viewDir.z * w.z);
             m_depth[i] = d;
             cmin = std::min(cmin, d);
             cmax = std::max(cmax, d);
@@ -197,35 +239,95 @@ void SplatCloud::sortForView(const glm::mat4& view, const glm::mat4& model) {
         range(c, lo, hi);
         uint32_t* start = &m_hist[static_cast<std::size_t>(c) * kBins];
         for (std::size_t i = lo; i < hi; ++i) {
-            m_order[start[m_keys[i]]++] = static_cast<uint32_t>(i);
+            out[start[m_keys[i]]++] = static_cast<uint32_t>(i);
         }
     });
+    if (kTrace) {
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        std::fprintf(stderr, "[splat] sorted %zu splats far-first in %.1f ms over %d threads\n", m_count, ms, chunks);
+    }
 }
 
-void SplatCloud::prepareFrame(const Camera& camera, const glm::mat4& model, uint32_t frameIndex) {
+void SplatCloud::prepareFrame(const Camera& camera, const glm::mat4& model, uint32_t frameIndex, bool asyncSort) {
     if (m_count == 0) {
         return;
     }
+    // The view DIRECTION (the view matrix's third row, which the sort reads the depth along):
+    // the order is a function of it alone, so a dolly, a pan and a headset's second eye — the
+    // same orientation, six centimetres over — re-sort nothing, and a turn under kResortDeg (a
+    // tracked head's jitter, frame to frame) keeps the last order.
     const glm::mat4 view = camera.view();
-    const glm::vec4 row(view[0][2], view[1][2], view[2][2], view[3][2]);
-    if (!m_sorted || row != m_lastRow || model != m_lastModel) {
-        // POSESTUDIO_SPLAT_TRACE=1: the sort's cost per view change, the number that says when a
-        // GPU sort is due.
-        static const bool kTrace = std::getenv("POSESTUDIO_SPLAT_TRACE") != nullptr;
-        const auto        t0 = std::chrono::steady_clock::now();
-        sortForView(view, model);
-        if (kTrace) {
-            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-            std::fprintf(stderr, "[splat] sorted %zu splats far-first in %.1f ms\n", m_count, ms);
-        }
-        m_lastRow = row;
+    glm::vec3       dir(view[0][2], view[1][2], view[2][2]);
+    const float     len = glm::length(dir);
+    dir = len > 1e-6f ? dir / len : glm::vec3(0.0f, 0.0f, 1.0f);
+    auto turnedFrom = [&](const glm::vec3& last) { return glm::dot(dir, last) < kResortCos; };
+
+    std::unique_lock<std::mutex> lock(m_mutex);
+    // A sort the worker finished since the last frame lands now: its order is the draw's.
+    if (m_resultReady) {
+        m_order.swap(m_orderBack);
+        m_lastDir = m_resultDir;
+        m_lastModel = m_resultModel;
+        m_sorted = true;
+        ++m_sortVersion;
+        m_resultReady = false;
+    }
+    const bool stale = !m_sorted || turnedFrom(m_lastDir) || model != m_lastModel;
+    if (stale && (!asyncSort || !m_sorted)) {
+        // On this thread: a desktop frame (its view's own order, exactly), and the very first
+        // order, which the first frame cannot do without. Never beside the worker: a request it
+        // has not taken is withdrawn, a sort it is running waited out and superseded.
+        m_wanted = false;
+        m_cv.wait(lock, [&] { return !m_busy; });
+        m_resultReady = false;
+        lock.unlock();
+        sortForView(dir, model, m_order, chunkCountFor(m_count, kDesktopChunks));
+        lock.lock();
+        m_lastDir = dir;
         m_lastModel = model;
         m_sorted = true;
         ++m_sortVersion;
+    } else if (stale) {
+        // VR Mode: the worker sorts for this view (the latest asked for wins) and this frame
+        // draws the last order landed. A view the worker is already on is not asked for again.
+        const bool asked = m_wanted || m_busy;
+        if (!asked || turnedFrom(m_askDir) || model != m_askModel) {
+            m_askDir = dir;
+            m_askModel = model;
+            m_wanted = true;
+            if (!m_worker.joinable()) {
+                m_worker = std::thread([this] { workerLoop(); });
+            }
+            m_cv.notify_all();
+        }
     }
+    lock.unlock();
     if (m_uploaded[frameIndex] != m_sortVersion) {
         std::memcpy(m_orderBuffers[frameIndex].mappedData(), m_order.data(), sizeof(uint32_t) * m_count);
         m_uploaded[frameIndex] = m_sortVersion;
+    }
+}
+
+void SplatCloud::workerLoop() {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    for (;;) {
+        m_cv.wait(lock, [&] { return m_quit || m_wanted; });
+        if (m_quit) {
+            return;
+        }
+        const glm::vec3 dir = m_askDir;
+        const glm::mat4 model = m_askModel;
+        m_wanted = false;
+        m_busy = true;
+        lock.unlock();
+        sortForView(dir, model, m_orderWork, chunkCountFor(m_count, kWorkerChunks));
+        lock.lock();
+        m_orderBack.swap(m_orderWork); // (the hand-over: a result prepareFrame has not taken is superseded)
+        m_resultDir = dir;
+        m_resultModel = model;
+        m_resultReady = true;
+        m_busy = false;
+        m_cv.notify_all(); // a frame waiting the sort out (prepareFrame's own-thread path)
     }
 }
 
@@ -246,14 +348,25 @@ void SplatCloud::record(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t f
     // POSESTUDIO_SPLAT_SH_DEGREE=<0..3> caps the harmonics evaluated (a diagnostic: the colour
     // with its view dependence off).
     static const int kDegreeCap = std::getenv("POSESTUDIO_SPLAT_SH_DEGREE") ? std::atoi(std::getenv("POSESTUDIO_SPLAT_SH_DEGREE")) : 3;
-    push.params = glm::vec4(static_cast<float>(std::min(m_shDegree, kDegreeCap)), static_cast<float>(m_shStride), 0.0f,
-                            ortho ? 1.0f : 0.0f);
-    // POSESTUDIO_SPLAT_NO_AA=1: the antialiased compensation off (the A/B on a scene trained with it).
+    // POSESTUDIO_SPLAT_TINY=1: every quad a pixel — the vertex stage's cost alone, the fill's
+    // being the difference (a diagnostic for the perf readouts).
+    static const bool kTiny = std::getenv("POSESTUDIO_SPLAT_TINY") != nullptr;
+    push.params = glm::vec4(static_cast<float>(std::min(m_shDegree, kDegreeCap)), static_cast<float>(m_shStride),
+                            kTiny ? 1.0f : 0.0f, ortho ? 1.0f : 0.0f);
+    // The opacity compensation of the antialiased (mip-splatting) formulation — for EVERY scene
+    // since 2026-11-05, not only one trained with it: without it a splat smaller than a pixel
+    // keeps its whole trained opacity through the 0.3 px dilation, and a capture seen from a
+    // distance — in a headset above all, at the photo layer's reduced scale — breaks into dark
+    // speckles where the thin shading splats in front of the surface collapse into single
+    // pixels; with it the capture stays smooth at any distance, and close up, where the splats
+    // are pixels wide and the compensation tends to one, the picture is the same (1.4% of pixels
+    // differ by over 8 of 255 on the real capture, the leggings' mottling among them).
+    // POSESTUDIO_SPLAT_NO_AA=1: the compensation off (the A/B).
     static const bool kNoAa = std::getenv("POSESTUDIO_SPLAT_NO_AA") != nullptr;
-    push.camPos = glm::vec4(glm::vec3(glm::inverse(model) * glm::vec4(camera.position(), 1.0f)), m_antialiased && !kNoAa ? 1.0f : 0.0f);
+    push.camPos = glm::vec4(glm::vec3(glm::inverse(model) * glm::vec4(camera.position(), 1.0f)), kNoAa ? 0.0f : 1.0f);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 1, 1, &m_sets[frameIndex], 0, nullptr);
     vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
-    vkCmdDraw(cmd, static_cast<uint32_t>(m_count * 6), 1, 0, 0);
+    vkCmdDraw(cmd, 4, static_cast<uint32_t>(m_count), 0, 0); // a strip of four, once a splat
 }
 
 } // namespace pose

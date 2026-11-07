@@ -88,6 +88,7 @@ using UniqueSemaphore           = UniqueDeviceHandle<VkSemaphore, vkDestroySemap
 using UniqueFence               = UniqueDeviceHandle<VkFence, vkDestroyFence>;
 using UniqueCommandPool         = UniqueDeviceHandle<VkCommandPool, vkDestroyCommandPool>;
 using UniqueSwapchain           = UniqueDeviceHandle<VkSwapchainKHR, vkDestroySwapchainKHR>;
+using UniqueQueryPool           = UniqueDeviceHandle<VkQueryPool, vkDestroyQueryPool>;
 
 } // namespace pose
 

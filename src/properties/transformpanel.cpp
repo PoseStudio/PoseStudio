@@ -135,13 +135,16 @@ void TransformPanel::buildUi() {
     const std::array<QString, 3> tips = {
         tr("Bends the joint in its natural direction. 0 is the rest pose, 100 is fully bent; "
            "negative values bend it the other way, as far as the joint allows.\n"
-           "In the viewport: press B and move the mouse."),
+           "In the viewport: press B and move the mouse.\n"
+           "With several joints selected (Shift+click), all of them turn by the same amount."),
         tr("Bends the joint in its secondary direction. 0 is the rest pose, 100 is the joint's limit; "
            "negative values bend it the other way, as far as the joint allows.\n"
-           "In the viewport: press S and move the mouse."),
+           "In the viewport: press S and move the mouse.\n"
+           "With several joints selected (Shift+click), all of them turn by the same amount."),
         tr("Turns the joint about its own length. 0 is the rest pose, 100 is the joint's limit; "
            "negative values turn it the other way, as far as the joint allows.\n"
-           "In the viewport: press T and move the mouse."),
+           "In the viewport: press T and move the mouse.\n"
+           "With several joints selected (Shift+click), all of them turn by the same amount."),
     };
     for (int i = 0; i < 3; ++i) {
         Row& row = m_rows[static_cast<std::size_t>(i)];
@@ -177,10 +180,10 @@ void TransformPanel::buildUi() {
 
         // Per-row restore: just this dial back to 0, the rest pose.
         row.restore = propertyrows::makeRestoreButton();
-        row.restore->setToolTip(tr("Back to the rest pose"));
+        row.restore->setToolTip(tr("Back to the rest pose (every selected joint's, with several selected)"));
         connect(row.restore, &QToolButton::clicked, this, [this, i]() {
             if (m_viewport && m_viewport->beginJointTransformEdit()) {
-                m_viewport->setJointTransformDial(i, 0.0);
+                m_viewport->setJointTransformDial(i, 0.0, true); // (every selected joint's, with a group)
                 m_viewport->endJointTransformEdit(); // registers no entry if the dial was already at 0
                 refresh();
             }
@@ -198,7 +201,7 @@ void TransformPanel::buildUi() {
     // --- Reset ---
     m_reset = new QPushButton(tr("Reset All"));
     m_reset->setObjectName(QStringLiteral("PropertyResetButton"));
-    m_reset->setToolTip(tr("Returns all three dials to 0: the selected joint's rest pose"));
+    m_reset->setToolTip(tr("Returns all three dials to 0: the selected joint's rest pose (every selected joint's, with several selected)"));
     col->addWidget(m_reset, 0, Qt::AlignLeft);
     connect(m_reset, &QPushButton::clicked, this, &TransformPanel::resetRotation);
 
@@ -223,7 +226,12 @@ void TransformPanel::refresh() {
             row.restore->setEnabled(on);
         }
     }
-    m_jointName->setText(state.valid ? QString::fromStdString(state.name) : tr("No joint selected"));
+    // With a Shift+click selection the dials turn every joint of it: the name says so.
+    const QString name = QString::fromStdString(state.name);
+    m_jointName->setText(!state.valid            ? tr("No joint selected")
+                         : state.groupCount == 1 ? tr("%1 + 1 more joint").arg(name)
+                         : state.groupCount > 1 ? tr("%1 + %2 more joints").arg(name).arg(state.groupCount)
+                                                : name);
     m_hint->setVisible(!state.valid);
     m_reset->setEnabled(state.valid);
     for (std::size_t i = 0; i < m_rows.size(); ++i) {
@@ -253,7 +261,7 @@ void TransformPanel::resetRotation() {
         return;
     }
     for (int i = 0; i < 3; ++i) {
-        m_viewport->setJointTransformDial(i, 0.0);
+        m_viewport->setJointTransformDial(i, 0.0, true); // (every selected joint's, with a group)
     }
     m_viewport->endJointTransformEdit();
     refresh();

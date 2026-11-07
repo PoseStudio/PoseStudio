@@ -1185,6 +1185,12 @@ bool Armature::dragIkTo(const glm::vec3& targetWorld) {
 }
 
 bool Armature::settleIkTick() {
+    if (m_figureMove && m_jsSoftBodyMoving && ++m_ikSettleTicks <= 120) {
+        // THE SOFT BODY'S TAIL after a figure move: she stands where the cursor left her, and the
+        // breasts and the buttocks bounce on by themselves until they rest, as after any drag.
+        m_jsSoftBodyMoving = tickSoftBody(1.0f / 60.0f);
+        return m_jsSoftBodyMoving;
+    }
     if (m_digitDrag || m_figureMove) {
         return false; // (nothing to land: neither has a contact pin, and the pose is the solve's)
     }

@@ -11,6 +11,7 @@
 #include "iblmaps.h"
 #include "mesh.h" // MeshPushConstants
 #include "shadowmap.h"
+#include "splatcloud.h" // SplatPushConstants
 #include "vertex.h"
 #include "vulkancommon.h" // kMaxFramesInFlight
 #include "vulkancontext.h"
@@ -39,7 +40,7 @@ PipelineConfig meshBaseConfig(const std::vector<VkDescriptorSetLayout>& layouts,
     // The HDR pass has a second colour attachment: the SPECULAR target the SSS blur must not
     // smear. Only the opaque pipeline writes it (mesh.frag routes the PBR specular there); every
     // other variant masks it off.
-    config.colorAttachmentCount = 3;
+    config.colorAttachmentCount = 2;
     config.writeColorAttachment1 = false;
     // No back-face culling (PipelineConfig's default): imported OBJ winding is inconsistent in
     // the wild, so we'd risk an invisible/inside-out model. The fragment shader instead flips the
@@ -53,7 +54,7 @@ PipelineConfig meshBaseConfig(const std::vector<VkDescriptorSetLayout>& layouts,
 
 } // namespace
 
-ScenePipelines::ScenePipelines(VulkanContext& context, VkRenderPass renderPass,
+ScenePipelines::ScenePipelines(VulkanContext& context, VkRenderPass renderPass, VkRenderPass photoRenderPass,
                                const std::vector<char>& vertSpirv,
                                const std::vector<char>& fragSpirv,
                                const std::vector<char>& backgroundVertSpirv,
@@ -168,37 +169,38 @@ ScenePipelines::ScenePipelines(VulkanContext& context, VkRenderPass renderPass,
         config.depthTestEnable = false;
         config.depthWriteEnable = false;
         config.blendEnable = false;
-        config.colorAttachmentCount = 3; // spec + photo targets present but masked off (writeColorAttachment1 false)
+        config.colorAttachmentCount = 2; // the spec target is present but masked off (writeColorAttachment1 false)
         config.descriptorSetLayouts = {m_cameraSetLayout.get(), m_iblSetLayout.get()};
         m_background = std::make_unique<VulkanPipeline>(context, renderPass, backgroundVertSpirv,
                                                         backgroundFragSpirv, config);
     }
 
-    // GAUSSIAN SPLATS (splatcloud.h): six vertices a splat from gl_VertexIndex (no vertex buffer),
-    // blended far-first into the pass's PHOTO LAYER (attachment 2) — depth-tested against the
-    // opaque geometry, never written (a translucent cloud must not occlude) — IN THE TRAINERS'
-    // OWN COLOUR SPACE: a splat's colour as the file has it, display-referred, accumulated
-    // premultiplied with its coverage, which the composite lays over the tonemapped scene. The
-    // first cut blended the splats into the HDR colour itself through the inverse tonemap, and
-    // the convex inverse weighed every bright splat more than it was trained to: skin read as
-    // speckled, oily and sparkling, a sunlit scene blew out. Attachments 0 and 1 are masked off
-    // (nothing of the splats touches the HDR colour, the SSS mask or the specular; a figure
+    // GAUSSIAN SPLATS (splatcloud.h): a four-vertex triangle strip instanced once a splat (no
+    // vertex buffer; gl_InstanceIndex is the sorted slot), blended far-first into the PHOTO PASS
+    // (hdrtarget.h: the layer, single-sample, over the resolved scene depth) — depth-tested
+    // against the opaque geometry, never written (a translucent cloud must not occlude) — IN THE
+    // TRAINERS' OWN COLOUR SPACE: a splat's colour as the file has it, display-referred,
+    // accumulated premultiplied with its coverage (the standard "over" blend), which the
+    // composite lays over the tonemapped scene. The first cut blended the splats into the HDR
+    // colour itself through the inverse tonemap, and the convex inverse weighed every bright
+    // splat more than it was trained to: skin read as speckled, oily and sparkling, a sunlit
+    // scene blew out; the second drew the layer as a third attachment of the scene pass, at its
+    // MSAA, and four blends a pixel of every quad were the whole of a frame's GPU time (nothing
+    // of the splats touches the HDR colour, the SSS mask or the specular either way; a figure
     // standing inside a capture is shaded as ever and covered by the composite). Its own two-set
     // layout: 0 = camera UBO, 1 = the cloud's buffers; the push block is splat.vert's.
     {
         PipelineConfig config;
-        config.pushConstantSize = 112; // sizeof(SplatPushConstants)
+        config.pushConstantSize = sizeof(SplatPushConstants);
         config.pushConstantStages = VK_SHADER_STAGE_VERTEX_BIT;
+        config.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
         config.blendEnable = true;
         config.depthTestEnable = true;
         config.depthWriteEnable = false;
-        config.colorWriteRgb = false;
-        config.colorWriteAlpha = false;
-        config.writeColorAttachment1 = false;
-        config.writeColorAttachment2 = true;
-        config.colorAttachmentCount = 3;
+        config.singleSample = true;
+        config.colorAttachmentCount = 1;
         config.descriptorSetLayouts = {m_cameraSetLayout.get(), m_splatSetLayout.get()};
-        m_splat = std::make_unique<VulkanPipeline>(context, renderPass, splatVertSpirv, splatFragSpirv, config);
+        m_splat = std::make_unique<VulkanPipeline>(context, photoRenderPass, splatVertSpirv, splatFragSpirv, config);
     }
 }
 

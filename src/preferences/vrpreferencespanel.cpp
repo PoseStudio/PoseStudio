@@ -65,4 +65,27 @@ VrPreferencesPanel::VrPreferencesPanel(QWidget* parent)
     connect(reducedToggle, &QCheckBox::toggled, this, [](bool reduced) {
         VrSettings::setReducedEffects(reduced);
     });
+
+    // --- Splat scale ---
+    auto* splatForm = new QFormLayout();
+    splatForm->setContentsMargins(0, 8, 0, 0);
+    splatForm->setHorizontalSpacing(12);
+    auto* splatBox = new pose::DragNumberBox(this);
+    splatBox->setRange(VrSettings::kMinSplatScale, 1.0);
+    splatBox->setSingleStep(0.05);
+    splatBox->setDecimals(2);
+    splatBox->setValue(VrSettings::splatScale());
+    splatBox->setFixedWidth(120);
+    splatForm->addRow(tr("Splat scale"), splatBox);
+    contentLayout()->addLayout(splatForm);
+    addDescription(
+        tr("The most of each eye's size a Gaussian splat scene is drawn at. Drawing the splats is the dearest "
+           "part of a headset frame, and PoseStudio lowers the size on the fly whenever a frame runs late and "
+           "raises it back toward this as the GPU finds room: at 1.00 the capture is as sharp as the GPU can "
+           "afford at the moment, softening as you walk up to it; 0.50 is half the eye's size in each direction, "
+           "a quarter of the work. Lower it if the headset image still stutters with a capture loaded; Reduced "
+           "effects gives the splats the most room. Applies when VR Mode next starts."));
+    connect(splatBox, &pose::DragNumberBox::valueChanged, this, [](double value) {
+        VrSettings::setSplatScale(value);
+    });
 }

@@ -62,6 +62,8 @@ public:
     /// The splat cloud of a splat-scene model, else null.
     SplatCloud*       splats() { return m_splats.get(); }
     const SplatCloud* splats() const { return m_splats.get(); }
+    /// Whether the model has any mesh to draw (a splat model has none).
+    bool hasMeshes() const { return !m_meshes.empty(); }
 
     Model(const Model&) = delete;
     Model& operator=(const Model&) = delete;
@@ -197,6 +199,7 @@ public:
     float breastSwingDeg(int side) const { return m_armature.breastSwingDeg(side); }
     float breastHangMm(int side) const { return m_armature.breastHangMm(side); }
     float breastSideMm(int side) const { return m_armature.breastSideMm(side); }
+    float breastUpMm(int side) const { return m_armature.breastUpMm(side); }
     float buttockMoveMm(int side) const { return m_armature.buttockMoveMm(side); }
     // THE FIGURE'S PLACE AND HEADING (the Transform tab's Figure group): pose edits like a dial's.
     void setFigurePosition(const glm::vec3& world) { m_armature.setFigurePosition(world); refreshCorrectives(); }
@@ -239,6 +242,12 @@ public:
     /// Sets the model's transform matrix (the armature owns it — IK, picking, and grounding all
     /// read it) and recomputes the skin data. The .pss load path restores a saved TRS through it.
     void setTransform(const glm::mat4& transform);
+    /// A STATIC model's (turn, tip, tilt) as the Transform tab last showed or set them: the
+    /// branch its orientation is read back on (Scene's decomposeStaticTransform), so a Tip carried
+    /// past 90 reads on instead of flipping the other two by 180.
+    glm::vec3 staticRotationShown() const { return m_staticRotationShown; }
+    /// (A reader's bookkeeping, not a change of the model: const, on a mutable member.)
+    void setStaticRotationShown(const glm::vec3& turnTipTilt) const { m_staticRotationShown = turnTipTilt; }
     /// Re-evaluates the pose correctives' weights against the current pose now and, with
     /// POSESTUDIO_DUMP_CORRECTIVES set, prints the active ones (CorrectiveSet::refresh). The
     /// explicit "pose settled" hook (Scene::finalizePose, setBoneRotation, applyPose); every
@@ -267,6 +276,8 @@ public:
     void translateY(float dy) { m_armature.shiftPoseY(dy); }
 
 private:
+    mutable glm::vec3 m_staticRotationShown{0.0f};
+
     /// Which of the model's meshes a record path draws.
     enum class MeshFilter { Opaque, All, NotMasked };
 

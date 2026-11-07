@@ -31,7 +31,10 @@ enum class AxisView { Front, Back, Right, Left, Top, Bottom };
  */
 class Camera {
 public:
-    /// Recomputes the projection for a new viewport aspect ratio (call on resize).
+    /// Recomputes the projection for a new viewport aspect ratio (call on resize). Under an
+    /// explicit view (a VR eye) only the size is recorded — the splat pass reads its footprints
+    /// off it — and the given projection is kept: rebuilt from the orbit fov here, each eye lost
+    /// its tracked off-centre frustum to the desktop's symmetric 50° one, and the stereo broke.
     void setViewportSize(float width, float height);
 
     /// Restores the default framing (target/distance/yaw/pitch) — the "home" view the viewport

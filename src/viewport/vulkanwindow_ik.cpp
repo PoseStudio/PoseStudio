@@ -255,6 +255,7 @@ void VulkanWindow::groundFigure() {
     m_fall.figure = figure;
     m_fall.height = lowestY;
     m_fall.dropped = 0.0f;
+    m_fall.lastT = 0.0f;
     m_fall.clock.start();
     m_fall.timer->start();
 }
@@ -264,7 +265,11 @@ void VulkanWindow::onFallTick() {
         m_fall.timer->stop();
         return;
     }
-    const float t = static_cast<float>(m_fall.clock.nsecsElapsed()) * 1e-9f;
+    // Under a SCRIPTED run the fall and the landing bounce keep script time — a sixtieth a tick —
+    // instead of the wall clock: a `shot` reads the frame back off the GPU and stalls a frame,
+    // the dip ran on meanwhile, and the landing gallery's knee reading at a fixed tick differed
+    // every run (2026-11-07: 6, 14, 19 degrees against a gate of 20 where the dip reaches 47).
+    const float t = m_script ? m_fall.lastT + 1.0f / 60.0f : static_cast<float>(m_fall.clock.nsecsElapsed()) * 1e-9f;
     const float dt = t > m_fall.lastT ? t - m_fall.lastT : 1.0f / 60.0f;
     m_fall.lastT = t;
     if (m_fall.softTail) {
@@ -350,7 +355,9 @@ void VulkanWindow::finishGroundFall() {
         scene().translateModelY(m_fall.figure, -(m_fall.height - m_fall.dropped));
         requestUpdate();
     }
-    if (m_renderer && m_fall.softTail) {
+    if (m_renderer && m_fall.figure >= 0) {
+        // (Whatever ended the fall — a press mid-air included: left as it stood, a breast floated
+        // weightless through the fall stayed floated until the next drag ticked it, 2026-11-07.)
         scene().settleSoftBody(m_fall.figure);
         requestUpdate();
     }

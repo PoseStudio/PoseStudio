@@ -1,5 +1,5 @@
 # SOFT BREASTS (armaturebreasts.cpp): the breasts hang with the chest's orientation against
-# gravity and bounce on a landing. The Posing preference is on by default, so the app runs this
+# gravity and bounce on a landing. The Soft Body Physics tab's switches are on by default, so the app runs this
 # with it on; `breastl` / `breastr` read the swing in degrees, `breasthangl` / `breasthangr` the
 # hang along the tether in mm. Standing they rest as sculpted; a bow swings them (the sag toward
 # the belly relieved) and draws them out toward the floor, the nipple leading; Reset Pose rests
@@ -86,18 +86,65 @@ view home
 fk hip 0 0 90
 expect breastsidel < -5
 expect breastsider > 5
+# ... and the UPPER breast (the left here, falling inward) drapes across the chest further than the
+# lower one falls outward: 54 mm against 32 on the base female, more on a fuller bust.
+expect breastsidel < -45
+expect breastsider < 40
 view top
 closeup chest 0.34
 shot 08_on_her_side_from_above
 reset
 view home
 
-# The landing: lifted half a metre and dropped, shot through the bounce, at rest afterwards.
+# THE JOLTS (the tenth look, 2026-11-06: "breasts are already hanging … downward movement is pretty
+# much already at its limit by default; think of something in a bag: it has nowhere to go downward,
+# but can swing side to side and can go upward"). A breast at rest hangs at the end of its stretch,
+# so the mass meets a FLOOR below the sculpt: the figure lifted quickly by the hips with Ctrl (the
+# chest carried at the cursor's speed, the mass left behind) sinks a fraction of a millimetre
+# (`breastupl` / `breastupr`, mm along the chest, + toward the head) and rises a few as the lift
+# stops; a quick crouch by the chest the same; a quick sideways carry sways them (`breastsidel`),
+# never past the jiggle's cap; and the settle after a Ctrl move rests them (the move's own tail).
+view right
+cpress hip
+dragv 0 0.10 4 0
+expect breastupl > -1
+expect breastupl < 1
+dragv 0 0 1 9
+expect breastupl > 2
+expect breastupl < 20
+release
+expect breastupl < 0.5
+reset
+press chest@0.6
+dragv 0 -0.10 4 0
+dragv 0 0 1 8
+expect breastupl > -1
+expect breastupl < 3
+release
+reset
+view front
+cpress hip
+dragv 0.12 0 4 0
+dragv 0 0 1 9
+expect breastsidel > 3
+expect breastsidel < 32
+release
+expect breastsidel < 0.5
+reset
+
+# The landing: lifted half a metre and dropped, shot through the bounce, at rest afterwards. The
+# kick dips the breast a few millimetres into the floor and springs it UP past the rest, once (the
+# base female: the float +24 — the fall is a fast motion, and the faster the move the more the
+# mass feels of it — the dip -2, the bounce back up to +25; a full bust's +37-42, the wall's
+# ceiling; wall-clock timed, so the shot is wherever the bounce is, and the gates are the floor's
+# give and the bounce's ceiling).
 view home
 lift 0.5
 ground
 wait 24
 shot 05_landing
+expect breastupl > -12
+expect breastupl < 45
 wait 90
 shot 06_landed
 expect breastl < 0.5

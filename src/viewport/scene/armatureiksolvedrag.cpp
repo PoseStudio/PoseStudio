@@ -310,6 +310,20 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
     const bool& rootTurns = s.rootTurns;
     const std::size_t& rootDofMark = s.rootDofMark;
 
+    // THE LIFT-OFF RE-BASES THE POSE (2026-11-07): the tick the rig lets the feet go under a drag
+    // of the hips or a trunk joint, every bone's posture reference becomes the pose she stands in.
+    // The drag-start pose was the SIT's or the kneel's fold she had just stood up out of, and with
+    // the pins gone the legs snapped back into it in one tick — a toe 67cm, the sit stood up and
+    // pulled on; the stand-up off all fours ended in a squat 22cm under the cursor. A hand's
+    // lift-off keeps its drag-start references: it begins standing, and its gates are calibrated
+    // on them.
+    if (rig.suspended() && !m_jsWasSuspended && rig.trunkEffector()) {
+        for (std::size_t b = 0; b < n && b < m_ikStartEuler.size() && b < m_boneEuler.size(); ++b) {
+            m_ikStartEuler[b] = m_boneEuler[b];
+        }
+    }
+    m_jsWasSuspended = m_jsWasSuspended || rig.suspended();
+
     // A SCOPED drag (IkScope::Chain) has no trunk policy: the chain alone answers the cursor — no
     // follow, no hinge, no sway, no reach fold, no unfold — and the root is none of its unknowns
     // (ikChooseUnknowns). Every member the policy would set is left off.
@@ -628,7 +642,6 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
                 }
             }
         }
-        m_jsWasSuspended = m_jsWasSuspended || rig.suspended();
     }
     // REACHING DOWN (2026-09-25; IK_JS_NO_REACH_HINGE): a HAND pushed down from a standing start
     // folds the trunk at the hips as well as bending the knees — the bow's hinge (the root's

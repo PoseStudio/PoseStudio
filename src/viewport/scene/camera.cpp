@@ -27,6 +27,9 @@ void Camera::setViewportSize(float width, float height) {
     m_viewportWidth = width > 0.0f ? width : 1.0f;
     m_viewportHeight = height > 0.0f ? height : 1.0f;
     m_aspect = (height > 0.0f) ? (width / height) : 1.0f;
+    if (m_explicit) {
+        return; // the headset's projection stands; the size serves the splats' footprints alone
+    }
     rebuildProjection();
 }
 

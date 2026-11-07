@@ -315,8 +315,10 @@ shot 62_sat_back_up_front
 # the trunk comes up with the rise - upright at the end, looking ahead. (A sit-up leaves the trunk
 # leaning after the chest's cursor; stood up by the hips it kept that lean and the gaze stayed down.)
 view home
+# (0.84 of the view, not 0.90, since 2026-11-07: standing from the floor sit takes 0.81, and a hip held
+# 9cm above where the straight legs stop it now LIFTS HER OFF after a quarter second, by design.)
 press hip
-dragv 0 0.90 90 60
+dragv 0 0.84 90 60
 report sit_stand
 expect hips > 700
 expect lowest > 0

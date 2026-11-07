@@ -188,8 +188,10 @@ public:
     bool beginJointTransformEdit();
     /// Turns dial @p dial (0/1/2 = Bend Forward / Bend Sideways / Twist) of the selected joint to
     /// @p value on its 0-100 scale: an FK rotation through the limits and the collision stop, so
-    /// the pose may rest short of the value — re-read jointTransform().
-    void setJointTransformDial(int dial, double value);
+    /// the pose may rest short of the value — re-read jointTransform(). The other joints of a
+    /// Shift+click selection turn with it by the same change, or, @p absolute, to @p value
+    /// (Scene::setSelectedJointDial).
+    void setJointTransformDial(int dial, double value, bool absolute = false);
     void endJointTransformEdit();
     /// THE FIGURE'S PLACE AND HEADING (the Transform tab's Figure group): the same bracket as the
     /// dials — one undo entry per scrub. `axis` 0/1/2 = x/y/z in world centimetres for the place;
@@ -243,7 +245,7 @@ public:
     /// lands in ~0.45s), animated on the fall timer; a figure sunk below the floor is lifted
     /// instantly (nothing falls upward). No-op before the renderer exists or mid-drag.
     void groundFigure();
-    /// The Posing preferences changed (the soft breasts): every figure re-posed with them.
+    /// The Soft Body Physics tab's settings changed: every figure re-posed with them.
     void applySoftBodySettings();
 
     /// Loads @p hdrPath as the lighting environment and re-bakes the IBL. Remembered and applied
@@ -279,6 +281,11 @@ public:
     /// renderer exists or without a headset.
     bool setVrMode(bool on);
     bool vrModeActive() const { return m_vr != nullptr; }
+    /// Whether a model (and with it, perhaps, a joint) is selected in the scene.
+    bool hasSelection() const;
+    /// Drops the selection — the model and its joint (Scene::setSelectedModel(-1)); nothing while
+    /// a drag owns the pose. Esc's default, from ViewportWidget's application-wide filter.
+    void clearSelection();
     /// Puts the user back in front of the figure, facing it (View → Recenter VR View) — applied
     /// at the next tracked frame. VR Mode also does this on its own as it starts.
     void recenterVr();
@@ -681,6 +688,10 @@ private:
     // true, its pre-edit pose in m_preEditPose like every bracketed edit's. And the joint
     // transform last announced through jointTransformChanged (notifyJointTransform).
     bool           m_transformEdit = false;
+    // The value last asked of each dial in the open bracket (setJointTransformDial): a Shift+click
+    // group's other joints turn by the CHANGE in it, not by the change the primary's read-back shows.
+    float          m_dialAsked[3] = {0.0f, 0.0f, 0.0f};
+    bool           m_dialAskedValid[3] = {false, false, false};
     JointTransform m_announcedJointTransform;
 
     // THE JOINT MOUSE MODE (Blender's modal transforms): with a joint selected, B / S / T turns
@@ -776,6 +787,9 @@ private:
     /// the menu button recentres. Called per VR frame before the eyes are located, so the frame
     /// shows the move.
     void applyVrInput(VrState& vr, const VrInput& input, float dt, int64_t time);
+    /// The dynamic splat scale: after a rendered VR frame, moves the eyes' photo layer scale with
+    /// the GPU's time (see VrState in vulkanwindow_vr.cpp).
+    void adaptVrSplatScale(VrState& vr, int64_t period, int64_t displayTime);
     /// Ends a controller-driven IK drag (as the mouse's release would), if one is in flight.
     void endVrDrag();
 

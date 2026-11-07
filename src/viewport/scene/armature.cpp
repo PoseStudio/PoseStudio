@@ -408,7 +408,7 @@ void Armature::computeSkinMatrices() {
         if (!m_breasts.empty() && softbody::breastMotion()) {
             for (const Breast& b : m_breasts) {
                 if (b.bone == static_cast<int>(i)) {
-                    skinBase = breastSwingMatrix(b, poseGlobal[i]) * poseGlobal[i];
+                    skinBase = breastSwingMatrix(b) * poseGlobal[i];
                     break;
                 }
             }

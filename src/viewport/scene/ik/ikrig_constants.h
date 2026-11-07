@@ -142,6 +142,28 @@ constexpr float kSuspendStrain = 0.15f;
 constexpr float kDownIntentTaut = 0.90f;
 constexpr float kSuspendUpFraction = 0.65f;
 constexpr int   kSuspendConfirmTicks = 15;
+/// THE HIPS AND THE TRUNK LIFT OFF TOO (2026-11-07; the user: "when pulling a figure up by the hip
+/// or torso or really anything, she tiptoes and tends to stay auto-pinned to the floor — too hard
+/// to get the figure to leave the floor; pulling a bit past the pin limit should at some point
+/// release the floor pin"): a drag of the hips or a trunk-role joint (IkRig::trunkEffector) lifts
+/// off at this much strain beyond reach — not kSuspendStrain's 15cm, a limb's — and only with the
+/// standing legs TAUT: each standing leg's STRETCH toward its pin (the socket's distance from the
+/// pin over the thigh-and-shin chain, liveContactStretch's measure: 1 dead straight, 0.985 at a
+/// knee bent 20 degrees, 0.94 at 40) at least kSuspendTautShare. A stand-up's root lags its
+/// cursor by more than the strain for longer than the confirmation while the knees are still
+/// bent — 26cm out of a sit, 16 off all fours — and must not lift off (measured as a share of the
+/// bone PATH from the root, which runs sideways to the socket first, a knee bent 40 degrees read
+/// taut and both stand-ups lifted off mid-rise, the released legs snapping back into the fold they
+/// began in: a toe 67cm in a tick).
+constexpr float kSuspendStrainTrunk = 0.08f;
+constexpr float kSuspendTautShare = 0.97f;
+/// A figure whose every foot stands this far over its floor height at a drag's start is IN THE
+/// AIR — lifted off and let go of there, carried up with Ctrl, a pose with the feet up — and
+/// nothing is planted: she stays where she floats (IkRig::plantContacts; the user, 2026-11-07:
+/// "when the character is floating the foot auto-pinning is still active, probably should not
+/// be"). Under it she hovers by residue and is healed onto the floor. The landing's airborne
+/// height (ikrigcontacts.cpp) is the same number.
+constexpr float kAirborneHeight = 0.05f;
 
 } // namespace
 

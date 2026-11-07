@@ -1959,6 +1959,57 @@ void RealPhases::liftPhases() {
                       gateMax("floor penetration, any joint (mm)", r.penetrationMax * 1000.0, 30.0),
                       gateMax("settle max step (mm)", r.settleMaxStep * 1000.0, 21.0)}, r);
     }
+
+    // --- THE HIPS LIFT HER OFF (2026-11-07; the user: "when pulling a figure up by the hip or
+    // torso she tiptoes and stays auto-pinned to the floor — too hard to get the figure to leave
+    // the floor; pulling a bit past the pin limit should release it"): the hips pulled 40cm up
+    // take her onto straight legs in the first few centimetres, and 8cm of strain past that
+    // (kSuspendStrainTrunk, with the legs taut) for a quarter second lets the feet go — she
+    // floats up with the cursor, the legs hanging (the dangle), eased in like a hand's lift.
+    // Before this round a pelvis drag never ran the lift-off test at all.
+    if (report.wants("hips-liftoff")) {
+        Scenario sc;
+        sc.grab = "hip";
+        sc.path = pullPath(glm::vec3(0.0f, 0.40f, 0.0f), 60, 120);
+        sc.release = false;
+        const RunResult r = run(sc);
+        const auto fromDown = [&](const char* from, const char* to) {
+            const int a = indexOf(from), b = indexOf(to);
+            if (a < 0 || b < 0 || static_cast<std::size_t>(std::max(a, b)) >= r.endPos.size()) {
+                return -1.0;
+            }
+            const glm::vec3 d = r.endPos[static_cast<std::size_t>(b)] - r.endPos[static_cast<std::size_t>(a)];
+            return glm::length(d) > 1.0e-4f ? static_cast<double>(glm::degrees(std::acos(glm::clamp(glm::dot(glm::normalize(d), glm::vec3(0.0f, -1.0f, 0.0f)), -1.0f, 1.0f)))) : -1.0;
+        };
+        phaseLegs("[real] hips pulled up past the legs' stretch lift her off (hip +40cm y)",
+                     {gateMin("suspended", r.suspended ? 1.0 : 0.0, 1.0),
+                      gateMin("hip rise (m)", r.hipDispY, 0.30),
+                      gateMin("feet height at the end (m)", r.feetMinY, 0.20),
+                      gateMax("dangle: the left thigh from plumb (deg)", fromDown("lThigh", "lShin"), 8.0),
+                      gateMax("steps taken", r.stepsTaken, 0.0),
+                      gateMax("worst single-tick jump through the lift (mm)",
+                              std::max(r.phases.empty() ? 0.0 : r.phases[0].maxJump,
+                                       r.phases.size() > 1 ? r.phases[1].maxJump : 0.0) * 1000.0, 80.0),
+                      gateMax("hip-to-cursor at rest (mm)", r.restingMiss * 1000.0, 20.0)}, r);
+    }
+
+    // --- ... AND THE HEAD (a trunk-role joint: the same strain, the same taut legs): pulled 40cm
+    // up it straightens her, stretches her 2cm, and lifts her off; a hand's 15cm of strain is a
+    // limb's, for an arm that must raise before it lifts.
+    if (report.wants("head-liftoff")) {
+        Scenario sc;
+        sc.grab = "head";
+        sc.path = pullPath(glm::vec3(0.0f, 0.40f, 0.0f), 60, 120);
+        sc.release = false;
+        const RunResult r = run(sc);
+        phaseLegs("[real] head pulled up past the body's stretch lifts her off (head +40cm y)",
+                     {gateMin("suspended", r.suspended ? 1.0 : 0.0, 1.0),
+                      gateMin("feet height at the end (m)", r.feetMinY, 0.15),
+                      gateMax("steps taken", r.stepsTaken, 0.0),
+                      gateMax("worst single-tick jump through the lift (mm)",
+                              std::max(r.phases.empty() ? 0.0 : r.phases[0].maxJump,
+                                       r.phases.size() > 1 ? r.phases[1].maxJump : 0.0) * 1000.0, 80.0)}, r);
+    }
 }
 
 /// Crouches by the chest and the hip, and standing back up out of one.
@@ -5207,9 +5258,13 @@ void RealPhases::tailPhases() {
         sc.prePose = {{"abdomenLower", glm::vec3(20.0f, 0.0f, 0.0f)},
                       {"chest", glm::vec3(15.0f, 0.0f, 0.0f)},
                       {"neck", glm::vec3(10.0f, 0.0f, 0.0f)}};
-        sc.path = pullPath(glm::vec3(0.0f, 0.15f, 0.0f), 40, 90);
+        // +10cm, not 15 (2026-11-07): the body gives 5 of them — the slouch straightened, a 2cm
+        // stretch — and a head pulled 8cm past what the body gives now LIFTS HER OFF (the trunk's
+        // lift-off; the head-liftoff phase gates it); this phase is the straightening on planted
+        // feet, so it pulls no further than the body can go.
+        sc.path = pullPath(glm::vec3(0.0f, 0.10f, 0.0f), 40, 90);
         const RunResult r = run(sc);
-        phaseLegs("[real] slouched head pull-up (head +15cm y)",
+        phaseLegs("[real] slouched head pull-up (head +10cm y)",
                      {gateMin("head rise (m)", r.grabEnd.y - r.grabStart.y, 0.035),
                       // (Heel RISE counts as drift here: past the spine's straightening reserve a
                       // head pulled up takes the figure onto the balls of its feet, 11-15mm.)

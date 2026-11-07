@@ -129,16 +129,26 @@ bool VulkanWindow::beginJointTransformEdit() {
     closeOpenPoseEdits(); // land a release settle / fall first; this edit starts from its result
     m_preEditPose = scene().capturePose();
     m_transformEdit = true;
+    for (bool& valid : m_dialAskedValid) {
+        valid = false; // (a new bracket: the first ask of each dial is measured against the pose)
+    }
     return true;
 }
 
-void VulkanWindow::setJointTransformDial(int dial, double value) {
+void VulkanWindow::setJointTransformDial(int dial, double value, bool absolute) {
     if (!beginJointTransformEdit()) {
         return;
     }
     // (Limits clamp and the body volumes stop it inside; correctives follow live on the GPU.)
-    if (scene().setSelectedJointDial(dial, static_cast<float>(value))) {
+    const bool  inRange = dial >= 0 && dial < 3;
+    const bool  knownAsk = inRange && m_dialAskedValid[dial];
+    const float previous = knownAsk ? m_dialAsked[dial] : 0.0f;
+    if (scene().setSelectedJointDial(dial, static_cast<float>(value), absolute, knownAsk ? &previous : nullptr)) {
         requestUpdate();
+    }
+    if (inRange) {
+        m_dialAsked[dial] = static_cast<float>(value);
+        m_dialAskedValid[dial] = true;
     }
 }
 

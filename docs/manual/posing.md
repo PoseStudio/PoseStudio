@@ -27,7 +27,8 @@ A left press that finds no joint orbits the camera instead, and a plain click se
 - **She crouches, kneels, sits and lies down.** Push the hips down and she crouches; take them down and forward and she kneels, the knees landing on the floor and the feet lying flat on their tops behind her, toes back (and the knees staying there when the chest is then pulled forward past her reach: she goes down onto her hands rather than up into a plank); down and back and she sits. Knees, hands, the seat and the head all become supports when they reach the floor and let go again when the body rises off them. See [Poses Step by Step](poses.md).
 - **Joints stay within their limits.** Every joint has the anatomical range its figure was authored with — a knee bends one way, a neck turns so far — and a drag never takes a joint past it.
 - **Limbs stay out of the body and out of each other.** Arms cross the chest without passing through it, a hand laid on the other forearm rests on it, crossed legs stay apart.
-- **Reaching high, and lifting her off the floor.** Pull a hand up past the arm's reach and she rises onto tiptoe — heels up, body tall, the shoulder shrugging no further than a shoulder does; bring it back within reach and the heels come down. Pull steadily further up and, after a moment, she lifts off and hangs from it — the legs come together and hang straight down, knees soft and feet pointed, the free arm at her side; lower her and she lands and stands back up.
+- **Reaching high, and lifting her off the floor.** Pull a hand up past the arm's reach and she rises onto tiptoe — heels up, body tall, the shoulder shrugging no further than a shoulder does; bring it back within reach and the heels come down. Pull steadily further up and, after a moment, she lifts off and hangs from it — the legs come together and hang straight down, knees soft and feet pointed, the free arm at her side; lower her and she lands and stands back up. The hips and the trunk lift her off too: pull the hips, the chest or the head up past where the legs can take her — she rises onto tiptoe first — and a little further, and after a moment the feet let go of the floor and she floats with the cursor, the legs hanging.
+- **A floating figure stays floating.** Let go of her in the air and your next drag — of a hand, the head, anything — poses her where she floats; nothing pulls her back to the floor until her feet come down to it (lower her by the hips and she lands) or the Ground button drops her. A figure hovering only a few centimetres above the floor is still settled onto it by her next drag.
 - **A hand behind the head** is made the way you would make it: drag the hand up beside the head, then roll the mouse wheel a notch at a time to push it back. Dragged there in one diagonal motion the arm may swing back first and come round late; the path up and then back gives the pose cleanly.
 - **A hand laid on the body lies on its palm.** Bring a hand to the hip, the chest, the top of the head, the belly or a knee and hold it there: it turns to lie flat, palm to the body, the way a hand put on the floor does. Brought to the small of the back it rests on the back of the hand instead — the forearm cannot turn the palm round that far. The hand settles only where it comes to rest; dragged past the body it keeps its angle. A hand that leaves the surface keeps the turn it took there; Reset Joint or the Transform tab's Twist dial straightens it. A hand brought to the hip also takes its elbow out, akimbo — drag the elbow afterwards if you want the arm straight.
 
@@ -96,6 +97,7 @@ Some poses are made with two hands at once — hands on a bar, a push against a 
 - A plain click on any joint, or on empty space, selects one joint alone again. A Shift + click on a finger or a toe selects that digit alone (digits are posed on their own), and a click on the face stands for the head.
 - `Ctrl` + drag is not a group gesture: it moves the pressed joint's chain, or (by the hips) the figure, as described above.
 - A group drag is one undo step, and the wheel's depth control works during it.
+- The [Transform tab's](#turning-several-joints-at-once) dials and `B` / `S` / `T` turn every selected joint too — select the spine's joints from the hips to the chest and one Bend dial curls the whole back.
 
 ## Turning a joint with the mouse: B, S, T
 
@@ -116,7 +118,7 @@ These are the same three motions as the dials of the [Transform tab](#the-transf
 - Pressing another of the three keys drops what the running one did and starts that one. To combine two, click to keep the first, then press the next key.
 - The mouse wheel still zooms while the mode is on, and the mode is not available in the middle of a drag.
 
-Rotations stop at the joint's limits, and a rotation that would push a limb into the body stops at the body. Only the one joint turns: no balance, no planted feet (press the [Ground button](#the-ground-button) afterwards if the feet left the floor). Each kept turn is one undo step. The keys are live only while the selected joint has that motion (an elbow has no Side-Side), and a text field you are typing in keeps its letters.
+Rotations stop at the joint's limits, and a rotation that would push a limb into the body stops at the body. Only the selected joint turns — or, with several joints selected (Shift + click), each of them by the same amount, as the dials do ([below](#turning-several-joints-at-once)): no balance, no planted feet (press the [Ground button](#the-ground-button) afterwards if the feet left the floor). Each kept turn is one undo step. The keys are live only while the selected joint has that motion (an elbow has no Side-Side), and a text field you are typing in keeps its letters.
 
 ## The Transform tab
 
@@ -162,6 +164,16 @@ The dials are scrub fields like the ones on the Environment tab: drag left or ri
 - On a left and a right joint the same value gives the mirrored pose: 50 on both thighs' Side-Side moves both legs outward.
 - The dials follow the figure. Drag a joint in the viewport, turn it with `B` / `S` / `T`, undo, or load a pose, and they show the selected joint's new rotation.
 - Each scrub, each typed value and each reset is one undo step.
+
+### Turning several joints at once
+
+Select several joints with **Shift + click** (see [Moving several joints together](#moving-several-joints-together-shift)) and the dials turn all of them: the tab names the last joint you clicked and how many more are selected, shows that joint's values, and a change of a dial moves **every selected joint by the same amount on its own scale**. Select the lower and upper abdomen and the two chest joints, drag Bend to 40, and the back curls evenly from the hips to the shoulders, each joint 40% of the way to its own limit; select both thighs and Side-Side spreads the legs together, mirrored.
+
+- The joints keep their differences: a joint already bent further than the others stays that much further. A joint at its limit stops there while the others go on.
+- A selected joint that does not have the motion (an elbow's Side-Side) sits it out.
+- The button beside a dial, and **Reset All**, take every selected joint back to its rest pose.
+- `B`, `S` and `T` turn the selection the same way, following the joint you clicked last.
+- The whole change is one undo step.
 
 ## Joint pins
 
@@ -216,15 +228,26 @@ Everything the body does comes from the figure you imported, not from PoseStudio
 
 ## Soft breasts
 
-A figure's breasts follow the pose. Bend her forward and they hang forward and out; lie her on her back and they flatten and settle outward; on her side they fall toward the lower side, the upper one in and the lower one out, rolling with the fall; hang her from a hand and they fall toward the head — all of it the more the fuller the bust. While you drag they lag the chest a little and bounce as it stops, and when she lands from the [Ground button](#the-ground-button) they drop with the landing and spring back, as her arms swing forward and back with the dip. Nothing of this is in the pose: pose files, undo, the Transform tab and the joints you pick read exactly as before, and a pectoral you turn by hand adds on top.
+A figure's breasts follow the pose. Bend her forward and they hang forward and out; lie her on her back and they flatten and settle outward; on her side they fall toward the lower side — the upper one draping across the chest, further than the lower one falls outward — rolling with the fall; hang her from a hand and they fall toward the head — all of it the more the fuller the bust. While you drag they lag the chest a little and bounce as it stops, and when she lands from the [Ground button](#the-ground-button) they drop with the landing and spring back, as her arms swing forward and back with the dip. Nothing of this is in the pose: pose files, undo, the Transform tab and the joints you pick read exactly as before, and a pectoral you turn by hand adds on top.
 
 How much they move depends on the breast the figure actually has, read off her mesh at import: a full breast moves the whole amount, a small one less, a flat chest (a male figure, a child) not at all. Figures from other formats take part when their rig carries breast bones (the character-creation exports do; most game and anime rigs do not).
 
-The breast moves as one piece — it shifts and hangs with a slight tilt, it does not swing like a bag — and in a bow it is drawn out toward the floor with the nipple leading. The amount is the breast's own: a large bust hangs and bounces a great deal, a modest one a little, a flat chest not at all. The bounce is speed-dependent and firm: a quick move sets the breasts swinging once and settling, a slow or a trembling one does not move them at all, and the two breasts never move quite together. It is an up-and-down and side-to-side motion — a drop sways the breasts a little apart, a rise brings them together — and never in and out: the breast moves as a solid mass inside the skin, not as a bag swinging from its top, and how far it hangs out from the chest follows the pose alone. When she lands from the Ground button her breasts drop and bounce, her knees take the landing, and her hanging arms swing forward with the elbows bending before they settle. Preferences → Posing turns it off or scales it (see [Preferences](preferences.md#posing)).
+The breast moves as one piece — it shifts and hangs with a slight tilt, it does not swing like a bag — and in a bow it is drawn out toward the floor with the nipple leading. The amount is the breast's own: a large bust hangs and bounces a great deal, a modest one a little, a flat chest not at all. The bounce is speed-dependent and firm: a quick move sets the breasts moving once and settling — the faster the move, the more — a slow or a trembling one does not move them at all, and the two breasts never move quite together. It goes up and sideways, hardly ever down: a breast at rest already hangs at the end of its stretch, so a jolt or a landing can press it only a few millimetres further down before it springs back up — like something carried in a bag, which can swing side to side and lift but has nowhere to go below — and never in and out: the breast moves as a solid mass inside the skin, not as a bag swinging from its top, and how far it hangs out from the chest follows the pose alone. A full bust moves more than a modest one, but its bounce has a ceiling: past a few centimetres the tissue holds, however full the breast. When she lands from the Ground button her breasts dip and spring up once, her knees take the landing, and her hanging arms swing forward with the elbows bending before they settle. The Soft Body Physics tab turns it off or scales it (see [The Soft Body Physics tab](#the-soft-body-physics-tab)).
 
 ## Soft buttocks
 
-A figure's buttocks jiggle with the hips' movement — sideways about half as far as the breasts, up and down about as far — and never hang: a pose by itself — a bow, a sit, lying down — leaves them exactly as sculpted. A quick drag of the hips or a landing from the Ground button sets them swaying and settling, sideways and up and down, a drop spreading them a little; a slow drag moves them not at all. It works on every rigged figure, whether or not its rig has a bone there, and as with the breasts nothing of it is in the pose or a pose file. Preferences → Posing has its own switch for it, and the Strength dial scales both (see [Preferences](preferences.md#posing)).
+A figure's buttocks jiggle with the hips' movement — sideways about half as far as the breasts, up and down about as far — and never hang: a pose by itself — a bow, a sit, lying down — leaves them exactly as sculpted. A quick drag of the hips or a landing from the Ground button sets them swaying and settling, sideways and up and down, a drop spreading them a little; a slow drag moves them not at all. It works on every rigged figure, whether or not its rig has a bone there, and as with the breasts nothing of it is in the pose or a pose file. The Soft Body Physics tab has its own switch and Softness dial for them (see [The Soft Body Physics tab](#the-soft-body-physics-tab)).
+
+## The Soft Body Physics tab
+
+The side panel's **Soft Body Physics** tab holds the controls for both, remembered between sessions:
+
+- **Enable soft body physics** — the master switch. Off, every figure keeps the breasts and the buttocks as sculpted.
+- **Breasts** — their own switch and two dials. **Softness (%)** scales everything the breasts do, the hang in a pose and the bounce alike: 100 is the calibrated amount for the figure's own bust, 0 holds them as sculpted, 200 doubles it. **Bounce (%)** scales only how much a quick move or a landing sets them bouncing, on top of the softness: 0 leaves just the hang of the pose.
+- **Buttocks** — their own switch and a **Softness (%)** dial for how far they jiggle.
+- **Restore Defaults** — everything back to the calibrated amounts, all on.
+
+Every change applies to the figures in the scene at once. Nothing here is written into the pose or a pose file.
 
 ## Tips
 

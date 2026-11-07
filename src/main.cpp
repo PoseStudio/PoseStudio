@@ -11,7 +11,7 @@
 #include "importformats.h"
 #include "database.h"
 #include "menumanager.h"
-#include "posingpreferencespanel.h"
+#include "softbodypanel.h"
 #include "splashoverlay.h"
 #include "whatsnewdialog.h"
 #include "helpwindow.h"
@@ -103,7 +103,7 @@ int main(int argc, char *argv[]) {
     }
 
     PreferencesManager::instance().loadFromDatabase();
-    PosingPreferencesPanel::applyStoredSettings(); // (the soft breasts' switches, before any figure is imported)
+    pose::SoftBodyPanel::applyStoredSettings(); // (the soft body's switches and dials, before any figure is imported)
 
     // --- 2. Branding & theming (window icon, Fusion proxy style, the QSS modules, menu shadows) ---
     AppTheme::install(app);
@@ -153,6 +153,8 @@ int main(int argc, char *argv[]) {
     sidePanel->addTab(assetsTab, QObject::tr("Asset Manager"));
     // The Transform tab: the selected joint's rotation as three dials (see TransformPanel).
     sidePanel->addTab(new pose::TransformPanel(viewport), QObject::tr("Transform"));
+    // The Soft Body Physics tab: the breasts' and the buttocks' switches and dials (see SoftBodyPanel).
+    sidePanel->addTab(new pose::SoftBodyPanel(viewport), QObject::tr("Soft Body Physics"));
     // The Environment tab: live image-based-lighting controls for the viewport (see EnvironmentPanel).
     pose::EnvironmentPanel *environmentTab = new pose::EnvironmentPanel(viewport);
     sidePanel->addTab(environmentTab, QObject::tr("Environment"));

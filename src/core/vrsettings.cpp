@@ -48,6 +48,18 @@ void VrSettings::setReducedEffects(bool reduced) {
                                            reduced ? QStringLiteral("1") : QStringLiteral("0"));
 }
 
+double VrSettings::splatScale() {
+    bool ok = false;
+    const double stored =
+        PreferencesManager::instance().getValue(Constants::PREF_VR_SPLAT_SCALE, kDefaultSplatScale).toDouble(&ok);
+    return ok ? std::clamp(stored, kMinSplatScale, 1.0) : kDefaultSplatScale;
+}
+
+void VrSettings::setSplatScale(double scale) {
+    PreferencesManager::instance().setValue(Constants::PREF_VR_SPLAT_SCALE,
+                                           QString::number(std::clamp(scale, kMinSplatScale, 1.0), 'f', 2));
+}
+
 QString VrSettings::status() {
     return g_status;
 }

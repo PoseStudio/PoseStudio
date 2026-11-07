@@ -112,4 +112,67 @@ glm::vec3 eulerFromMatrix(const glm::mat3& m, const std::string& order) {
     return outDegrees;
 }
 
+namespace {
+
+// An angle in degrees brought into [-180, 180].
+float wrapDegrees(float x) {
+    return x - 360.0f * std::round(x / 360.0f);
+}
+
+} // namespace
+
+glm::vec3 eulerFromMatrixNear(const glm::mat3& m, const std::string& order, const glm::vec3& near) {
+    int i = 0, j = 1, k = 2;
+    if (order.size() >= 3) {
+        const int oi = axisIndexOf(order[0]);
+        const int oj = axisIndexOf(order[1]);
+        const int ok = axisIndexOf(order[2]);
+        if (oi >= 0 && oj >= 0 && ok >= 0 && oi != oj && oj != ok && oi != ok) {
+            i = oi;
+            j = oj;
+            k = ok;
+        }
+    }
+    // The plain decomposition, and the same with the third-applied angle held at near's: M =
+    // M' · Rk(c), M' decomposed (its third angle 0 by construction) — equal to the first away
+    // from gimbal lock, and AT it the split of the folded angle that keeps the third where it was.
+    glm::vec3 axisK(0.0f);
+    axisK[k] = 1.0f;
+    const glm::mat3 rk(glm::rotate(glm::mat4(1.0f), glm::radians(near[k]), axisK));
+    glm::vec3       held = eulerFromMatrix(m * glm::transpose(rk), order);
+    held[k] += near[k];
+    const glm::vec3 bases[2] = {eulerFromMatrix(m, order), held};
+
+    glm::vec3 best(0.0f);
+    float     bestDist = -1.0f;
+    for (const glm::vec3& base : bases) {
+        // Each base and its other branch: Ri(a+180)·Rj(180-b)·Rk(c+180) = Ri(a)·Rj(b)·Rk(c).
+        glm::vec3 flipped = base;
+        flipped[i] += 180.0f;
+        flipped[j] = 180.0f - flipped[j];
+        flipped[k] += 180.0f;
+        for (const glm::vec3& cand : {base, flipped}) {
+            glm::vec3 out(0.0f);
+            float     dist = 0.0f;
+            for (int a = 0; a < 3; ++a) {
+                // Nearest to near modulo 360, then into [-180, 180] (an exact ±180 keeps near's sign).
+                const float d = wrapDegrees(cand[a] - near[a]);
+                float       v = near[a] + d;
+                if (v > 180.0f) {
+                    v -= 360.0f;
+                } else if (v < -180.0f) {
+                    v += 360.0f;
+                }
+                out[a] = v;
+                dist += d * d;
+            }
+            if (bestDist < 0.0f || dist < bestDist) {
+                bestDist = dist;
+                best = out;
+            }
+        }
+    }
+    return best;
+}
+
 } // namespace pose

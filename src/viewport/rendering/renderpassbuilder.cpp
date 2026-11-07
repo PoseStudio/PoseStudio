@@ -63,6 +63,20 @@ RenderPassBuilder& RenderPassBuilder::depth(VkFormat format, VkSampleCountFlagBi
     return *this;
 }
 
+RenderPassBuilder& RenderPassBuilder::depthReadOnly(VkFormat format, VkSampleCountFlagBits samples,
+                                                    VkImageLayout layout) {
+    if (m_hasDepth) {
+        throw VulkanError("RenderPassBuilder::depth() called twice.");
+    }
+    const uint32_t index = attachmentCount();
+    VkAttachmentDescription a = describe(format, samples, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, layout);
+    a.initialLayout = layout;
+    m_attachments.push_back(a);
+    m_depthRef = {index, layout};
+    m_hasDepth = true;
+    return *this;
+}
+
 RenderPassBuilder& RenderPassBuilder::dependency(const VkSubpassDependency& dep) {
     m_dependencies.push_back(dep);
     return *this;

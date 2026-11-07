@@ -31,7 +31,7 @@ A few seconds after every launch the application sends an anonymous "this instal
 
 - The **menu bar** — File, Edit, View and Help.
 - The **3D viewport** fills most of the window. In its top-right corner floats a strip of controls: the shading picker, the camera-view picker, and the Home, Ground and Skeleton buttons.
-- The **side panel** on the right has three tabs on its left edge: **Asset Manager** (your content), **Transform** (the selected joint's rotation) and **Environment** (lighting). Drag the divider between the viewport and the panel to resize them.
+- The **side panel** on the right has four tabs on its left edge: **Asset Manager** (your content), **Transform** (the selected joint's rotation), **Soft Body Physics** (how the breasts and the buttocks move) and **Environment** (lighting). Drag the divider between the viewport and the panel to resize them.
 
 [The Interface](interface.md) describes each part in detail.
 

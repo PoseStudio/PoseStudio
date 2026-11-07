@@ -825,9 +825,5 @@ void MenuManager::openPreferencesDialog(const QString &initialTab) {
         QObject::connect(&dialog, &PreferencesDialog::navigateToLibraryRequested,
                           assetManagerWidget, &AssetManagerWidget::navigateToLibraryRoot);
     }
-    if (viewportWidget) {
-        QObject::connect(&dialog, &PreferencesDialog::softBodySettingsChanged,
-                          viewportWidget, &pose::ViewportWidget::applySoftBodySettings);
-    }
     dialog.exec();
 }

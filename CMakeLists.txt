@@ -290,6 +290,8 @@ add_executable(
     src/properties/transformpanel.h
     src/properties/propertyrows.cpp      # the row builders every properties tab shares (group, restore button)
     src/properties/propertyrows.h
+    src/properties/softbodypanel.cpp     # the Soft Body Physics tab: the breasts' and the buttocks' switches and dials
+    src/properties/softbodypanel.h
 
     # --- 3D Viewport (Vulkan) ---
     # Qt-facing layer (the only viewport files that touch Qt):
@@ -543,8 +545,6 @@ add_executable(
     src/preferences/generalpreferencespanel.h
     src/preferences/vrpreferencespanel.cpp  # VR support toggle, headset status, render scale
     src/preferences/vrpreferencespanel.h
-    src/preferences/posingpreferencespanel.cpp # the soft breasts' switch and strength
-    src/preferences/posingpreferencespanel.h
     src/preferences/assetspreferencespanel.cpp
     src/preferences/assetspreferencespanel.h
     src/preferences/placeholderpreferencespanel.cpp # one class for every not-yet-built tab (Interface/Input/Navigation/System)
@@ -948,6 +948,7 @@ set(SHADER_SOURCES
     depthresolve.frag
     splat.vert
     splat.frag
+    splatmask.frag
 )
 
 set(COMPILED_SPV_FILES "")

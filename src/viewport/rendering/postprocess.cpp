@@ -34,6 +34,7 @@ struct PostPush {
     float params[4];
     float outline[4];
     float uvRect[4];
+    float photo[4]; // xy = the photo layer's UV scale (CompositeOptions::photoUvScale)
 };
 
 } // namespace
@@ -296,7 +297,8 @@ void PostProcess::recordComposite(VkCommandBuffer cmd, bool tonemap, bool bloom,
     constexpr float kBloomStrength = 0.35f;
     const PostPush push{{tonemap ? 1.0f : 0.0f, kBloomStrength, bloom ? 1.0f : 0.0f, outlineWidthPx},
                         {m_outlineColor[0], m_outlineColor[1], m_outlineColor[2], options.encodeSrgb ? 1.0f : 0.0f},
-                        {options.uvScale[0], options.uvScale[1], options.uvOffset[0], options.uvOffset[1]}};
+                        {options.uvScale[0], options.uvScale[1], options.uvOffset[0], options.uvOffset[1]},
+                        {options.photoUvScale[0], options.photoUvScale[1], options.outlineFromSplats ? 1.0f : 0.0f, 0.0f}};
     const VkDescriptorSet set = (options.fromMirror && m_hasMirror) ? m_mirrorSet : m_compositeSet;
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_compositePipeline->handle());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_compositePipeline->layout(), 0,

@@ -35,17 +35,18 @@
 
 namespace pose {
 
-Scene::Scene(VulkanContext& context, VkRenderPass renderPass, VkRenderPass outlineMaskPass,
+Scene::Scene(VulkanContext& context, VkRenderPass renderPass, VkRenderPass outlineMaskPass, VkRenderPass photoPass,
              const std::vector<char>& vertSpirv, const std::vector<char>& fragSpirv,
              const std::vector<char>& skeletonVertSpirv, const std::vector<char>& skeletonFragSpirv,
              const std::vector<char>& shadowVertSpirv, const std::vector<char>& shadowFragSpirv,
              const std::vector<char>& backgroundVertSpirv,
              const std::vector<char>& backgroundFragSpirv,
              const std::vector<char>& outlineMaskFragSpirv,
-             const std::vector<char>& splatVertSpirv, const std::vector<char>& splatFragSpirv)
+             const std::vector<char>& splatVertSpirv, const std::vector<char>& splatFragSpirv,
+             const std::vector<char>& splatMaskFragSpirv)
     : m_context(context) {
     // The shared plumbing first: every pass below builds against its layouts.
-    m_pipelines = std::make_unique<ScenePipelines>(m_context, renderPass, vertSpirv, fragSpirv,
+    m_pipelines = std::make_unique<ScenePipelines>(m_context, renderPass, photoPass, vertSpirv, fragSpirv,
                                                    backgroundVertSpirv, backgroundFragSpirv,
                                                    splatVertSpirv, splatFragSpirv);
 
@@ -60,7 +61,9 @@ Scene::Scene(VulkanContext& context, VkRenderPass renderPass, VkRenderPass outli
     // overlay (skeleton, pin markers, the orthographic floor line).
     m_outlinePass = std::make_unique<OutlinePass>(m_context, outlineMaskPass,
                                                   m_pipelines->poseSetLayout(), shadowVertSpirv,
-                                                  outlineMaskFragSpirv);
+                                                  outlineMaskFragSpirv, m_pipelines->cameraSetLayout(),
+                                                  m_pipelines->splatSetLayout(), splatVertSpirv,
+                                                  splatMaskFragSpirv);
     m_lineOverlay = std::make_unique<LineOverlay>(m_context, renderPass,
                                                   m_pipelines->cameraSetLayout(),
                                                   skeletonVertSpirv, skeletonFragSpirv);
@@ -112,24 +115,43 @@ void Scene::addModel(const ModelData& data) {
                                                m_pipelines->poseSetLayout(),
                                                m_pipelines->fallbackDiffuse(),
                                                m_pipelines->fallbackNormal()));
-    setSelectedModel(static_cast<int>(m_models.size()) - 1); // the new arrival is the selection
+    // The new arrival is NOT selected (2026-11-06; the user: "when an object is brought into a
+    // scene it should not be selected by default" — until then every import arrived outlined).
+    // The selection stays as it was; a figure imported into an empty scene is the posing target
+    // all the same, activeFigureIndex() falling back to the first figure until a joint is clicked.
 }
 
 void Scene::addSplatModel(const SplatData& data, const glm::mat4& transform) {
     m_models.push_back(std::make_unique<Model>(m_context, data, m_pipelines->splatSetLayout()));
     m_models.back()->setTransform(transform);
-    setSelectedModel(static_cast<int>(m_models.size()) - 1);
+    // Not selected either (above).
 }
 
-void Scene::recordSplats(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex) {
-    bool any = false;
+bool Scene::hasMeshes() const {
     for (const std::unique_ptr<Model>& model : m_models) {
-        if (model->splats() != nullptr) {
-            any = true;
-            break;
+        if (model->hasMeshes()) {
+            return true;
         }
     }
-    if (!any) {
+    return false;
+}
+
+bool Scene::selectedIsSplat() const {
+    const int selected = selectedModelIndex();
+    return selected >= 0 && m_models[static_cast<std::size_t>(selected)]->splats() != nullptr;
+}
+
+bool Scene::hasSplats() const {
+    for (const std::unique_ptr<Model>& model : m_models) {
+        if (model->splats() != nullptr) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Scene::recordSplats(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex, bool asyncSort) {
+    if (!hasSplats()) {
         return;
     }
     const VulkanPipeline& pipeline = m_pipelines->splat();
@@ -141,8 +163,13 @@ void Scene::recordSplats(VkCommandBuffer cmd, const Camera& camera, uint32_t fra
         if (cloud == nullptr) {
             continue;
         }
-        cloud->prepareFrame(camera, model->transform(), frameIndex);
-        cloud->record(cmd, pipeline.layout(), frameIndex, camera, model->transform());
+        // The ORDER buffer's slot: the desktop frames alternate theirs with the frame in flight;
+        // VR Mode's two eyes — one VR frame in flight, waited for before the next records, and
+        // the same far-first order for both (it is the view direction's alone) — share slot 0,
+        // so the order is copied once a frame, not once an eye.
+        const uint32_t orderSlot = splatOrderSlot(frameIndex, asyncSort);
+        cloud->prepareFrame(camera, model->transform(), orderSlot, asyncSort);
+        cloud->record(cmd, pipeline.layout(), orderSlot, camera, model->transform());
     }
 }
 
@@ -224,8 +251,11 @@ void Scene::removeModel(std::size_t index) {
 }
 
 void Scene::clearModels() {
-    m_models.clear(); // destructors free buffers/descriptors, as the last removeModel would
-    setSelectedModel(-1); // clear the selection (and its joint selection)
+    m_models.clear();     // destructors free buffers/descriptors, as the last removeModel would
+    m_selectedModel = -1; // the selection with them — DIRECTLY: setSelectedModel(-1) reads the
+                          // selection through the bounds check, which an empty list already fails,
+                          // and returned early with the old index kept; the next model imported
+                          // into that slot then arrived selected (File → New / Open, 2026-11-07)
     m_activeFigure = -1;  // no posing target
 }
 
@@ -250,13 +280,15 @@ void Scene::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex) {
 }
 
 bool Scene::recordOutlinePass(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex,
-                              const OutlineMask& mask) {
+                              const OutlineMask& mask, bool asyncSort) {
     const int selected = selectedModelIndex();
     if (selected < 0) {
         return false; // nothing selected: skip the pass; the composite draws no outline
     }
-    return m_outlinePass->record(cmd, camera, frameIndex, mask,
-                                 *m_models[static_cast<std::size_t>(selected)]);
+    // (A splat scene's order slot as recordSplats picks it: VR Mode's eyes share slot 0.)
+    const uint32_t orderSlot = splatOrderSlot(frameIndex, asyncSort);
+    return m_outlinePass->record(cmd, camera, frameIndex, mask, *m_models[static_cast<std::size_t>(selected)],
+                                 m_pipelines->cameraSet(frameIndex), orderSlot, asyncSort);
 }
 
 void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex) {

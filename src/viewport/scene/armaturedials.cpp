@@ -534,8 +534,12 @@ glm::vec3 Armature::figureRotationDeg() const {
     // axis, then roll about her own forward axis ("YXZ": leftmost outermost). The tilt is shown
     // with her left side DOWN positive, which is a negative roll about +z.
     const glm::mat3 world = glm::mat3(m_transform) * glm::mat3(m_poseGlobal[static_cast<std::size_t>(root)]);
-    const glm::vec3 e = eulerFromMatrix(world, "YXZ"); // (e.x pitch, e.y yaw, e.z roll)
-    return glm::vec3(e.y, e.x, -e.z);
+    // On the branch nearest what was last shown: the plain decomposition keeps the tip within
+    // ±90, and a tip carried past 90 read back as 180 - tip with the turn and the tilt flipped.
+    const glm::vec3& shown = m_figureRotationShown;
+    const glm::vec3  e = eulerFromMatrixNear(world, "YXZ", glm::vec3(shown.y, shown.x, -shown.z)); // (pitch, yaw, roll)
+    m_figureRotationShown = glm::vec3(e.y, e.x, -e.z);
+    return m_figureRotationShown;
 }
 
 void Armature::setFigureRotationDeg(const glm::vec3& turnTipTilt) {
@@ -559,7 +563,12 @@ void Armature::setFigureRotationDeg(const glm::vec3& turnTipTilt) {
         parentRot = glm::mat3(m_poseGlobal[static_cast<std::size_t>(bone.parent)]);
     }
     const glm::mat3 next = invOrient * glm::transpose(parentRot) * glm::inverse(glm::mat3(m_transform)) * target * orient;
-    m_boneEuler[static_cast<std::size_t>(root)] = eulerFromMatrix(next, bone.rotationOrder);
+    // The root's channels on the branch nearest the ones it has: read plainly, a tilt past 90 (the
+    // root's middle channel through its ±90 on the hip's order) put two channels at 180 — the same
+    // pose, but the hip's dials jumped to ±100 and back.
+    m_boneEuler[static_cast<std::size_t>(root)] =
+        eulerFromMatrixNear(next, bone.rotationOrder, m_boneEuler[static_cast<std::size_t>(root)]);
+    m_figureRotationShown = turnTipTilt;
     clampBoneEuler(root);
     recomposePoseLocal(static_cast<std::size_t>(root));
     computeSkinMatrices();

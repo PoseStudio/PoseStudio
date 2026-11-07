@@ -25,7 +25,7 @@
  * kButtockJoltShare of it felt), with the breasts' figure of eight (a drop spreads the cheeks a
  * little) and the landing's KICK. Compliance half the breasts' sideways and the breasts' own
  * along the trunk (kButtockSide, kButtockDown: the first look read the up-and-down too subtle
- * at half), the breasts' frequency and damping, substepped, the
+ * at half), its own frequency and damping (kButtockHz, kButtockDamping), substepped, the
  * stiffening capped. Nothing of it is in the pose. POSESTUDIO_BREAST_TRACE=2 prints the left
  * cheek per tick beside the breast; POSESTUDIO_BUTTOCK_DOWN / _SIDE (mm per g) and _IMPACT are
  * the levers.
@@ -33,6 +33,7 @@
 
 #include "armature.h"
 
+#include "ikmath.h" // normalizedFrame
 #include "ikrig.h"
 #include "rigroles.h"
 #include "softbodysettings.h"
@@ -75,18 +76,6 @@ const float kButtockDown = envOrF("POSESTUDIO_BUTTOCK_DOWN", kButtockDownDefault
 const float kButtockSide = envOrF("POSESTUDIO_BUTTOCK_SIDE", kButtockSideDefault * 1000.0f) / 1000.0f;
 const float kButtockCap = envOrF("POSESTUDIO_BUTTOCK_CAP", kButtockCapDefault * 1000.0f) / 1000.0f;
 const float kButtockImpactShare = envOrF("POSESTUDIO_BUTTOCK_IMPACT", kButtockImpactShareDefault);
-
-/// The hips' frame as posed: the root bone's world rotation, its columns normalized.
-glm::mat3 normalizedFrame(const glm::mat4& boneGlobal) {
-    glm::mat3 frame(boneGlobal);
-    for (int c = 0; c < 3; ++c) {
-        const float len = glm::length(frame[c]);
-        if (len > 1e-8f) {
-            frame[c] /= len;
-        }
-    }
-    return frame;
-}
 
 } // namespace
 
@@ -229,8 +218,7 @@ void Armature::tickButtocks(float dt, bool& movingOut) {
         return;
     }
     if (!m_buttockDynamic) {
-        m_buttockSamples = 0; // (the first tick of a sequence: no velocity to read yet)
-        m_buttockAccel = glm::vec3(0.0f);
+        m_buttockReader.reset(); // (the first tick of a sequence: no velocity to read yet)
         for (Buttock& b : m_buttocks) {
             b.disp = glm::vec3(0.0f);
             b.vel = glm::vec3(0.0f);
@@ -238,35 +226,16 @@ void Armature::tickButtocks(float dt, bool& movingOut) {
     }
     // THE HIPS' ACCELERATION, read as the breasts read the chest's: the hip joint's velocity
     // smoothed before it is differenced, the acceleration smoothed after, the dead band, the cap.
-    const glm::vec3 hips = glm::vec3(m_transform * m_poseGlobal[static_cast<std::size_t>(m_buttockRoot)][3]);
-    glm::vec3       accel(0.0f);
-    if (m_buttockSamples >= 1) {
-        const glm::vec3 velRaw = (hips - m_buttockHipsPos) / dt;
-        const glm::vec3 vel = m_buttockSamples >= 2 ? glm::mix(m_buttockHipsVel, velRaw, kButtockVelSmooth) : velRaw;
-        if (m_buttockSamples >= 2) {
-            accel = (vel - m_buttockHipsVel) / dt;
-        }
-        m_buttockHipsVel = vel;
-    }
-    m_buttockHipsPos = hips;
-    ++m_buttockSamples;
-    constexpr float g = 9.81f;
-    m_buttockAccel = glm::mix(m_buttockAccel, accel / g, kButtockAccelSmooth);
-    glm::vec3 felt = m_buttockAccel;
-    float     mag = glm::length(felt);
-    if (mag < kButtockAccelDeadG) {
-        felt = glm::vec3(0.0f);
-        mag = 0.0f;
-    } else if (mag > kButtockAccelMaxG) {
-        felt *= kButtockAccelMaxG / mag;
-        mag = kButtockAccelMaxG;
-    }
+    float           mag = 0.0f;
+    const glm::vec3 felt = m_buttockReader.sample(glm::vec3(m_transform * m_poseGlobal[static_cast<std::size_t>(m_buttockRoot)][3]), dt,
+                                                  kButtockVelSmooth, kButtockAccelSmooth, kButtockAccelDeadG, kButtockAccelMaxG, mag);
+    (void)mag;
     // Into the hips' frame (the model transform taken off first): the rest the mass is drawn to is
     // the acceleration's alone — a pose changes nothing — sideways and along the trunk.
     const glm::mat3 toModel = glm::inverse(glm::mat3(m_transform));
     const glm::mat3 frame = normalizedFrame(m_poseGlobal[static_cast<std::size_t>(m_buttockRoot)]);
     const glm::vec3 aFrame = glm::transpose(frame) * (toModel * felt) * kButtockJoltShare;
-    const float     strength = softbody::breastStrength();
+    const float     strength = softbody::buttockStrength(); // (the tab's Softness of the buttocks' own; the breasts' until 2026-11-07)
     const glm::vec3 restBase(-kButtockSide * aFrame.x * strength, -kButtockDown * aFrame.y * strength, 0.0f);
     const glm::vec3 damping(kButtockDamping, kButtockDamping, kButtockDamping);
     const float     h = dt / static_cast<float>(kButtockSubsteps);
@@ -315,20 +284,18 @@ void Armature::kickButtocks(float impactSpeed) {
         m_buttockDynamic = true;
     }
     // The kick is the landing's whole deceleration: the reader forgets the fall.
-    m_buttockSamples = 0;
-    m_buttockAccel = glm::vec3(0.0f);
+    m_buttockReader.reset();
     const glm::mat3 toModel = glm::inverse(glm::mat3(m_transform));
     const glm::mat3 frame = normalizedFrame(m_poseGlobal[static_cast<std::size_t>(m_buttockRoot)]);
     const glm::vec3 downFrame = glm::transpose(frame) * (toModel * glm::vec3(0.0f, -1.0f, 0.0f));
     for (Buttock& b : m_buttocks) {
-        b.vel += glm::vec3(downFrame.x, downFrame.y, 0.0f) * (impactSpeed * kButtockImpactShare * softbody::breastStrength());
+        b.vel += glm::vec3(downFrame.x, downFrame.y, 0.0f) * (impactSpeed * kButtockImpactShare * softbody::buttockStrength());
     }
 }
 
 void Armature::settleButtocks() {
     m_buttockDynamic = false;
-    m_buttockSamples = 0;
-    m_buttockAccel = glm::vec3(0.0f);
+    m_buttockReader.reset();
     for (Buttock& b : m_buttocks) {
         b.disp = glm::vec3(0.0f);
         b.vel = glm::vec3(0.0f);

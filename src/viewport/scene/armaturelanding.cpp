@@ -109,8 +109,13 @@ bool Armature::beginLandingBounce(float impactSpeed) {
                      dip * 1000.0f, feet, other ? 1 : 0, feet > 0 && !other ? "bounce" : "no bounce");
     }
     if (feet == 0 || other) {
-        endIkDrag();
+        endIkDrag(); // (settles the soft body with the drag it closes, the kick above included ...)
         giveBack();
+        // ... so the landing's kick is given again: not on her feet nothing dips, but the breasts
+        // and the buttocks still bounce, and the fall's soft tail runs them to rest (left settled,
+        // a kneeling or seated figure's breasts floated up through the fall and snapped to rest on
+        // impact, 2026-11-07).
+        kickSoftBody(impactSpeed);
         return false;
     }
     m_landing.active = true;
@@ -189,7 +194,7 @@ bool Armature::landingBounceTick(float seconds) {
         // run on, for up to kLandingTailSeconds, then the bounce ends (endLandingBounce rests it
         // exactly).
         const bool armsSwinging = !m_landing.arms.empty() && std::abs(armAngle) > kLandingArmRestDeg;
-        if (seconds >= m_landing.seconds + kLandingTailSeconds || (!armsSwinging && !softbody::breastMotion())) {
+        if (seconds >= m_landing.seconds + kLandingTailSeconds || (!armsSwinging && !softbody::breastMotion() && !softbody::buttockMotion())) {
             return false;
         }
         if (!m_landing.tail) {
@@ -205,16 +210,14 @@ bool Armature::landingBounceTick(float seconds) {
         if (applyArms()) {
             computeSkinMatrices();
         }
-        const bool breasts = softbody::breastMotion() && tickSoftBody(dt);
-        return armsSwinging || breasts;
+        const bool soft = tickSoftBody(dt); // (the breasts and the buttocks; at once when both are off)
+        return armsSwinging || soft;
     }
     dragIkTo(m_landing.hipStart - glm::vec3(0.0f, m_landing.dip * landingShape(seconds, m_landing.seconds), 0.0f));
     if (applyArms()) {
         computeSkinMatrices();
     }
-    if (softbody::breastMotion()) {
-        tickSoftBody(dt); // (THE SOFT BREASTS feel the landing's deceleration and bounce)
-    }
+    tickSoftBody(dt); // (THE SOFT BODY feels the landing's deceleration and bounces; at once when off)
     // The tail: blended home to the pose she landed in.
     const float home = glm::smoothstep(kLandingBlendFrom * m_landing.seconds, m_landing.seconds, seconds);
     if (home > 0.0f && m_landing.euler.size() == m_bones.size() && m_landing.translation.size() == m_bones.size()) {

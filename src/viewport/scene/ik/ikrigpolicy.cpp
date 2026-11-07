@@ -79,9 +79,15 @@ void IkRig::updateIntent(const glm::vec3& target, const std::vector<glm::vec3>& 
             target.y > positions[static_cast<std::size_t>(m_effector)].y + kLimbUpIntentHeight * m_sizeScale && !effectorIsTrunk();
     }
     boundLivePins(positions);
-    if (m_effector != m_graph.root()) {
-        updateSuspension(target, positions); // a sustained beyond-reach lift releases the pins
+    updateSuspension(target, positions); // a sustained beyond-reach lift releases the pins — the hips' and the trunk's too (2026-11-07)
+}
+
+bool IkRig::trunkEffector() const {
+    if (m_effector == m_graph.root()) {
+        return true;
     }
+    const RigRole r = m_roles.role(m_effector);
+    return r == RigRole::Hips || r == RigRole::Pelvis || r == RigRole::Spine || r == RigRole::Neck || r == RigRole::Head;
 }
 
 void IkRig::updateSuspension(const glm::vec3& target, const std::vector<glm::vec3>& positions) {
@@ -96,6 +102,46 @@ void IkRig::updateSuspension(const glm::vec3& target, const std::vector<glm::vec
     const float strainLen = glm::length(strain);
     bool leashBound = false;
     const glm::vec3& rootPos = positions[static_cast<std::size_t>(m_pelvis)];
+    // THE HIPS AND THE TRUNK (2026-11-07): a limb's lift-off asks 15cm of strain beyond the
+    // chain's reach — a reachable up-pull must raise the arm, however briskly. A drag of the hips
+    // (the chain is nothing: the strain is how far the cursor stands above the root the legs
+    // stop) or of a trunk joint lifts off at kSuspendStrainTrunk — "a bit past the pin limit" —
+    // and only with the standing legs TAUT — each planted foot's leg at kSuspendTautShare of its
+    // STRETCH toward its pin (limbStretch, liveContactStretch's measure: 1 dead straight, 0.985 at
+    // a knee bent 20°). A kneel-up's root lags its cursor by more than the strain for longer than
+    // the confirmation while its knees are still bent, and the leash alone (the drag-start
+    // distance with headroom) is bound before the legs are straight. (A first cut read the root's
+    // place along the bone PATH from the pin, which runs sideways to the socket first: a knee bent
+    // 40° read taut.) With no standing leg to measure — every foot user-pinned, or none planted —
+    // nothing is taut: a lift against user pins strains against them and releases nothing.
+    const bool  trunk = trunkEffector();
+    const float strainLimit = (trunk ? kSuspendStrainTrunk : kSuspendStrain) * m_sizeScale;
+    bool        legsTaut = true;
+    if (trunk) {
+        int measured = 0;
+        for (std::size_t p = 0; p < m_pins.size(); ++p) {
+            const IkEffector& pin = m_pins[p];
+            if (pin.leashRadius <= 0.0f || (p < m_pinLive.size() && m_pinLive[p]) || (p < m_pinUser.size() && m_pinUser[p])) {
+                continue;
+            }
+            // The leg's rest span: the chain from the pin up to the limb junction (limbStretch's
+            // measure over it, as liveContactStretch reads a live contact's).
+            const int junction = limbJunction(pin.node);
+            float     span = 0.0f;
+            for (int cur = pin.node; cur >= 0 && cur != junction && m_parents[static_cast<std::size_t>(cur)] >= 0;
+                 cur = m_parents[static_cast<std::size_t>(cur)]) {
+                span += m_edgeRestLen[static_cast<std::size_t>(cur)];
+            }
+            ++measured;
+            if (limbStretch(pin.node, pin.target, span, positions) < kSuspendTautShare) {
+                legsTaut = false;
+                break;
+            }
+        }
+        if (measured == 0) {
+            legsTaut = false;
+        }
+    }
     // (The test measures the ROOT against the pin target although the leash itself is centered
     // at (target - leashOffset) on the socket — see IkEffector::leashOffset. The suspension and
     // arm-raise gates are calibrated on it as written: correcting it moves the lift-off
@@ -110,19 +156,27 @@ void IkRig::updateSuspension(const glm::vec3& target, const std::vector<glm::vec
     // The lift gate is GEOMETRIC unreachability — the target farther from the leash-bound
     // root than the fully-extended chain — NOT the drag error: a reachable up-pull must simply
     // RAISE THE ARM overhead, however briskly it is made.
-    const bool beyondReach =
-        glm::length(target - rootPos) > chainLen + kSuspendStrain * m_sizeScale;
+    const bool beyondReach = glm::length(target - rootPos) > chainLen + strainLimit;
     static const bool kSuspendTrace = std::getenv("IK_SUSPEND_TRACE") != nullptr;
     if (kSuspendTrace) {
         std::fprintf(stderr,
                      "[suspend] leashBound=%d beyondReach=%d (|t-root|=%.3f chain=%.3f) "
-                     "strain=%.3f up=%.2f ticks=%d\n",
+                     "strain=%.3f up=%.2f ticks=%d trunk=%d legsTaut=%d\n",
                      leashBound ? 1 : 0, beyondReach ? 1 : 0, glm::length(target - rootPos),
                      chainLen, strainLen, strainLen > 1e-6f ? strain.y / strainLen : 0.0f,
-                     m_suspendTicks);
+                     m_suspendTicks, trunk ? 1 : 0, legsTaut ? 1 : 0);
     }
-    if (leashBound && beyondReach && strainLen > kSuspendStrain * m_sizeScale &&
-        strain.y > kSuspendUpFraction * strainLen) {
+    // ... AND THE BODY HAS STOPPED GAINING ON THE CURSOR (the trunk's lift alone): a stand-up's
+    // hips close on a cursor held above them at a centimetre or three a tick for the last part of
+    // the rise, the legs already straight by the stretch's measure, and the fifteen ticks ran out
+    // with the strain at 8.5cm — a tick or two before the hips would have arrived within 2 of a
+    // cursor 90cm over a floor sit (the floor gallery's sit-to-stand lifted off at the top of a
+    // stand-up it should have finished). A strain that shrinks resets the count; a still cursor
+    // over stopped hips holds it, a cursor pulled on grows it.
+    const bool gaining = trunk && strainLen < m_suspendStrainLast - 0.001f;
+    m_suspendStrainLast = strainLen;
+    if (leashBound && legsTaut && beyondReach && strainLen > strainLimit &&
+        strain.y > kSuspendUpFraction * strainLen && !gaining) {
         if (++m_suspendTicks >= kSuspendConfirmTicks) {
             m_suspended = true;
             m_airborne = false; // the feet are still on the floor; see the landing rule

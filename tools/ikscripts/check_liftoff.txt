@@ -1,0 +1,45 @@
+# LIFTING HER OFF THE FLOOR BY THE HIPS AND THE TRUNK, AND A FLOATING FIGURE (2026-11-07; the user:
+# "when pulling a figure up by the hip or torso she tiptoes and stays auto-pinned to the floor —
+# too hard to get the figure to leave the floor; pulling a bit past the pin limit should release
+# it. And when the character is floating the foot auto-pinning is still active, it should not be").
+# Numbers only. The hips pulled up past the legs' stretch lift her off after a quarter second and
+# she floats with the cursor; a floating figure's next drag — a hand's — leaves her floating; lowered
+# by the hips she lands; the chest lifts her off too.
+view right
+press hip
+dragv 0 0.30 30 45
+expect lowest > 100
+expect steps == 0
+release
+expect lowest > 100
+
+# Floating, a hand drag poses the arm and leaves her in the air.
+press lHand
+dragv -0.10 0 20 10
+release
+expect lowest > 100
+
+# Lowered by the hips, her feet come down to the floor and she lands on them.
+press hip
+dragv 0 -0.40 40 40
+release
+expect lowest < 20
+reset
+
+# The chest lifts her off too.
+view right
+press chest@0.6
+dragv 0 0.40 30 45
+expect lowest > 100
+release
+reset
+
+# ... and a hip pulled up only to standing (a crouch stood back up) does NOT lift off.
+press hip
+dragv 0 -0.25 40 20
+release
+press hip
+dragv 0 0.25 40 40
+expect lowest < 20
+release
+reset

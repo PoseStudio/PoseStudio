@@ -42,7 +42,9 @@ public:
     /// pipelines against @p renderPass from the mesh (@p vertSpirv/@p fragSpirv) and backdrop
     /// shaders. The wire pipeline is only built on a device with fillModeNonSolid (wire() is
     /// null otherwise).
-    ScenePipelines(VulkanContext& context, VkRenderPass renderPass,
+    /// @p photoRenderPass is the HDR target's photo pass (single-sample), which the Gaussian
+    /// splat pipeline alone builds against.
+    ScenePipelines(VulkanContext& context, VkRenderPass renderPass, VkRenderPass photoRenderPass,
                    const std::vector<char>& vertSpirv, const std::vector<char>& fragSpirv,
                    const std::vector<char>& backgroundVertSpirv,
                    const std::vector<char>& backgroundFragSpirv,

@@ -81,21 +81,18 @@ struct PipelineConfig {
     // pixel wide (wider lines would need the wideLines feature).
     VkPolygonMode polygonMode = VK_POLYGON_MODE_FILL;
 
-    // Colour attachments in the target render pass. The HDR scene pass has THREE: attachment 0
-    // is the (SSS-blurred) diffuse scene, attachment 1 the SPECULAR the blur must never smear
-    // (smeared glints read as a wet film on skin), attachment 2 the PHOTO LAYER — the Gaussian
-    // splats, a display-referred image accumulated in the trainers' own colour space
-    // (premultiplied colour + coverage: blended src.a / 1 − src.a for the colour and 1 / 1 − src.a
-    // for the alpha) that the composite lays OVER the tonemapped scene. Attachment 0 keeps this
-    // config's blend state; attachment 1 is written plainly by the opaque mesh pipeline
-    // (writeColorAttachment1), attachment 2 by the splat pipeline (writeColorAttachment2, with
-    // attachments 0 and 1 masked off through colorWriteRgb / colorWriteAlpha), and each is masked
-    // off entirely for every other scene pipeline, whose shaders don't even declare it.
+    // Colour attachments in the target render pass. The HDR scene pass has TWO: attachment 0 is
+    // the (SSS-blurred) diffuse scene, attachment 1 the SPECULAR the blur must never smear
+    // (smeared glints read as a wet film on skin). Attachment 0 keeps this config's blend state;
+    // attachment 1 is written plainly by the opaque mesh pipeline (writeColorAttachment1) and
+    // masked off entirely for every other scene pipeline, whose shaders don't even declare it.
+    // (The Gaussian splats' PHOTO LAYER is a single-attachment pass of its own — hdrtarget.h —
+    // where the splat pipeline blends with this config's standard "over" state: premultiplied
+    // colour + coverage, src.a / 1 − src.a for the colour and 1 / 1 − src.a for the alpha.)
     // (On a device without independentBlend the attachments must share one state — see
     // VulkanContext::supportsIndependentBlend() and the note in vulkanpipeline.cpp.)
     uint32_t colorAttachmentCount   = 1;
     bool     writeColorAttachment1  = false;
-    bool     writeColorAttachment2  = false;
 
     // Vertex input. Empty (the default) means "no vertex buffers" — vertices come from
     // gl_VertexIndex (the grid, the fullscreen passes). The mesh and skeleton pipelines supply an

@@ -38,7 +38,7 @@ The keys work whichever panel has focus, except while you are typing in a text f
 
 ## Selecting objects
 
-A **click** (press and release without dragging) selects the model under the cursor and outlines it in blue; a click on empty space clears the selection. Selecting works on the model's bounding box, so a click just outside the mesh but within its extent still selects it. An orbit drag, however short, never changes the selection.
+A **click** (press and release without dragging) selects the model under the cursor and outlines it in blue; a click on empty space — or `Esc` — clears the selection. Selecting works on the model's bounding box, so a click just outside the mesh but within its extent still selects it. An orbit drag, however short, never changes the selection.
 
 The selection matters for:
 

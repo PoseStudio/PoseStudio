@@ -54,3 +54,12 @@ expect selected.hip == 1
 view right
 click hip
 expect selected.hip == 0
+
+# Esc, with nothing else claiming it, deselects whatever is selected: the model and its joint.
+view front
+click hip
+expect selected.hip == 1
+expect selection == 0
+app esc
+expect selection == -1
+expect selected.hip == 0

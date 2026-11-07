@@ -94,6 +94,12 @@ public:
         float uvScale[2] = {1.0f, 1.0f};
         float uvOffset[2] = {0.0f, 0.0f};
         bool  encodeSrgb = false;
+        /// The share of the photo layer's UV space its current scale draws into
+        /// (HdrTarget::photoUvScale): the layer is sampled at uv × this.
+        float photoUvScale[2] = {1.0f, 1.0f};
+        /// The outline mask holds a splat scene's accumulated opacity (Scene::selectedIsSplat):
+        /// the outline follows its 50% contour rather than reading it as coverage.
+        bool  outlineFromSplats = false;
     };
 
     /// Records the fullscreen composite draw. The caller has begun the swapchain render pass and

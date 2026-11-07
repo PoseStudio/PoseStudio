@@ -31,6 +31,7 @@
 #include "vulkanhandles.h"
 
 #include <glm/glm.hpp>
+#include <array>
 #include <memory>
 #include <string>
 #include <utility>
@@ -143,11 +144,17 @@ public:
     /// depth swapchain — the eye target then keeps its depth and resolves it per eye for the
     /// runtime's reprojection (needs MSAA: the resolve shader reads a multisampled image).
     /// @p reducedEffects skips the subsurface blur and bloom in the eyes (a lighter GPU).
+    /// @p splatScale sizes the eyes' photo layer — the Gaussian splats — as a share of the eye
+    /// (hdrtarget.h: the splats' fill is what a headset frame cannot afford; 1 = the eye's size).
     void beginVr(VkRenderPass eyeRenderPass, VkExtent2D eyeExtent, bool encodeSrgb,
-                 VkRenderPass eyeDepthRenderPass = VK_NULL_HANDLE, bool reducedEffects = false);
+                 VkRenderPass eyeDepthRenderPass = VK_NULL_HANDLE, bool reducedEffects = false,
+                 float splatScale = 1.0f);
     /// Leaves VR (waits for the device, frees the eye targets); the desktop view is its own again.
     void endVr();
     bool vrActive() const { return m_vr != nullptr; }
+    /// The eyes' photo layer scale as drawn now (HdrTarget::setPhotoScale: free to change between
+    /// frames) — VR Mode's dynamic scale (vulkanwindow_vr.cpp) moves it with the GPU's time.
+    void setVrSplatScale(float scale);
     /// Renders one VR frame: the key-light shadow map once, then each eye's scene through its
     /// tracked view (VrEyeView) into the eye targets, composited into @p eyeFramebuffers[eye]
     /// (the headset's framebuffer for the image the caller acquired), and — with a depth pass —
@@ -156,6 +163,20 @@ public:
     /// VulkanError.
     void drawVrFrame(const VrEyeView views[2], const VkFramebuffer eyeFramebuffers[2],
                      const VkFramebuffer eyeDepthFramebuffers[2] = nullptr);
+
+    // --- GPU timing (POSESTUDIO_GPU_PERF / POSESTUDIO_VR_PERF) ----------------------------------
+    /// The GPU time of the last COMPLETED frame of a kind — the whole command buffer, and the
+    /// Gaussian splat draw(s) within it (both eyes' in a VR frame) — in milliseconds, read off
+    /// timestamp queries where that frame's fence is waited for. valid once such a frame has
+    /// completed. Measured whenever the queue has timestamps (a few stamps a frame): the VR
+    /// splat scale reads it; the two environment variables only PRINT it.
+    struct GpuTimings {
+        double frameMs = 0.0;
+        double splatMs = 0.0;
+        bool   valid = false;
+    };
+    const GpuTimings& lastGpuTimings() const { return m_gpuTimings; }     ///< the desktop frame's
+    const GpuTimings& lastVrGpuTimings() const { return m_vrGpuTimings; } ///< the VR frame's
 
 private:
     void createCommandPool();
@@ -170,7 +191,7 @@ private:
     /// outline mask was drawn (the composite paints no outline otherwise).
     bool recordScenePasses(VkCommandBuffer cmd, const Camera& camera, uint32_t frameSlot, HdrTarget& hdr,
                            OutlineMask& outline, PostProcess& post, VkExtent2D extent,
-                           bool postEffects = true);
+                           bool postEffects = true, bool asyncSplatSort = false);
 
     VulkanContext& m_context;
 
@@ -188,6 +209,26 @@ private:
                                               // scene (backdrop, meshes, overlays) — see scene.h
     std::unique_ptr<Grid>            m_grid;  // floor grid overlay (drawn into the HDR pass after the scene)
     float                            m_uiScale = 1.0f; // see setUiScale
+
+    // GPU timestamps (lastGpuTimings): kTimingQueries queries per SLOT — the frame's first stamp,
+    // the splat draw's begin/end for each of up to two scene passes (the desktop's one; an eye
+    // each in VR), the frame's last stamp — a slot per desktop frame in flight and one for the
+    // VR frame; written only while timing is on, read back after the slot's fence.
+    static constexpr uint32_t kTimingQueries = 6;
+    static constexpr uint32_t kVrTimingSlot = static_cast<uint32_t>(kMaxFramesInFlight);
+    void createTimingPool();
+    void timingBegin(VkCommandBuffer cmd, uint32_t slot); // resets the slot (outside any render pass) + stamp 0
+    void timingMark(VkCommandBuffer cmd, uint32_t query); // one of the slot's inner stamps
+    void timingEnd(VkCommandBuffer cmd);                  // the slot's last stamp
+    void timingRead(uint32_t slot, GpuTimings& into);     // after the slot's fence
+    bool            m_gpuTimingOn = false;
+    float           m_timestampPeriodNs = 0.0f;
+    UniqueQueryPool m_timingPool;
+    std::array<bool, kMaxFramesInFlight + 1> m_timingWritten{};
+    uint32_t        m_timingSlot = 0; // the slot the frame being recorded stamps
+    uint32_t        m_timingPass = 0; // its scene passes so far (recordScenePasses)
+    GpuTimings      m_gpuTimings;
+    GpuTimings      m_vrGpuTimings;
 
     UniqueCommandPool            m_commandPool;
     std::vector<VkCommandBuffer> m_commandBuffers; // one per frame-in-flight; freed with the pool

@@ -56,6 +56,12 @@ public:
     RenderPassBuilder& depth(VkFormat format, VkSampleCountFlagBits samples, VkAttachmentLoadOp loadOp,
                              VkAttachmentStoreOp storeOp, VkImageLayout finalLayout);
 
+    /// Appends a depth attachment this pass only READS — the depth test against a depth another
+    /// pass produced (the photo pass over the resolved scene depth): loaded, kept, and both
+    /// entered and left in @p layout, a read-only depth layout. The one attachment a pass takes
+    /// with its contents defined, so initialLayout is @p layout, not UNDEFINED.
+    RenderPassBuilder& depthReadOnly(VkFormat format, VkSampleCountFlagBits samples, VkImageLayout layout);
+
     /// Appends an external dependency.
     RenderPassBuilder& dependency(const VkSubpassDependency& dep);
     /// Appends several (the helpers below return pairs).
