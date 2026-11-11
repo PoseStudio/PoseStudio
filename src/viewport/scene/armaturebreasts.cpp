@@ -39,7 +39,11 @@
  * and the swing scale with that fullness to kBreastFullnessPower: a large breast hangs and
  * bounces a great deal, a small one little, a flat chest (a male figure, a child) not at all.
  * One pectoral per side carries the breast (the one with the biggest patch of skin: a rib twist
- * beside it owns a few points); the rest ride as before.
+ * beside it owns a few points); the rest ride as before. A RIG WITH NO BREAST BONE (a biped, a
+ * motion-capture skeleton, most game and avatar rigs: the breast is the chest's own skin) gets the
+ * same mass on a BONELESS breast — armaturebreastfield.cpp reads where the breast stands and how
+ * full it is off the chest's skin, and the mass's displacement reaches the skin as a soft-body
+ * delta field the GPU blends, where here it is a turn of the bone's skin transform.
  *
  * THE MOTION: while the engine ticks (a drag, its settle's tail, the Ground button's fall and
  * landing bounce) the mass is a damped spring toward its resting displacement (kBreastHz, a
@@ -197,12 +201,12 @@ void Armature::setupBreasts() {
     static const bool kTrace = std::getenv("POSESTUDIO_BREAST_TRACE") != nullptr;
     const RigRoles& roles = m_ikRig->roles();
     const float     scale = m_ikRig->sizeScale() > 0.0f ? m_ikRig->sizeScale() : 1.0f;
-    // The bind joint positions (model space; binds are translation-only).
-    std::vector<glm::vec3> bind(m_bones.size(), glm::vec3(0.0f));
-    for (std::size_t i = 0; i < m_bones.size(); ++i) {
-        const Bone& b = m_bones[i];
-        bind[i] = (b.parent >= 0 ? bind[static_cast<std::size_t>(b.parent)] : glm::vec3(0.0f)) + glm::vec3(b.localBind[3]);
+    // A BONELESS BREAST'S FIELD (armaturebreastfield.cpp) is read with the model's vertex data at
+    // the import; a figure whose mesh came in another way (a dump) reads it here.
+    if (!m_breastFieldsReady) {
+        setupBreastFields();
     }
+    const std::vector<glm::vec3> bind = bindJointPositions(); // (model space; binds are translation-only)
     // ONE READING PER CANDIDATE, THE CHOICE AFTER. A side may carry more than one Pectoral-role
     // bone (a game rig's rib twist beside its breast bone), and the breast is the one with the
     // BIGGEST PATCH of skin — 175 points against the twist's 17 on one character-creation rig,
@@ -397,6 +401,33 @@ void Armature::setupBreasts() {
         }
     }
     for (const Reading& r : chosen) {
+        // A BONELESS BREAST (armaturebreastfield.cpp): no pectoral bone of this side carries the
+        // breast's apex — the rig has none, or only helpers beside it — and the chest's own skin
+        // is full enough to move: the mass is this file's, and its displacement reaches the skin as
+        // a delta field (bone -1: no skin transform is turned).
+        const int          sideIndex = &r == &chosen[0] ? 0 : 1;
+        const BreastField& field = m_breastFields[sideIndex];
+        if (field.valid) {
+            Breast b;
+            b.bone = -1;
+            b.field = sideIndex;
+            b.parent = field.chest;
+            b.size = field.size;
+            b.protrusion = std::max(0.005f, field.apexBind.z - field.wallZ);
+            b.pivotBind = glm::vec3(field.apexBind.x, field.apexBind.y, field.wallZ);
+            b.pivotTopBind = glm::vec3(field.apexBind.x, field.apexBind.y + kBreastLever * scale, field.wallZ);
+            b.lever = std::sqrt(kBreastLever * scale * kBreastLever * scale + b.protrusion * b.protrusion);
+            b.side = sideIndex == 0 ? 1.0f : -1.0f;
+            if (kTrace) {
+                std::fprintf(stderr, "[breast] %s boneless: the chest's own skin on %s, moved as a field -> fullness %.2f (weight %.2f); the wall %.1f mm behind the apex\n",
+                             sideIndex == 0 ? "L" : "R", b.parent >= 0 ? m_boneNames[static_cast<std::size_t>(b.parent)].c_str() : "-", b.size,
+                             breastWeight(b.size), b.protrusion * 1000.0f);
+            }
+            if (b.parent >= 0) {
+                m_breasts.push_back(b);
+            }
+            continue;
+        }
         if (r.points == 0) {
             continue;
         }

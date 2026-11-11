@@ -71,6 +71,12 @@ public:
     /// not a descendant of it.
     void navigateToLibraryRoot(const QString& libraryPath);
 
+    /// Opens a file the way double-clicking it in the grid does: a model, a figure or a splat
+    /// scene goes to the viewport through the import*Requested signals, a content-library script
+    /// is followed as the link it is (openScriptLink), anything else opens in the operating
+    /// system's application for it. Public so a script on the command line takes the same path.
+    void openAsset(const QString& path);
+
 signals:
     /// Emitted when the user picks "Manage Asset Folders" from a tree context menu, so
     /// whatever owns the Preferences dialog can open it directly to the Assets tab.
@@ -97,9 +103,8 @@ private slots:
 
     void onContextMenuRequested(const QPoint &pos);
     void onGridContextMenuRequested(const QPoint &pos);
-    /// Double-click on a grid item: a folder item opens that folder in the grid; an importable
-    /// model (.obj) or figure (.duf/.dsf) is routed to the viewport importers via the
-    /// import*Requested signals; anything else opens in the OS default application.
+    /// Double-click on a grid item: a folder item opens that folder in the grid; a file goes
+    /// through openAsset.
     void onGridItemDoubleClicked(QListWidgetItem *item);
 
     /// A tree item's data changed: for a Collection row, persists the inline rename.
@@ -226,6 +231,17 @@ private:
     /// and optionally opens the inline rename editor on it (a freshly created collection).
     void navigateToCollectionNode(int collectionId, bool enterEditMode = false);
     void navigateToCollectionAssetItem(int collectionId, const QString& assetFullPath);
+
+    // --- Script links (assetscriptlink.h) ---
+    /// Follows a content-library script to what it links to: a folder is shown (in the tree when
+    /// it lies in a library) and the character in it imported when it is the folder's only one;
+    /// a file opens through openAsset; a web page opens in the browser. A script that leads
+    /// nowhere PoseStudio can go is explained in a message, which offers the operating system's
+    /// application instead — PoseStudio never runs a script.
+    void openScriptLink(const QString& scriptPath);
+    /// The folders a script's content-relative path may lie under besides its own ancestors:
+    /// the asset libraries and the figure content roots set in Preferences.
+    QStringList scriptLinkRoots() const;
 
     // --- Collections & favorites ---
     /// Creates a collection in the database and its tree row. Returns the new id, or -1.

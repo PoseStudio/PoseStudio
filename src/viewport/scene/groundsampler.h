@@ -40,17 +40,21 @@ public:
     /// pickSurface() casts against. Transparent shells and masked cards are not pickable: a click
     /// on a cornea is a click on the eye behind it, one on a lash card's clear part a click on
     /// the lid.
-    void add(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, bool pickable);
+    /// @p mesh is the model's mesh index the triangles belong to — what a click's zone is
+    /// (pickSurface's meshOut; the Materials tab shows the zone under the last click).
+    void add(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, bool pickable, int mesh = 0);
     bool empty() const { return m_samples.empty(); }
 
     /// The FIRST point of the CURRENT pose's skin along @p ray (world space) — what a click is ON.
     /// CPU-skins every sample as lowestY() does, tests the pickable triangles (two-sided, as the
     /// mesh is drawn) and takes the nearest hit: @p tOut its distance along the ray's direction
     /// (normalized), @p hitWorld the point, @p bone the joint that weighs most on the skin there
-    /// (the three corners' weights blended at the hit). False without samples or when the ray
-    /// misses every triangle. A few milliseconds for a figure: a click's worth, never a frame's.
+    /// (the three corners' weights blended at the hit), @p meshOut (optional) the model's mesh
+    /// index the hit triangle belongs to — its material zone. False without samples or when the
+    /// ray misses every triangle. A few milliseconds for a figure: a click's worth, never a
+    /// frame's. A STATIC model's samples (no skeleton) are cast through the transform alone.
     bool pickSurface(const Armature& armature, const Ray& ray, float& tOut, glm::vec3& hitWorld,
-                     int& bone) const;
+                     int& bone, int* meshOut = nullptr) const;
 
     /// The world height of the CURRENT pose's lowest point: positive = hovering that far above
     /// the floor, negative = sunk into it. With samples, CPU-skins every sample with
@@ -69,6 +73,7 @@ private:
     std::vector<GroundSample> m_samples;
     struct PickTriangle {
         uint32_t a, b, c; // indices into m_samples
+        int      mesh;    // the model's mesh (material zone) the triangle belongs to
     };
     std::vector<PickTriangle> m_triangles; ///< The pickable surface (pickSurface).
 };

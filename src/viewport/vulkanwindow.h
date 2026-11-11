@@ -48,6 +48,7 @@
 #include "scene/ik/cursorfilter.h"  // IkCursorFilter (the drag target low-pass)
 #include "scene/jointtransform.h"   // JointTransform (the Transform tab's view of the selected joint)
 #include "scene/lightingsettings.h" // stored by value; applied to the renderer once it exists
+#include "scene/materialparams.h"  // MaterialView / MaterialParams (the Materials tab's view of the selected object)
 #include "scene/projectfile.h"      // ProjectDocument (the .pss save/load state)
 #include "scene/shademode.h"        // kDefaultShadeMode
 #include "projectstate.h"           // ProjectState (the .pss document's runtime state)
@@ -74,6 +75,7 @@ namespace pose {
 
 class OpenXrSystem;
 struct VrInput;
+struct DecodedImage;
 class Scene;
 class VulkanContext;
 class VulkanError;
@@ -201,6 +203,38 @@ public:
     /// The Figure group's Scale row (a static model's uniform scale, percent).
     void setFigureScale(double pct);
 
+    /// THE MATERIALS TAB (materialparams.h; scenematerials.cpp): what it shows for the SELECTED
+    /// object — its zones and the selected zone's material values, as they stand and as
+    /// imported. Invalid without a renderer or a selected object with meshes.
+    /// materialViewChanged says when to re-read.
+    MaterialView materialView() const;
+    /// Selects the zone the tab shows (its picker) — a selection, not an edit; an open material
+    /// edit is closed first (it belongs to the zone it began on).
+    void setMaterialZone(int zone);
+    /// A material edit, as ONE undoable edit however many values it passes through (a scrub):
+    /// begin (refused without a renderer or a selected object; the object's zone materials are
+    /// snapshotted), then any number of setSelectedMaterial — the selected zone's values and,
+    /// @p linked, every other zone that shares its imported material — then end (the undo entry
+    /// and the dirty flag; a no-op when nothing changed). A set without a begin opens the
+    /// bracket itself; every other edit closes an open one (closeSettlingEdits), after which
+    /// the panel's own end is a no-op. A material edit touches no pose.
+    bool beginMaterialEdit();
+    void setSelectedMaterial(const MaterialParams& params, bool linked);
+    void endMaterialEdit();
+    /// The selected zone's material back to its imported values — its linked zones' too,
+    /// @p linked — or, @p allZones, every zone of the selected object's: one undoable edit.
+    void resetSelectedMaterial(bool linked, bool allZones);
+    /// THE TEXTURE SLOTS (vulkanwindow_materials.cpp; the tab's Textures group): the selected
+    /// zone's slot @p map replaced by the image file at @p source (decoded as an import's would
+    /// be), cleared (""), or put back to the imported map (kImportedTexture) — one undo entry
+    /// (its own bracket, or the open edit's). False when the file cannot be read: the slot is
+    /// left as it was.
+    bool setMaterialTexture(MaterialMap map, const QString& source);
+    /// The selected zone's PLAIN image in slot @p map as it stands (the decoded file, uncapped by
+    /// nothing but the import's size cap; a roughness or metalness map with @p channel the one it
+    /// reads), for the tab's thumbnails; null without one.
+    std::shared_ptr<const DecodedImage> materialSlotImage(MaterialMap map, int* channel = nullptr) const;
+
     /// THE JOINT MOUSE MODE, as the rest of the application drives it (the mode itself is
     /// described with its members below). toggleJointModal is the B / S / T key (@p kind 0/1/2 =
     /// Bend / Side-Side / Twist, a JointDialKind) WHEREVER THE KEYBOARD FOCUS IS — the Edit menu's
@@ -311,6 +345,10 @@ signals:
     /// or the selected joint's pose moved by ANY means: a drag, the mouse mode, undo, a pose load,
     /// a reset, a dial. The Transform tab re-reads on it.
     void jointTransformChanged();
+    /// Emitted when what materialView() shows has changed — another object (or none) selected,
+    /// another zone picked, or a zone's material edited by ANY means: a slider, undo, a project
+    /// opened. The Materials tab re-reads on it (notifyMaterialView, from the rendered frame).
+    void materialViewChanged();
     /// The scripted test's `uishot`: a picture of the application's WIDGETS (the side tabs — the
     /// native viewport is not in it) is wanted at @p path. ViewportWidget takes it.
     void uiShotRequested(const QString& path);
@@ -377,6 +415,21 @@ private:
     /// selection change requests a frame, so the frame is the one place that sees them all —
     /// no gesture has to remember the Transform tab.
     void notifyJointTransform();
+    /// Emits materialViewChanged if what the Materials tab shows differs from what was last
+    /// announced (MaterialView::sameView: the selection, the zone, the zone list, the object's
+    /// material revision). Called where notifyJointTransform is: every rendered frame.
+    void notifyMaterialView();
+    /// Ends a material edit's bracket: pushes the pre-edit zone materials as one undo entry if
+    /// anything changed (and marks the document dirty).
+    void commitMaterialUndo();
+    /// Makes mesh @p mesh of model @p model carry in slot @p map what @p source says ("" none,
+    /// kImportedTexture the import's, else a file): decodes, derives the bound image with the
+    /// partner slot's, applies through the Scene. False when a file could not be read.
+    bool applySlotSource(int model, int mesh, MaterialMap map, const std::string& source);
+    /// Every slot of every zone of @p model whose recorded source in @p materials (in mesh order)
+    /// differs from the mesh's — the undo swap's and the project load's texture half, run before
+    /// the values are applied.
+    void applyMaterialTextures(int model, const std::vector<MaterialParams>& materials);
 
     /// An import requested before the renderer existed, replayed in request order once it does
     /// (command-line "open with" hands several in a row — the order must survive).
@@ -668,11 +721,12 @@ private:
     // edits too: the snapshot carries the pins ("@pin:" rows), so undoing a pin or a drag
     // restores the pins of that moment.
     struct UndoEntry {
-        enum class Kind { Pose, Lighting };
+        enum class Kind { Pose, Lighting, Material };
         Kind             kind = Kind::Pose;
         PoseSnapshot     pose;        // the pre-edit pose  (kind == Pose)
-        int              figure = -1; // which figure the pose belongs to (kind == Pose)
+        int              figure = -1; // which model the pose / materials belong to (kind == Pose / Material)
         LightingSettings lighting;    // the pre-edit dials (kind == Lighting)
+        std::vector<MaterialParams> materials; // the pre-edit zone materials, in mesh order (kind == Material)
     };
     /// The one undo/redo body: pops @p from, re-applies it, and pushes the state it replaced
     /// onto @p to. undo() and redo() are mirror images of each other through it.
@@ -693,6 +747,13 @@ private:
     float          m_dialAsked[3] = {0.0f, 0.0f, 0.0f};
     bool           m_dialAskedValid[3] = {false, false, false};
     JointTransform m_announcedJointTransform;
+    // THE MATERIALS TAB's edit (beginMaterialEdit .. endMaterialEdit): open while true, on the
+    // model whose zone materials were snapshotted at the begin; and the view last announced
+    // through materialViewChanged (notifyMaterialView).
+    bool                        m_materialEdit = false;
+    int                         m_materialEditModel = -1;
+    std::vector<MaterialParams> m_preEditMaterials;
+    MaterialView                m_announcedMaterialView;
 
     // THE JOINT MOUSE MODE (Blender's modal transforms): with a joint selected, B / S / T turns
     // on its Bend / Side-Side / Twist dial and MOVING THE MOUSE turns it — the limb goes the way
@@ -749,6 +810,7 @@ private:
     void startScript();          ///< The first step, once a posable figure exists (polled).
     void scriptStep();           ///< Runs lines until one must wait for the app; the wait's end re-calls it.
     bool scriptPixelOf(const QString& spec, QPointF& px); ///< "<bone>[@share]" -> the pixel a user would click.
+    void scriptWaitTick();       ///< One tick of a `wait`: advances a fall / landing in flight, then the next tick or scriptStep.
     void scriptDragTick();       ///< One tick of a scripted move (from the IK tick, before its solve).
     void scriptSettled();        ///< A release's settle finished: the `release` line's wait is over.
     void scriptFrameRendered();  ///< A frame was presented after `shot`: save the capture, resume.

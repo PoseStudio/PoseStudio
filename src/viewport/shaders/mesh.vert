@@ -31,13 +31,15 @@
 #define SKIN_SET 2 // the joint + corrective buffers ride in the main pass's set 2
 #include "skinning.glsl"
 #include "correctives.glsl"
+#define MATERIAL_SET 2 // ... and the per-model material buffer (binding 3)
+#include "material.glsl"
 
+// The push block (MeshPushConstants in mesh.h): the model matrix and meta — x the mesh's index
+// into the material buffer, y the draw kind packed with the SELECTED joint + its twist twin
+// (Mesh::record). The material itself lives in the buffer since 2026-11-09.
 layout(push_constant) uniform Push {
     mat4 model;
-    vec4 baseColor; // rgb tint, a = opacity
-    vec4 material;  // x = roughness, y = normalMode
-    vec4 material2; // (fragment-side material params)
-    vec4 material3; // z packs the draw kind with the SELECTED joint + its twist twin (Mesh::record)
+    vec4 meta;
 } pc;
 
 layout(location = 0) in vec3 inPos;
@@ -82,7 +84,18 @@ void main() {
     // mat3(model) is correct for the rigid/uniform-scale model transforms in play; swap to a
     // proper normal matrix if non-uniform scale ever appears.
     vWorldNormal = mat3(pc.model) * skinnedNormal;
-    vUv = inUv;
+    // The material's UV tiling, rotation and offset (a tiled floor, a turned grain, an offset
+    // decal) in glTF's texture-transform order — scale, then rotate about the UV origin, then
+    // translate; (1,1,0,0) and a rotation of 0 leave the UVs exactly as authored (the rotation
+    // is skipped at 0, so no cos/sin rounding reaches an unrotated material).
+    MaterialGpu surf = materials.m[int(pc.meta.x + 0.5)];
+    vec2 uvScaled = inUv * surf.uvTransform.xy;
+    if (surf.extra2.w != 0.0) {
+        float c = cos(surf.extra2.w);
+        float s = sin(surf.extra2.w);
+        uvScaled = vec2(c * uvScaled.x + s * uvScaled.y, -s * uvScaled.x + c * uvScaled.y);
+    }
+    vUv = uvScaled + surf.uvTransform.zw;
     vWorldPos = worldPos.xyz;
     vAo = inAo;
     vTangent = vec4(mat3(pc.model) * skinnedTangent, inTangent.w);
@@ -95,7 +108,7 @@ void main() {
     // head's — its bones are not selectable — and the head bone's own weights cover the scalp
     // alone). The joint buffer's second half carries that per joint, in the .x of one more entry
     // each (Model::uploadJointsIfDirty); the joint count is half the buffer's length.
-    int packed = int(pc.material3.z + 0.5);
+    int packed = int(pc.meta.y + 0.5);
     int selJoint = ((packed >> 3) & 1023) - 1;
     int selTwin = (packed >> 13) - 1;
     float sel = 0.0;

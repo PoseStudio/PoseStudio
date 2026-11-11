@@ -267,6 +267,91 @@ void VulkanWindow::scriptStep() {
             } else {
                 say("[ikscript]   %s refused (a drag owns the pose)\n", qPrintable(cmd));
             }
+        } else if (cmd == QLatin1String("select") && w.size() > 1) {
+            // select <index>: the model selected, as a click on its box does (-1 = none) — the way a
+            // script reaches a STATIC model's materials (it has no joint to click).
+            scene().setSelectedModel(static_cast<int>(num(1)));
+            requestUpdate();
+        } else if (cmd == QLatin1String("zone") && w.size() > 1) {
+            // zone <index|name>: the Materials tab's zone picker.
+            bool ok = false;
+            int  index = w[1].toInt(&ok);
+            if (!ok) {
+                const MaterialView view = materialView();
+                index = -1;
+                for (std::size_t i = 0; i < view.zones.size(); ++i) {
+                    if (QString::fromStdString(view.zones[i]).compare(w[1], Qt::CaseInsensitive) == 0) {
+                        index = static_cast<int>(i);
+                        break;
+                    }
+                }
+                if (index < 0) {
+                    say("[ikscript]   zone '%s' unknown\n", qPrintable(w[1]));
+                }
+            }
+            if (index >= 0) {
+                setMaterialZone(index);
+            }
+        } else if (cmd == QLatin1String("material") && w.size() > 2) {
+            // material <field> <value> | material <colour> <r> <g> <b> (linear; `color` the base
+            // colour, else a materialColorName — specularcolor, coatcolor, sheencolor,
+            // transmissioncolor, emissioncolor, subsurfacecolor, scattercolor): the selected zone's
+            // material set the way the Materials tab does it (one bracketed, undoable edit; the
+            // fields and their display units are the tab's — materialparams.h), reaching the zones
+            // that share the imported material while `matlink` is on.
+            MaterialParams p = materialView().params;
+            bool           known = true;
+            MaterialColor  which = MaterialColor::Base;
+            if (w.size() > 4 && (w[1].compare(QLatin1String("color"), Qt::CaseInsensitive) == 0 ||
+                                 materialColorByName(w[1].toLower().toStdString(), which))) {
+                materialColorRef(p, which) =
+                    glm::vec3(static_cast<float>(num(2)), static_cast<float>(num(3)), static_cast<float>(num(4)));
+            } else {
+                MaterialField field = MaterialField::Roughness;
+                if (materialFieldByName(w[1].toLower().toStdString(), field)) {
+                    setMaterialField(p, field, static_cast<float>(num(2)));
+                } else {
+                    known = false;
+                    say("[ikscript]   material field '%s' unknown\n", qPrintable(w[1]));
+                }
+            }
+            if (known && beginMaterialEdit()) {
+                setSelectedMaterial(p, s.materialLinked);
+                endMaterialEdit();
+            }
+        } else if (cmd == QLatin1String("matlink") && w.size() > 1) {
+            // matlink on|off: the tab's "Edit matching zones together".
+            s.materialLinked = w[1].compare(QLatin1String("off"), Qt::CaseInsensitive) != 0;
+        } else if (cmd == QLatin1String("matreset")) {
+            // matreset [all]: the tab's Reset Zone / Reset All Zones.
+            resetSelectedMaterial(s.materialLinked, w.size() > 1 && w[1].compare(QLatin1String("all"), Qt::CaseInsensitive) == 0);
+        } else if (cmd == QLatin1String("texture") && w.size() > 2) {
+            // texture <slot> <path|none|imported>: the tab's Textures group — the selected zone's
+            // slot replaced by an image file (no spaces in the path: the line is split on them),
+            // cleared, or put back to the imported map; one undoable edit. The slot names are
+            // materialMapName's (basecolor, normal, bump, roughness, metalness, specmask,
+            // translucency, emission, pore, cutout).
+            MaterialMap map = MaterialMap::BaseColor;
+            if (!materialMapByName(w[1].toLower().toStdString(), map)) {
+                say("[ikscript]   texture slot '%s' unknown\n", qPrintable(w[1]));
+            } else {
+                const QString what = w[2];
+                QString       source;
+                if (what.compare(QLatin1String("imported"), Qt::CaseInsensitive) == 0) {
+                    source = QString::fromLatin1(kImportedTexture);
+                } else if (what.compare(QLatin1String("none"), Qt::CaseInsensitive) != 0) {
+                    // A relative path is a test asset's: against POSESTUDIO_IK_SCRIPT_ASSETS (the
+                    // folder tools/materials/make_test_assets.py wrote), else the output folder.
+                    source = what;
+                    if (QFileInfo(what).isRelative()) {
+                        const QString assets = qEnvironmentVariable("POSESTUDIO_IK_SCRIPT_ASSETS");
+                        source = QDir(assets.isEmpty() ? s.outDir : assets).filePath(what);
+                    }
+                }
+                if (!setMaterialTexture(map, source)) {
+                    say("[ikscript]   texture '%s' could not be applied\n", qPrintable(what));
+                }
+            }
         } else if (cmd == QLatin1String("dial") && w.size() > 2) {
             // dial <forward|sideways|twist> <value> [abs]: the selected joint's Transform-tab dial set
             // to that value, the way the tab does it (one bracketed, undoable edit); with a group the
@@ -358,6 +443,7 @@ void VulkanWindow::scriptStep() {
             // and out of their contact sheet. The Transform tab is brought up to date first: it
             // follows the rendered frame, and the script does not wait for one here.
             notifyJointTransform();
+            notifyMaterialView();
             QDir(s.outDir).mkpath(QStringLiteral("ui"));
             emit uiShotRequested(QDir(s.outDir).filePath(QStringLiteral("ui/") + w[1] + QStringLiteral(".png")));
         } else if (cmd == QLatin1String("pin") && w.size() > 1) {
@@ -544,13 +630,26 @@ void VulkanWindow::scriptStep() {
             }
             abortIkDrag(); // a press that never moved: a click
         } else if (cmd == QLatin1String("wait")) {
-            QTimer::singleShot(std::max(1, static_cast<int>(num(1))) * 16, this, &VulkanWindow::scriptStep);
+            // wait <ticks>: that many sixteenths of a second — and each tick ALSO advances a fall or
+            // a landing bounce in flight (scriptWaitTick → onFallTick), so the fall keeps step with
+            // the wait however long a `shot`'s GPU readback stalls the event loop: a repeating
+            // 16 ms timer folds the periods it missed into ONE tick while a single-shot deadline
+            // keeps wall time, and the landing gallery's knee reading at a fixed tick differed
+            // from one run to the next until the two shared one clock (2026-11-09).
+            s.waitTicks = std::max(1, static_cast<int>(num(1)));
+            QTimer::singleShot(16, this, &VulkanWindow::scriptWaitTick);
             return;
         } else if (cmd == QLatin1String("expect") && w.size() >= 4) {
             // expect <metric> <op> <value>: the script as a TEST. (Metrics: scriptMetric.)
             double      value = 0.0;
             const bool  known = scriptMetric(w[1], value);
-            const double want = w[3].toDouble();
+            // The wanted value: a number, or another METRIC's value (`expect mat.roughness ==
+            // matimported.roughness`).
+            bool   wantIsNumber = false;
+            double want = w[3].toDouble(&wantIsNumber);
+            if (!wantIsNumber && !scriptMetric(w[3], want)) {
+                want = 0.0;
+            }
             const QString op = w[2];
             const bool ok = known && (op == QLatin1String("<")    ? value < want
                                       : op == QLatin1String("<=") ? value <= want
@@ -588,6 +687,20 @@ void VulkanWindow::scriptStep() {
 /// cursor along the move, feeds it to the drag exactly as a mouse move would, records the
 /// worst single-tick joint move (a POP over 10cm is logged), and resumes the script when the
 /// move's ticks and hold are up.
+void VulkanWindow::scriptWaitTick() {
+    if (!m_script) {
+        return;
+    }
+    if (m_fall.timer != nullptr && m_fall.timer->isActive()) {
+        onFallTick(); // (the timer's own timeouts are ignored under a script: see onFallTick)
+    }
+    if (--m_script->waitTicks > 0) {
+        QTimer::singleShot(16, this, &VulkanWindow::scriptWaitTick);
+        return;
+    }
+    scriptStep();
+}
+
 void VulkanWindow::scriptDragTick() {
     IkScript& s = *m_script;
     if (!s.moving) {
@@ -743,6 +856,83 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         value = m_renderer ? static_cast<double>(scene().selectedModelIndex()) : -1.0; // -1 = nothing selected
         return true;
     }
+    // THE MATERIALS TAB's metrics (materialparams.h): `zones` (the selected object's zone count),
+    // `zone` (the selected zone's index, -1 with nothing selected), `zonename.<name>` (1 when that
+    // zone is selected), `matlinked` (the other zones sharing the imported material),
+    // `mat.<field>` / `matimported.<field>` (the selected zone's values in the tab's display units,
+    // as they stand / as imported; `mat.color.<r|g|b>` the linear base colour).
+    if (name.compare(QLatin1String("zones"), Qt::CaseInsensitive) == 0) {
+        const MaterialView view = materialView();
+        value = view.valid ? static_cast<double>(view.zones.size()) : 0.0;
+        return true;
+    }
+    if (name.compare(QLatin1String("zone"), Qt::CaseInsensitive) == 0) {
+        const MaterialView view = materialView();
+        value = view.valid ? static_cast<double>(view.zone) : -1.0;
+        return true;
+    }
+    if (name.compare(QLatin1String("matlinked"), Qt::CaseInsensitive) == 0) {
+        value = static_cast<double>(materialView().linkedZones);
+        return true;
+    }
+    if (name.startsWith(QLatin1String("matmap."), Qt::CaseInsensitive) || name.startsWith(QLatin1String("mattex."), Qt::CaseInsensitive)) {
+        // matmap.<slot>: 1 when the selected zone carries that map — the slot names are the
+        // Materials tab's (materialMapName: basecolor, normal, bump, roughness, metalness,
+        // specmask, translucency, emission, pore, cutout); mattex.<slot>: where the
+        // slot's map comes from — 0 none, 1 the imported map, 2 a file chosen in the tab.
+        const MaterialView view = materialView();
+        if (!view.valid) {
+            return false;
+        }
+        const bool    tex = name.startsWith(QLatin1String("mattex."), Qt::CaseInsensitive);
+        const QString which = name.mid(7).toLower();
+        MaterialMap   map = MaterialMap::BaseColor;
+        if (!materialMapByName(which.toStdString(), map)) {
+            return false;
+        }
+        const std::string& source = view.params.maps[static_cast<std::size_t>(map)].source;
+        value = tex ? (source.empty() ? 0.0 : source == kImportedTexture ? 1.0 : 2.0) : (view.maps.has(map) ? 1.0 : 0.0);
+        return true;
+    }
+    if (name.startsWith(QLatin1String("zonename."), Qt::CaseInsensitive)) {
+        const MaterialView view = materialView();
+        const QString      want = name.mid(9);
+        value = (view.valid && view.zone >= 0 && static_cast<std::size_t>(view.zone) < view.zones.size() &&
+                 QString::fromStdString(view.zones[static_cast<std::size_t>(view.zone)]).compare(want, Qt::CaseInsensitive) == 0)
+                    ? 1.0
+                    : 0.0;
+        return true;
+    }
+    if (name.startsWith(QLatin1String("mat."), Qt::CaseInsensitive) || name.startsWith(QLatin1String("matimported."), Qt::CaseInsensitive)) {
+        const MaterialView view = materialView();
+        if (!view.valid) {
+            return false;
+        }
+        const bool            imported = name.startsWith(QLatin1String("matimported."), Qt::CaseInsensitive);
+        const MaterialParams& p = imported ? view.imported : view.params;
+        const QString         rest = name.mid(imported ? 12 : 4).toLower();
+        {
+            // mat.color.<r|g|b> is the linear base colour; mat.<colour>.<r|g|b> any of the
+            // material's colours by the tab's names (materialColorName).
+            const int dot = rest.indexOf(QLatin1Char('.'));
+            if (dot > 0) {
+                const QString colorName = rest.left(dot);
+                MaterialColor which = MaterialColor::Base;
+                if (colorName == QLatin1String("color") || materialColorByName(colorName.toStdString(), which)) {
+                    const glm::vec3 c = materialColorValue(p, which);
+                    const QChar     channel = rest.size() > dot + 1 ? rest[dot + 1] : QLatin1Char('r');
+                    value = channel == QLatin1Char('g') ? c.y : channel == QLatin1Char('b') ? c.z : c.x;
+                    return true;
+                }
+            }
+        }
+        MaterialField field = MaterialField::Roughness;
+        if (!materialFieldByName(rest.toStdString(), field)) {
+            return false;
+        }
+        value = materialFieldValue(p, field);
+        return true;
+    }
     if (name.startsWith(QLatin1String("figure."), Qt::CaseInsensitive)) {
         // (The Figure group's rows: a posable figure's, or a selected STATIC model's — a splat
         // scene, an OBJ — which has no armature.)
@@ -818,7 +1008,7 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         value = s.jumpMax * 1000.0;
     } else if (key == QLatin1String("breastl") || key == QLatin1String("breastr")) {
         // THE SOFT BREASTS: the left / right breast's swing from the sculpt, degrees (0 with the
-        // soft body switched off, or on a figure without pectoral bones).
+        // soft body switched off, or on a flat chest).
         value = static_cast<double>(scene().breastSwingDeg(key == QLatin1String("breastl") ? 0 : 1));
     } else if (key == QLatin1String("breasthangl") || key == QLatin1String("breasthangr")) {
         // THE SOFT BREASTS: how far the left / right breast is drawn out along its tether, mm (0
@@ -832,6 +1022,14 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         // THE SOFT BREASTS: how far the left / right breast has moved along the chest, mm, + up toward
         // the head (a bow's lift, a jolt's or a landing's bounce; below 0 only by the floor's give).
         value = static_cast<double>(scene().breastUpMm(key == QLatin1String("breastupl") ? 0 : 1));
+    } else if (key == QLatin1String("breastfields")) {
+        // THE BONELESS BREASTS: how many of the figure's breasts are delta fields (a rig with no
+        // breast bone: 2; a figure whose pectoral bones carry them, or a flat chest: 0).
+        value = static_cast<double>(arm->breastFieldCount());
+    } else if (key == QLatin1String("breastfieldl") || key == QLatin1String("breastfieldr")) {
+        // ... and how far the left / right one's field moves the skin at its apex, mm: what the GPU
+        // blends (the mass's displacement within the field's travel limit).
+        value = static_cast<double>(arm->breastFieldMoveMm(key == QLatin1String("breastfieldl") ? 0 : 1));
     } else if (key == QLatin1String("buttl") || key == QLatin1String("buttr")) {
         // THE SOFT BUTTOCKS: how far the left / right cheek has moved from the sculpt, mm (0 at
         // rest in any pose — they never hang — and while the soft body is switched off).

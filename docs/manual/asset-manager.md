@@ -26,9 +26,21 @@ Most character content is delivered this way — every preset comes with its own
 - **Expand a folder** in the tree with its arrow. Folders load as you open them.
 - **Click a folder** to show its assets in the grid: subfolders first (as folder shortcuts), then the assets alphabetically. The **breadcrumb** above the grid shows where you are; click any segment to go there.
 - **Folder icons** in the tree say whether a folder holds assets of its own, holds them only in subfolders, or holds none.
-- **Double-click** an asset: `.obj`, `.duf` and `.dsf` files import into the viewport; anything else opens in whatever application Windows uses for that file type. Double-click a folder shortcut to enter the folder.
+- **Double-click** an asset: a model (`.obj`), a figure (`.duf`, `.dsf`, `.fbx`, `.glb` / `.gltf`, `.vrm`, `.usd` / `.usda` / `.usdc` / `.usdz`) or a Gaussian splat scene (`.ply`, `.splat`, `.spz`) imports into the viewport; a script link (`.dsa`) is followed — see [Script links](#script-links); anything else opens in whatever application your system uses for that file type. Double-click a folder shortcut to enter the folder.
 - **Hover** over an asset for its file type, size, modification date and folder.
 - **Refresh** (in every context menu) rescans after you change files on disk.
+
+## Script links
+
+Character content often comes with small **scripts** (`.dsa`) among its presets — a thumbnail labelled with the character's name in a *Characters* folder, a vendor's web address in each of the product's folders. Most of them are links: the character's script points at the folder that holds the character, the web-address one at the vendor's site. PoseStudio never runs a script, but it reads a plain-text one for its link and follows it when you double-click it:
+
+- **A link to a folder** shows that folder — in the tree too, when it lies in one of your libraries. When the folder holds exactly **one character**, that character is imported into the viewport as well, as if you had double-clicked it. Clothing, hair and props are not characters: a link to a folder of boots shows the folder and leaves the choice to you, and so does a folder with several characters in it.
+- **A link to a file** — a script that loads a preset — opens that file as its own double-click would.
+- **A link to a web page** opens in your browser.
+
+A script that is not a link (a program, a tool), an encrypted (`.dse`) or compiled (`.dsb`) script, or a link whose target has gone missing is explained in a message instead, which offers **Open in Default Application** if you want the application that owns the script to run it. The same scripts given to PoseStudio on the command line (or with *Open with*) are followed the same way.
+
+A link written relative to a content library ("/People/…") is looked for in the library the script lies in, then in your asset libraries and the content folders you have located for figures (see [Importing Content](importing.md#when-the-figures-data-cannot-be-found)).
 
 ## Searching
 

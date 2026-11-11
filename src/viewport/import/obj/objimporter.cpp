@@ -8,6 +8,9 @@
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
+#include "specgloss.h"
+#include <algorithm>
+#include <cmath>
 
 #include "objimporter.h"
 
@@ -163,8 +166,84 @@ ModelData ObjImporter::load(const std::string& path) const {
         MeshData mesh;
         if (materialId >= 0 && materialId < static_cast<int>(materials.size())) {
             const tinyobj::material_t& mat = materials[materialId];
+            mesh.name = mat.name; // the Materials tab's zone name
             mesh.baseColor = glm::vec3(mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]);
             mesh.diffuse.path = resolveTexturePath(config.mtl_search_path, mat.diffuse_texname);
+            // THE PBR EXTENSION of the MTL format (Pr / Pm / map_Pr / map_Pm / norm — what Blender
+            // and most current exporters write), and the classic channels read into the one
+            // material model (specgloss.h): Ks is a PHONG specular, whose grey level is the
+            // specular weight (Blender's default 0.5 = the standard dielectric; black = matte; an
+            // absent Ks reads black in the parser and keeps the default), map_Ks the specular mask,
+            // Ns the glossiness in Blender's own convention (Ns = (1 − roughness)² × 1000, the
+            // most common source of an MTL today; 3ds Max's default 96 lands at 0.69, the old
+            // default) where no Pr is given, d / map_d the opacity, map_bump / bump a height map
+            // with its -bm multiplier.
+            const bool hasPr = mat.roughness > 0.0f || !mat.roughness_texname.empty();
+            if (hasPr) {
+                mesh.roughness = std::clamp(mat.roughness > 0.0f ? mat.roughness : 1.0f, 0.05f, 1.0f);
+                mesh.roughnessMap.path = resolveTexturePath(config.mtl_search_path, mat.roughness_texname);
+            } else if (mat.shininess > 1.0f) { // (the parser's default for an absent Ns is 1: no authored value reads as the old default roughness)
+                mesh.roughness = std::clamp(1.0f - std::sqrt(std::clamp(mat.shininess / 1000.0f, 0.0f, 1.0f)), 0.05f, 1.0f);
+            }
+            mesh.lobe1Roughness = mesh.roughness;
+            mesh.lobe2Roughness = mesh.roughness;
+            if (mat.metallic > 0.0f || !mat.metallic_texname.empty()) {
+                mesh.metalness = std::clamp(mat.metallic > 0.0f ? mat.metallic : 1.0f, 0.0f, 1.0f);
+                mesh.metalnessMap.path = resolveTexturePath(config.mtl_search_path, mat.metallic_texname);
+            }
+            const glm::vec3 ks(mat.specular[0], mat.specular[1], mat.specular[2]);
+            if (ks.r + ks.g + ks.b > 0.0f) {
+                mesh.specularWeight = phongSpecularWeight(ks);
+                mesh.specularWeightWithMap = mesh.specularWeight;
+            }
+            mesh.specMask.path = resolveTexturePath(config.mtl_search_path, mat.specular_texname);
+            if (!mat.normal_texname.empty()) {
+                mesh.normal.path = resolveTexturePath(config.mtl_search_path, mat.normal_texname);
+                mesh.normalMode = mesh.normal.path.empty() ? 0 : 1;
+            } else if (!mat.bump_texname.empty()) {
+                mesh.normal.path = resolveTexturePath(config.mtl_search_path, mat.bump_texname);
+            }
+            if (!mat.displacement_texname.empty()) {
+                mesh.displacementMap.path = resolveTexturePath(config.mtl_search_path, mat.displacement_texname); // disp (stored-only)
+                mesh.normalMode = mesh.normal.path.empty() ? 0 : 2;
+                mesh.normalStrength = std::clamp(mat.bump_texopt.bump_multiplier, 0.1f, 8.0f);
+            }
+            if (mat.dissolve > 0.0f && mat.dissolve < 1.0f) {
+                mesh.opacity = mat.dissolve;
+            }
+            mesh.opacityMask.path = resolveTexturePath(config.mtl_search_path, mat.alpha_texname);
+            // THE CANONICAL MATERIAL's further channels: Ke / map_Ke the emission, Ni the index of
+            // refraction, Pc / Pcr the clearcoat, Ps the sheen, aniso / anisor the anisotropy, Tf the
+            // transmission filter (a tint; the MTL has no weight to go with it).
+            {
+                const glm::vec3 ke(mat.emission[0], mat.emission[1], mat.emission[2]);
+                const float     peak = std::max(ke.r, std::max(ke.g, ke.b));
+                if (peak > 0.0f || !mat.emissive_texname.empty()) {
+                    mesh.emissionColor = peak > 0.0f ? ke / peak : glm::vec3(1.0f);
+                    mesh.emission = peak > 0.0f ? peak : 1.0f;
+                    mesh.emissionMap.path = resolveTexturePath(config.mtl_search_path, mat.emissive_texname);
+                }
+            }
+            if (mat.ior > 1.0f) {
+                mesh.ior = std::clamp(mat.ior, 1.0f, 3.0f);
+            }
+            if (mat.clearcoat_thickness > 0.0f) {
+                mesh.topCoatWeight = std::clamp(mat.clearcoat_thickness, 0.0f, 1.0f);
+                mesh.topCoatRoughness = std::clamp(mat.clearcoat_roughness, 0.0f, 1.0f);
+            }
+            if (mat.sheen > 0.0f) {
+                mesh.sheen = std::clamp(mat.sheen, 0.0f, 1.0f);
+            }
+            if (mat.anisotropy > 0.0f) {
+                mesh.anisotropy = std::clamp(mat.anisotropy, 0.0f, 1.0f);
+                mesh.anisotropyRotation = std::clamp(mat.anisotropy_rotation, 0.0f, 1.0f) * 360.0f; // (a turn)
+            }
+            {
+                const glm::vec3 tf(mat.transmittance[0], mat.transmittance[1], mat.transmittance[2]);
+                if (tf != glm::vec3(1.0f) && tf != glm::vec3(0.0f)) {
+                    mesh.transmissionColor = tf;
+                }
+            }
         }
         result.meshes.push_back(std::move(mesh));
         vertexCaches.emplace_back();

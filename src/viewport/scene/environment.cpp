@@ -322,7 +322,33 @@ BrdfLut integrateBrdfLut(int size, int samples) {
                     b += fc * gVis;
                 }
             }
-            lut.data[static_cast<std::size_t>(y) * size + x] = glm::vec2(a, b) / static_cast<float>(samples);
+            // The SHEEN lobe's directional albedo (the LUT's .z): Estevez & Kulla's "Charlie"
+            // distribution with Neubelt's visibility, integrated over the hemisphere with uniform
+            // samples (the lobe is broad; half the GGX count keeps the startup bake short). The
+            // shader clamps the sheen roughness at 0.07 before its lookup, so the rows below it
+            // hold that roughness's value.
+            constexpr float kPiF = 3.14159265358979f;
+            const int   sheenSamples = std::max(samples / 2, 64);
+            const float sheenRough = std::max(roughness, 0.07f);
+            const float invA = 1.0f / (sheenRough * sheenRough);
+            float e = 0.0f;
+            for (int s = 0; s < sheenSamples; ++s) {
+                const glm::vec2 xi = hammersley(static_cast<uint32_t>(s), static_cast<uint32_t>(sheenSamples));
+                const float cosT = xi.x; // uniform over the hemisphere
+                const float sinT = std::sqrt(std::max(0.0f, 1.0f - cosT * cosT));
+                const float phi = 2.0f * kPiF * xi.y;
+                const glm::vec3 l(sinT * std::cos(phi), sinT * std::sin(phi), cosT);
+                const glm::vec3 h = glm::normalize(l + vv);
+                const float ndl = std::max(l.z, 0.0f);
+                const float ndh = std::max(h.z, 0.0f);
+                const float sin2h = std::max(1.0f - ndh * ndh, 0.0078125f);
+                const float d = (2.0f + invA) * std::pow(sin2h, invA * 0.5f) / (2.0f * kPiF);
+                const float vis = 1.0f / std::max(4.0f * (ndl + ndv - ndl * ndv), 1e-5f);
+                e += d * vis * ndl;
+            }
+            e *= 2.0f * kPiF / static_cast<float>(sheenSamples);
+            lut.data[static_cast<std::size_t>(y) * size + x] =
+                glm::vec4(glm::vec2(a, b) / static_cast<float>(samples), e, 0.0f);
         }
     });
     return lut;

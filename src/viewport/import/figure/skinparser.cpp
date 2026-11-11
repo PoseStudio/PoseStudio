@@ -39,7 +39,7 @@ std::vector<VertexSkin> parseSkinWeights(
         for (const auto& joint : *joints) {
             std::string node = joint.value("node", std::string());
             if (!node.empty() && node[0] == '#') {
-                node = node.substr(1);
+                node = urlDecode(node.substr(1)); // the reference is percent-encoded, the bone's id plain
             }
             const auto boneIt = boneNameToIndex.find(node);
             if (boneIt == boneNameToIndex.end()) {

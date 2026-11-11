@@ -1,0 +1,27 @@
+# THE SPECULAR / GLOSSINESS BAKE on a spec/gloss glTF WITH MAPS (2026-11-09):
+#   POSESTUDIO_TEST_FIGURE=<assets>/sg_textured.gltf tools/ikscripts/run.sh tools/ikscripts/materials/textured_cube.txt <out>
+# (the asset from tools/materials/make_test_assets.py). The Mapped material carries a diffuse map
+# (a red / blue checker) and a spec/gloss map (left half gold specular with gloss 0.9, right half
+# 4 % grey with gloss 0.3): the decode layer bakes the solve per texel, so the zone ends with a
+# base-colour map, a metalness map and a roughness map, and its scalars at 1 — the maps carry
+# everything. The Plain material has factors only.
+view front
+select 0
+expect selection == 0
+expect zones == 2
+zone Mapped
+expect zonename.Mapped == 1
+expect matmap.basecolor == 1
+expect matmap.metalness == 1
+expect matmap.roughness == 1
+expect mat.metallic == 100
+expect mat.roughness == 100
+expect mat.color.r == 1
+shot 01_mapped_bake
+uishot 01_mapped_bake
+zone Plain
+expect zonename.Plain == 1
+expect matmap.basecolor == 0
+expect mat.metallic < 1
+expect mat.roughness > 39
+expect mat.roughness < 41

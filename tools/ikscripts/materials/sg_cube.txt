@@ -1,0 +1,31 @@
+# THE SPECULAR / GLOSSINESS CONVERSION on a spec/gloss glTF with factors only (2026-11-09):
+#   POSESTUDIO_TEST_FIGURE=<assets>/sg_scalar.gltf tools/ikscripts/run.sh tools/ikscripts/materials/sg_cube.txt <out>
+# and, as the reference it must match, the same on <assets>/mr_cube.gltf — the metallic-roughness
+# cube with the same two materials written directly. The assets come from
+# tools/materials/make_test_assets.py. A static model: `select 0` stands in for the click.
+# Gold: black diffuse, gold specular, gloss 0.8 -> a metal with the gold as its base colour.
+# RedPlastic: red diffuse, 4 % grey specular, gloss 0.5 -> a dielectric with the red kept.
+view front
+select 0
+expect selection == 0
+expect zones == 2
+zone Gold
+expect zonename.Gold == 1
+expect mat.metallic > 95
+expect mat.roughness > 18
+expect mat.roughness < 22
+expect mat.color.r > 0.9
+expect mat.color.g > 0.7
+expect mat.color.g < 0.82
+expect mat.color.b > 0.3
+expect mat.color.b < 0.4
+shot 01_gold
+uishot 01_gold
+zone RedPlastic
+expect zonename.RedPlastic == 1
+expect mat.metallic < 1
+expect mat.roughness > 49
+expect mat.roughness < 51
+expect mat.color.r > 0.78
+expect mat.color.r < 0.82
+expect mat.color.g < 0.07

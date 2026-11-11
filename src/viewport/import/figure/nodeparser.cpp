@@ -96,9 +96,11 @@ std::vector<FigureBone> parseSkeleton(const nlohmann::json& nodeLibrary) {
         }
         bone.rotationOrder = node.value("rotation_order", std::string("XYZ"));
 
+        // A reference spells an id percent-encoded ("#Some%20Hair_1234"), the node it names plain:
+        // compared as written, every bone under a figure node with a space in its id lost its parent.
         std::string parent = node.value("parent", std::string());
         if (!parent.empty() && parent[0] == '#') {
-            parent = parent.substr(1);
+            parent = urlDecode(parent.substr(1));
         }
 
         idToIndex.emplace(bone.name, static_cast<int>(bones.size()));

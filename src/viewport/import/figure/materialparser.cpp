@@ -124,6 +124,9 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
     std::unordered_map<const nlohmann::json*, ChannelIndex> baseIndexes;
 
     for (const auto& mat : materials) {
+        if (overrides && overrides->skip.count(&mat)) {
+            continue; // another figure's material (see MaterialBaseOverrides::skip)
+        }
         // Resolve the base material this one extends. Same-file "#id" references resolve here
         // directly; CROSS-FILE bases (newer skin materials' "/data/...#<SkinShaderBase>") are
         // pre-resolved by the importer (applySceneMaterials), which hands the referenced base in
@@ -131,13 +134,20 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
         // is consulted first, then the extra bases.
         const nlohmann::json* base = nullptr;
         std::string url = mat.value("url", std::string());
+        bool        rewritten = false;
         if (overrides) {
             if (const auto rw = overrides->urlRewrites.find(&mat); rw != overrides->urlRewrites.end()) {
                 url = rw->second;
+                rewritten = true;
             }
         }
         if (url.size() > 1 && url[0] == '#') {
-            const std::string fragment = url.substr(1);
+            // The reference spells the id percent-encoded ("#Layer%202"), the library plain
+            // ("Layer 2"): compared as written, a base whose id has a space in it was never found
+            // and its material lost every channel it leaves to the base (the roughness, what
+            // makes a shell transparent). A rewritten url arrives decoded already.
+            const bool asWritten = rewritten || (overrides && overrides->baseIdsAsWritten);
+            const std::string fragment = asWritten ? url.substr(1) : urlDecode(url.substr(1));
             if (const auto it = library.find(fragment); it != library.end()) {
                 base = it->second;
             } else if (overrides) {
@@ -291,7 +301,8 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
         bool tcPresent = false;
         const float tcWeightRaw = scalarChannel("Top Coat Weight", 0.0f, &tcPresent);
         const nlohmann::json* tcEnable = effectiveChannel(sceneIndex, baseIndex, "Top Coat Enable");
-        if (tcPresent && tcWeightRaw > 0.0f && (!tcEnable || channelBool(*tcEnable, true))) {
+        ref.topCoatEnabled = !tcEnable || channelBool(*tcEnable, true); // (the switch is a switch; the weight is read either way)
+        if (tcPresent && tcWeightRaw > 0.0f) {
             const float tcReflectivity =
                 std::clamp(scalarChannel("Top Coat Reflectivity", 0.5f), 0.0f, 1.0f);
             // The coat's COLOUR scales it: a dark-grey Top Coat Color is how 2017-era skins tame a
@@ -327,6 +338,7 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
         if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "Translucency Weight")) {
             ref.translucencyWeight = std::clamp(channelScalar(*c, 0.5f), 0.0f, 1.0f);
         }
+        ref.translucencyWeightImageUri = channelMapUri("Translucency Weight");
         ref.translucencyImageUri = channelMapUri("Translucency Color");
         if (ref.translucencyImageUri.empty()) {
             ref.translucencyImageUri = channelMapUri("Translucency Weight");
@@ -343,6 +355,13 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
                 ref.detailTiles = scalarChannel("Detail Vertical Tiles", 32.0f);
             }
             ref.detailTiles = std::clamp(ref.detailTiles, 1.0f, 512.0f);
+            // The layer's further channels (stored-only): the vertical count and the offsets, the
+            // roughness multiplier tiled with it, and the weight's and the multiplier's maps.
+            ref.detailTilesV = std::clamp(scalarChannel("Detail Vertical Tiles", ref.detailTiles), 1.0f, 512.0f);
+            ref.detailOffset = glm::vec2(scalarChannel("Detail Horizontal Offset", 0.0f), scalarChannel("Detail Vertical Offset", 0.0f));
+            ref.detailRoughness = std::clamp(scalarChannel("Detail Specular Roughness Mult", 1.0f), 0.0f, 4.0f);
+            ref.detailWeightImageUri = channelMapUri("Detail Weight");
+            ref.detailRoughnessImageUri = channelMapUri("Detail Specular Roughness Mult");
         }
 
         // Both detail-map channels carry a dialed STRENGTH alongside the map ("Normal Map" 2.5,
@@ -353,6 +372,18 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
         if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "Normal Map")) {
             ref.normalImageUri = channelImageUri(*c, imageLibrary);
             ref.normalStrength = std::clamp(channelScalar(*c, 1.0f), 0.0f, 7.9f);
+        }
+        // Displacement (stored-only): the map, and the source app's min / max centimetres turned
+        // into the renderers' strength (black to white) + mid level (the value at zero).
+        ref.displacementImageUri = channelMapUri("Displacement Strength");
+        {
+            const float dispStrength = scalarChannel("Displacement Strength", 1.0f);
+            const float dispMin = scalarChannel("Minimum Displacement", -0.1f);
+            const float dispMax = scalarChannel("Maximum Displacement", 0.1f);
+            const float range = dispMax - dispMin;
+            ref.displacementStrength = std::clamp(range * dispStrength, -100.0f, 100.0f);
+            ref.displacementMidLevel = std::abs(range) > 1.0e-6f ? std::clamp(-dispMin / range, 0.0f, 1.0f) : 0.5f;
+            ref.displacementSubdiv = std::clamp(std::round(scalarChannel("SubD Displacement Level", 0.0f)), 0.0f, 5.0f);
         }
         if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "Bump Strength")) {
             ref.bumpImageUri = channelImageUri(*c, imageLibrary);
@@ -388,6 +419,122 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
         // NB: do NOT treat "no diffuse map + low roughness" as transparent — that over-broad
         // heuristic wrongly turned some figures' untextured skin zones invisible. Refraction is the
         // reliable clear-shell signal.
+
+        // --- THE CANONICAL MATERIAL's further channels (materialparams.h), each read where the
+        // shader authors it; the Materials tab shows them and the rendering engines will read them.
+        ref.transmission = std::clamp(refraction, 0.0f, 1.0f);
+        if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "Emission Color")) {
+            glm::vec3 e(0.0f);
+            channelColor(*c, e);
+            const float peak = std::max(e.x, std::max(e.y, e.z));
+            if (peak > 0.0f) {
+                ref.emissionColor = e / peak;
+                // "Luminance" in cd/m² (the shader's default unit): 1000 cd/m² = the engine's radiance 1.
+                ref.emission = std::max(0.0f, scalarChannel("Luminance", 1500.0f)) * peak / 1000.0f;
+                ref.emissionImageUri = channelMapUri("Emission Color");
+            }
+        }
+        // The dielectric's reflectance is its REFLECTIVITY here (F0 = 0.08 × reflectivity, folded into
+        // the specular weight above with 1.5 as the baseline), never its Refraction Index — the
+        // shader's own glossy layer reads it the same way — so the index is the TRANSMISSION's: read
+        // for a refracting surface (the eye's clear shells, glass), left at the baseline for the rest
+        // (a skin preset authors 1.33, and read into the viewport's F0 it halved every skin's
+        // specular on top of the reflectivity that already states it).
+        if (refraction > 0.0f) {
+            ref.ior = std::clamp(scalarChannel("Refraction Index", 1.5f), 1.0f, 3.0f);
+        }
+        if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "Transmitted Color")) {
+            channelColor(*c, ref.transmissionColor);
+        }
+        ref.transmissionDepth = std::max(0.0f, scalarChannel("Transmitted Measurement Distance", 0.0f)) * 0.01f; // cm → m
+        if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "Thin Walled")) {
+            ref.thinWalled = channelBool(*c, false);
+        }
+        // The Translucency Color is the tint skins author under the surface (the map's own tint);
+        // the VOLUME's scattering is SSS Color (the per-channel scattering colour), the Scattering
+        // Measurement Distance (cm) and SSS Direction — OpenPBR's subsurface radius colour, radius
+        // scale and scatter anisotropy.
+        if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "Translucency Color")) {
+            channelColor(*c, ref.subsurfaceColor);
+        }
+        if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "SSS Color")) {
+            channelColor(*c, ref.subsurfaceRadiusColor);
+        }
+        ref.subsurfaceRadius = std::clamp(scalarChannel("Scattering Measurement Distance", 1.0f), 0.0f, 100.0f);
+        ref.subsurfaceAnisotropy = std::clamp(scalarChannel("SSS Direction", 0.0f), -1.0f, 1.0f);
+        ref.transmissionColorImageUri = channelMapUri("Transmitted Color");
+        ref.anisotropy = std::clamp(scalarChannel("Glossy Anisotropy", 0.0f), 0.0f, 1.0f);
+        ref.anisotropyRotation = std::clamp(scalarChannel("Glossy Anisotropy Rotations", 0.0f), 0.0f, 1.0f) * 360.0f;
+        // The Specular section's maps (stored-only slots).
+        ref.specularColorImageUri = channelMapUri("Glossy Color");
+        ref.anisotropyImageUri = channelMapUri("Glossy Anisotropy");
+        ref.anisotropyRotationImageUri = channelMapUri("Glossy Anisotropy Rotations");
+        ref.lobe2RoughnessImageUri = channelMapUri("Specular Lobe 2 Roughness Mult");
+        if (ref.lobe2RoughnessImageUri.empty()) {
+            ref.lobe2RoughnessImageUri = channelMapUri("Specular Lobe 2 Roughness");
+        }
+        ref.lobeRatioImageUri = channelMapUri("Dual Lobe Specular Ratio");
+        ref.diffuseRoughness = std::clamp(scalarChannel("Diffuse Roughness", 0.0f), 0.0f, 1.0f);
+        ref.diffuseRoughnessImageUri = channelMapUri("Diffuse Roughness");
+        if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "Top Coat Color")) {
+            channelColor(*c, ref.coatColor);
+            // The shader's Top Coat Color tints the coat's REFLECTION, and its luminance is folded
+            // into the weight above (a dark grey coat colour is a weak coat). The canonical
+            // material's coat colour is the tint of what passes THROUGH the coat (OpenPBR's), which
+            // the viewport draws, so only the HUE is kept: a grey coat colour is white here, and a
+            // skin's coat darkens nothing twice.
+            const float lum = glm::dot(ref.coatColor, glm::vec3(0.2126f, 0.7152f, 0.0722f));
+            ref.coatColor = lum > 1e-4f ? glm::clamp(ref.coatColor / lum, 0.0f, 1.0f) : glm::vec3(1.0f);
+        }
+        // The coat's INDEX: the shader reads its Top Coat IOR channel in the Fresnel layering mode
+        // (2) alone; in the Reflectivity / Weighted modes — the skins' — the coat's reflectance is
+        // its Reflectivity, folded into the weight above at the standard 1.5 dielectric's 4%, and
+        // that is the index the coat carries (read as the channel's 1.6 whatever the mode, every
+        // skin's coat would brighten by a third the day the viewport drew the index, 2026-11-10).
+        const int coatMode = static_cast<int>(scalarChannel("Top Coat Layering Mode", 0.0f) + 0.5f);
+        ref.coatIor = coatMode == 2 ? std::clamp(scalarChannel("Top Coat IOR", 1.5f), 1.0f, 3.0f) : 1.5f;
+        ref.coatAnisotropy = std::clamp(scalarChannel("Top Coat Anisotropy", 0.0f), 0.0f, 1.0f);
+        ref.coatAnisotropyRotation = std::clamp(scalarChannel("Top Coat Rotations", 0.0f), 0.0f, 1.0f) * 360.0f;
+        ref.coatAnisotropyImageUri = channelMapUri("Top Coat Anisotropy");
+        ref.coatAnisotropyRotationImageUri = channelMapUri("Top Coat Rotations");
+        ref.transmissionWeightImageUri = channelMapUri("Refraction Weight");
+        // Backscattering is the shader's sheen: the retro-reflective fuzz of cloth.
+        ref.sheen = std::clamp(scalarChannel("Backscattering Weight", 0.0f), 0.0f, 1.0f);
+        if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "Backscattering Color")) {
+            channelColor(*c, ref.sheenColor);
+        }
+        ref.sheenRoughness = std::clamp(scalarChannel("Backscattering Roughness", 0.5f), 0.0f, 1.0f);
+        ref.sheenWeightImageUri = channelMapUri("Backscattering Weight");
+        ref.sheenColorImageUri = channelMapUri("Backscattering Color");
+        ref.sheenRoughnessImageUri = channelMapUri("Backscattering Roughness");
+        // The thin film: a thickness above 0 switches it on (the shader has no weight).
+        {
+            const float thickness = std::clamp(scalarChannel("Thin Film Thickness", 0.0f), 0.0f, 2000.0f);
+            ref.thinFilmThicknessImageUri = channelMapUri("Thin Film Thickness");
+            if (thickness > 0.0f || !ref.thinFilmThicknessImageUri.empty()) {
+                ref.thinFilm = 1.0f;
+                ref.thinFilmThickness = thickness > 0.0f ? thickness : 500.0f;
+                ref.thinFilmIor = std::clamp(scalarChannel("Thin Film IOR", 1.5f), 1.0f, 3.0f);
+            }
+        }
+        // The top coat's maps (stored-only slots): the weight, colour, roughness and reflectivity
+        // (or IOR) channels' images, and the coat's own bump map with its strength.
+        ref.coatWeightImageUri = channelMapUri("Top Coat Weight");
+        ref.coatColorImageUri = channelMapUri("Top Coat Color");
+        ref.coatRoughnessImageUri = channelMapUri("Top Coat Roughness");
+        if (ref.coatRoughnessImageUri.empty()) {
+            ref.coatRoughnessImageUri = channelMapUri("Top Coat Glossiness");
+        }
+        ref.coatReflectivityImageUri = channelMapUri("Top Coat Reflectivity");
+        if (ref.coatReflectivityImageUri.empty()) {
+            ref.coatReflectivityImageUri = channelMapUri("Top Coat IOR");
+        }
+        ref.coatBumpImageUri = channelMapUri("Top Coat Bump");
+        if (!ref.coatBumpImageUri.empty()) {
+            ref.coatBumpStrength = std::clamp(scalarChannel("Top Coat Bump", 1.0f), 0.0f, 7.9f);
+        }
+        ref.uvTiling = glm::vec2(scalarChannel("Horizontal Tiles", 1.0f), scalarChannel("Vertical Tiles", 1.0f));
+        ref.uvOffset = glm::vec2(scalarChannel("Horizontal Offset", 0.0f), scalarChannel("Vertical Offset", 0.0f));
 
         if (const auto g = mat.find("groups"); g != mat.end() && g->is_array()) {
             for (const auto& zone : *g) {

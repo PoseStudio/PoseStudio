@@ -265,6 +265,11 @@ void VulkanWindow::onFallTick() {
         m_fall.timer->stop();
         return;
     }
+    if (m_script && sender() == m_fall.timer) {
+        // Under a SCRIPTED run the script's `wait` ticks drive the fall (scriptWaitTick), so the
+        // fall and the wait count the same ticks; the timer only says a fall is in flight.
+        return;
+    }
     // Under a SCRIPTED run the fall and the landing bounce keep script time — a sixtieth a tick —
     // instead of the wall clock: a `shot` reads the frame back off the GPU and stalls a frame,
     // the dip ran on meanwhile, and the landing gallery's knee reading at a fixed tick differed

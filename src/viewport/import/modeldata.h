@@ -55,6 +55,10 @@ using DecodedImagePtr = std::shared_ptr<const DecodedImage>;
 struct MeshData {
     std::vector<Vertex>   vertices;
     std::vector<uint32_t> indices;
+    /// The material zone's name as the file has it ("Torso", a glTF material's name, an MTL
+    /// material's): what the Materials tab lists and a project's material overrides are keyed
+    /// by. Empty = unnamed (the tab shows "Zone N").
+    std::string           name;
     // Material diffuse color when present, else this default for geometry with no material/texture:
     // a light neutral grey, hex #D1D1D1. Stored LINEAR (sRGB->linear of 209/209/209) because the lit
     // fragment output is hardware-encoded to the sRGB swapchain — so a fully-lit surface reads as
@@ -67,6 +71,54 @@ struct MeshData {
     // When hasOpacityMask is set, the image's alpha channel carries the baked opacity mask.
     TextureSource         diffuse;
     DecodedImagePtr       diffuseImage;
+    /// THE TEXTURE SLOTS' plain images (2026-11-09; set by the decode layer, kept by the Mesh for
+    /// the Materials tab's replacements): the base-colour map's plain decode (no cutout baked),
+    /// the cutout mask (its gray in every channel), the roughness and metalness maps' plain
+    /// decodes (their channels are roughnessChannel / metalnessChannel). Null = none.
+    DecodedImagePtr       diffusePlainImage;
+    DecodedImagePtr       opacityMaskImage;
+    DecodedImagePtr       roughnessPlainImage;
+    DecodedImagePtr       metalnessPlainImage;
+    /// A bump map CARRIED BESIDE a normal map (`normal` is then the normal map, normalMode 1), and
+    /// an sRGB emission map — two more of the canonical material's slots (set 1 bindings 6 / 7).
+    TextureSource         bumpMap;
+    DecodedImagePtr       bumpImage;
+    float                 bumpStrength = 1.0f;
+    TextureSource         emissionMap;
+    DecodedImagePtr       emissionImage;
+    /// The STORED-ONLY maps (no binding; the Materials tab shows them, a renderer will read them):
+    /// a grayscale map multiplying Diffuse Roughness.
+    TextureSource         diffuseRoughnessMap;
+    DecodedImagePtr       diffuseRoughnessImage;
+    /// The top coat's maps (stored-only): weight, colour (sRGB), roughness, reflectivity, and the
+    /// coat's own bump / normal map with its strength.
+    TextureSource         coatWeightMap;
+    DecodedImagePtr       coatWeightImage;
+    TextureSource         coatColorMap;
+    DecodedImagePtr       coatColorImage;
+    TextureSource         coatRoughnessMap;
+    DecodedImagePtr       coatRoughnessImage;
+    TextureSource         coatReflectivityMap;
+    DecodedImagePtr       coatReflectivityImage;
+    TextureSource         coatBumpMap;
+    DecodedImagePtr       coatBumpImage;
+    float                 coatBumpStrength = 1.0f;
+    /// The translucency WEIGHT map (stored-only; the Translucency slot is the colour map, whose
+    /// luminance the viewport uses as the weight — a weight map alone is also read into it).
+    TextureSource         translucencyWeightMap;
+    DecodedImagePtr       translucencyWeightImage;
+    /// The Specular section's maps (stored-only): the reflection's tint, the anisotropy and its
+    /// rotation, the broad lobe's roughness and the lobe ratio.
+    TextureSource         specularColorSlotMap;
+    DecodedImagePtr       specularColorSlotImage;
+    TextureSource         anisotropyMap;
+    DecodedImagePtr       anisotropyImage;
+    TextureSource         anisotropyRotationMap;
+    DecodedImagePtr       anisotropyRotationImage;
+    TextureSource         lobe2RoughnessMap;
+    DecodedImagePtr       lobe2RoughnessImage;
+    TextureSource         lobeRatioMap;
+    DecodedImagePtr       lobeRatioImage;
 
     // Detail (surface) map: a tangent-space normal map or a grayscale bump/height map, selected by
     // normalMode. Decoded like the diffuse map, but uploaded as a LINEAR texture (it's data, not
@@ -105,6 +157,30 @@ struct MeshData {
     bool                  opacityFromDiffuseAlpha = false;
     TextureSource         specMask;
     DecodedImagePtr       specMaskImage;
+    /// A METALNESS map (2026-11-09): glTF's metallic-roughness texture's blue channel, an FBX or
+    /// USD metalness texture, an MTL's map_Pm. It rides the roughness texture's GREEN channel —
+    /// the decode layer builds one parameter image per (roughness map, metalness map) pair with
+    /// the roughness in red and the metalness in green (255 where a map is absent, so the
+    /// shader's per-texel multiplies are no-ops) — and sets hasMetalnessMap. `metalness` is the
+    /// factor the texel multiplies (1 with a map and no factor).
+    TextureSource         metalnessMap;
+    int                   metalnessChannel = 0;
+    bool                  hasMetalnessMap = false; // set by the decode layer: the parameter map carries a metalness
+    bool                  hasRoughnessMap = false; // set by the decode layer: the parameter map carries a roughness (a map, or a baked glossiness)
+    /// A SPECULAR / GLOSSINESS source (import/specgloss.h), converted at import: the reader sets
+    /// convertSpecGloss with the maps and factors of the older convention — the diffuse map is
+    /// `diffuse` above with `diffuseFactor` on it, the specular colour map (sRGB) and its factor,
+    /// the glossiness map (a channel; glTF packs it in the specular map's alpha) and its factor —
+    /// having already put the SCALAR solve into baseColor / metalness / roughness. With any of the
+    /// maps present the decode layer bakes the solve per texel into a base-colour map and a
+    /// metalness map (and a roughness map from a glossiness map) in their place.
+    bool                  convertSpecGloss = false;
+    glm::vec4             diffuseFactor{1.0f};        // linear RGB × the diffuse map, alpha × its alpha
+    TextureSource         specularColorMap;
+    glm::vec3             specularColorFactor{1.0f};  // linear, × the specular map (the F0 itself untextured)
+    TextureSource         glossinessMap;
+    int                   glossinessChannel = 0;      // 0 red … 2 blue, 3 alpha
+    float                 glossinessFactor = 1.0f;
 
     // Translucency map (sRGB colour: the flesh-red transmitted tint, or a grayscale weight map —
     // luminance = per-region strength). White fallback = uniform.
@@ -117,6 +193,58 @@ struct MeshData {
     DecodedImagePtr       detailNormalImage;
     float                 detailWeight = 0.0f;
     float                 detailTiles  = 0.0f;
+    /// The detail layer's further values and maps (stored-only): the vertical tiling and the
+    /// offsets, a roughness multiplier tiled with it, the weight's mask map and the multiplier's map.
+    float                 detailTilesV = 0.0f;
+    glm::vec2             detailOffset{0.0f};
+    float                 detailRoughness = 1.0f;
+    TextureSource         detailWeightMap;
+    DecodedImagePtr       detailWeightImage;
+    TextureSource         detailRoughnessMap;
+    DecodedImagePtr       detailRoughnessImage;
+    /// Displacement (stored-only; a renderer's): the height map, centimetres black-to-white, the
+    /// mid level, the subdivision before displacing.
+    TextureSource         displacementMap;
+    DecodedImagePtr       displacementImage;
+    float                 displacementStrength = 0.2f;
+    float                 displacementMidLevel = 0.5f;
+    float                 displacementSubdiv = 0.0f;
+    /// A baked ambient-occlusion map and its weight (rendered since 2026-11-10 through the parameter
+    /// map's blue, over the viewport's own per-vertex `ao`).
+    TextureSource         aoMap;
+    DecodedImagePtr       aoImage;
+    float                 aoWeight = 1.0f;
+    /// The transmission tint's map (stored-only).
+    TextureSource         transmissionColorMap;
+    DecodedImagePtr       transmissionColorImage;
+    /// The completion batch's stored-only maps and values (2026-11-10): the transmission weight's map,
+    /// the coat's anisotropy (+ rotation) with maps, the sheen's three maps, the thin film's weight
+    /// and thickness maps, the UV rotation and the double-sided flag.
+    TextureSource         transmissionWeightMap;
+    DecodedImagePtr       transmissionWeightImage; ///< (rendered: the parameter map's alpha)
+    /// THE LAYER MAP (the decode layer's buildPackedMap, 2026-11-10): the coat weight (R), the coat
+    /// roughness (G), the sheen weight (B) and the thin-film thickness (A) maps packed into the one
+    /// linear image the shader samples (set 1 binding 8); null without any of the four.
+    DecodedImagePtr       layerMapImage;
+    float                 coatAnisotropy = 0.0f;
+    float                 coatAnisotropyRotation = 0.0f;
+    TextureSource         coatAnisotropyMap;
+    DecodedImagePtr       coatAnisotropyImage;
+    TextureSource         coatAnisotropyRotationMap;
+    DecodedImagePtr       coatAnisotropyRotationImage;
+    TextureSource         sheenWeightMap;
+    DecodedImagePtr       sheenWeightImage;
+    TextureSource         sheenColorMap;
+    DecodedImagePtr       sheenColorImage;
+    TextureSource         sheenRoughnessMap;
+    DecodedImagePtr       sheenRoughnessImage;
+    TextureSource         thinFilmWeightMap;
+    DecodedImagePtr       thinFilmWeightImage;
+    TextureSource         thinFilmThicknessMap;
+    DecodedImagePtr       thinFilmThicknessImage;
+    float                 uvRotation = 0.0f;
+    bool                  doubleSided = false;
+    bool                  topCoatEnabled = true; ///< the native Top Coat Enable switch (the weight kept either way)
 
     float                 roughness = 0.7f; // 0 = mirror-smooth, 1 = fully rough (matte).
     float                 specularWeight = 1.0f; // F0 multiplier (1 = 4% dielectric; skin ~0.5).
@@ -129,6 +257,34 @@ struct MeshData {
     float                 topCoatRoughness = 0.65f;
     float                 translucencyWeight = 0.5f; // × the translucency map's luminance
     float                 opacity   = 1.0f; // < 1 => drawn in the transparent pass, alpha-blended.
+    // THE CANONICAL MATERIAL's further channels (materialparams.h, 2026-11-09): a reader fills what
+    // its format carries; the rest stay at these neutral defaults.
+    float                 diffuseRoughness = 0.0f;
+    glm::vec3             specularColor{1.0f};
+    float                 ior = 1.5f;
+    float                 anisotropy = 0.0f;
+    float                 anisotropyRotation = 0.0f;
+    float                 transmission = 0.0f;
+    glm::vec3             transmissionColor{1.0f};
+    float                 transmissionDepth = 0.0f;
+    float                 dispersion = 0.0f;
+    bool                  thinWalled = false;
+    glm::vec3             subsurfaceColor{1.0f};
+    float                 subsurfaceRadius = 1.0f; ///< the scattering distance, cm
+    glm::vec3             subsurfaceRadiusColor{1.0f}; ///< the scattering colour (SSS Color)
+    float                 subsurfaceAnisotropy = 0.0f;   ///< the scattering direction, -1..1
+    float                 sheen = 0.0f;
+    glm::vec3             sheenColor{1.0f};
+    float                 sheenRoughness = 0.5f;
+    glm::vec3             coatColor{1.0f};
+    float                 coatIor = 1.5f;
+    float                 thinFilm = 0.0f;
+    float                 thinFilmThickness = 500.0f; // nm
+    float                 thinFilmIor = 1.4f;
+    glm::vec3             emissionColor{1.0f};
+    float                 emission = 0.0f;           // luminance factor (0 = none)
+    glm::vec2             uvTiling{1.0f};
+    glm::vec2             uvOffset{0.0f};
 
     // For pose correctives: the source *base* (pre-de-index) vertex index each render vertex
     // came from — the key that maps a corrective's base-vertex deltas onto these render vertices.
@@ -235,6 +391,9 @@ struct ModelData {
     std::vector<MeshData>       meshes;
     std::vector<ModelBone>      bones;
     std::vector<PoseCorrective> correctives; ///< Pose-driven corrective morphs; empty for static models.
+    /// Anything the reader wants in the import log (a conversion it made, a channel it could not
+    /// read) — the Qt layer prints them under the import's line, as the rigged readers' notes are.
+    std::vector<std::string>    notes;
 };
 
 } // namespace pose

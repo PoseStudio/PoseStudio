@@ -58,6 +58,43 @@ ProjectDocument makeDoc() {
     f1.rootBone = "hip";
     f1.rootTranslation = glm::vec3(0.0f, -0.31f, 0.12f);
     f1.translation = glm::vec3(0.5f, 0.0f, -1.25f);
+    // A material edit on one zone (the Materials tab): every value off its default.
+    pose::ProjectMaterial torso;
+    torso.zone = "Torso";
+    torso.params.baseColor = glm::vec3(0.8f, 0.55f, 0.4f);
+    torso.params.opacity = 0.9f;
+    torso.params.roughness = 0.35f;
+    torso.params.metalness = 0.25f;
+    torso.params.specular = 0.6f;
+    torso.params.normalStrength = 2.5f;
+    torso.params.translucency = 0.75f;
+    torso.params.topCoat = 0.4f;
+    torso.params.topCoatRoughness = 0.3f;
+    torso.params.detailWeight = 0.45f;
+    torso.params.detailTiles = 24.0f;
+    torso.params.lobe1Roughness = 0.6f;
+    torso.params.lobe2Roughness = 0.2f;
+    torso.params.lobeRatio = 0.85f;
+    // The canonical material's further channels, and two texture slots: a file and a cleared one.
+    torso.params.ior = 1.33f;
+    torso.params.specularColor = glm::vec3(0.9f, 0.8f, 0.7f);
+    torso.params.anisotropy = 0.2f;
+    torso.params.transmission = 0.3f;
+    torso.params.transmissionColor = glm::vec3(0.2f, 0.9f, 0.3f);
+    torso.params.thinWalled = true;
+    torso.params.subsurfaceRadius = 2.5f;
+    torso.params.sheen = 0.4f;
+    torso.params.coatIor = 1.7f;
+    torso.params.thinFilm = 0.6f;
+    torso.params.thinFilmThickness = 320.0f;
+    torso.params.emission = 2.0f;
+    torso.params.emissionColor = glm::vec3(1.0f, 0.5f, 0.25f);
+    torso.params.bumpStrength = 1.75f;
+    torso.params.uvTiling = glm::vec2(2.0f, 3.0f);
+    torso.params.uvOffset = glm::vec2(0.25f, -0.5f);
+    torso.textures.push_back({"basecolor", "C:/textures/skin.png"});
+    torso.textures.push_back({"cutout", ""});
+    f1.materials.push_back(torso);
     f1.rotation = glm::normalize(glm::vec4(0.0f, 0.7071068f, 0.0f, 0.7071068f));
     f1.scale = glm::vec3(1.5f, 2.25f, 0.75f);
     doc.figures.push_back(f1);
@@ -113,9 +150,15 @@ void checkRoundTrip() {
     check(vec3Equal(b.translation, a.translation), "f1 translation");
     check(vec4Equal(b.rotation, a.rotation), "f1 rotation (quaternion)");
     check(vec3Equal(b.scale, a.scale), "f1 scale");
+    check(b.materials.size() == 1 && b.materials[0].zone == "Torso" && b.materials[0].params == a.materials[0].params,
+          "f1 material override (every value)");
+    check(b.materials.size() == 1 && b.materials[0].textures.size() == 2 && b.materials[0].textures[0].slot == "basecolor" &&
+              b.materials[0].textures[0].source == "C:/textures/skin.png" && b.materials[0].textures[1].slot == "cutout" &&
+              b.materials[0].textures[1].source.empty(),
+          "f1 material texture slots (a file and a cleared slot)");
 
     const ProjectFigure& c = out.figures[1];
-    check(c.source == path("model.obj") && c.pose.empty() && c.pins.empty() &&
+    check(c.source == path("model.obj") && c.pose.empty() && c.pins.empty() && c.materials.empty() &&
               c.rootBone.empty() && vec3Equal(c.translation, glm::vec3(0.0f)) &&
               vec3Equal(c.scale, glm::vec3(1.0f)) &&
               vec4Equal(c.rotation, glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)),
@@ -161,7 +204,8 @@ void checkRejections() {
 void checkForwardCompatibility() {
     writeText(path("future.json"),
               R"({"format":"posestudio.project","version":1,"figures":[{"source":"/x.duf",
-                  "pose":[["hip",1.0,2.0,3.0]],"mysteryField":{"a":1},"pins":[]}],
+                  "pose":[["hip",1.0,2.0,3.0]],"mysteryField":{"a":1},"pins":[],
+                  "materials":[{"zone":"Torso","roughness":0.4,"futureKey":1,"textures":[{"slot":"glow","source":"x.png"},{"slot":"normal","source":"n.png"}]}]}],
                  "environment":{"hdri":"","settings":{"exposure":0.5,"futureDial":42}},
                  "camera":{"target":[0,1,0],"yaw":0.1,"pitch":0.2,"distance":3.0,"orthographic":false,
                            "fovDeg":60},"topLevelUnknown":[1,2,3]})");
@@ -172,6 +216,11 @@ void checkForwardCompatibility() {
               vec3Equal(d.figures[0].pose[0].second, glm::vec3(1.0f, 2.0f, 3.0f)) &&
               d.environment.settings.exposure == 0.5f && d.camera.distance == 3.0f,
           "known values survive");
+    check(d.figures[0].materials.size() == 1 && d.figures[0].materials[0].zone == "Torso" &&
+              d.figures[0].materials[0].params.roughness == 0.4f &&
+              d.figures[0].materials[0].params.metalness == 0.0f && // absent: the default
+              d.figures[0].materials[0].textures.size() == 1 && d.figures[0].materials[0].textures[0].slot == "normal", // an unknown slot left out
+          "a partial material entry reads with defaults");
 }
 
 } // namespace

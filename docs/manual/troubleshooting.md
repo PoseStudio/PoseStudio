@@ -19,6 +19,8 @@ PoseStudio renders with Vulkan, which needs a graphics driver that provides it. 
 
 ## The figure looks wrong
 
+- **A character comes in with the base figure's shape, or with a plain head on her own body**: one of her morph files is not in the content folders PoseStudio knows — a character built on another needs that one's files as well. The log names each shape that was applied and warns about each that was not, with the file it looked for (see [Seeing what PoseStudio is doing](#seeing-what-posestudio-is-doing)); install the content, or locate its folder ([Importing Content](importing.md#when-the-figures-data-cannot-be-found)), and import again.
+- **Her hair, eyelashes or clothes are missing**: they were saved as separate figures in the character's file, and only the character is imported from such a file so far. See [Importing Content](importing.md#a-file-that-holds-several-figures).
 - **Skin looks like wet plastic** in the PBR mode: lower **Specular** under Image-Based Lighting, or try a less glossy environment. Most skin materials render as intended; the remaining cases are content whose maps were authored for another renderer.
 - **The figure is dark**: raise **Exposure**, or switch the HDRI — some panoramas are much dimmer than others.
 - **A black or missing texture**: the texture file the material refers to is not where the preset expects it. PoseStudio skips textures it cannot decode and uses the material's colour.
@@ -32,6 +34,7 @@ PoseStudio renders with Vulkan, which needs a graphics driver that provides it. 
 - **The hand stops short of the cursor**: the arm is at full reach and the body has leaned as far as its balance allows. Take the hips along, or let a foot step first (drag the hips or the chest).
 - **She will not go lower / will not stand up**: a kneeling body is stopped by its thighs over the planted knees — drag the hips *back* to sit onto the heels. To get up from a kneel or a sit, drag the hips or the chest *up*.
 - **A pinned joint holds a drag back**: unpin it (`P`, or *Unpin All Joints* in the context menu). Orange markers show the pins.
+- **Her breasts or buttocks do not move**: check the switches in the **Soft Body Physics** tab. The breasts' motion is sized by the bust read off her mesh at import — a flat chest gets none, and a small bust very little; raise **Softness** to see more. A model with no skeleton (a static scan) has no soft body. See [Soft breasts](posing.md#soft-breasts).
 - **Delete or P does nothing**: the viewport needs keyboard focus — click in it first.
 - **Undo is empty after deleting an object**: deleting clears the whole undo history. File → New clears it too.
 - **Opening a project says a figure file is missing**: the project names each figure by the path it was imported from; if the file moved, choose it again in the dialog, or skip it to open the rest. See [Project Files](project-files.md#if-a-figure-file-has-moved).
@@ -51,6 +54,8 @@ PoseStudio logs what it does to its console output — imports, the ping, the up
 set QT_LOGGING_TO_CONSOLE=1
 PoseStudio.exe
 ```
+
+For an imported character the log has a line `[figure] shape: … morphs applied (…)` naming the shapes that made her, and a warning `[figure] shape: NOT applied —` for each shape that could not be applied, with its reason: its file is not under any content folder (the path it was looked for at is given), or it was made for another figure.
 
 ## Starting over
 

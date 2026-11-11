@@ -8,7 +8,7 @@ A project file (`.pss`) saves the whole scene — every figure with its pose and
 - **File → Save As…** (`Ctrl+Shift+S`) picks a new `.pss` location and becomes the project's file from then on. The dialog opens in the folder you used last time; `.pss` is added to the name if you leave it off.
 - **File → Open** (`Ctrl+O`) loads a `.pss` project. Everything currently in the scene is replaced by the project's content.
 
-A save is tiny — kilobytes, not megabytes: the file stores references and numbers, never geometry or textures. Opening a project re-imports the figure files it names through the normal import pipeline and restores their poses, transforms, the environment (HDRI and every lighting dial) and the camera framing on top.
+A save is tiny — kilobytes, not megabytes: the file stores references and numbers, never geometry or textures. Opening a project re-imports the figure files it names through the normal import pipeline and restores their poses, transforms, [material edits](materials.md) (the zones whose material differs from the import, by zone name — every value, and each texture slot that was replaced by a file or cleared; a replaced map is referenced by its path, like the figure file itself), the environment (HDRI and every lighting dial) and the camera framing on top.
 
 ## If a figure file has moved
 
@@ -22,7 +22,7 @@ The scene you had stays untouched until every referenced file is found or explic
 
 ## Unsaved changes
 
-PoseStudio tracks whether the scene has changed since the last save — posing, moving a figure, importing, deleting, and changing the environment all count; moving the camera does not (see [Preferences](preferences.md) to make it count). When there are unsaved changes, **New**, **Open** and closing the window ask first:
+PoseStudio tracks whether the scene has changed since the last save — posing, moving a figure, editing a material, importing, deleting, and changing the environment all count; moving the camera does not (see [Preferences](preferences.md) to make it count). When there are unsaved changes, **New**, **Open** and closing the window ask first:
 
 - **Save** writes the project and continues;
 - **Discard Changes** discards the changes and continues;

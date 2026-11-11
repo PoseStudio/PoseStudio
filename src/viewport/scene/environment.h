@@ -66,7 +66,8 @@ PrefilteredSpecular prefilterSpecular(const EnvironmentImage& env, int baseSize 
                                       int samples = 128);
 
 /// Numerically integrates the environment BRDF (the other half of split-sum) into a @p size × @p size
-/// LUT (BrdfLut, ibldata.h) with @p samples per texel. Environment-independent, so it's baked once.
+/// LUT (BrdfLut, ibldata.h) with @p samples per texel — the GGX scale and bias, and beside them the
+/// sheen lobe's directional albedo. Environment-independent, so it's baked once.
 BrdfLut integrateBrdfLut(int size = 128, int samples = 512);
 
 /// The CPU-baked, view-independent IBL products for one environment — SH diffuse irradiance and the

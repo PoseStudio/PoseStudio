@@ -1,0 +1,109 @@
+# THE MATERIALS TAB (2026-11-09): the selected object's material zones as sliders, on PoseStudio's one
+# material model — metallic / roughness with a specular weight. `zone <index|name>` picks the zone the
+# tab shows, `material <field> <value>` sets one field the way the tab does (one bracketed, undoable
+# edit; the fields and their display units are the tab's: roughness, metallic, specular, normal, pore,
+# tiles, opacity, subsurface, topcoat, topcoatrough in percent — tiles a count — and `material color
+# r g b` the linear base colour), `matlink on|off` whether an edit reaches the zones that share the
+# imported material (the tab's "Edit matching zones together", on by default), `matreset [all]` the
+# tab's Reset Zone / Reset All Zones. Metrics: `mat.<field>` and `mat.color.<r|g|b>` read the selected
+# zone, `matimported.<field>` what it imported with, `zone` the selected zone's index, `zones` the
+# count, `zonename.<name>` 1 when that zone is selected, `matlinked` how many other zones share the
+# material. `uishot` pictures the tab (run with POSESTUDIO_TAB=Materials).
+view front
+uishot 00_nothing_selected
+# Nothing selected: no zones, no values.
+expect zones == 0
+expect zone == -1
+
+# A click on the figure's chest selects her, and the zone under the cursor — the torso's skin — is
+# what the tab shows. The reference figure's skin zones share one material: the torso's imported
+# values are the face's, the arms' and the legs'.
+click chest
+expect zones > 10
+expect zonename.Torso == 1
+expect matlinked >= 3
+expect mat.roughness == matimported.roughness
+uishot 01_torso_as_imported
+shot 01_torso_as_imported
+
+# Roughness to 10 %: the torso and, linked, every skin zone go glossy; the eyes and the mouth keep
+# their own materials. One undo step takes it back.
+material roughness 10
+expect mat.roughness == 10
+zone Face
+expect mat.roughness == 10
+zone Irises
+expect mat.roughness == matimported.roughness
+zone Torso
+shot 02_skin_glossy
+undo
+expect mat.roughness == matimported.roughness
+zone Face
+expect mat.roughness == matimported.roughness
+zone Torso
+
+# Unlinked, an edit stays with its zone.
+matlink off
+material metallic 100
+expect mat.metallic == 100
+zone Face
+expect mat.metallic == matimported.metallic
+zone Torso
+shot 03_torso_metal_alone
+uishot 03_torso_metal_alone
+# Reset Zone: back to the imported values (and nothing else moves).
+matreset
+expect mat.metallic == matimported.metallic
+matlink on
+
+# Specular: 100 is the standard dielectric; the value reads what the file gave — the reference
+# figure's skin carries a specular MASK, so its undiscounted weight imports above 100 (the mask's
+# texels, well under white, bring the rendered F0 back under the dielectric's).
+expect matimported.specular > 20
+expect matimported.specular < 200
+material specular 100
+expect mat.specular == 100
+# The base colour: a red tint on the torso's map, read back as set (linear).
+material color 1 0.3 0.3
+expect mat.color.r == 1
+expect mat.color.g == 0.3
+shot 04_torso_red_tint
+# Opacity below 100 draws the zone see-through.
+material opacity 40
+expect mat.opacity == 40
+shot 05_torso_translucent
+# Reset All Zones: every zone back to the import, every value.
+matreset all
+expect mat.opacity == matimported.opacity
+expect mat.specular == matimported.specular
+expect mat.color.r == 1
+expect dirty == 1
+
+# The edits are part of the project: saved, the scene emptied, opened again — the roughness edit
+# is back on the skin zones and nowhere else.
+material roughness 15
+saveproject materials.pss
+new
+expect figures == 0
+openproject materials.pss
+expect figures == 1
+click chest
+expect zonename.Torso == 1
+expect mat.roughness == 15
+zone Face
+expect mat.roughness == 15
+zone Irises
+expect mat.roughness == matimported.roughness
+zone Torso
+shot 06_reopened_glossy_skin
+matreset all
+expect mat.roughness == matimported.roughness
+
+# A click on the eye selects its zone (the cornea is clear, so the click lands on the sclera or the
+# iris behind it); a click on the thigh the legs' skin.
+view front
+click lEye
+expect zonename.Torso == 0
+click lThigh@0.5
+expect zonename.Legs == 1
+uishot 07_legs

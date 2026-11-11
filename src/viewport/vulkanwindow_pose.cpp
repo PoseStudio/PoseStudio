@@ -64,6 +64,7 @@ void VulkanWindow::closeSettlingEdits() {
     finishIkSettle();
     finishGroundFall();
     endJointTransformEdit(); // (the joint mouse mode's too: what it made is kept)
+    endMaterialEdit();       // (a material scrub's bracket: what it set is kept)
 }
 
 void VulkanWindow::closeOpenPoseEdits() {
@@ -325,6 +326,103 @@ void VulkanWindow::notifyJointTransform() {
     }
 }
 
+// --- The Materials tab ------------------------------------------------------------------------
+
+MaterialView VulkanWindow::materialView() const {
+    return m_renderer ? scene().materialView() : MaterialView{};
+}
+
+void VulkanWindow::setMaterialZone(int zone) {
+    if (!m_renderer) {
+        return;
+    }
+    endMaterialEdit(); // an edit belongs to the zone it began on
+    scene().setSelectedZone(zone);
+    requestUpdate(); // (the frame's notify tells the tab)
+}
+
+bool VulkanWindow::beginMaterialEdit() {
+    if (m_materialEdit) {
+        return true; // already open (a set opened it, or a nested begin)
+    }
+    if (!m_renderer) {
+        return false;
+    }
+    const int model = scene().selectedModelIndex();
+    if (model < 0) {
+        return false; // nothing selected: nothing to edit
+    }
+    m_materialEditModel = model;
+    m_preEditMaterials = scene().captureMaterials(model);
+    m_materialEdit = true;
+    return true;
+}
+
+void VulkanWindow::setSelectedMaterial(const MaterialParams& params, bool linked) {
+    if (!beginMaterialEdit()) {
+        return;
+    }
+    if (scene().selectedModelIndex() != m_materialEditModel) {
+        // The selection moved under an open bracket (a click while a colour dialog is up): the
+        // first object's entry is committed and the edit goes on with the new selection.
+        endMaterialEdit();
+        if (!beginMaterialEdit()) {
+            return;
+        }
+    }
+    if (scene().setSelectedZoneMaterial(params, linked)) {
+        requestUpdate(); // the values ride the push block: the next frame shows them
+    }
+}
+
+void VulkanWindow::endMaterialEdit() {
+    if (!m_materialEdit) {
+        return;
+    }
+    m_materialEdit = false;
+    if (m_renderer) {
+        commitMaterialUndo(); // a no-op if nothing changed
+        requestUpdate();
+    }
+    m_materialEditModel = -1;
+}
+
+void VulkanWindow::commitMaterialUndo() {
+    if (!m_renderer || m_materialEditModel < 0) {
+        return;
+    }
+    const std::vector<MaterialParams> now = scene().captureMaterials(m_materialEditModel);
+    if (!now.empty() && now != m_preEditMaterials) {
+        UndoEntry entry;
+        entry.kind = UndoEntry::Kind::Material;
+        entry.figure = m_materialEditModel;
+        entry.materials = m_preEditMaterials;
+        m_undoStack.push_back(std::move(entry));
+        m_redoStack.clear();
+        markProjectDirty(); // a committed material edit is a document change
+    }
+}
+
+void VulkanWindow::resetSelectedMaterial(bool linked, bool allZones) {
+    if (!m_renderer) {
+        return;
+    }
+    endMaterialEdit();
+    if (!beginMaterialEdit()) {
+        return;
+    }
+    scene().resetZoneMaterials(allZones, linked);
+    endMaterialEdit(); // registers no entry if nothing differed from the imported values
+}
+
+void VulkanWindow::notifyMaterialView() {
+    MaterialView now = materialView();
+    if (!now.sameView(m_announcedMaterialView)) {
+        m_announcedMaterialView = std::move(now);
+        emit materialViewChanged();
+    }
+}
+
 void VulkanWindow::resetSelectedJoint() { runPoseUtility(PoseUtility::ResetJoint); }
 void VulkanWindow::resetSelectedLimb() { runPoseUtility(PoseUtility::ResetLimb); }
 void VulkanWindow::resetPose() { runPoseUtility(PoseUtility::ResetPose); }
@@ -469,6 +567,17 @@ bool VulkanWindow::captureProjectDocument(ProjectDocument& out) const {
             fig.rootBone = std::move(rootBone);
             fig.rootTranslation = rootTranslation;
         }
+        // The Materials tab's edits: the zones whose material differs from the imported one — the
+        // values and the texture slots that were replaced or cleared.
+        for (const Model::MaterialOverride& o : model->materialOverrides()) {
+            ProjectMaterial pm;
+            pm.zone = o.zone;
+            pm.params = o.params;
+            for (const auto& [slot, source] : o.textures) {
+                pm.textures.push_back({slot, source});
+            }
+            fig.materials.push_back(std::move(pm));
+        }
 
         // Decompose the model matrix into TRS (the document stores it channel-wise).
         glm::quat rotation;
@@ -577,6 +686,25 @@ int VulkanWindow::loadProjectFile(const QString& path,
             rows.emplace_back(std::string(kPosePinPrefix) + pin, glm::vec3(1.0f, 0.0f, 0.0f));
         }
         model->applyPose(rows);
+        // The saved material edits, by zone key (a zone the re-imported file no longer has is
+        // left out, as an unknown pose row would be).
+        const int modelIndex = static_cast<int>(scene().modelCount()) - 1;
+        for (const ProjectMaterial& m : fig.materials) {
+            model->applyMaterialOverride(m.zone, m.params);
+            // … and its texture slots: a replaced map decoded from its file (a file that is gone
+            // leaves the import's own, with a warning in the log), a cleared one cleared.
+            for (const ProjectTexture& t : m.textures) {
+                MaterialMap map = MaterialMap::BaseColor;
+                if (!materialMapByName(t.slot, map)) {
+                    continue;
+                }
+                for (std::size_t i = 0; i < model->meshCount(); ++i) {
+                    if (model->zoneKey(i) == m.zone) {
+                        applySlotSource(modelIndex, static_cast<int>(i), map, t.source);
+                    }
+                }
+            }
+        }
     }
 
     // 5. ENVIRONMENT — the saved dials + HDRI (a no-op path keeps the startup bake, as does a
@@ -643,6 +771,14 @@ void VulkanWindow::swapUndoEntry(std::vector<UndoEntry>& from, std::vector<UndoE
         counter.pose = scene().capturePose();
         scene().applyPose(entry.pose);
         scene().finalizePose(); // re-runs correctives, like any pose change
+    } else if (entry.kind == UndoEntry::Kind::Material) {
+        // The zones' materials of that object back to the snapshot — the object selected, so the
+        // Materials tab shows what changed (the frame's notify tells it).
+        counter.figure = entry.figure;
+        counter.materials = scene().captureMaterials(entry.figure);
+        applyMaterialTextures(entry.figure, entry.materials); // the slots first: the values keep the mesh's maps
+        scene().applyMaterials(entry.figure, entry.materials);
+        scene().setSelectedModel(entry.figure);
     } else {
         counter.lighting = m_deferred.lighting; // the current dials
         setLightingSettings(entry.lighting);

@@ -57,14 +57,13 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
         m_hasBounds = true;
     }
 
-    // Descriptors from this model's pool: one set-1 per mesh (six samplers each: diffuse, detail,
-    // roughness map, spec mask, translucency map, micro-detail normal) + one set-2 pose set per
-    // frame slot (joints + corrective weights + deltas).
+    // Descriptors from this model's pool: one set-1 per mesh (its kMaterialBindingCount samplers)
+    // + one set-2 pose set per frame slot (joints + corrective weights + deltas + the materials).
     const VkDevice device = context.device();
     m_descriptorPool = createDescriptorPool(
         device,
-        {poolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, meshCount * 6),
-         poolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kMaxFramesInFlight * 3)},
+        {poolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, meshCount * kMaterialBindingCount),
+         poolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kMaxFramesInFlight * 4)},
         meshCount + kMaxFramesInFlight);
 
     // One upload batch for the whole model: every mesh's vertex/index buffers and texture record
@@ -146,14 +145,23 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
         m_armature.dump(dumpPath);
     }
 
-    // THE SOFT-BODY DELTA FIELDS (armaturebuttocks.cpp): per cheek two correctives — a delta of
-    // the field's weight along the lateral axis and one along the trunk — on every render vertex
-    // the field reaches, blended by the GPU at the mass's displacement.
+    // THE SOFT-BODY DELTA FIELDS: per cheek two correctives (armaturebuttocks.cpp) — a delta of
+    // the field's weight along the lateral axis and one along the trunk — and per BONELESS BREAST
+    // three (armaturebreastfield.cpp: sideways, along the chest, out along the tether; none on a
+    // figure whose breasts ride pectoral bones), on every render vertex the field reaches, blended
+    // by the GPU at the mass's displacement. The indices are the armature's (softBodyWeight).
     std::vector<SoftBodyField> softFields;
     if (skinned) {
-        softFields.resize(4);
+        constexpr std::size_t kButtockFields = Armature::kSoftBodyButtockFields;
+        constexpr std::size_t kBreastBase = Armature::kSoftBodyBreastBase;
+        softFields.resize(kButtockFields + Armature::kSoftBodyBreastFields);
         for (std::size_t f = 0; f < softFields.size(); ++f) {
-            softFields[f].id = std::string("softbody:buttock_") + (f < 2 ? "l_" : "r_") + (f % 2 == 0 ? "x" : "y");
+            if (f < kButtockFields) {
+                softFields[f].id = std::string("softbody:buttock_") + (f < 2 ? "l_" : "r_") + (f % 2 == 0 ? "x" : "y");
+            } else {
+                const std::size_t b = f - kBreastBase;
+                softFields[f].id = std::string("softbody:breast_") + (b < 3 ? "l_" : "r_") + "xyz"[b % 3];
+            }
             softFields[f].softIndex = static_cast<int>(f);
             softFields[f].perMesh.resize(meshCount);
         }
@@ -165,12 +173,25 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
             }
             for (uint32_t lv = 0; lv < meshData.vertices.size(); ++lv) {
                 const Vertex& v = meshData.vertices[lv];
+                const int     bone = dominantJoint(v);
                 int           side = -1;
-                const float   w = m_armature.softBodyFieldWeight(v.pos, dominantJoint(v), side);
+                const float   w = m_armature.softBodyFieldWeight(v.pos, bone, side);
                 if (w > 1e-3f && side >= 0) {
                     softFields[static_cast<std::size_t>(side) * 2].perMesh[k].push_back({lv, glm::vec3(w, 0.0f, 0.0f)});
                     softFields[static_cast<std::size_t>(side) * 2 + 1].perMesh[k].push_back({lv, glm::vec3(0.0f, w, 0.0f)});
                     any = true;
+                }
+                float breast[2] = {0.0f, 0.0f};
+                m_armature.breastFieldWeights(v.pos, bone, breast);
+                for (std::size_t s = 0; s < 2; ++s) {
+                    if (breast[s] > 1e-3f) {
+                        for (int axis = 0; axis < 3; ++axis) {
+                            glm::vec3 delta(0.0f);
+                            delta[axis] = breast[s];
+                            softFields[kBreastBase + s * 3 + static_cast<std::size_t>(axis)].perMesh[k].push_back({lv, delta});
+                        }
+                        any = true;
+                    }
                 }
             }
             ++k;
@@ -187,20 +208,25 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
     if (!data.correctives.empty() || !softFields.empty()) {
         m_correctives.build(data, perMeshRanges, correctiveEntries, softFields);
     }
-    if (skinned) {
-        // Ground samples: the skinning inputs groundGap() needs to find the posed lowest point
-        // (the GPU buffers are device-local and unreadable). Reserved once, summed across meshes
-        // (see GroundSampler::reserve).
-        std::size_t totalVerts = 0;
-        std::size_t totalTris = 0;
-        for (const MeshData& meshData : data.meshes) {
-            if (!meshData.indices.empty()) {
-                totalVerts += meshData.vertices.size();
-                if (meshData.opacity >= 0.999f && !meshData.hasOpacityMask) {
-                    totalTris += meshData.indices.size() / 3; // (the pickable surface: Model::pickSurface)
-                }
+    // Ground samples: the skinning inputs groundGap() needs to find the posed lowest point (the
+    // GPU buffers are device-local and unreadable), and the SURFACE a click is on (pickSurface).
+    // Reserved once, summed across meshes (see GroundSampler::reserve). A STATIC model keeps its
+    // samples too — a click on a prop names its material zone for the Materials tab — unless it
+    // is huge: past the cap its box alone is pickable, as before (a click's convenience is not
+    // worth doubling a million-triangle scan's memory).
+    constexpr std::size_t kStaticPickTriangleCap = 1000000;
+    std::size_t totalVerts = 0;
+    std::size_t totalTris = 0;
+    for (const MeshData& meshData : data.meshes) {
+        if (!meshData.indices.empty()) {
+            totalVerts += meshData.vertices.size();
+            if (meshData.opacity >= 0.999f && !meshData.hasOpacityMask) {
+                totalTris += meshData.indices.size() / 3; // (the pickable surface: Model::pickSurface)
             }
         }
+    }
+    const bool sampled = skinned || totalTris <= kStaticPickTriangleCap;
+    if (sampled) {
         m_ground.reserve(totalVerts, totalTris);
     }
     for (const MeshData& meshData : data.meshes) {
@@ -211,10 +237,11 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
         const std::vector<uint32_t>* ranges =
             (mi < perMeshRanges.size() && !perMeshRanges[mi].empty()) ? &perMeshRanges[mi] : nullptr;
         m_meshes.emplace_back(context, meshData, materialSetLayout, m_descriptorPool.get(),
-                              fallbackDiffuse, fallbackNormal, uploads, batch, ranges);
-        if (skinned) {
+                              fallbackDiffuse, fallbackNormal, uploads, batch, ranges, static_cast<uint32_t>(mi));
+        if (sampled) {
             // (Opaque skin only is pickable: a click on the eye's clear shells is a click on the eye.)
-            m_ground.add(meshData.vertices, meshData.indices, meshData.opacity >= 0.999f && !meshData.hasOpacityMask);
+            m_ground.add(meshData.vertices, meshData.indices, meshData.opacity >= 0.999f && !meshData.hasOpacityMask,
+                         static_cast<int>(mi));
         }
     }
     m_correctives.createBuffers(context, correctiveEntries, batch);
@@ -222,9 +249,7 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
 
     // Partition the meshes for the record paths (m_meshes is complete and never reallocates
     // again, so the pointers stay valid).
-    for (const Mesh& mesh : m_meshes) {
-        (mesh.isTransparent() ? m_transparentMeshes : m_opaqueMeshes).push_back(&mesh);
-    }
+    repartitionMeshes();
     m_jointCount = m_armature.jointCount();
 
     // Host-mapped storage buffers of skinning DUAL QUATERNIONS (2 vec4 per joint — see
@@ -244,15 +269,44 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
                          VMA_MEMORY_USAGE_AUTO,
                          VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                              VMA_ALLOCATION_CREATE_MAPPED_BIT);
-        // Set 2 for this slot: 0 = joints, 1 = corrective weights, 2 = the shared delta table.
-        const VkDescriptorBufferInfo infos[3] = {
+        // THE MATERIAL BUFFER (2026-11-09): every mesh's MaterialGpu, one host-mapped buffer per
+        // frame slot like the joints' (a material edit rewrites the slot's entries at record time,
+        // behind that slot's fence), bound as binding 3 of the same set.
+        const VkDeviceSize materialBytes = static_cast<VkDeviceSize>(m_meshes.size()) * sizeof(MaterialGpu);
+        m_materialBuffers[slot] =
+            VulkanBuffer(context, materialBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                         VMA_MEMORY_USAGE_AUTO,
+                         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                             VMA_ALLOCATION_CREATE_MAPPED_BIT);
+        // Set 2 for this slot: 0 = joints, 1 = corrective weights, 2 = the shared delta table,
+        // 3 = the materials.
+        const VkDescriptorBufferInfo infos[4] = {
             bufferInfo(m_jointBuffers[slot].handle(), jointBytes),
             bufferInfo(m_correctives.weightBuffer(static_cast<uint32_t>(f))),
             bufferInfo(m_correctives.deltaBuffer()),
+            bufferInfo(m_materialBuffers[slot].handle(), materialBytes),
         };
         writeBufferDescriptors(device, m_jointSets[slot], 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                               infos, 3);
+                               infos, 4);
     }
+}
+
+void Model::uploadMaterialsIfDirty(uint32_t frameIndex) {
+    if (frameIndex >= static_cast<uint32_t>(kMaxFramesInFlight) || m_meshes.empty()) {
+        return;
+    }
+    // (revision + 1, so a never-written slot — 0 — is behind the first revision, 0.)
+    if (m_materialUploaded[frameIndex] == m_materialRevision + 1) {
+        return;
+    }
+    auto* dst = static_cast<MaterialGpu*>(m_materialBuffers[frameIndex].mappedData());
+    if (dst == nullptr) {
+        return;
+    }
+    for (std::size_t i = 0; i < m_meshes.size(); ++i) {
+        dst[i] = m_meshes[i].gpu();
+    }
+    m_materialUploaded[frameIndex] = m_materialRevision + 1;
 }
 
 Model::Model(VulkanContext& context, const SplatData& data, VkDescriptorSetLayout splatSetLayout) {
@@ -330,6 +384,7 @@ void Model::bindPose(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t setI
         return;
     }
     uploadJointsIfDirty(frameIndex);
+    uploadMaterialsIfDirty(frameIndex); // (the materials ride the same set: binding 3)
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, setIndex, 1,
                             &m_jointSets[frameIndex], 0, nullptr);
 }
@@ -547,8 +602,104 @@ bool Model::groundGap(float& lowestY) const {
     return m_ground.lowestY(m_armature, m_boundsMin, m_boundsMax, m_hasBounds, lowestY);
 }
 
-bool Model::pickSurface(const Ray& ray, float& tOut, glm::vec3& hitWorld, int& bone) const {
-    return m_ground.pickSurface(m_armature, ray, tOut, hitWorld, bone);
+bool Model::pickSurface(const Ray& ray, float& tOut, glm::vec3& hitWorld, int& bone, int* mesh) const {
+    return m_ground.pickSurface(m_armature, ray, tOut, hitWorld, bone, mesh);
+}
+
+// --- THE MATERIALS TAB: the zones' editable materials ---------------------------------------------
+
+void Model::repartitionMeshes() {
+    m_opaqueMeshes.clear();
+    m_transparentMeshes.clear();
+    for (const Mesh& mesh : m_meshes) {
+        (mesh.isTransparent() ? m_transparentMeshes : m_opaqueMeshes).push_back(&mesh);
+    }
+}
+
+std::string Model::zoneKey(std::size_t i) const {
+    if (i >= m_meshes.size()) {
+        return std::string();
+    }
+    const std::string& name = m_meshes[i].name();
+    return name.empty() ? "#" + std::to_string(i) : name;
+}
+
+bool Model::setMeshMaterial(std::size_t i, const MaterialParams& params) {
+    if (i >= m_meshes.size()) {
+        return false;
+    }
+    Mesh&      mesh = m_meshes[i];
+    const bool wasTransparent = mesh.isTransparent();
+    if (!mesh.setMaterial(params)) {
+        return false;
+    }
+    if (mesh.isTransparent() != wasTransparent) {
+        repartitionMeshes(); // (the pointers are unchanged; only the lists' membership moves)
+    }
+    ++m_materialRevision;
+    return true;
+}
+
+bool Model::setMeshTexture(std::size_t i, MaterialMap map, const std::shared_ptr<const DecodedImage>& plain, int channel,
+                           const std::shared_ptr<const DecodedImage>& gpuImage, const std::string& source) {
+    if (i >= m_meshes.size()) {
+        return false;
+    }
+    Mesh&      mesh = m_meshes[i];
+    const bool wasTransparent = mesh.isTransparent();
+    mesh.setSlotImage(map, plain, channel, gpuImage, source);
+    if (mesh.isTransparent() != wasTransparent) {
+        repartitionMeshes();
+    }
+    ++m_materialRevision;
+    return true;
+}
+
+std::vector<MaterialParams> Model::captureMaterials() const {
+    std::vector<MaterialParams> out;
+    out.reserve(m_meshes.size());
+    for (const Mesh& mesh : m_meshes) {
+        out.push_back(mesh.material());
+    }
+    return out;
+}
+
+void Model::applyMaterials(const std::vector<MaterialParams>& materials) {
+    const std::size_t n = std::min(materials.size(), m_meshes.size());
+    for (std::size_t i = 0; i < n; ++i) {
+        setMeshMaterial(i, materials[i]);
+    }
+}
+
+std::vector<Model::MaterialOverride> Model::materialOverrides() const {
+    std::vector<MaterialOverride> out;
+    for (std::size_t i = 0; i < m_meshes.size(); ++i) {
+        const Mesh& mesh = m_meshes[i];
+        if (mesh.material() == mesh.importedMaterial()) {
+            continue;
+        }
+        MaterialOverride o;
+        o.zone = zoneKey(i);
+        o.params = mesh.material();
+        for (int m = 0; m < kMaterialMapCount; ++m) {
+            const std::string& now = mesh.material().maps[static_cast<std::size_t>(m)].source;
+            if (now != mesh.importedMaterial().maps[static_cast<std::size_t>(m)].source) {
+                o.textures.emplace_back(materialMapName(static_cast<MaterialMap>(m)), now);
+            }
+        }
+        out.push_back(std::move(o));
+    }
+    return out;
+}
+
+bool Model::applyMaterialOverride(const std::string& zone, const MaterialParams& params) {
+    bool any = false;
+    for (std::size_t i = 0; i < m_meshes.size(); ++i) {
+        if (zoneKey(i) == zone) {
+            any = setMeshMaterial(i, params) || any;
+        }
+    }
+    return any;
 }
 
 } // namespace pose

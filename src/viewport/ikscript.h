@@ -35,6 +35,8 @@ struct IkScript {
     int         next = 0;   ///< The next line to run.
     QString     outDir;     ///< Where shots and the report go (POSESTUDIO_IK_SCRIPT_OUT, else the script's folder).
     int         retries = 0;
+    bool        materialLinked = true; ///< The Materials tab's "Edit matching zones together" for `material` (matlink on|off).
+    int         waitTicks = 0;         ///< The ticks a `wait` has left (scriptWaitTick: each one also advances a fall in flight).
 
     // --- A drag in flight ------------------------------------------------------------------
     bool      dragging = false;   ///< Between `press` and `release`.

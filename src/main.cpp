@@ -11,6 +11,7 @@
 #include "importformats.h"
 #include "database.h"
 #include "menumanager.h"
+#include "materialpanel.h"
 #include "softbodypanel.h"
 #include "splashoverlay.h"
 #include "whatsnewdialog.h"
@@ -20,6 +21,7 @@
 #include "installping.h"
 #include "updatecheck.h"
 #include "assetmanagerwidget.h"
+#include "assetscriptlink.h"
 #include "apptheme.h"
 #include "environmentpanel.h"
 #include "transformpanel.h"
@@ -153,6 +155,8 @@ int main(int argc, char *argv[]) {
     sidePanel->addTab(assetsTab, QObject::tr("Asset Manager"));
     // The Transform tab: the selected joint's rotation as three dials (see TransformPanel).
     sidePanel->addTab(new pose::TransformPanel(viewport), QObject::tr("Transform"));
+    // The Materials tab: the selected object's material zones as sliders (see MaterialPanel).
+    sidePanel->addTab(new pose::MaterialPanel(viewport), QObject::tr("Materials"));
     // The Soft Body Physics tab: the breasts' and the buttocks' switches and dials (see SoftBodyPanel).
     sidePanel->addTab(new pose::SoftBodyPanel(viewport), QObject::tr("Soft Body Physics"));
     // The Environment tab: live image-based-lighting controls for the viewport (see EnvironmentPanel).
@@ -249,6 +253,10 @@ int main(int argc, char *argv[]) {
             viewport->loadPose(arg);
         } else if (arg.endsWith(QStringLiteral(".pss"), Qt::CaseInsensitive)) {
             projectToOpen = arg;
+        } else if (AssetScriptLink::isScriptFile(arg)) {
+            // A content-library script ("open with" a .dsa): followed as the Asset Manager's
+            // double-click follows it — the folder it links to shown, its one character imported.
+            assetsTab->openAsset(arg);
         }
     }
     // A project on the command line, or the scene of the process that restarted into this one

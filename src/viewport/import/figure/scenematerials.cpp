@@ -22,7 +22,8 @@
 
 namespace pose {
 
-std::unordered_map<std::string, std::string> sceneMaterialUvSets(const nlohmann::json& root) {
+std::unordered_map<std::string, std::string> sceneMaterialUvSets(const nlohmann::json& root,
+                                                                 const FigureScope& scope) {
     std::unordered_map<std::string, std::string> out;
     const auto scene = root.find("scene");
     if (scene == root.end()) {
@@ -33,6 +34,9 @@ std::unordered_map<std::string, std::string> sceneMaterialUvSets(const nlohmann:
         return out;
     }
     for (const auto& mat : *materials) {
+        if (!mat.is_object() || !scope.owns(mat.value("geometry", std::string()))) {
+            continue; // another figure's material (its zone may share this figure's zone's name)
+        }
         const auto uvSet = mat.find("uv_set");
         if (uvSet == mat.end() || !uvSet->is_string()) {
             continue;
@@ -52,7 +56,8 @@ std::unordered_map<std::string, std::string> sceneMaterialUvSets(const nlohmann:
 }
 
 void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolver& resolver,
-                         const std::string& referringDir) {
+                         const std::string& referringDir, const FigureScope* scope,
+                         bool followerPreset) {
     if (!root.contains("scene") || !root["scene"].contains("materials")) {
         return;
     }
@@ -74,10 +79,15 @@ void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolve
         libraryPtr = &(*lib);
     }
     MaterialBaseOverrides overrides;
+    overrides.baseIdsAsWritten = followerPreset; // see scenematerials.h
     std::vector<std::shared_ptr<const FigureDocument>> baseDocs; // keep the referenced documents alive
     std::unordered_set<std::string> importedBases; // fragments already looked up (found or not)
     if (sceneMaterials.is_array()) {
         for (const auto& mat : sceneMaterials) {
+            if (scope && mat.is_object() && !scope->owns(mat.value("geometry", std::string()))) {
+                overrides.skip.insert(&mat); // another figure's material
+                continue;
+            }
             const std::string url = mat.value("url", std::string());
             if (url.size() < 2 || url[0] == '#') {
                 continue; // same-file (or no) base — parseMaterials handles it directly
@@ -126,9 +136,67 @@ void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolve
         mesh.material.lobe2Roughness = ref.lobe2Roughness;
         mesh.material.lobeRatio = ref.lobeRatio;
         mesh.material.topCoatWeight = ref.topCoatWeight;
+        mesh.material.topCoatEnabled = ref.topCoatEnabled;
         mesh.material.topCoatRoughness = ref.topCoatRoughness;
         mesh.material.translucencyWeight = ref.translucencyWeight;
         mesh.material.opacity = ref.opacity;
+        // The canonical material's further channels (materialparser.h).
+        mesh.material.emissionColor = ref.emissionColor;
+        mesh.material.emission = ref.emission;
+        if (!ref.emissionImageUri.empty()) {
+            mesh.material.emissionMapPath = resolver.resolve(ref.emissionImageUri, referringDir).path;
+        }
+        mesh.material.ior = ref.ior;
+        mesh.material.transmission = ref.transmission;
+        mesh.material.transmissionColor = ref.transmissionColor;
+        mesh.material.transmissionDepth = ref.transmissionDepth;
+        mesh.material.thinWalled = ref.thinWalled;
+        mesh.material.subsurfaceColor = ref.subsurfaceColor;
+        mesh.material.subsurfaceRadiusColor = ref.subsurfaceRadiusColor;
+        mesh.material.subsurfaceRadius = ref.subsurfaceRadius;
+        mesh.material.subsurfaceAnisotropy = ref.subsurfaceAnisotropy;
+        mesh.material.anisotropy = ref.anisotropy;
+        mesh.material.anisotropyRotation = ref.anisotropyRotation;
+        mesh.material.diffuseRoughness = ref.diffuseRoughness;
+        if (!ref.diffuseRoughnessImageUri.empty()) {
+            mesh.material.diffuseRoughnessMapPath = resolver.resolve(ref.diffuseRoughnessImageUri, referringDir).path;
+        }
+        mesh.material.coatColor = ref.coatColor;
+        mesh.material.coatIor = ref.coatIor;
+        const auto mapPath = [&](const std::string& uri) { return uri.empty() ? std::string() : resolver.resolve(uri, referringDir).path; };
+        mesh.material.coatWeightMapPath = mapPath(ref.coatWeightImageUri);
+        mesh.material.coatColorMapPath = mapPath(ref.coatColorImageUri);
+        mesh.material.coatRoughnessMapPath = mapPath(ref.coatRoughnessImageUri);
+        mesh.material.coatReflectivityMapPath = mapPath(ref.coatReflectivityImageUri);
+        mesh.material.coatBumpMapPath = mapPath(ref.coatBumpImageUri);
+        mesh.material.coatBumpStrength = ref.coatBumpStrength;
+        mesh.material.specularColorMapPath = mapPath(ref.specularColorImageUri);
+        mesh.material.displacementMapPath = mapPath(ref.displacementImageUri);
+        mesh.material.transmissionColorMapPath = mapPath(ref.transmissionColorImageUri);
+        mesh.material.transmissionWeightMapPath = mapPath(ref.transmissionWeightImageUri);
+        mesh.material.coatAnisotropy = ref.coatAnisotropy;
+        mesh.material.coatAnisotropyRotation = ref.coatAnisotropyRotation;
+        mesh.material.coatAnisotropyMapPath = mapPath(ref.coatAnisotropyImageUri);
+        mesh.material.coatAnisotropyRotationMapPath = mapPath(ref.coatAnisotropyRotationImageUri);
+        mesh.material.sheen = ref.sheen;
+        mesh.material.sheenColor = ref.sheenColor;
+        mesh.material.sheenRoughness = ref.sheenRoughness;
+        mesh.material.sheenWeightMapPath = mapPath(ref.sheenWeightImageUri);
+        mesh.material.sheenColorMapPath = mapPath(ref.sheenColorImageUri);
+        mesh.material.sheenRoughnessMapPath = mapPath(ref.sheenRoughnessImageUri);
+        mesh.material.thinFilm = ref.thinFilm;
+        mesh.material.thinFilmThickness = ref.thinFilmThickness;
+        mesh.material.thinFilmIor = ref.thinFilmIor;
+        mesh.material.thinFilmThicknessMapPath = mapPath(ref.thinFilmThicknessImageUri);
+        mesh.material.displacementStrength = ref.displacementStrength;
+        mesh.material.displacementMidLevel = ref.displacementMidLevel;
+        mesh.material.displacementSubdiv = ref.displacementSubdiv;
+        mesh.material.anisotropyMapPath = mapPath(ref.anisotropyImageUri);
+        mesh.material.anisotropyRotationMapPath = mapPath(ref.anisotropyRotationImageUri);
+        mesh.material.lobe2RoughnessMapPath = mapPath(ref.lobe2RoughnessImageUri);
+        mesh.material.lobeRatioMapPath = mapPath(ref.lobeRatioImageUri);
+        mesh.material.uvTiling = ref.uvTiling;
+        mesh.material.uvOffset = ref.uvOffset;
         if (!ref.roughnessImageUri.empty()) {
             mesh.material.roughnessMapPath = resolver.resolve(ref.roughnessImageUri, referringDir).path;
         }
@@ -139,11 +207,19 @@ void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolve
             mesh.material.translucencyMapPath =
                 resolver.resolve(ref.translucencyImageUri, referringDir).path;
         }
+        if (!ref.translucencyWeightImageUri.empty()) {
+            mesh.material.translucencyWeightMapPath = resolver.resolve(ref.translucencyWeightImageUri, referringDir).path;
+        }
         if (!ref.detailNormalImageUri.empty()) {
             mesh.material.detailNormalMapPath =
                 resolver.resolve(ref.detailNormalImageUri, referringDir).path;
             mesh.material.detailWeight = ref.detailWeight;
             mesh.material.detailTiles = ref.detailTiles;
+            mesh.material.detailTilesV = ref.detailTilesV;
+            mesh.material.detailOffset = ref.detailOffset;
+            mesh.material.detailRoughness = ref.detailRoughness;
+            mesh.material.detailWeightMapPath = mapPath(ref.detailWeightImageUri);
+            mesh.material.detailRoughnessMapPath = mapPath(ref.detailRoughnessImageUri);
         }
         if (!ref.diffuseImageUri.empty()) {
             mesh.material.diffuseMapPath = resolver.resolve(ref.diffuseImageUri, referringDir).path;

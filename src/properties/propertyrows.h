@@ -24,6 +24,12 @@ namespace pose::propertyrows {
 /// returns the form.
 QFormLayout* addGroup(QVBoxLayout* parent, const QString& title);
 
+/// A COLLAPSIBLE group (the Materials tab's sections, 2026-11-09): a header button with an arrow
+/// and the title (#PropertyCollapsibleHeader) over a body (#PropertyCollapsibleBody) holding a
+/// QFormLayout; clicking the header shows or hides the body. Appended to @p parent, open or
+/// closed as @p expanded says; returns the form (the body's) — add rows to it as to addGroup's.
+QFormLayout* addCollapsibleGroup(QVBoxLayout* parent, const QString& title, bool expanded);
+
 /// The small restore-default icon button (#PropertyRowRestore) that sits right of a row. The
 /// caller wires clicked to the row's own restore behaviour.
 QToolButton* makeRestoreButton();

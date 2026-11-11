@@ -66,11 +66,18 @@ ScenePipelines::ScenePipelines(VulkanContext& context, VkRenderPass renderPass, 
     m_cameraSetLayout = createDescriptorSetLayout(
         m_device, {descriptorBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)});
+    // Set 1: the mesh's texture maps (mesh.h's MaterialBinding: diffuse, detail normal/bump, the
+    // parameter map, spec mask, translucency, pore normal, a bump beside a normal, emission, the
+    // layer map, the sheen colour).
     m_materialSetLayout = createDescriptorSetLayout(
-        m_device, uniformBindings(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        m_device, uniformBindings(kMaterialBindingCount, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                   VK_SHADER_STAGE_FRAGMENT_BIT));
+    // Set 2: the per-model pose data (joints, corrective weights, corrective deltas) and, since
+    // 2026-11-09, the MATERIAL BUFFER (binding 3 — read by the fragment stage, and by the vertex
+    // stage for the UV transform).
     m_poseSetLayout = createDescriptorSetLayout(
-        m_device, uniformBindings(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT));
+        m_device, uniformBindings(4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT));
     m_iblSetLayout = createDescriptorSetLayout(
         m_device, uniformBindings(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                   VK_SHADER_STAGE_FRAGMENT_BIT));
@@ -132,6 +139,25 @@ ScenePipelines::ScenePipelines(VulkanContext& context, VkRenderPass renderPass, 
         config.colorWriteAlpha = false; // don't clobber the SSS mask under blended shells/cards
         // The specular attachment stays masked: blended shells keep their specular in-line (mask ≈ 0).
         m_transparent =
+            std::make_unique<VulkanPipeline>(context, renderPass, vertSpirv, fragSpirv, config);
+    }
+
+    // TRANSMISSION (2026-11-10): a transmissive zone — glass, water, a gem — is drawn TWICE in the
+    // transparent pass with these two variants: the first MULTIPLIES the frame behind it by what
+    // the surface lets through (ZERO / SRC_COLOR: out = dst × src, a per-channel tint), the
+    // second ADDS its own reflection and what is left of its diffuse (ONE / ONE). Two draws make
+    // a per-channel transmittance without dual-source blending, which not every device has.
+    // Depth test on, write off, alpha and the specular attachment masked, as the transparent
+    // variant. The shader tells the draws apart by their kinds (MeshDrawKind::TransmitMultiply /
+    // TransmitAdd); Scene::record binds each in turn.
+    for (int pass = 0; pass < 2; ++pass) {
+        PipelineConfig config = meshBaseConfig(layouts, binding, attrs);
+        config.blendEnable = true;
+        config.depthWriteEnable = false;
+        config.colorWriteAlpha = false;
+        config.srcColorBlendFactor = pass == 0 ? VK_BLEND_FACTOR_ZERO : VK_BLEND_FACTOR_ONE;
+        config.dstColorBlendFactor = pass == 0 ? VK_BLEND_FACTOR_SRC_COLOR : VK_BLEND_FACTOR_ONE;
+        (pass == 0 ? m_transmitMultiply : m_transmitAdd) =
             std::make_unique<VulkanPipeline>(context, renderPass, vertSpirv, fragSpirv, config);
     }
 

@@ -30,11 +30,14 @@ struct PrefilteredSpecular {
 };
 
 /// The environment BRDF integration LUT (the other half of split-sum): at (NdotV, roughness) it stores
-/// the scale (.x) and bias (.y) to apply to F0. Environment-independent, so it's baked once. `data` is
-/// row-major, size×size, y = roughness, x = NdotV.
+/// the GGX scale (.x) and bias (.y) to apply to F0, and (.z) the SHEEN lobe's directional albedo —
+/// how much a fuzz of that roughness reflects at that angle (the Charlie distribution with Neubelt's
+/// visibility), the mesh shader's environment sheen term and the energy the base loses under it;
+/// .w is unused. Environment-independent, so it's baked once. `data` is row-major, size×size,
+/// y = roughness, x = NdotV.
 struct BrdfLut {
     int                    size = 0;
-    std::vector<glm::vec2> data;
+    std::vector<glm::vec4> data;
 };
 
 } // namespace pose

@@ -147,6 +147,59 @@ std::shared_ptr<const FigureDocument> UriResolver::loadDocument(const ResolvedUr
     return doc;
 }
 
+std::vector<std::string> UriResolver::listFiles(const std::string& directoryUri,
+                                                const std::string& extension) const {
+    std::vector<std::string> out;
+    std::string              relDir = urlDecode(directoryUri);
+    while (!relDir.empty() && (relDir.front() == '/' || relDir.front() == '\\')) {
+        relDir.erase(relDir.begin());
+    }
+    if (relDir.empty()) {
+        return out;
+    }
+    for (const std::string& root : m_roots) {
+        std::error_code ec;
+        fs::path        dir = fs::path(root) / fs::path(relDir);
+        if (!fs::is_directory(dir, ec)) {
+            const std::string tolerant = resolveCaseTolerant(root, relDir);
+            if (tolerant.empty() || !fs::is_directory(fs::path(tolerant), ec)) {
+                continue;
+            }
+            dir = tolerant;
+        }
+        for (fs::recursive_directory_iterator it(dir, ec), end; it != end; it.increment(ec)) {
+            if (ec) {
+                break;
+            }
+            if (!it->is_regular_file(ec) ||
+                toLowerAscii(it->path().extension().string()) != extension) {
+                continue;
+            }
+            // Back to the root-relative form, with the three characters a URI gives a meaning to
+            // escaped (a file name may hold a '%' or a '#').
+            // (lexically: fs::relative would ask the filesystem about every one of them.)
+            const std::string rel = it->path().lexically_relative(fs::path(root)).generic_string();
+            if (rel.empty() || rel.rfind("..", 0) == 0) {
+                continue;
+            }
+            std::string uri = "/";
+            for (const char c : rel) {
+                if (c == '%') {
+                    uri += "%25";
+                } else if (c == '#') {
+                    uri += "%23";
+                } else if (c == '?') {
+                    uri += "%3F";
+                } else {
+                    uri.push_back(c);
+                }
+            }
+            out.push_back(std::move(uri));
+        }
+    }
+    return out;
+}
+
 std::shared_ptr<const FigureDocument> UriResolver::cached(const std::string& path) const {
     const auto it = m_cache.find(path);
     return it != m_cache.end() ? it->second : nullptr;

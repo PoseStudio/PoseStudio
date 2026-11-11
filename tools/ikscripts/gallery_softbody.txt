@@ -15,6 +15,8 @@ view right
 expect breastl < 0.5
 expect breastr < 0.5
 expect breasthangl < 0.5
+# (Her breasts ride her pectoral bones: neither is a boneless breast's field — softbody/boneless.txt.)
+expect breastfields == 0
 
 # A LEVEL-CHESTED BOW — the user's pose (the chest horizontal, a hand reaching for the floor): the
 # breast hangs off the chest wall as a teardrop, the nipple at its lowest point pointing at the

@@ -22,6 +22,7 @@
 #include "assetlibraries.h"
 #include "assetnodeids.h"
 #include "assetscan.h"
+#include "assetscriptlink.h"
 #include "assetthumbnailloader.h"
 #include "assettreedelegate.h"
 #include "assettreeview.h"
@@ -44,6 +45,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QSignalBlocker>
@@ -987,7 +989,13 @@ void AssetManagerWidget::onGridItemDoubleClicked(QListWidgetItem *item) {
     if (item->data(AssetGridRole::ItemKind).toString() == kFolderItemKind) {
         deselectTree();
         displayFolder(path);
-    } else if (path.endsWith(QStringLiteral(".obj"), Qt::CaseInsensitive)) {
+    } else {
+        openAsset(path);
+    }
+}
+
+void AssetManagerWidget::openAsset(const QString& path) {
+    if (pose::ImportFormats::isModelFile(path)) {
         // Importable model: load it into the 3D viewport rather than the OS default app.
         emit importModelRequested(path);
     } else if (pose::ImportFormats::isFigureRouteFile(path)) {
@@ -996,8 +1004,85 @@ void AssetManagerWidget::onGridItemDoubleClicked(QListWidgetItem *item) {
         emit importFigureRequested(path);
     } else if (pose::ImportFormats::isSplatFile(path)) {
         emit importSplatRequested(path); // a Gaussian splat scene, as a static model
+    } else if (AssetScriptLink::isScriptFile(path)) {
+        openScriptLink(path); // read for its link, never run
     } else {
         QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    }
+}
+
+// =============================================================================
+// [ SCRIPT LINKS ]
+// =============================================================================
+
+QStringList AssetManagerWidget::scriptLinkRoots() const {
+    QStringList roots = m_libraryPaths;
+    const QString configured =
+        PreferencesManager::instance().getValue(Constants::PREF_FIGURE_CONTENT_ROOTS).toString();
+    for (const QString& root : configured.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+        if (!root.trimmed().isEmpty()) roots << root.trimmed();
+    }
+    return roots;
+}
+
+void AssetManagerWidget::openScriptLink(const QString& scriptPath) {
+    using AssetScriptLink::Link;
+    const Link link = AssetScriptLink::follow(scriptPath, scriptLinkRoots());
+    qInfo().noquote() << "[script-link]" << QDir::toNativeSeparators(scriptPath) << "->"
+                      << (link.kind == Link::Kind::None ? QStringLiteral("nothing") : link.target);
+
+    switch (link.kind) {
+    case Link::Kind::Folder: {
+        // The folder in the tree when it lies in a library (the content library's own
+        // behaviour), else in the grid alone.
+        navigateToFolderInTree(link.target);
+        if (AssetScan::normalizePath(m_currentFolderPath)
+                .compare(AssetScan::normalizePath(link.target), AssetScan::kPathCase) != 0) {
+            deselectTree();
+            displayFolder(link.target);
+        }
+        // A folder of one character IS that character: open it, as its double-click would.
+        if (const QString figure = AssetScriptLink::loneFigureIn(link.target); !figure.isEmpty()) {
+            qInfo().noquote() << "[script-link] the folder's one figure:" << QDir::toNativeSeparators(figure);
+            emit importFigureRequested(figure);
+        }
+        return;
+    }
+    case Link::Kind::File:
+        openAsset(link.target); // never a script: follow() has already walked the chain
+        return;
+    case Link::Kind::Url:
+        QDesktopServices::openUrl(QUrl(link.target));
+        return;
+    case Link::Kind::None:
+        break;
+    }
+
+    QString why;
+    switch (link.problem) {
+    case Link::Problem::Unreadable:
+        why = tr("It is encrypted or compiled, so PoseStudio cannot read where it leads.");
+        break;
+    case Link::Problem::Missing:
+        why = tr("It leads to \"%1\", which could not be found.").arg(link.missing);
+        break;
+    default:
+        why = tr("It is a program for another application, not a link to a folder, a file or a web page.");
+        break;
+    }
+    QMessageBox box(QMessageBox::Information, tr("Script Not Followed"),
+                    tr("\"%1\" is a script. PoseStudio does not run scripts; it follows the ones "
+                       "that link to a folder, a file or a web page.")
+                        .arg(QFileInfo(scriptPath).fileName()),
+                    QMessageBox::NoButton, this);
+    box.setInformativeText(why);
+    QPushButton* openElsewhere =
+        box.addButton(tr("Open in Default Application"), QMessageBox::ActionRole);
+    box.addButton(QMessageBox::Close);
+    box.setDefaultButton(QMessageBox::Close);
+    box.exec();
+    if (box.clickedButton() == openElsewhere) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(scriptPath));
     }
 }
 

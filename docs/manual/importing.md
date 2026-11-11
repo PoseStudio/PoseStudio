@@ -12,7 +12,7 @@ Every import lands a new object in the scene, unselected — click it to select 
 
 ## Static models (.obj)
 
-An `.obj` file imports with its material groups, diffuse colours and diffuse textures (`map_Kd`) — the texture files are looked up relative to the `.obj`'s own folder through its `.mtl`. Missing normals are generated. Other texture maps (normal, roughness, metalness) are not read from `.obj` files, since the format has no standard way to carry them. The model is lit and shaded like everything else, but it has no skeleton: it can be selected, framed, deleted and looked at, not posed.
+An `.obj` file imports with its material groups, diffuse colours and diffuse textures (`map_Kd`) — the texture files are looked up relative to the `.obj`'s own folder through its `.mtl` — and the MTL format's PBR extension where the file uses it: `Pr` / `map_Pr` roughness, `Pm` / `map_Pm` metalness, `norm` a normal map; the classic `Ks`, `Ns`, `map_bump` and `d` channels are read in their place (see [Materials and the specular / glossiness conversion](#materials-and-the-specular--glossiness-conversion)). Missing normals are generated. The model is lit and shaded like everything else, but it has no skeleton: it can be selected, framed, deleted and looked at, not posed — and its materials are edited on the [Materials tab](materials.md) like a figure's.
 
 A model whose file uses an unsupported format is simply ignored — nothing appears and no message is shown.
 
@@ -20,7 +20,7 @@ A model whose file uses an unsupported format is simply ignored — nothing appe
 
 A figure preset is a small file that *refers* to the figure's geometry, skeleton, skin weights, morphs, UV layout and materials, which live in a content folder alongside it, in a `data` subfolder. Importing one brings in the whole figure:
 
-- **The shape** — the base figure with the character's own morphs baked in, then smoothed once (Catmull-Clark subdivision) so limbs and faces read round.
+- **The shape** — the base figure with the character's own morphs baked in, then smoothed once (Catmull-Clark subdivision) so limbs and faces read round. A character is usually one dial that drives several shapes — a head, a body, the feet, sometimes a share of another character — and every shape it reaches is applied, each held to the range its morph allows.
 - **The materials** — per-zone physically based materials with diffuse, normal or bump, roughness, specular-mask and translucency maps, the eyes' clear shells rendered transparent, and eyelash and eyebrow cards cut out by their masks. Each zone's maps are read through the UV layout its material names, so a character that paints its skin on one generation's layout and its eyes on another's renders both correctly.
 - **The rig** — every bone with its rest position, rotation order and the anatomical limits authored for it, plus the skin weights that let the mesh follow it.
 - **Pose correctives** — the corrective shapes that fix the mesh at deep elbow, knee, shoulder and hip bends; they blend live as you pose.
@@ -34,6 +34,18 @@ Import takes a few seconds for a fully textured character. The progress dialog n
 ### Files that are not figures
 
 Pose, material, light and other presets share the `.duf` extension. Importing one of those shows *"This file may be a pose, material, or other preset rather than a figure"* — pick the character's own preset instead. (Pose presets in this format are not readable yet; PoseStudio has its own [pose files](pose-files.md).)
+
+The same goes for a character that is distributed as **shaping presets** — a "head", a "body", a "feet" preset to apply to a figure that is already loaded — with no preset of the character as a whole: those are not figures, and PoseStudio cannot apply one to a figure in the scene yet. Import the preset that loads the whole character.
+
+### A file that holds several figures
+
+A character saved from a scene is often saved *with* what she wore: her eyelashes, her hair, a ring, sometimes a second character — each a figure of its own in the same file, with its own shape dials and materials. PoseStudio imports the **first figure in the file**, which is the character, with the dials and the materials the file lists for *her*: a morph dialed on her hair is not added to her body, and where two figures have a material zone of the same name (her eye and her eyelash figure both have an eye-moisture zone) each keeps its own.
+
+The other figures of such a file — hair, eyelashes, clothes and accessories saved as separate figures beside her — are **not imported yet**. Followers a preset *declares* as add-ons are (see the list above), which is how the standard characters get their eyelashes.
+
+### When a shape is missing
+
+A character's shape is spread over several morph files, and those belong to the content, not to the preset: a character built on another one needs that one's files too. A morph whose file is not in any content folder is left out, and the rest of the character still imports — she may come in with a plain head on her own body, or as the base figure wearing her skin. PoseStudio's log names every shape it applied and, as a warning, every one it could not, with the file it looked for (see [Troubleshooting](troubleshooting.md#seeing-what-posestudio-is-doing)).
 
 ## Characters from FBX, glTF and USD files
 
@@ -51,7 +63,7 @@ Binary and ASCII FBX from version 6 on. The file's own axes and units are conver
 
 ### glTF files (.glb, .gltf)
 
-A `.glb` holds everything in one file; a `.gltf` keeps its buffers (`.bin`) and images beside it, or embedded as data URIs — both import. glTF is metres and Y-up by definition, so nothing is converted; a file written in centimetres (a character 20 m tall) is read as such and scaled down. The joints stand where the file's nodes put them — glTF stores no bind pose apart from the skins' matrices, and this is what every viewer shows at the default pose — so a file whose nodes are saved posed imports in that pose (its animations are not read). The metallic-roughness material model is read (the base colour and map, the metallic-roughness map's green channel as the roughness map, the normal map with its scale, the alpha mode as the opacity, with the base map's alpha as the cutout for masked and blended materials), the older specular-glossiness extension as a fallback. Not read: morph targets, vertex colours, texture transforms, a second UV set. A file that requires Draco or meshopt mesh compression, or Basis Universal textures, is refused with a message naming the extension: export it without compression.
+A `.glb` holds everything in one file; a `.gltf` keeps its buffers (`.bin`) and images beside it, or embedded as data URIs — both import. glTF is metres and Y-up by definition, so nothing is converted; a file written in centimetres (a character 20 m tall) is read as such and scaled down. The joints stand where the file's nodes put them — glTF stores no bind pose apart from the skins' matrices, and this is what every viewer shows at the default pose — so a file whose nodes are saved posed imports in that pose (its animations are not read). The metallic-roughness material model is read (the base colour and map, the metallic-roughness map's green channel as the roughness map and its blue as the metalness map, the normal map with its scale, the alpha mode as the opacity, with the base map's alpha as the cutout for masked and blended materials); a file in the older specular-glossiness extension is converted to it at import (see [Materials and the specular / glossiness conversion](#materials-and-the-specular--glossiness-conversion)). Not read: morph targets, vertex colours, texture transforms, a second UV set. A file that requires Draco or meshopt mesh compression, or Basis Universal textures, is refused with a message naming the extension: export it without compression.
 
 ### VRM avatars (.vrm)
 
@@ -74,6 +86,22 @@ What to expect, compared with a native figure:
 - A rig whose structure PoseStudio cannot read completely — no arms found, say — still imports and poses joint by joint with the dials; the import log names the roles it could not place.
 
 A static file (no skeleton) in any of the three formats imports as a model, like an `.obj` — a prop, a helmet, a building — with its textures and materials; it can be selected, framed and deleted, not posed.
+
+## Materials and the specular / glossiness conversion
+
+PoseStudio renders one material model — **metallic / roughness with a specular weight** — and every importer produces it, so the [Materials tab](materials.md) edits every object with the same sliders. What each format gives:
+
+| Format | Read as the material |
+| --- | --- |
+| `.duf` / `.dsf` figures | The preset's physically based shader: base colour, the dual-lobe or glossy specular as roughness and a specular weight (its reflectivity, with 0.5 the standard dielectric), Metallic Weight, Top Coat, Translucency, the normal, bump, roughness, specular-mask, translucency and pore-detail maps, Cutout Opacity and Refraction. |
+| `.glb` / `.gltf` / `.vrm` | The metallic-roughness model as the file has it — the base colour and map, the metallic-roughness map's green channel as roughness and its blue as metalness, the normal map with its scale, the alpha mode as opacity. A file in the older **specular-glossiness** extension is **converted**: see below. |
+| `.fbx` | A PBR material's base colour, roughness, metalness (value or map), normal map and opacity. A **3ds Max specular / glossiness** material is converted; a **Phong or Lambert** material's specular colour is a highlight, not a reflectance, so only its brightness is read, as the specular weight (the default grey 0.5 = the standard dielectric, black = matte), and its map as the specular mask. |
+| `.usd` family | UsdPreviewSurface in the metallic workflow as the file has it (metallic as value or map). A surface in the **specular workflow** (`useSpecularWorkflow`) is converted. |
+| `.obj` / `.mtl` | `Kd` / `map_Kd`, and the MTL PBR extension — `Pr` / `map_Pr` roughness, `Pm` / `map_Pm` metalness, `norm` normal map — with the classic channels in their place where the extension is absent: `Ks` as the specular weight (its brightness; Blender's default 0.5 = the standard dielectric), `map_Ks` as the specular mask, `Ns` as the glossiness in Blender's own convention (`Ns` = (1 − roughness)² × 1000), `map_bump` / `bump` as a bump map with its `-bm` strength, `d` / `map_d` as opacity. |
+
+**The wider material.** The table lists the base layer; each reader also fills what its format carries of the rest of the [material](materials.md) — a `.duf` preset's Emission Color and Luminance, Refraction Weight (and, for a refracting surface such as the eye's shells, its Refraction Index — a skin's reflectance is its Reflectivity, which the Specular row already carries), Transmitted Color and distance, Thin Walled, Translucency Color (the tint under the skin; the Translucency Weight map is kept too), SSS Color, Scattering Measurement Distance and SSS Direction (the Subsurface section's Scattering rows), Glossy Anisotropy, Diffuse Roughness, Top Coat Color and IOR, and its Horizontal / Vertical Tiles and Offsets; a glTF file's emission (with `KHR_materials_emissive_strength`), `KHR_materials_ior`, `_specular`, `_transmission`, `_volume`, `_sheen`, `_clearcoat`, `_iridescence` and `_anisotropy`, and a `KHR_texture_transform` on the base map as the material's tiling and offset (its rotation is noted and left out); an FBX material's unified PBR channels — emission, IOR, anisotropy, transmission, subsurface colour, sheen, coat, thin film, thin walled; an MTL's `Ke` / `map_Ke`, `Ni`, `Pc` / `Pcr`, `Ps`, `aniso` / `anisor` and `Tf`; a USD preview surface's emissive colour, IOR and clearcoat. The maps these extensions carry beyond the emission map have no slot yet.
+
+**The conversion.** A specular / glossiness material gives a surface a diffuse colour, a specular colour (what it reflects at normal incidence) and a glossiness. PoseStudio turns it into the metallic / roughness equivalent with the standard solve the Khronos glTF tools use: roughness is one minus glossiness; the metalness is the value that makes a metallic-roughness material's diffuse and specular come out as the source's, with 4 % as the dielectric baseline; the base colour is the diffuse for a dielectric and the specular colour for a metal, blended by the metalness. Where the material carries maps — a diffuse map, a specular colour map, a glossiness map — the solve runs per texel at import and the result is a base-colour map and a metalness map (and a roughness map from a glossiness map) in their place; the sliders then scale those. The conversion is exact for a physically plausible material: a dielectric's specular is a grey near 4 % and a metal's diffuse is black. A tinted specular on a non-metal, or a dielectric much brighter than 4 %, has no exact equivalent and comes out as the nearest metallic / roughness material. Every converted material is named in the import log (`[gltf]`, `[fbx]`, `[usd]` lines in the console).
 
 ## Gaussian splat scenes (.ply, .splat, .spz)
 

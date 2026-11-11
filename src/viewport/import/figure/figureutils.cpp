@@ -5,10 +5,15 @@
 
 #include "figureutils.h"
 
+#include "figuredocument.h" // isGzip / gunzip (figureFileKind)
+
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cctype>
+#include <exception>
 #include <filesystem>
+#include <string_view>
 
 namespace pose {
 
@@ -118,15 +123,34 @@ std::size_t geometryVertexCount(const nlohmann::json& doc) {
     return (values != verts->end() && values->is_array()) ? values->size() : 0;
 }
 
+namespace {
+
+// True for a scene node that IS a figure of the file: it carries a geometry, by a reference that
+// leads somewhere. A wearable saved to be ADDED to a figure lists that figure first as a
+// placeholder — "name://@selection…", whatever is selected when it is loaded — which is no figure
+// of the file: taken for one, such a preset could not be imported at all (its "base geometry" is
+// the selection), and read as a character where its wearable has bones enough.
+bool isFigureInstance(const nlohmann::json& node) {
+    if (!node.is_object()) {
+        return false;
+    }
+    const auto geos = node.find("geometries");
+    if (geos == node.end() || !geos->is_array() || geos->empty() || !(*geos)[0].is_object()) {
+        return false;
+    }
+    const std::string url = (*geos)[0].value("url", std::string());
+    return !url.empty() && url.rfind("name:", 0) != 0;
+}
+
+} // namespace
+
 const nlohmann::json* findFigureNode(const nlohmann::json& root) {
     const auto scene = root.find("scene");
     if (scene == root.end() || !scene->contains("nodes")) {
         return nullptr;
     }
     for (const auto& node : (*scene)["nodes"]) {
-        const auto geos = node.find("geometries");
-        if (geos != node.end() && geos->is_array() && !geos->empty() &&
-            !(*geos)[0].value("url", std::string()).empty()) {
+        if (isFigureInstance(node)) {
             return &node;
         }
     }
@@ -136,6 +160,120 @@ const nlohmann::json* findFigureNode(const nlohmann::json& root) {
 std::string findGeometryUri(const nlohmann::json& root) {
     const nlohmann::json* node = findFigureNode(root);
     return node ? (*node)["geometries"][0].value("url", std::string()) : std::string();
+}
+
+bool FigureScope::owns(const std::string& reference) const {
+    if (!scoped || reference.empty()) {
+        return true;
+    }
+    const std::size_t hash = reference.find('#');
+    const std::string id = urlDecode(hash == std::string::npos ? reference : reference.substr(hash + 1));
+    return id == nodeId || std::find(geometryIds.begin(), geometryIds.end(), id) != geometryIds.end();
+}
+
+bool FigureScope::namesAnotherFigure(const std::string& name) const {
+    return scoped && !name.empty() &&
+           std::find(otherFigures.begin(), otherFigures.end(), name) != otherFigures.end();
+}
+
+FigureScope figureScopeOf(const nlohmann::json& root, const nlohmann::json* figureNode) {
+    FigureScope scope;
+    if (!figureNode) {
+        figureNode = findFigureNode(root);
+    }
+    if (!figureNode) {
+        return scope;
+    }
+    const ChannelRef asset = parseChannelRef(figureNode->value("url", std::string()));
+    scope.nodeId = figureNode->value("id", std::string());
+    scope.assetId = asset.decodedKey;
+    if (const std::size_t hash = asset.fileUrl.find('#'); hash != std::string::npos && hash > 0) {
+        scope.assetFile = asset.fileUrl.substr(0, hash);
+    }
+    if (const auto geos = figureNode->find("geometries"); geos != figureNode->end() && geos->is_array()) {
+        for (const auto& geo : *geos) {
+            if (geo.is_object()) {
+                scope.geometryIds.push_back(geo.value("id", std::string()));
+            }
+        }
+    }
+    // One figure in the scene: nothing to tell apart, and a preset that names its parents some
+    // other way keeps importing as it always did.
+    int figures = 0;
+    if (const auto scene = root.find("scene"); scene != root.end() && scene->contains("nodes")) {
+        for (const auto& node : (*scene)["nodes"]) {
+            if (!isFigureInstance(node)) {
+                continue;
+            }
+            ++figures;
+            if (&node == figureNode) {
+                continue;
+            }
+            // A second instance of the SAME figure shares the asset id (two characters on one
+            // base): only what tells the two apart is recorded.
+            for (const std::string& name : {node.value("id", std::string()),
+                                            parseChannelRef(node.value("url", std::string())).decodedKey}) {
+                if (!name.empty() && name != scope.nodeId && name != scope.assetId) {
+                    scope.otherFigures.push_back(name);
+                }
+            }
+        }
+    }
+    scope.scoped = figures > 1;
+    return scope;
+}
+
+bool isFigureRoot(const nlohmann::json& root) {
+    if (!root.is_object()) {
+        return false;
+    }
+    if (const auto gl = root.find("geometry_library"); gl != root.end()) {
+        return gl->is_array() && !gl->empty();
+    }
+    return findFigureNode(root) != nullptr;
+}
+
+FigureFileKind figureFileKind(std::vector<std::uint8_t> bytes) {
+    try {
+        if (isGzip(bytes)) {
+            bytes = gunzip(bytes.data(), bytes.size());
+        }
+    } catch (const std::exception&) {
+        return FigureFileKind::NotAFigure;
+    }
+    // A figure names its geometry: a base file its "geometry_library", a preset a scene node's
+    // "geometries". A pose, material or shape preset names neither (a material preset's key is
+    // the singular "geometry"), so most of a content folder never reaches the parse.
+    const std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    if (text.find("\"geometries\"") == std::string_view::npos &&
+        text.find("\"geometry_library\"") == std::string_view::npos) {
+        return FigureFileKind::NotAFigure;
+    }
+    const nlohmann::json root = nlohmann::json::parse(bytes.begin(), bytes.end(), nullptr, false);
+    if (root.is_discarded() || !isFigureRoot(root)) {
+        return FigureFileKind::NotAFigure;
+    }
+    // A wearable's figure node is fitted onto another figure ("conform_target": the figure it
+    // was saved on, or the scene's selection) or hangs from one of its bones ("parent": a prop
+    // attached to "name://@selection/hip:") — a character's figure node is neither.
+    const nlohmann::json* node = findFigureNode(root);
+    if (!node) {
+        return FigureFileKind::Character; // a base figure file (its geometry_library)
+    }
+    if (node->contains("conform_target") || node->contains("parent")) {
+        return FigureFileKind::Wearable;
+    }
+    // Its skeleton: the scene nodes the file parents within itself ("#hip" under "#Figure" …).
+    // Every human figure generation lists a hundred and more; a prop, none or a hinge or two.
+    constexpr std::size_t kCharacterMinBones = 20;
+    std::size_t bones = 0;
+    for (const auto& n : root.at("scene").at("nodes")) {
+        const auto parent = n.find("parent");
+        if (parent != n.end() && parent->is_string() && parent->get_ref<const std::string&>().rfind('#', 0) == 0) {
+            ++bones;
+        }
+    }
+    return bones >= kCharacterMinBones ? FigureFileKind::Character : FigureFileKind::Prop;
 }
 
 const nlohmann::json* findModifierById(const nlohmann::json& doc, const std::string& id) {
@@ -156,11 +294,13 @@ const nlohmann::json* findMorphModifier(const nlohmann::json& doc, const std::st
     if (lib == doc.end() || !lib->is_array()) {
         return nullptr;
     }
-    // Prefer the modifier whose id matches the URI fragment; else the first one carrying a morph.
+    // The modifier the fragment names, when the file defines it: its morph — or nothing, for a
+    // control or a scale (which must not borrow the shape of whatever else the file holds). Only a
+    // reference that names no modifier of this file falls back to the first one carrying a morph.
     if (!fragment.empty()) {
         for (const auto& m : *lib) {
-            if (m.value("id", std::string()) == fragment && m.contains("morph")) {
-                return &m;
+            if (m.value("id", std::string()) == fragment) {
+                return m.contains("morph") ? &m : nullptr;
             }
         }
     }

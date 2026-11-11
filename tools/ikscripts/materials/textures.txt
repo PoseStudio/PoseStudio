@@ -1,0 +1,166 @@
+# THE TEXTURE SLOTS (2026-11-09): the Materials tab's Textures group driven on the base figure —
+#   POSESTUDIO_TEST_FIGURE=<figure> tools/ikscripts/run.sh tools/ikscripts/materials/textures.txt <out> POSESTUDIO_IK_SCRIPT_ASSETS=<assets>
+# (the PNGs from tools/materials/make_test_assets.py; a relative path in `texture` resolves
+# against POSESTUDIO_IK_SCRIPT_ASSETS, else the output folder). The torso imports with a
+# base-colour map and no cutout: a file replaces the map, undo brings the import's back, the slot
+# is cleared and restored; a cutout chosen on a zone without one makes it a cutout zone and the
+# arrow takes it away again; a project round trip carries a chosen map and a cleared slot.
+view front
+click chest
+expect zonename.Torso == 1
+expect matmap.basecolor == 1
+expect mattex.basecolor == 1
+texture basecolor tex_red.png
+expect mattex.basecolor == 2
+expect matmap.basecolor == 1
+closeup chest 0.6
+shot 01_red_basecolor
+undo
+expect mattex.basecolor == 1
+texture basecolor none
+expect mattex.basecolor == 0
+expect matmap.basecolor == 0
+shot 02_no_basecolor
+texture basecolor imported
+expect mattex.basecolor == 1
+expect matmap.basecolor == 1
+expect matmap.cutout == 0
+texture cutout tex_mask.png
+expect matmap.cutout == 1
+expect mattex.cutout == 2
+shot 03_cutout_checker
+texture cutout imported
+expect matmap.cutout == 0
+texture roughness tex_rough.png
+expect mattex.roughness == 2
+expect matmap.roughness == 1
+shot 04_roughness_ramp
+texture roughness imported
+expect mattex.roughness < 2
+texture emission tex_red.png
+expect matmap.emission == 1
+texture emission none
+expect matmap.emission == 0
+# The project round trip: a chosen base colour and a cleared normal slot come back.
+texture basecolor tex_red.png
+texture normal none
+saveproject textures.pss
+new
+expect figures == 0
+openproject textures.pss
+click chest
+expect zonename.Torso == 1
+expect mattex.basecolor == 2
+expect mattex.normal == 0
+shot 05_after_project
+texture basecolor imported
+expect mattex.basecolor == 1
+
+# The eleventh slot (2026-11-10): a STORED-ONLY map (Diffuse Roughness) is chosen, shown and cleared like
+# any other; the viewport never samples it, so no shot changes.
+texture diffuseroughness tex_rough.png
+expect mattex.diffuseroughness == 2
+expect matmap.diffuseroughness == 1
+texture diffuseroughness none
+expect mattex.diffuseroughness == 0
+expect matmap.diffuseroughness == 0
+
+# The top coat's five slots (2026-11-10), stored-only like the diffuse roughness: one chosen and cleared.
+texture coatweight tex_rough.png
+expect mattex.coatweight == 2
+expect matmap.coatweight == 1
+texture coatcolor tex_red.png
+expect mattex.coatcolor == 2
+texture coatweight none
+expect mattex.coatweight == 0
+texture coatcolor none
+expect matmap.coatcolor == 0
+
+# The translucency weight map (2026-11-10), stored-only beside the rendered colour map.
+texture translucencyweight tex_rough.png
+expect mattex.translucencyweight == 2
+expect matmap.translucency == 1
+texture translucencyweight none
+expect mattex.translucencyweight == 0
+
+# The Specular section maps (2026-11-10), stored-only: a tint map and a lobe map chosen and cleared.
+texture specularcolor tex_red.png
+expect mattex.specularcolor == 2
+expect matmap.specularcolor == 1
+texture loberatio tex_rough.png
+expect mattex.loberatio == 2
+texture specularcolor none
+expect mattex.specularcolor == 0
+texture loberatio none
+expect matmap.loberatio == 0
+
+# The Detail section slots (2026-11-10), stored-only beside the rendered detail normal map.
+texture detailweight tex_rough.png
+expect mattex.detailweight == 2
+texture detailroughness tex_rough.png
+expect matmap.detailroughness == 1
+texture detailweight none
+texture detailroughness none
+expect mattex.detailweight == 0
+expect matmap.detailroughness == 0
+
+# Displacement (2026-11-10), stored-only: the map chosen, its rows live, the map cleared.
+texture displacement tex_rough.png
+expect mattex.displacement == 2
+expect matmap.displacement == 1
+material displacement 1.5
+expect mat.displacement == 1.5
+texture displacement none
+expect mattex.displacement == 0
+
+# Ambient occlusion (2026-11-10), stored-only: the map chosen, its weight live, the map cleared.
+texture ao tex_rough.png
+expect mattex.ao == 2
+material aoweight 60
+expect mat.aoweight == 60
+texture ao none
+expect matmap.ao == 0
+
+# The scattering rows and the transmission colour map (2026-11-10), stored-only.
+texture transmissioncolor tex_red.png
+expect mattex.transmissioncolor == 2
+material sssdirection 30
+expect mat.sssdirection == 30
+material subsurfaceradius 0.25
+expect mat.subsurfaceradius == 0.25
+texture transmissioncolor none
+expect matmap.transmissioncolor == 0
+
+# The completion batch (2026-11-10): the last stored-only maps and values.
+texture transmissionweight tex_rough.png
+expect mattex.transmissionweight == 2
+texture sheencolor tex_red.png
+expect matmap.sheencolor == 1
+texture thinfilmthickness tex_rough.png
+expect mattex.thinfilmthickness == 2
+material coatanisotropy 40
+expect mat.coatanisotropy == 40
+material tilingrotation 45
+expect mat.tilingrotation == 45
+texture transmissionweight none
+texture sheencolor none
+texture thinfilmthickness none
+expect matmap.sheencolor == 0
+
+# The layer switches (2026-11-10): a layer off keeps its values; the switch rides the project.
+material topcoat 40
+material topcoatenabled 0
+expect mat.topcoatenabled == 0
+expect mat.topcoat == 40
+material topcoatenabled 1
+expect mat.topcoatenabled == 1
+
+# The surface switches (2026-11-10): Specular off keeps its value, Base and Geometry likewise.
+material specularenabled 0
+expect mat.specularenabled == 0
+expect mat.specular > 0
+material specularenabled 1
+material geometryenabled 0
+expect mat.geometryenabled == 0
+material geometryenabled 1
+expect mat.baseenabled == 1

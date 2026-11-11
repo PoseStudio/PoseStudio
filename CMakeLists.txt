@@ -266,6 +266,8 @@ add_executable(
     src/assets/customtooltip.h
     src/assets/assetscan.cpp              # filesystem scanning: asset/thumbnail pairing, folder hit classification
     src/assets/assetscan.h
+    src/assets/assetscriptlink.cpp        # a content-library script (.dsa) read as the folder / file / page it links to
+    src/assets/assetscriptlink.h
     src/assets/assetdb.cpp                # every Collections/Favorites SQL statement
     src/assets/assetdb.h
     src/assets/assetthumbnailloader.cpp   # off-thread thumbnail decode + the gradient canvas
@@ -288,6 +290,8 @@ add_executable(
     src/properties/hdriselector.h
     src/properties/transformpanel.cpp    # the Transform tab: the selected joint's three rotation dials
     src/properties/transformpanel.h
+    src/properties/materialpanel.cpp     # the Materials tab: the selected object's material zones as sliders
+    src/properties/materialpanel.h
     src/properties/propertyrows.cpp      # the row builders every properties tab shares (group, restore button)
     src/properties/propertyrows.h
     src/properties/softbodypanel.cpp     # the Soft Body Physics tab: the breasts' and the buttocks' switches and dials
@@ -312,6 +316,7 @@ add_executable(
     src/viewport/vulkanwindow_camera.cpp  # named views, Blender-convention view hotkeys
     src/viewport/vulkanwindow_ik.cpp      # the FBIK drag loop, ground fall, X/Y/Z wheel hold
     src/viewport/vulkanwindow_pose.cpp    # pose utilities, pins, pose files, delete, undo/redo
+    src/viewport/vulkanwindow_materials.cpp # the Materials tab's side: the view, the edit bracket, the texture slots (decode + bake + upload)
     src/viewport/vulkanwindow_bench.cpp   # POSESTUDIO_IK_PERF / _BENCH diagnostics
     src/viewport/vulkanwindow_vr.cpp      # VR Mode: the OpenXR session's lifecycle, wait thread, stereo frame
     # The OpenXR layer (Qt-free: OpenXR + Vulkan + GLM): the headset found at startup, the session
@@ -413,6 +418,8 @@ add_executable(
     src/viewport/import/importerregistry.h
     src/viewport/import/obj/objimporter.cpp   # single TINYOBJLOADER_IMPLEMENTATION TU
     src/viewport/import/obj/objimporter.h
+    src/viewport/import/specgloss.cpp         # the specular / glossiness -> metallic / roughness conversion every importer applies
+    src/viewport/import/specgloss.h
     # Native figure importer (rigged/morphed characters; JSON scene format via nlohmann + miniz):
     src/viewport/import/figure/figuredocument.cpp
     src/viewport/import/figure/figuredocument.h
@@ -489,11 +496,13 @@ add_executable(
     src/viewport/scene/armatureikdigit.cpp  # the bone classes (body / face rig / digit) and the digit drag
     src/viewport/scene/armaturelanding.cpp  # the landing bounce: a figure dropped onto her feet absorbs the landing
     src/viewport/scene/armaturebreasts.cpp     # THE SOFT BREASTS: the pectorals hung by gravity, by their size; their bounce
+    src/viewport/scene/armaturebreastfield.cpp # THE BONELESS BREAST: on a rig with no breast bone, the chest's own skin moved as a delta field
     src/viewport/scene/armaturebuttocks.cpp    # THE SOFT BUTTOCKS: the glutes' skin as a delta field the GPU blends, jiggling with the hips' movement
     src/viewport/scene/softbodysettings.h
     src/viewport/scene/armatureikfigure.cpp # the figure move: Ctrl + the body itself moves the figure as she is posed
     src/viewport/scene/armaturedials.cpp    # the transform dials: a joint's rotation as Bend Forward / Bend Sideways / Twist, 0-100
     src/viewport/scene/jointtransform.h     # ... and what the Transform tab shows of them (plain data)
+    src/viewport/scene/materialparams.h     # the Materials tab's per-zone values and view (plain data)
     src/viewport/scene/shadowpass.cpp    # the key light's depth-only pass: map, pipeline, frustum fit
     src/viewport/scene/shadowpass.h
     src/viewport/scene/outlinepass.cpp   # the selection-outline mask pass
@@ -504,6 +513,7 @@ add_executable(
     src/viewport/scene/scenepipelines.h
     src/viewport/scene/scene.cpp         # orchestration: construction, models, the record sequence
     src/viewport/scene/sceneposing.cpp   # Scene's posing forwarders to the active figure
+    src/viewport/scene/scenematerials.cpp # the Materials tab's side: the selected object's zones and their materials
     src/viewport/scene/scene.h
     src/viewport/scene/shademode.h # the shader picker's mode table (names + how each mode draws)
 
@@ -749,6 +759,7 @@ add_executable(PoseStudioIkHarness
     src/viewport/scene/armatureikdigit.cpp
     src/viewport/scene/armaturelanding.cpp
     src/viewport/scene/armaturebreasts.cpp
+    src/viewport/scene/armaturebreastfield.cpp
     src/viewport/scene/armaturebuttocks.cpp
     src/viewport/scene/armatureikfigure.cpp
     src/viewport/scene/armaturedials.cpp
@@ -795,6 +806,68 @@ target_include_directories(PoseStudioProjectFileCheck PRIVATE
 )
 add_test(NAME project-file-check COMMAND PoseStudioProjectFileCheck)
 
+# The script-link reader's guard (tools/scriptlink): writes synthetic content-library scripts —
+# folder links, file loaders, web links, chains, programs, an encrypted one — and checks where
+# AssetScriptLink::follow() leads, and which folders loneFigureIn() opens. Qt6::Core plus the
+# figure importer's document sniff (figureutils + figuredocument + miniz); no widgets, no Vulkan.
+add_executable(PoseStudioScriptLinkCheck
+    tools/scriptlink/check_links.cpp
+    src/assets/assetscriptlink.cpp
+    src/viewport/import/figure/figureutils.cpp
+    src/viewport/import/figure/figuredocument.cpp
+    ${miniz_SOURCE_DIR}/miniz.c
+    ${miniz_SOURCE_DIR}/miniz_tinfl.c
+    ${miniz_SOURCE_DIR}/miniz_tdef.c
+    ${miniz_SOURCE_DIR}/miniz_zip.c
+)
+target_include_directories(PoseStudioScriptLinkCheck PRIVATE
+    src/assets
+    src/core
+    src/viewport/import/figure
+    ${glm_SOURCE_DIR}
+    ${nlohmann_json_SOURCE_DIR}/single_include
+    ${miniz_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/cmake/miniz-shim
+)
+target_compile_definitions(PoseStudioScriptLinkCheck PRIVATE
+    GLM_FORCE_RADIANS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+)
+target_link_libraries(PoseStudioScriptLinkCheck PRIVATE Qt6::Core)
+add_test(NAME script-link-check COMMAND PoseStudioScriptLinkCheck)
+
+# The native figure importer's guard and report tool (tools/figurecheck): with no arguments it
+# writes a synthetic content library — a base figure, shape morphs, controls, a two-figure scene —
+# into the OS temp folder and checks what a character preset comes out as (the rules that turn "a
+# preset dials a control" into "the cage has this shape" and "this zone has that material");
+# with --report <preset> it prints what a REAL preset imports as, for a before/after diff across a
+# content library. The whole Qt-free importer (import/figure) + miniz; the Vulkan HEADERS only
+# (vertex.h names the vertex-input structs) — no Qt, no device.
+file(GLOB FIGURE_CHECK_IMPORTER CONFIGURE_DEPENDS src/viewport/import/figure/*.cpp)
+add_executable(PoseStudioFigureCheck
+    tools/figurecheck/check_figure.cpp
+    ${FIGURE_CHECK_IMPORTER}
+    ${miniz_SOURCE_DIR}/miniz.c
+    ${miniz_SOURCE_DIR}/miniz_tinfl.c
+    ${miniz_SOURCE_DIR}/miniz_tdef.c
+    ${miniz_SOURCE_DIR}/miniz_zip.c
+)
+target_include_directories(PoseStudioFigureCheck PRIVATE
+    src/viewport/import
+    src/viewport/import/figure
+    src/viewport/util
+    ${glm_SOURCE_DIR}
+    ${nlohmann_json_SOURCE_DIR}/single_include
+    ${miniz_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/cmake/miniz-shim
+)
+target_compile_definitions(PoseStudioFigureCheck PRIVATE
+    GLM_FORCE_RADIANS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+)
+target_link_libraries(PoseStudioFigureCheck PRIVATE Vulkan::Headers)
+add_test(NAME figure-shape-check COMMAND PoseStudioFigureCheck)
+
 # .pss save/restore diagnostic (see tools/projectfile/probe.cpp): runs the real import + scene
 # classes headless and prints which document fields diverge across a save/load round-trip. OPT-IN:
 # it compiles the whole engine a second time, which no ordinary build (or the release workflow)
@@ -814,6 +887,7 @@ add_executable(PoseStudioPssProbe
     src/viewport/import/tangentgen.cpp
     src/viewport/import/texturegutters.cpp
     src/viewport/import/importerregistry.cpp
+    src/viewport/import/specgloss.cpp
     src/viewport/import/obj/objimporter.cpp
     ${PSS_PROBE_FIGURE}
     ${PSS_PROBE_RENDERING}
@@ -920,6 +994,7 @@ set(SHADER_BINARY_DIR "${CMAKE_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${SHADER_BINARY_DIR}")
 
 set(SHADER_INCLUDES
+    "${SHADER_INCLUDE_DIR}/material.glsl"
     "${SHADER_INCLUDE_DIR}/camera_ubo.glsl"   # the set-0 camera/lighting UBO + rotateY
     "${SHADER_INCLUDE_DIR}/skinning.glsl"     # joint buffer + dual-quaternion skinning blend
     "${SHADER_INCLUDE_DIR}/correctives.glsl"  # pose-corrective buffers + per-vertex blend

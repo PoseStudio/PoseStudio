@@ -272,6 +272,7 @@ void VulkanWindow::failDevice(const char* stage, const VulkanError& error) {
     m_deviceFailed = true;
     qCritical() << "[Vulkan]" << stage << "failed; viewport disabled:" << error.what();
     notifyJointTransform(); // the figure went with the renderer: the Transform tab empties
+    notifyMaterialView();   // ... and the Materials tab
 }
 
 void VulkanWindow::releaseVulkan() {
@@ -451,6 +452,7 @@ void VulkanWindow::renderFrame() {
     // drawFrame() returns true only when the swapchain was just rebuilt (or the frame skipped
     // mid-rebuild) and one follow-up frame is needed to reflect the new size.
     notifyJointTransform(); // the Transform tab follows whatever this frame is about to show
+    notifyMaterialView();   // ... and the Materials tab (the selection, the zone, a material edit)
     try {
         const bool perfFrame = m_diag && (m_ik.dragging || m_ik.settling);
         const qint64 f0 = perfFrame ? m_diag->frameBegin() : 0;

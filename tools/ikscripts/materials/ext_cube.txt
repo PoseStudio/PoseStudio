@@ -1,0 +1,44 @@
+# THE MATERIAL EXTENSIONS the glTF reader fills the wider material from (2026-11-09):
+#   POSESTUDIO_TEST_FIGURE=<assets>/ext_cube.gltf tools/ikscripts/run.sh tools/ikscripts/materials/ext_cube.txt <out>
+# (the asset from tools/materials/make_test_assets.py). Glow: an emissive factor × an emissive
+# strength of 4 with its colour kept apart, KHR_materials_ior 1.33, KHR_materials_specular (the
+# weight and a tint), clearcoat, sheen (its colour's peak is the weight), iridescence (the thin
+# film), anisotropy (its rotation in radians → degrees); Glass: transmission with a volume (the
+# attenuation colour and distance, metres → centimetres) and a KHR_texture_transform on the base
+# map read as the material's UV tiling and offset. Every value in the tab's display units.
+view front
+select 0
+expect selection == 0
+expect zones == 2
+zone Glow
+expect zonename.Glow == 1
+expect mat.emission == 4
+expect mat.emissioncolor.r == 1
+expect mat.emissioncolor.g == 0.5
+expect mat.emissioncolor.b == 0.25
+expect mat.ior == 1.33
+expect mat.specular == 50
+expect mat.specularcolor.g == 0.8
+expect mat.topcoat == 80
+expect mat.topcoatrough == 10
+expect mat.sheen == 50
+expect mat.sheencolor.r == 1
+expect mat.sheenrough == 30
+expect mat.thinfilm == 70
+expect mat.thinfilmior == 1.3
+expect mat.thinfilmthickness == 400
+expect mat.anisotropy == 50
+expect mat.anisotropyrotation > 89.9
+expect mat.anisotropyrotation < 90.1
+shot 01_glow
+zone Glass
+expect zonename.Glass == 1
+expect mat.transmission == 60
+expect mat.transmissioncolor.g == 0.9
+expect mat.transmissiondepth == 50
+expect mat.tilingx == 2
+expect mat.tilingy == 3
+expect mat.offsetx == 0.25
+expect mat.offsety == 0.5
+expect matmap.basecolor == 1
+shot 02_glass

@@ -74,6 +74,7 @@ ModelData toModelData(FigureData&& fig) {
             continue;
         }
         MeshData mesh;
+        mesh.name = zone.materialZone; // the Materials tab's zone name
         mesh.vertices = std::move(zone.vertices);
         mesh.indices = std::move(zone.indices);
         mesh.baseVertex = std::move(zone.baseVertex); // source base index per vertex (for correctives)
@@ -91,15 +92,74 @@ ModelData toModelData(FigureData&& fig) {
         mesh.lobe2Roughness = zone.material.lobe2Roughness;
         mesh.lobeRatio = zone.material.lobeRatio;
         mesh.topCoatWeight = zone.material.topCoatWeight;
+        mesh.topCoatEnabled = zone.material.topCoatEnabled;
         mesh.topCoatRoughness = zone.material.topCoatRoughness;
         mesh.translucencyWeight = zone.material.translucencyWeight;
         mesh.roughnessMap.path = zone.material.roughnessMapPath;
         mesh.specMask.path = zone.material.specMaskMapPath;
         mesh.translucencyMap.path = zone.material.translucencyMapPath;
+        mesh.translucencyWeightMap.path = zone.material.translucencyWeightMapPath;
         mesh.detailNormalMap.path = zone.material.detailNormalMapPath;
         mesh.detailWeight = zone.material.detailWeight;
         mesh.detailTiles = zone.material.detailTiles;
+        mesh.detailTilesV = zone.material.detailTilesV;
+        mesh.detailOffset = zone.material.detailOffset;
+        mesh.detailRoughness = zone.material.detailRoughness;
+        mesh.detailWeightMap.path = zone.material.detailWeightMapPath;
+        mesh.detailRoughnessMap.path = zone.material.detailRoughnessMapPath;
         mesh.opacity = zone.material.opacity;
+        // The canonical material's further channels (figuredata.h).
+        mesh.emissionColor = zone.material.emissionColor;
+        mesh.emission = zone.material.emission;
+        mesh.emissionMap.path = zone.material.emissionMapPath;
+        mesh.ior = zone.material.ior;
+        mesh.transmission = zone.material.transmission;
+        mesh.transmissionColor = zone.material.transmissionColor;
+        mesh.transmissionDepth = zone.material.transmissionDepth;
+        mesh.thinWalled = zone.material.thinWalled;
+        mesh.subsurfaceColor = zone.material.subsurfaceColor;
+        mesh.subsurfaceRadiusColor = zone.material.subsurfaceRadiusColor;
+        mesh.subsurfaceRadius = zone.material.subsurfaceRadius;
+        mesh.subsurfaceAnisotropy = zone.material.subsurfaceAnisotropy;
+        mesh.anisotropy = zone.material.anisotropy;
+        mesh.anisotropyRotation = zone.material.anisotropyRotation;
+        mesh.diffuseRoughness = zone.material.diffuseRoughness;
+        mesh.diffuseRoughnessMap.path = zone.material.diffuseRoughnessMapPath;
+        mesh.coatColor = zone.material.coatColor;
+        mesh.coatIor = zone.material.coatIor;
+        mesh.coatWeightMap.path = zone.material.coatWeightMapPath;
+        mesh.coatColorMap.path = zone.material.coatColorMapPath;
+        mesh.coatRoughnessMap.path = zone.material.coatRoughnessMapPath;
+        mesh.coatReflectivityMap.path = zone.material.coatReflectivityMapPath;
+        mesh.coatBumpMap.path = zone.material.coatBumpMapPath;
+        mesh.coatBumpStrength = zone.material.coatBumpStrength;
+        mesh.specularColorSlotMap.path = zone.material.specularColorMapPath;
+        mesh.displacementMap.path = zone.material.displacementMapPath;
+        mesh.transmissionColorMap.path = zone.material.transmissionColorMapPath;
+        mesh.transmissionWeightMap.path = zone.material.transmissionWeightMapPath;
+        mesh.coatAnisotropy = zone.material.coatAnisotropy;
+        mesh.coatAnisotropyRotation = zone.material.coatAnisotropyRotation;
+        mesh.coatAnisotropyMap.path = zone.material.coatAnisotropyMapPath;
+        mesh.coatAnisotropyRotationMap.path = zone.material.coatAnisotropyRotationMapPath;
+        mesh.sheen = zone.material.sheen;
+        mesh.sheenColor = zone.material.sheenColor;
+        mesh.sheenRoughness = zone.material.sheenRoughness;
+        mesh.sheenWeightMap.path = zone.material.sheenWeightMapPath;
+        mesh.sheenColorMap.path = zone.material.sheenColorMapPath;
+        mesh.sheenRoughnessMap.path = zone.material.sheenRoughnessMapPath;
+        mesh.thinFilm = zone.material.thinFilm;
+        mesh.thinFilmThickness = zone.material.thinFilmThickness;
+        mesh.thinFilmIor = zone.material.thinFilmIor;
+        mesh.thinFilmThicknessMap.path = zone.material.thinFilmThicknessMapPath;
+        mesh.displacementStrength = zone.material.displacementStrength;
+        mesh.displacementMidLevel = zone.material.displacementMidLevel;
+        mesh.displacementSubdiv = zone.material.displacementSubdiv;
+        mesh.anisotropyMap.path = zone.material.anisotropyMapPath;
+        mesh.anisotropyRotationMap.path = zone.material.anisotropyRotationMapPath;
+        mesh.lobe2RoughnessMap.path = zone.material.lobe2RoughnessMapPath;
+        mesh.lobeRatioMap.path = zone.material.lobeRatioMapPath;
+        mesh.uvTiling = zone.material.uvTiling;
+        mesh.uvOffset = zone.material.uvOffset;
         // Detail map: prefer a true tangent-space normal map (mode 1); else the grayscale bump/height
         // map (mode 2, applied via a texture-space central difference in the shader). The base figure
         // ships bump maps, so this is what gives its skin surface grain. Either way the AUTHORED
@@ -109,6 +169,10 @@ ModelData toModelData(FigureData&& fig) {
             mesh.normal.path = zone.material.normalMapPath;
             mesh.normalMode = 1;
             mesh.normalStrength = zone.material.normalStrength;
+            // A bump map BESIDE the normal map rides its own slot (mesh.frag applies both): until
+            // 2026-11-09 a skin with both lost its bump's grain.
+            mesh.bumpMap.path = zone.material.bumpMapPath;
+            mesh.bumpStrength = zone.material.bumpStrength;
         } else if (!zone.material.bumpMapPath.empty()) {
             mesh.normal.path = zone.material.bumpMapPath;
             mesh.normalMode = 2;
@@ -301,6 +365,31 @@ void showImportFailureMessage(const QString& path, const QString& detail, bool n
     QMessageBox::warning(QApplication::activeWindow(), QObject::tr("Import Failed"), body);
 }
 
+// What became of the character's dialed shape, in the log: the morphs that were applied, and — a
+// warning — the ones that could not be, each with its reason (its file is not under any content
+// folder; its file does not define it; it was made for another geometry). A character that comes
+// out as the base figure, or with a base head on her own body, then says which file is missing.
+void logShape(const ShapeReport& shape) {
+    constexpr int kListed = 12;
+    if (!shape.applied.empty()) {
+        QStringList names;
+        for (const ShapeReport::Morph& morph : shape.applied) {
+            if (names.size() == kListed) {
+                names << QStringLiteral("and %1 more").arg(static_cast<int>(shape.applied.size()) - kListed);
+                break;
+            }
+            names << QStringLiteral("%1 %2").arg(QString::fromStdString(morph.id)).arg(morph.weight, 0, 'f', 2);
+        }
+        qInfo().noquote() << QStringLiteral("[figure] shape: %1 morphs applied (%2); %3 joints follow")
+                                 .arg(shape.applied.size())
+                                 .arg(names.join(QStringLiteral(", ")))
+                                 .arg(shape.jointsMoved);
+    }
+    for (const std::string& missing : shape.missing) {
+        qWarning().noquote() << "[figure] shape: NOT applied —" << QString::fromStdString(missing);
+    }
+}
+
 // One import attempt with a fixed set of content roots: roots -> FigureImporter::load ->
 // toModelData -> the shared post-parse pipeline (ModelImportService::uploadModelData: texture
 // decode, AO + tangents, GPU upload, timing log). Throws std::runtime_error on failure; drives
@@ -319,6 +408,7 @@ void runFigureImport(VulkanRenderer& renderer, const QString& path,
     FigureImporter importer;
     FigureData     figure = importer.load(path.toStdString(), roots);
     progress.parsed();
+    logShape(figure.shape);
 
     ModelData data = toModelData(std::move(figure));
     const QString counts = QObject::tr(", %1 zones, %2 pose correctives")

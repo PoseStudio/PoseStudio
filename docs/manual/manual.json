@@ -7,6 +7,7 @@
     { "id": "importing",        "title": "Importing Content",       "file": "importing.md" },
     { "id": "navigation",       "title": "Navigating the Viewport", "file": "navigation.md" },
     { "id": "shading",          "title": "Shading and Display",     "file": "shading.md" },
+    { "id": "materials",        "title": "Materials",               "file": "materials.md" },
     { "id": "environment",      "title": "Lighting and Environment","file": "environment.md" },
     { "id": "vr",               "title": "VR Mode",                 "file": "vr.md" },
     { "id": "posing",           "title": "Posing",                  "file": "posing.md",

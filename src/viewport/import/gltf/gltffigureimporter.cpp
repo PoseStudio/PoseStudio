@@ -5,6 +5,7 @@
  */
 
 #include "gltffigureimporter.h"
+#include "specgloss.h"
 
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
@@ -571,6 +572,7 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
                 if (info != nullptr) {
                     ++info->materials;
                 }
+                out.name = mat->name != nullptr ? mat->name : ""; // the Materials tab's zone name
                 const cgltf_texture_view* baseView = nullptr;
                 if (mat->has_pbr_metallic_roughness) {
                     const cgltf_pbr_metallic_roughness& pbr = mat->pbr_metallic_roughness;
@@ -582,29 +584,151 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
                     if (pbr.metallic_roughness_texture.texture != nullptr) {
                         out.roughnessMap = resolveImage(textures, imageOf(pbr.metallic_roughness_texture.texture), info);
                         out.roughnessChannel = 1; // (roughness rides the green channel; metalness the blue)
+                        out.metalnessMap = out.roughnessMap; // the same texture's blue channel (the Materials tab, 2026-11-09)
+                        out.metalnessChannel = 2;
                     }
                 } else if (mat->has_pbr_specular_glossiness) {
+                    // THE ONE MATERIAL MODEL (specgloss.h): the deprecated specular / glossiness
+                    // extension, converted by the standard solve — the scalars here, the maps per
+                    // texel in the decode layer (the diffuse map, and the spec/gloss map: specular
+                    // RGB in sRGB, glossiness in the alpha).
                     const cgltf_pbr_specular_glossiness& sg = mat->pbr_specular_glossiness;
-                    out.baseColor = glm::vec3(sg.diffuse_factor[0], sg.diffuse_factor[1], sg.diffuse_factor[2]);
+                    const glm::vec3 diffuse(sg.diffuse_factor[0], sg.diffuse_factor[1], sg.diffuse_factor[2]);
+                    const glm::vec3 specular(sg.specular_factor[0], sg.specular_factor[1], sg.specular_factor[2]);
+                    const MetallicRoughness mr = convertSpecGloss(diffuse, specular, sg.glossiness_factor);
+                    out.baseColor = mr.baseColor;
+                    out.metalness = mr.metalness;
+                    out.roughness = std::max(0.05f, mr.roughness);
                     out.opacity = sg.diffuse_factor[3];
                     baseView = &sg.diffuse_texture;
-                    out.roughness = std::max(0.05f, std::min(1.0f, 1.0f - sg.glossiness_factor));
+                    out.convertSpecGloss = true;
+                    out.specularWeight = 1.0f; // (the solve's dielectric is the standard 4 %)
+                    out.specularWeightWithMap = 1.0f;
+                    out.diffuseFactor = glm::vec4(diffuse, sg.diffuse_factor[3]);
+                    out.specularColorFactor = specular;
+                    out.glossinessFactor = sg.glossiness_factor;
+                    if (sg.specular_glossiness_texture.texture != nullptr) {
+                        out.specularColorMap = resolveImage(textures, imageOf(sg.specular_glossiness_texture.texture), info);
+                        out.glossinessMap = out.specularColorMap;
+                        out.glossinessChannel = 3; // the alpha
+                    }
+                    if (info != nullptr) {
+                        info->notes.push_back("material '" + out.name + "' converted from specular-glossiness (KHR_materials_pbrSpecularGlossiness) to metallic-roughness");
+                    }
                 }
                 if (baseView != nullptr && baseView->texture != nullptr) {
                     out.diffuse = resolveImage(textures, imageOf(baseView->texture), info);
                     uvSet = baseView->texcoord;
-                    if (!out.diffuse.empty()) {
+                    if (!out.diffuse.empty() && !out.convertSpecGloss) {
                         out.baseColor = glm::vec3(1.0f); // (the map carries the colour; the factor is folded in by most exporters)
                     }
-                    if (baseView->has_transform && info != nullptr && !notedTransform) {
-                        info->notes.push_back("texture transforms (KHR_texture_transform) are not applied");
-                        notedTransform = true;
+                    if (baseView->has_transform) {
+                        // KHR_texture_transform on the base map: its scale, offset and rotation are
+                        // the material's UV tiling, offset and rotation (every map of the material
+                        // follows it; the rotation is stored — the viewport does not turn its maps).
+                        const cgltf_texture_transform& t = baseView->transform;
+                        out.uvTiling = glm::vec2(t.scale[0], t.scale[1]);
+                        out.uvOffset = glm::vec2(t.offset[0], t.offset[1]);
+                        out.uvRotation = glm::degrees(t.rotation);
+                        if (t.rotation != 0.0f && info != nullptr && !notedTransform) {
+                            info->notes.push_back("texture transform rotations (KHR_texture_transform) are stored, not drawn");
+                            notedTransform = true;
+                        }
                     }
                 }
                 if (mat->normal_texture.texture != nullptr) {
                     out.normal = resolveImage(textures, imageOf(mat->normal_texture.texture), info);
                     out.normalMode = out.normal.empty() ? 0 : 1;
                     out.normalStrength = std::max(0.1f, std::min(8.0f, mat->normal_texture.scale > 0.0f ? mat->normal_texture.scale : 1.0f));
+                }
+                // THE CANONICAL MATERIAL's further channels, from the extensions that carry them
+                // (their own maps have no slot yet: the factors alone are read, the emission map
+                // excepted).
+                {
+                    const glm::vec3 e(mat->emissive_factor[0], mat->emissive_factor[1], mat->emissive_factor[2]);
+                    const float     peak = std::max(e.x, std::max(e.y, e.z));
+                    if (peak > 0.0f) {
+                        out.emissionColor = e / peak;
+                        out.emission = peak * (mat->has_emissive_strength ? std::max(0.0f, mat->emissive_strength.emissive_strength) : 1.0f);
+                        // The core occlusion texture (its red channel, strength = scale): a stored-only
+                        // slot — the viewport bakes its own per-vertex AO.
+                        if (mat->occlusion_texture.texture != nullptr) {
+                            out.aoMap = resolveImage(textures, imageOf(mat->occlusion_texture.texture), info);
+                            out.aoWeight = std::max(0.0f, std::min(1.0f, mat->occlusion_texture.scale));
+                        }
+                        if (mat->emissive_texture.texture != nullptr) {
+                            out.emissionMap = resolveImage(textures, imageOf(mat->emissive_texture.texture), info);
+                        }
+                    }
+                }
+                if (mat->has_ior) {
+                    out.ior = std::max(1.0f, std::min(3.0f, mat->ior.ior));
+                }
+                if (mat->has_specular) {
+                    out.specularWeight = std::max(0.0f, mat->specular.specular_factor);
+                    out.specularWeightWithMap = out.specularWeight;
+                    out.specularColor = glm::vec3(mat->specular.specular_color_factor[0], mat->specular.specular_color_factor[1],
+                                                  mat->specular.specular_color_factor[2]);
+                    if (mat->specular.specular_color_texture.texture != nullptr) {
+                        out.specularColorSlotMap = resolveImage(textures, imageOf(mat->specular.specular_color_texture.texture), info);
+                    }
+                }
+                if (mat->has_transmission) {
+                    out.transmission = std::max(0.0f, std::min(1.0f, mat->transmission.transmission_factor));
+                    out.thinWalled = !mat->has_volume; // (transmission without a volume is a thin sheet, by the extension)
+                    if (mat->transmission.transmission_texture.texture != nullptr) {
+                        out.transmissionWeightMap = resolveImage(textures, imageOf(mat->transmission.transmission_texture.texture), info);
+                    }
+                }
+                if (mat->has_volume) {
+                    out.transmissionColor = glm::vec3(mat->volume.attenuation_color[0], mat->volume.attenuation_color[1], mat->volume.attenuation_color[2]);
+                    const float distance = mat->volume.attenuation_distance;
+                    out.transmissionDepth = std::isfinite(distance) && distance < 1e6f ? std::max(0.0f, distance) : 0.0f;
+                }
+                if (mat->has_sheen) {
+                    const glm::vec3 c(mat->sheen.sheen_color_factor[0], mat->sheen.sheen_color_factor[1], mat->sheen.sheen_color_factor[2]);
+                    const float     peak = std::max(c.x, std::max(c.y, c.z));
+                    out.sheen = std::min(1.0f, peak);
+                    out.sheenColor = peak > 0.0f ? c / peak : glm::vec3(1.0f);
+                    out.sheenRoughness = std::max(0.0f, std::min(1.0f, mat->sheen.sheen_roughness_factor));
+                    if (mat->sheen.sheen_color_texture.texture != nullptr) {
+                        out.sheenColorMap = resolveImage(textures, imageOf(mat->sheen.sheen_color_texture.texture), info);
+                    }
+                    if (mat->sheen.sheen_roughness_texture.texture != nullptr) {
+                        out.sheenRoughnessMap = resolveImage(textures, imageOf(mat->sheen.sheen_roughness_texture.texture), info);
+                    }
+                }
+                out.doubleSided = mat->double_sided;
+                if (mat->has_clearcoat) {
+                    out.topCoatWeight = std::max(0.0f, std::min(1.0f, mat->clearcoat.clearcoat_factor));
+                    out.topCoatRoughness = std::max(0.0f, std::min(1.0f, mat->clearcoat.clearcoat_roughness_factor));
+                    if (mat->clearcoat.clearcoat_texture.texture != nullptr) {
+                        out.coatWeightMap = resolveImage(textures, imageOf(mat->clearcoat.clearcoat_texture.texture), info);
+                    }
+                    if (mat->clearcoat.clearcoat_roughness_texture.texture != nullptr) {
+                        out.coatRoughnessMap = resolveImage(textures, imageOf(mat->clearcoat.clearcoat_roughness_texture.texture), info);
+                    }
+                    if (mat->clearcoat.clearcoat_normal_texture.texture != nullptr) {
+                        out.coatBumpMap = resolveImage(textures, imageOf(mat->clearcoat.clearcoat_normal_texture.texture), info);
+                    }
+                }
+                if (mat->has_iridescence) {
+                    out.thinFilm = std::max(0.0f, std::min(1.0f, mat->iridescence.iridescence_factor));
+                    out.thinFilmIor = std::max(1.0f, std::min(3.0f, mat->iridescence.iridescence_ior));
+                    out.thinFilmThickness = std::max(0.0f, mat->iridescence.iridescence_thickness_max);
+                    if (mat->iridescence.iridescence_texture.texture != nullptr) {
+                        out.thinFilmWeightMap = resolveImage(textures, imageOf(mat->iridescence.iridescence_texture.texture), info);
+                    }
+                    if (mat->iridescence.iridescence_thickness_texture.texture != nullptr) {
+                        out.thinFilmThicknessMap = resolveImage(textures, imageOf(mat->iridescence.iridescence_thickness_texture.texture), info);
+                    }
+                }
+                if (mat->has_anisotropy) {
+                    out.anisotropy = std::max(0.0f, std::min(1.0f, mat->anisotropy.anisotropy_strength));
+                    out.anisotropyRotation = glm::degrees(mat->anisotropy.anisotropy_rotation);
+                    if (mat->anisotropy.anisotropy_texture.texture != nullptr) {
+                        out.anisotropyMap = resolveImage(textures, imageOf(mat->anisotropy.anisotropy_texture.texture), info);
+                    }
                 }
                 out.lobe1Roughness = out.roughness;
                 out.lobe2Roughness = out.roughness;

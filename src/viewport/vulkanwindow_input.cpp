@@ -120,10 +120,16 @@ void VulkanWindow::selectModelAtClick(const QPointF& localPos) {
     // Box-level pick (Model::intersectRay): the nearest model whose bounds the cursor's ray
     // enters, else -1 = clear the selection. Selecting a figure also makes it the posing target;
     // deselecting drops its joint selection with it (Scene::setSelectedModel).
-    const int picked = scene().pickModel(cursorRay(localPos));
+    const Ray ray = cursorRay(localPos);
+    const int picked = scene().pickModel(ray);
     if (picked != scene().selectedModelIndex()) {
         scene().setSelectedModel(picked);
         requestUpdate(); // the outline moved / went away
+    }
+    // The material zone under the click, for the Materials tab (a figure's joint pick records
+    // it the same way; a static model's surface is cast here).
+    if (picked >= 0 && scene().selectZoneAt(ray)) {
+        requestUpdate(); // (the frame's notify tells the tab)
     }
 }
 

@@ -40,8 +40,8 @@ class VulkanContext;
  * vertex+fragment push block, and the opaque one writes the second (specular) attachment; the
  * skeleton overlay is a LINE_LIST; the shadow pass is single-sample and depth-only with a static
  * depth bias; the outline mask and the post passes are depth-free; the post passes and the
- * composite are single-sample. The rest (dynamic viewport/scissor, front face, blend factors) is
- * shared and lives in VulkanPipeline itself.
+ * composite are single-sample. The rest (dynamic viewport/scissor, front face) is shared and lives
+ * in VulkanPipeline itself.
  */
 struct PipelineConfig {
     uint32_t           pushConstantSize   = 0;                          // 0 = no push constants
@@ -74,6 +74,12 @@ struct PipelineConfig {
     // surface fill lays down depth (so the surface occludes the grid and the wires behind it)
     // while the framebuffer keeps the viewport's clear colour.
     bool  colorWriteRgb      = true;
+
+    // Attachment 0's colour blend factors when blendEnable is set: straight alpha by default
+    // (src.a / 1 − src.a). The transmissive mesh variants (scenepipelines.cpp) MULTIPLY the
+    // frame by the shader's colour (ZERO / SRC_COLOR) and ADD to it (ONE / ONE).
+    VkBlendFactor srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    VkBlendFactor dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 
     // Wireframe: rasterize each triangle as its three edges instead of filling it. Needs the
     // fillModeNonSolid device feature (VulkanContext enables it when the device has it — check

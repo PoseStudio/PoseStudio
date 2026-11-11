@@ -252,6 +252,10 @@ void Armature::setBodyMesh(std::vector<BodyMeshPoint> mesh) {
     m_boneClass.clear(); // (... and the bone classes with it)
     m_breasts.clear();
     m_breastsReady = false;
+    m_breastFields[0] = BreastField{};
+    m_breastFields[1] = BreastField{};
+    m_breastFieldSkin.clear();
+    m_breastFieldsReady = false;
     m_buttocks.clear();
     m_buttocksReady = false;
     // THE SOFT BREASTS need the rig (the pectorals' roles) and this mesh (the breasts' size):

@@ -1,0 +1,81 @@
+# THE BONELESS BREAST (armaturebreastfield.cpp): on a rig with no breast bone the breast is the
+# chest's own skin, and the soft breasts' mass moves it as a delta field. NOT run by run_all.sh
+# (the subfolder). Run it on the BASE FIGURE with every breast forced to a field — the bone path's
+# mass, the field's skin, on the figure the amounts are calibrated on:
+#   POSESTUDIO_TEST_FIGURE=<base figure> tools/ikscripts/run.sh tools/ikscripts/softbody/boneless.txt <out> POSESTUDIO_BREAST_AS_FIELD=1
+# or, with no probe, on a rigged character whose rig has no breast bone (read its numbers: the
+# gates are the base figure's). `breastfields` counts the figure's field breasts; `breastfieldl` /
+# `breastfieldr` read how far the field moves the skin at the breast's apex, mm — what the GPU is
+# given to blend: the mass's displacement, within the field's travel across the chest.
+expect breastfields == 2
+view front
+closeup chest 0.30
+shot 01_standing_front
+expect breastfieldl < 0.01
+expect breastfieldr < 0.01
+
+# BOWED LEVEL (the hips pitched forward, in the air): the breasts hang out toward the floor and
+# lift toward the head, a teardrop off the chest wall — from the side and from three-quarters.
+view home
+fk hip 85 0 0
+expect breasthangl > 15
+expect breastfieldl > 20
+expect breastfieldr > 20
+view right
+closeup chest 0.30
+shot 02_bow_side
+orbit 40 -12
+shot 03_bow_threeq
+reset
+expect breastfieldl < 0.01
+
+# ON HER BACK: pressed toward the chest wall and spread outward — a field flattens the dome.
+view home
+fk hip -90 0 0
+expect breasthangl < -4
+expect breastsidel > 8
+expect breastfieldl > 15
+view top
+closeup chest 0.30
+shot 04_on_back_above
+view right
+closeup chest 0.30
+orbit 35 20
+shot 05_on_back_threeq
+reset
+
+# ON HER SIDE: the mass of the upper breast (the left here) falls 54 mm toward the sternum on the
+# base figure; the field carries it only within its travel that way (the skin between the breast
+# and the still sternum must not fold over itself), the lower one's fall outward nearly whole.
+view home
+fk hip 0 0 90
+expect breastsidel < -45
+expect breastfieldl > 10
+expect breastfieldl < 45
+expect breastfieldr > 15
+view front
+closeup chest 0.30
+shot 06_on_side_front
+reset
+
+# A JOLT: the figure lifted quickly by the hips with Ctrl — the breasts rise as the lift stops,
+# and rest again after the release.
+view right
+cpress hip
+dragv 0 0.10 4 0
+dragv 0 0 1 9
+expect breastupl > 2
+expect breastfieldl > 2
+release
+expect breastfieldl < 0.01
+reset
+
+# THE LANDING: dropped half a metre, shot through the bounce, at rest after it.
+view home
+lift 0.5
+ground
+wait 24
+shot 07_landing
+wait 90
+expect breastfieldl < 0.01
+quit

@@ -15,6 +15,7 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -26,10 +27,13 @@ namespace pose {
 /// native units).
 using MorphDelta = std::pair<uint32_t, glm::vec3>;
 
-/// Returns the deltas of the morph modifier named @p fragment in @p morphDoc (falling back to the
-/// first modifier that carries a `morph`). Empty if the document has no such morph (e.g. it turned
-/// out to be a formula-only (driver) modifier rather than a shape).
-std::vector<MorphDelta> parseMorphDeltas(const nlohmann::json& morphDoc, const std::string& fragment);
+/// Returns the deltas of the morph modifier named @p fragment in @p morphDoc (see
+/// findMorphModifier for which modifier that is). Empty if it carries no morph — a control, a
+/// scale, a formula-only driver. @p outVertexCount, when given, receives the vertex count of the
+/// geometry the morph says it was authored for (its `vertex_count`), or 0 where it does not say:
+/// a morph for ANOTHER geometry indexes other vertices, and must not be applied to this one.
+std::vector<MorphDelta> parseMorphDeltas(const nlohmann::json& morphDoc, const std::string& fragment,
+                                         std::size_t* outVertexCount = nullptr);
 
 } // namespace pose
 

@@ -8,6 +8,7 @@
 #include "jointmodalinput.h"
 #include "openxrsystem.h" // the headset's Vulkan requirements, negotiated before the instance (vr/)
 #include "scene/jointtransform.h"
+#include "scene/materialparams.h"
 #include "scene/shademode.h"
 #include "viewportstrip.h"
 #include "vrsettings.h"
@@ -143,6 +144,8 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
     connect(m_window, &VulkanWindow::lightingRestored, this, &ViewportWidget::lightingRestored);
     // ... and likewise the selected joint's transform changing, for the Transform tab.
     connect(m_window, &VulkanWindow::jointTransformChanged, this, &ViewportWidget::jointTransformChanged);
+    // ... and the Materials tab's view of the selected object changing.
+    connect(m_window, &VulkanWindow::materialViewChanged, this, &ViewportWidget::materialViewChanged);
     // The scripted test's `uishot`: the main window's widgets as a picture (the panels beside the
     // viewport; the native viewport itself is not in a widget grab — `shot` reads that off the GPU),
     // and the floating strip, a window of its own, beside it as <name>_strip.png (its badge).
@@ -327,6 +330,38 @@ void ViewportWidget::setFigureRotation(int axis, double degrees) {
 
 void ViewportWidget::setFigureScale(double pct) {
     withWindow([pct](VulkanWindow& w) { w.setFigureScale(pct); });
+}
+
+MaterialView ViewportWidget::materialView() const {
+    return m_window ? m_window->materialView() : MaterialView{};
+}
+
+void ViewportWidget::setMaterialZone(int zone) {
+    withWindow([zone](VulkanWindow& w) { w.setMaterialZone(zone); });
+}
+
+bool ViewportWidget::beginMaterialEdit() {
+    return m_window && m_window->beginMaterialEdit();
+}
+
+void ViewportWidget::setSelectedMaterial(const MaterialParams& params, bool linked) {
+    withWindow([&params, linked](VulkanWindow& w) { w.setSelectedMaterial(params, linked); });
+}
+
+void ViewportWidget::endMaterialEdit() {
+    withWindow([](VulkanWindow& w) { w.endMaterialEdit(); });
+}
+
+void ViewportWidget::resetSelectedMaterial(bool linked, bool allZones) {
+    withWindow([linked, allZones](VulkanWindow& w) { w.resetSelectedMaterial(linked, allZones); });
+}
+
+bool ViewportWidget::setMaterialTexture(MaterialMap map, const QString& source) {
+    return m_window && m_window->setMaterialTexture(map, source);
+}
+
+std::shared_ptr<const DecodedImage> ViewportWidget::materialSlotImage(MaterialMap map, int* channel) const {
+    return m_window ? m_window->materialSlotImage(map, channel) : nullptr;
 }
 
 void ViewportWidget::setJointTransformDial(int dial, double value, bool absolute) {

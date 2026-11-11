@@ -37,8 +37,10 @@
 #include <exception>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace pose {
 
@@ -46,46 +48,72 @@ namespace {
 
 // Applies the preset's dialed shape morphs to the base vertices — this is what turns the generic
 // base figure into the specific character. A character rarely dials the shape morphs directly; it
-// dials a *control* whose driver formulas drive the real head/body morphs, so resolveDialedMorphs()
-// walks that graph and returns each reached morph file + weight. We then bake its sparse deltas
-// (position += weight · delta). Controls/scales resolve to no deltas and no-op; a morph that
-// fails to load is skipped rather than aborting the whole import. Returns the dialed morphs (the
-// corrective scan needs both their folders and their weights) and fills the figure scale and the
-// joint-centre offsets the same formulas drive.
-std::vector<DialedMorph> bakeDialedMorphs(const nlohmann::json& presetRoot, UriResolver& resolver,
-                                          const std::string& presetDir, GeometryData& geo,
-                                          float& figureScale, JointCenterOffsets& jointCenterOffsets) {
-    const std::vector<DialedMorph> dialedMorphs =
-        resolveDialedMorphs(presetRoot, resolver, presetDir, figureScale, jointCenterOffsets);
+// dials a *control* whose driver formulas drive the real morphs — often several, a head, a body,
+// the feet — so resolveDialedMorphs() walks that graph (for the figure @p scope names: a scene
+// lists every figure's dials side by side) and returns each reached morph file + weight. We then
+// bake its sparse deltas (position += weight · delta). Controls/scales resolve to no deltas and
+// no-op; a morph that fails to load is skipped rather than aborting the whole import, and SAID:
+// @p report lists what was applied and what could not be. Returns the resolved shape — the
+// reached channels (the corrective scan needs both their folders and their weights), the figure
+// scale and the joint-centre offsets the same formulas drive.
+ResolvedShape bakeDialedMorphs(const nlohmann::json& presetRoot, UriResolver& resolver,
+                               const std::string& presetDir, const FigureScope& scope,
+                               GeometryData& geo, ShapeReport& report) {
+    ResolvedShape shape = resolveDialedMorphs(presetRoot, resolver, presetDir, scope);
+    report.missing = shape.missing;
     // Load every reached morph document up front, across cores — a character preset can reach
     // hundreds of morph files, and their serial read+inflate+parse was a large slice of import
     // time. The bake loop below then hits the resolver's cache.
     {
         std::vector<std::string> morphUris;
-        morphUris.reserve(dialedMorphs.size());
-        for (const DialedMorph& dialed : dialedMorphs) {
+        morphUris.reserve(shape.morphs.size());
+        for (const DialedMorph& dialed : shape.morphs) {
             morphUris.push_back(dialed.url);
         }
         resolver.prefetchDocuments(morphUris, presetDir);
     }
-    for (const DialedMorph& dialed : dialedMorphs) {
-        const ResolvedUri ru = resolver.resolve(dialed.url, presetDir);
-        if (!ru.resolved()) {
+    for (const DialedMorph& dialed : shape.morphs) {
+        std::shared_ptr<const FigureDocument> morphDoc; // keeps a morph file alive through its bake
+        const nlohmann::json*                 morphRoot = nullptr;
+        std::string                           fragment;
+        if (!dialed.url.empty() && dialed.url[0] == '#') {
+            morphRoot = &presetRoot; // a morph the preset carries in its own modifier_library
+            fragment = dialed.id;
+        } else {
+            const ResolvedUri ru = resolver.resolve(dialed.url, presetDir);
+            if (!ru.resolved()) {
+                continue; // the walk already reported its file as missing
+            }
+            try {
+                morphDoc = resolver.loadDocument(ru);
+            } catch (const std::exception&) {
+                continue;
+            }
+            morphRoot = &morphDoc->root();
+            fragment = ru.fragment;
+        }
+        std::size_t                   authoredFor = 0;
+        const std::vector<MorphDelta> deltas = parseMorphDeltas(*morphRoot, fragment, &authoredFor);
+        if (deltas.empty()) {
+            continue; // a control, a scale
+        }
+        // A morph says how many vertices the geometry it was made for has. One made for another
+        // geometry indexes other vertices: added to this cage it moves whichever of ours happen to
+        // share the numbers.
+        if (authoredFor != 0 && authoredFor != geo.positions.size()) {
+            report.missing.push_back(dialed.id + ": made for another geometry (" +
+                                     std::to_string(authoredFor) + " vertices, this one has " +
+                                     std::to_string(geo.positions.size()) + ")");
             continue;
         }
-        std::shared_ptr<const FigureDocument> morphDoc;
-        try {
-            morphDoc = resolver.loadDocument(ru);
-        } catch (const std::exception&) {
-            continue;
-        }
-        for (const auto& [vertexIndex, delta] : parseMorphDeltas(morphDoc->root(), ru.fragment)) {
+        for (const auto& [vertexIndex, delta] : deltas) {
             if (vertexIndex < geo.positions.size()) {
                 geo.positions[vertexIndex] += dialed.weight * delta;
             }
         }
+        report.applied.push_back({dialed.id, dialed.weight, deltas.size()});
     }
-    return dialedMorphs;
+    return shape;
 }
 
 // The full loader. `includeAddons` is true for the user-facing entry point and false for the
@@ -100,20 +128,24 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
     FigureDocument presetDoc = FigureDocument::loadFromFile(path);
     const nlohmann::json& root = presetDoc.root();
 
-    // Locate the base geometry. Either this file *is* a base .dsf (has geometry_library), or it's a
-    // preset that references one via a scene node's geometries[0].url.
+    // Locate the base geometry: the one the scene's figure node names. For a preset that is another
+    // file (geometries[0].url = "/data/…/Figure.dsf#geometry"); for a base .dsf it is the file's
+    // own geometry_library ("#geometry", or no figure node at all). The figure node is asked
+    // FIRST: a user-saved character can carry a geometry_library of its own — a prop that was never
+    // saved as an asset is embedded in the scene file — and taken for a base file on the strength
+    // of that key, one such character imported as her prop (found 2026-11-10).
     const nlohmann::json* geomEntry = nullptr;
     std::shared_ptr<const FigureDocument> baseDoc; // keeps the referenced base file alive
     std::string baseDir = presetDir;
     std::string baseFile = path; // the base figure .dsf itself (sibling-base corrective matching)
 
-    if (root.contains("geometry_library")) {
-        geomEntry = findGeometryEntry(root, std::string());
-    } else {
-        const std::string geomUri = findGeometryUri(root);
-        if (geomUri.empty()) {
+    const std::string geomUri = findGeometryUri(root);
+    if (geomUri.empty() || geomUri[0] == '#') {
+        if (!root.contains("geometry_library")) {
             throw std::runtime_error("figure import: no geometry reference found in " + path);
         }
+        geomEntry = findGeometryEntry(root, geomUri.empty() ? std::string() : urlDecode(geomUri.substr(1)));
+    } else {
         const ResolvedUri ru = resolver.resolve(geomUri, presetDir);
         if (!ru.resolved()) {
             throw std::runtime_error("figure import: cannot resolve base geometry '" + geomUri + "'");
@@ -136,11 +168,17 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
         baseCagePositions = geo.positions;
     }
 
+    // WHICH FIGURE of the scene this load is for. A user-saved character is a scene of several —
+    // the character, her eyelashes, her hair, a ring — whose dials and materials are listed side
+    // by side; everything read out of the scene below is read for this one (see FigureScope).
+    const FigureScope scope = figureScopeOf(root);
+
     // The character's shape: bake the dialed morphs into the cage.
-    float figureScale = 1.0f;
-    JointCenterOffsets jointCenterOffsets; // per-bone rest-origin shifts the same morphs drive
-    const std::vector<DialedMorph> dialedMorphs =
-        bakeDialedMorphs(root, resolver, presetDir, geo, figureScale, jointCenterOffsets);
+    FigureData out;
+    const ResolvedShape shape = bakeDialedMorphs(root, resolver, presetDir, scope, geo, out.shape);
+    const std::vector<DialedMorph>& dialedMorphs = shape.morphs;
+    const float                     figureScale = shape.figureScale;
+    const JointCenterOffsets&       jointCenterOffsets = shape.jointCenterOffsets; // per-bone rest-origin shifts
 
     // The UV sets. The base geometry names the DEFAULT (resolved relative to the base file), and
     // each scene material may name the set ITS zone's maps are painted on (`uv_set`, resolved
@@ -167,7 +205,7 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
     std::unordered_map<std::string, std::unique_ptr<UvSet>> ownUvSets; // by resolved key; null = refused
     int zonesOnOwnUvSet = 0;
     if (std::getenv("POSESTUDIO_UV_DEFAULT_ONLY") == nullptr) {
-        const std::unordered_map<std::string, std::string> zoneUris = sceneMaterialUvSets(root);
+        const std::unordered_map<std::string, std::string> zoneUris = sceneMaterialUvSets(root, scope);
         for (std::size_t zone = 0; zone < geo.materialZones.size(); ++zone) {
             const auto named = zoneUris.find(geo.materialZones[zone]);
             if (named == zoneUris.end()) {
@@ -204,7 +242,6 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
         }
     }
 
-    FigureData out;
     out.figureScale = figureScale;
     out.zonesOnOwnUvSet = zonesOnOwnUvSet;
     out.graftPopulated = geo.graftPopulated;
@@ -224,6 +261,12 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
     // matches the character's morphed proportions (a base-figure rig around a morphed mesh would pivot
     // limbs at the wrong places, and the joint overlay would float off the body).
     applyJointCenterOffsets(out.bones, jointCenterOffsets);
+    for (const FigureBone& bone : out.bones) {
+        const auto moved = jointCenterOffsets.find(bone.name);
+        if (moved != jointCenterOffsets.end() && glm::length(moved->second) > 1e-4f) {
+            ++out.shape.jointsMoved;
+        }
+    }
 
     if (!out.bones.empty()) {
         // Twist bones sit mid-limb where there's no real joint; keep their axial twist but forbid the
@@ -276,8 +319,9 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
     }
 
     // Materials come from the preset's scene (a base .dsf on its own carries none -> zones keep the
-    // default base color). Texture URIs are resolved to on-disk paths inside.
-    applySceneMaterials(out, root, resolver, presetDir);
+    // default base color) — the ones it lists for THIS figure's geometry. Texture URIs are resolved
+    // to on-disk paths inside.
+    applySceneMaterials(out, root, resolver, presetDir, &scope, /*followerPreset=*/!includeAddons);
 
     // Fitted follower addons (anime eyeballs, lashes, …) the preset declares in its post-load block.
     // Characters built this way deliberately hide the standard surfaces the follower replaces (e.g.
@@ -316,7 +360,7 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
                         // section is absent (the anime-eye presets use the animation-track form),
                         // so a non-material preset document just passes through harmlessly.
                         applySceneMaterials(entry.data, addonPresetDoc->root(), resolver,
-                                            addonPresetDir);
+                                            addonPresetDir, nullptr, /*followerPreset=*/true);
                         applyAnimationMaterials(entry.data, addonPresetDoc->root(), resolver,
                                                 addonPresetDir);
                     } catch (const std::exception&) {

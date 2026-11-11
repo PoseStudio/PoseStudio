@@ -41,6 +41,10 @@ class OpenXrSystem;
 class ViewportStrip;
 class VulkanWindow;
 struct JointTransform;
+enum class MaterialMap;
+struct DecodedImage;
+struct MaterialParams;
+struct MaterialView;
 class JointModalInput;
 struct LightingSettings;
 
@@ -125,6 +129,22 @@ public:
     void setFigurePosition(int axis, double cm); ///< The Figure group: see VulkanWindow::setFigurePosition.
     void setFigureRotation(int axis, double degrees);
     void setFigureScale(double pct); ///< A static model's Scale row (percent).
+    /// THE MATERIALS TAB's side of the selected object (VulkanWindow::materialView): its zones and
+    /// the selected zone's values, the zone pick, and the material edit — one undo entry per
+    /// begin..end however many values are set between. Invalid / no-ops if the viewport degraded.
+    MaterialView materialView() const;
+    void setMaterialZone(int zone);
+    bool beginMaterialEdit();
+    void setSelectedMaterial(const MaterialParams& params, bool linked);
+    void endMaterialEdit();
+    void resetSelectedMaterial(bool linked, bool allZones);
+    /// The selected zone's texture slot @p map: an image file's path, "" to clear it, or
+    /// kImportedTexture for the imported map back (VulkanWindow::setMaterialTexture; one undo
+    /// entry). False when the file could not be read.
+    bool setMaterialTexture(MaterialMap map, const QString& source);
+    /// The selected zone's image in slot @p map (VulkanWindow::materialSlotImage), for the tab's
+    /// thumbnails; null without one.
+    std::shared_ptr<const DecodedImage> materialSlotImage(MaterialMap map, int* channel = nullptr) const;
     /// The B / S / T key, wherever the keyboard focus is (the Edit menu's actions carry the keys
     /// application-wide): the joint mouse mode on dial @p kind (0/1/2 = Bend / Side-Side /
     /// Twist) of the selected joint — on, off again, or switched to it
@@ -209,6 +229,10 @@ signals:
     /// selected, or its pose moved by any means (VulkanWindow::jointTransformChanged). The
     /// Transform tab re-reads jointTransform() on it.
     void jointTransformChanged();
+    /// Emitted when what materialView() shows has changed — another object or zone selected, a
+    /// material edited by any means (VulkanWindow::materialViewChanged). The Materials tab
+    /// re-reads materialView() on it.
+    void materialViewChanged();
     /// Re-emitted from the viewport when the .pss document's state changes (path adopted, dirty
     /// flag transitioned), so the main window can keep its title in sync. The window-title update
     /// listens to this; the state itself is read back through projectPath() / isProjectDirty().

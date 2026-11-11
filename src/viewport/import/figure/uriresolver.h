@@ -88,6 +88,14 @@ public:
     void prefetchDocuments(const std::vector<std::string>& uris,
                            const std::string& referringFileDir = "");
 
+    /// Every file with the (lowercase, dotted) extension @p extension under the root-relative
+    /// directory @p directoryUri ("/data/…/Morphs", percent-encoded or not), recursively, across
+    /// ALL content roots — each as a root-relative URI resolve() takes ("/data/…/Some%20Morph.dsf":
+    /// only '%', '#' and '?' are encoded, which is all resolve() needs). Lists names, opens
+    /// nothing. For finding a file by its NAME when a reference gives an id and no file.
+    std::vector<std::string> listFiles(const std::string& directoryUri,
+                                       const std::string& extension) const;
+
     /// Percent-decodes a URL-encoded string ("My%20Figures" -> "My Figures"). Forwards to
     /// figureutils' urlDecode (kept here so resolver callers read naturally).
     static std::string urlDecode(const std::string& s);

@@ -26,14 +26,30 @@
 namespace pose {
 
 struct FigureData;
+struct FigureScope;
 class UriResolver;
 
 /// Applies @p root's `scene.materials` onto @p fig: each zone the scene names gets its resolved
 /// colours/maps/opacity, other zones keep what they have. @p referringDir resolves relative
 /// texture references (the directory of the document @p root came from). Shared by the main
 /// figure path (the preset's own materials) and the addon path (a follower's materials preset).
+/// @p scope, when given, keeps the materials to the ones the scene lists for THAT figure's
+/// geometry: a scene of several figures lists every one's, zones are matched by NAME, and two
+/// figures share names more often than not (a character's eye and her eyelash figure both have an
+/// "EyeMoisture", a suit has "Lips", a second character has everything) — the later one won.
+///
+/// @p followerPreset is set for a post-load FOLLOWER's own preset and its materials presets. A
+/// material's same-file base ("#Eye%20Left") is looked up by its DECODED id everywhere else; for
+/// those presets it is compared as written, which misses every base whose id has a space in it —
+/// DELIBERATELY, for now: one generation's follower presets (its eyes, its lashes) carry grey
+/// placeholder bases with the specular all but off, and the character's hierarchical preset then
+/// sets the real lobes through tracks applyAnimationMaterials does not read yet. Found, those
+/// placeholders would take the catchlight off every eye of that generation; missed, the material
+/// keeps the parser's defaults, which is what those figures have always rendered with. To go
+/// when the hierarchical form reads the specular lobes.
 void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolver& resolver,
-                         const std::string& referringDir);
+                         const std::string& referringDir, const FigureScope* scope = nullptr,
+                         bool followerPreset = false);
 
 /// Applies a hierarchical-materials preset (asset_info type "preset_hierarchical_material") onto
 /// @p fig. Its values ride in single-key `scene.animations` tracks, each url addressing one
@@ -51,8 +67,9 @@ void applyAnimationMaterials(FigureData& fig, const nlohmann::json& root, UriRes
 /// zone's maps are painted on the layout its material names, which need not be the geometry's
 /// default (see uvparser.h). The hierarchical-material form carries `?uv_set` tracks too, which
 /// are not read: those presets are applied after assembly, and no content seen names a set other
-/// than the figure's own through them.
-std::unordered_map<std::string, std::string> sceneMaterialUvSets(const nlohmann::json& root);
+/// than the figure's own through them. Only the materials @p scope's figure owns are read.
+std::unordered_map<std::string, std::string> sceneMaterialUvSets(const nlohmann::json& root,
+                                                                 const FigureScope& scope);
 
 } // namespace pose
 

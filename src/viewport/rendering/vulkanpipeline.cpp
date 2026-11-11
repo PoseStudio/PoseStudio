@@ -94,9 +94,10 @@ VulkanPipeline::VulkanPipeline(VulkanContext& context, VkRenderPass renderPass,
              : 0u) |
         (config.colorWriteAlpha ? VK_COLOR_COMPONENT_A_BIT : 0u);
     blendAttachment.blendEnable = config.blendEnable ? VK_TRUE : VK_FALSE;
-    // Standard straight-alpha blending: out = src.rgb*src.a + dst.rgb*(1-src.a).
-    blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    // Straight-alpha blending by default: out = src.rgb*src.a + dst.rgb*(1-src.a) — the config's
+    // factors, which the transmissive mesh variants set to multiply or add instead.
+    blendAttachment.srcColorBlendFactor = config.srcColorBlendFactor;
+    blendAttachment.dstColorBlendFactor = config.dstColorBlendFactor;
     blendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
     blendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
     blendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;

@@ -28,12 +28,15 @@
 #include <QString>
 
 #include <memory>
+#include <string>
 
+class QImage;
 class QProgressDialog;
 
 namespace pose {
 
 class VulkanRenderer;
+struct DecodedImage;
 struct ModelData;
 
 /**
@@ -116,6 +119,29 @@ public:
                                 const char* kindPrefix, const QString& path,
                                 const QString& logSuffix = QString());
 };
+
+/// THE TEXTURE SLOTS' helpers (the Materials tab, vulkanwindow_materials.cpp — the same decodes
+/// and bakes the import runs, on one file): an image file decoded to RGBA8 (capped like an
+/// import's), a cutout mask file (its gray in every channel), the base colour with a mask baked
+/// into its alpha (a white canvas at the mask's size without a base colour; a copy of the base
+/// without a mask; null with neither), the roughness / metalness parameter map (null with
+/// neither), and a QImage mask as a DecodedImage. Null on a failed decode (logged).
+std::shared_ptr<DecodedImage> decodeTextureFile(const std::string& path);
+std::shared_ptr<DecodedImage> decodeMaskFile(const std::string& path);
+std::shared_ptr<DecodedImage> maskToDecoded(const QImage& mask);
+std::shared_ptr<DecodedImage> bakeCutoutIntoBaseColor(const std::shared_ptr<const DecodedImage>& base,
+                                                      const std::shared_ptr<const DecodedImage>& mask);
+/// The LAYER map (set 1 binding 8) from the four slots' plain images — the coat weight, the coat
+/// roughness, the sheen weight and the thin-film thickness, each one's red channel into R, G, B
+/// and A (255 where a map is absent); null without any of them.
+std::shared_ptr<DecodedImage> buildLayerMapImage(const std::shared_ptr<const DecodedImage>& coatWeight,
+                                                 const std::shared_ptr<const DecodedImage>& coatRoughness,
+                                                 const std::shared_ptr<const DecodedImage>& sheenWeight,
+                                                 const std::shared_ptr<const DecodedImage>& thinFilmThickness);
+std::shared_ptr<DecodedImage> buildParameterMapImage(const std::shared_ptr<const DecodedImage>& rough, int roughChannel,
+                                                     const std::shared_ptr<const DecodedImage>& metal, int metalChannel,
+                                                     const std::shared_ptr<const DecodedImage>& ambientOcclusion,
+                                                     const std::shared_ptr<const DecodedImage>& transmissionWeight);
 
 } // namespace pose
 

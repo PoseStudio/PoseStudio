@@ -1153,8 +1153,9 @@ private:
     LandingBounce                 m_landing;
     // --- SOFT BREASTS (armaturebreasts.cpp): the pectoral bones hung by gravity, by their size ---
     struct Breast {
-        int       bone = -1;
-        int       parent = -1;
+        int       bone = -1;         ///< The pectoral that carries the breast; -1 for a BONELESS breast (`field`).
+        int       field = -1;        ///< A boneless breast's delta field (0 left, 1 right: m_breastFields); -1 where a bone carries it.
+        int       parent = -1;       ///< The chest: the bone whose frame the mass moves in (the pectoral's parent, or the field's spine link).
         float     size = 0.0f;       ///< 0 (a flat chest: no swing) .. 1 (a full breast), off the skin's protrusion.
         glm::vec3 pivotBind{0.0f};   ///< The breast's base on the chest wall behind the nipple (model space at bind).
         glm::vec3 pivotTopBind{0.0f}; ///< Its upper attachment on the chest wall, kBreastLever over the nipple: the swing's pivot.
@@ -1164,7 +1165,7 @@ private:
         glm::vec3 disp{0.0f};        ///< The mass's displacement from the sculpt (m, chest frame: sideways, along the chest, out along the tether).
         glm::vec3 vel{0.0f};
     };
-    std::vector<Breast> m_breasts;                   ///< One per side (the pectoral that carries the breast), or none.
+    std::vector<Breast> m_breasts;                   ///< One per side (the pectoral that carries the breast, or a boneless breast's field), or none.
     bool                m_breastsReady = false;      ///< setupBreasts ran (with the rig and the body mesh).
     /// THE ACCELERATION READER the soft body's masses share (armaturebreasts.cpp, armaturebuttocks.cpp):
     /// a joint's velocity SMOOTHED before it is differenced and the acceleration smoothed after, so
@@ -1188,6 +1189,25 @@ private:
     void      kickBreasts(float impactSpeed);
     void      settleBreasts();
     bool      breastsMoving() const;
+    // --- THE BONELESS BREAST (armaturebreastfield.cpp): on a rig with no breast bone the breast is
+    //     the chest's own skin, and its mass moves it as a soft-body delta field the GPU blends ---
+    struct BreastField {
+        bool      valid = false;       ///< This side's breast is a field: its apex is carried by no pectoral bone, and it is full enough to move.
+        int       chest = -1;          ///< The spine link that owns the skin at the apex: the frame the mass moves in.
+        float     size = 0.0f;         ///< Its fullness, on Breast::size's scale (0 flat .. 1 the base female .. 3).
+        glm::vec3 apexBind{0.0f};      ///< The breast's furthest point forward at bind (model space): the field's centre.
+        float     wallZ = 0.0f;        ///< The ribs under the fold (bind z): the chest wall behind the breast.
+        float     radiusIn = 0.07f;    ///< The field's reach from the apex toward the sternum (m) ...
+        float     radiusOut = 0.08f;   ///< ... toward the armpit ...
+        float     radiusUp = 0.09f;    ///< ... up the chest ...
+        float     radiusDown = 0.05f;  ///< ... and down to the fold.
+    };
+    BreastField                m_breastFields[2];           ///< Left, right.
+    bool                       m_breastFieldsReady = false; ///< setupBreastFields ran (with the rig and the body mesh).
+    std::vector<unsigned char> m_breastFieldSkin;           ///< Per bone: 1 where its skin may carry a breast's field (the spine links and their riders, the collars, the neck).
+    void  setupBreastFields();
+    std::vector<glm::vec3> bindJointPositions() const; ///< Every bone's bind joint position (model space; binds are translation-only): what the soft body's readings of the body mesh are made against.
+    float breastFieldDisplacement(int side, int axis) const; ///< That side's field breast's displacement along a chest axis (m): the mass's, or its rest between ticks; 0 off or with no field.
     // --- SOFT BUTTOCKS (armaturebuttocks.cpp): the glutes' skin as a soft-body delta field the GPU blends ---
     struct Buttock {
         float     side = 1.0f;     ///< +1 the left cheek (outward is +x), -1 the right.
@@ -1229,17 +1249,32 @@ public:
     float breastSideMm(int side) const;
     /// How far that breast has moved along the chest (mm, + up toward the head): a bow's lift, a jolt's or a landing's bounce; below 0 only by the floor's give.
     float breastUpMm(int side) const;
-    // --- SOFT BUTTOCKS (armaturebuttocks.cpp) ---
+    // --- THE SOFT-BODY DELTA FIELDS (armaturebuttocks.cpp, armaturebreastfield.cpp) ---
     /// Sets up the soft-body delta fields the Model bakes into its vertex data at import (the
-    /// buttocks: the cheeks' apexes and the skin that may carry the field); needs the rig and the
-    /// body mesh. The fields exist whether or not the preference is on; the weights read 0 off.
+    /// buttocks: the cheeks' apexes and the skin that may carry the field; a boneless breast: its
+    /// apex, its reach and its size); needs the rig and the body mesh. The fields exist whether or
+    /// not the preference is on; the weights read 0 off.
     void  setupSoftBodyFields();
-    /// The soft-body delta field's weight at a render vertex (its bind position and the bone that
+    /// The buttocks' delta field's weight at a render vertex (its bind position and the bone that
     /// weighs most on it): 0 outside the glutes, 1 at a cheek's fullest point; @p side is the
     /// cheek (0 left, 1 right) or -1.
     float softBodyFieldWeight(const glm::vec3& bindPos, int dominantBone, int& side) const;
-    /// A soft-body corrective's weight the GPU blends (metres): index = cheek × 2 + axis (0
-    /// sideways, 1 along the trunk). 0 unless the buttocks are on and moving.
+    /// The boneless breasts' delta field at a render vertex: its weight for the left (@p out[0])
+    /// and the right (@p out[1]) breast — 1 over the breast's core, falling to 0 at the sternum, the
+    /// fold and the field's edge; both 0 on a figure whose breasts ride pectoral bones, or has none.
+    void  breastFieldWeights(const glm::vec3& bindPos, int dominantBone, float out[2]) const;
+    /// How many of the figure's breasts are boneless — delta fields — whether or not the soft body is on: 0, 1 or 2 (the scripts' `breastfields`).
+    int   breastFieldCount() const { return (m_breastFields[0].valid ? 1 : 0) + (m_breastFields[1].valid ? 1 : 0); }
+    /// How far the left (0) / right (1) boneless breast's field moves the skin at its apex (mm): what the GPU is given to blend. 0 with no field there, or off (the scripts' `breastfieldl` / `breastfieldr`).
+    float breastFieldMoveMm(int side) const;
+    /// THE SOFT-BODY CORRECTIVES' INDICES (SoftBodyField::softIndex → softBodyWeight): the buttocks'
+    /// four first — cheek × 2 + axis (0 sideways, 1 along the trunk) — then the boneless breasts' six,
+    /// kSoftBodyBreastBase + side × 3 + axis (0 sideways, 1 along the chest, 2 out along the tether).
+    static constexpr int kSoftBodyButtockFields = 4;
+    static constexpr int kSoftBodyBreastBase = kSoftBodyButtockFields;
+    static constexpr int kSoftBodyBreastFields = 6;
+    /// A soft-body corrective's weight the GPU blends (metres): the mass's displacement along the
+    /// field's axis. 0 unless that part of the soft body is on (the buttocks': and moving).
     float softBodyWeight(int index) const;
     /// How far the left (0) or right (1) cheek has moved (mm): the scripts' `buttl` / `buttr`.
     float buttockMoveMm(int side) const;

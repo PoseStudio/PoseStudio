@@ -88,6 +88,16 @@ The keys work on the number row and on the numeric keypad. With NumLock off, the
 | Click a dial | Type a value; `Enter` confirms, `Esc` cancels |
 | The small button beside a dial | Return that dial to 0, the rest pose |
 
+## Materials tab
+
+| Gesture | Action |
+| --- | --- |
+| Click a surface in the viewport | Select the object and the material zone under the cursor |
+| Drag across a value | Scrub it (every matching zone with it, while **Edit matching zones together** is on) |
+| Click a value | Type it; `Enter` confirms, `Esc` cancels |
+| Click the Base Color swatch | Open the colour picker; `Cancel` puts the colour back |
+| The small button beside a row | Return that value to what the file imported with |
+
 ## This manual
 
 | Key | Action |

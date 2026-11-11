@@ -5,6 +5,7 @@
  */
 
 #include "usdfigureimporter.h"
+#include "specgloss.h"
 
 #include <lightusd.hh>
 #include <tydra/render-data-converter.hh>
@@ -547,6 +548,7 @@ ModelData UsdFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                 if (info != nullptr) {
                     ++info->materials;
                 }
+                out.name = m.name; // the Materials tab's zone name
                 const auto textureOf = [&](int tid, int* channel) -> TextureSource {
                     if (tid < 0 || static_cast<std::size_t>(tid) >= scene.textures.size()) {
                         return TextureSource();
@@ -583,6 +585,41 @@ ModelData UsdFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                     out.lobe1Roughness = out.roughness;
                     out.lobe2Roughness = out.roughness;
                     out.metalness = std::max(0.0f, std::min(1.0f, s.metallic.value));
+                    if (s.metallic.is_texture()) {
+                        // The metalness MAP (the Materials tab, 2026-11-09): read into the parameter
+                        // image's green channel by the decode layer, whichever channel its output names.
+                        int channel = 0;
+                        out.metalnessMap = textureOf(s.metallic.texture_id, &channel);
+                        out.metalnessChannel = channel == 3 ? 0 : channel;
+                        if (!out.metalnessMap.empty()) {
+                            out.metalness = 1.0f; // (the map carries it)
+                        }
+                    }
+                    if (s.useSpecularWorkflow) {
+                        // THE ONE MATERIAL MODEL (specgloss.h): a preview surface in the SPECULAR
+                        // workflow gives its reflectance at normal incidence as a colour; the standard
+                        // solve turns it into a metalness (the scalars here, the maps per texel in
+                        // the decode layer).
+                        const glm::vec3 specular(s.specularColor.value[0], s.specularColor.value[1], s.specularColor.value[2]);
+                        const float     glossiness = 1.0f - std::max(0.0f, std::min(1.0f, s.roughness.value));
+                        const glm::vec3 diffuse = out.diffuse.empty() ? out.baseColor : glm::vec3(0.8f);
+                        const MetallicRoughness mr = convertSpecGloss(diffuse, specular, glossiness);
+                        out.convertSpecGloss = true;
+                        out.specularColorFactor = s.specularColor.is_texture() ? glm::vec3(1.0f) : specular;
+                        if (s.specularColor.is_texture()) {
+                            out.specularColorMap = textureOf(s.specularColor.texture_id, nullptr);
+                        }
+                        out.glossinessFactor = glossiness;
+                        if (out.diffuse.empty() && out.specularColorMap.empty()) {
+                            out.baseColor = mr.baseColor; // the scalar solve: no maps to bake
+                            out.metalness = mr.metalness;
+                        }
+                        out.specularWeight = 1.0f;
+                        out.specularWeightWithMap = 1.0f;
+                        if (info != nullptr) {
+                            info->notes.push_back("material '" + out.name + "' converted from the specular workflow to metallic / roughness");
+                        }
+                    }
                     if (s.normal.is_texture()) {
                         out.normal = textureOf(s.normal.texture_id, nullptr);
                         out.normalMode = out.normal.empty() ? 0 : 1;
@@ -599,6 +636,25 @@ ModelData UsdFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                             out.opacityMask = textureOf(tid, nullptr);
                         }
                         out.opacity = 1.0f;
+                    }
+                    // The canonical material's further channels a preview surface carries: the
+                    // emissive colour (and its map), the index of refraction, the clearcoat.
+                    {
+                        const glm::vec3 e(s.emissiveColor.value[0], s.emissiveColor.value[1], s.emissiveColor.value[2]);
+                        const float     peak = std::max(e.x, std::max(e.y, e.z));
+                        if (s.emissiveColor.is_texture()) {
+                            out.emissionMap = textureOf(s.emissiveColor.texture_id, nullptr);
+                            out.emissionColor = glm::vec3(1.0f);
+                            out.emission = out.emissionMap.empty() ? 0.0f : 1.0f;
+                        } else if (peak > 0.0f) {
+                            out.emissionColor = e / peak;
+                            out.emission = peak;
+                        }
+                    }
+                    out.ior = std::max(1.0f, std::min(3.0f, s.ior.value));
+                    if (s.clearcoat.value > 0.0f) {
+                        out.topCoatWeight = std::min(1.0f, s.clearcoat.value);
+                        out.topCoatRoughness = std::max(0.0f, std::min(1.0f, s.clearcoatRoughness.value));
                     }
                 } else if (m.openPBRShader.has_value()) {
                     const ty::OpenPBRSurfaceShader& s = *m.openPBRShader;

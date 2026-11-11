@@ -1,0 +1,26 @@
+# THE MTL PBR EXTENSION and the classic channels (2026-11-09):
+#   POSESTUDIO_TEST_FIGURE=<assets>/pbr_cube.obj tools/ikscripts/run.sh tools/ikscripts/materials/obj_cube.txt <out>
+# (the asset from tools/materials/make_test_assets.py). PbrGold: Pr 0.25 / Pm 1. ClassicPlastic:
+# Ks 0.5 grey (the specular weight: 100 = the standard dielectric) and Ns 250 (Blender's
+# convention: roughness 0.5). MappedMetal: Pm 1 with a map_Pm (half white, half black) and Pr 0.4.
+view front
+select 0
+expect selection == 0
+expect zones == 3
+zone PbrGold
+expect zonename.PbrGold == 1
+expect mat.metallic == 100
+expect mat.roughness == 25
+expect matmap.metalness == 0
+zone ClassicPlastic
+expect zonename.ClassicPlastic == 1
+expect mat.specular == 100
+expect mat.metallic == 0
+expect mat.roughness == 50
+zone MappedMetal
+expect zonename.MappedMetal == 1
+expect matmap.metalness == 1
+expect mat.metallic == 100
+expect mat.roughness == 40
+shot 01_obj
+uishot 01_obj

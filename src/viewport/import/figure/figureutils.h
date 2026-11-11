@@ -14,10 +14,13 @@
  *    "current wins" readers (channelScalar/channelDouble/channelBool/channelColor) for DIALED values
  *    — a material colour, a morph weight — and the "rest wins" reader (restVec3Channels) for BIND
  *    transforms, where a scene's current_value is the posed state and the bind must come from rest.
- *  - parseChannelRef() returns BOTH the raw and the percent-decoded id: the morph resolver compares
- *    raw-vs-raw (both sides come from the same encoded formula text), while the corrective gate
- *    path compares the decoded id against dialed morph ids (which arrive decoded). Each caller
- *    picks the field it always compared on, so consolidation changed no behaviour.
+ *  - parseChannelRef() returns BOTH the raw and the percent-decoded id, and AN ID IS COMPARED
+ *    DECODED: a reference writes it percent-encoded ("#Some%20Character%20Body"), the file that
+ *    defines it writes it plain ("id": "Some Character Body"). The morph resolver compared raw
+ *    with raw until 2026-11-10 — and looked a modifier up in its file by the raw spelling, so a
+ *    control whose id has a space in it was never found, its formulas never walked, and the
+ *    character it stands for imported as the base figure (a third of one library's morphs have
+ *    such ids). rawKey is for a caller that must hand the reference on as written.
  *
  * Pure std + GLM + nlohmann — no Qt, no Vulkan.
  */
@@ -30,7 +33,9 @@
 #include <nlohmann/json_fwd.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
+#include <vector>
 
 namespace pose {
 
@@ -86,13 +91,76 @@ std::size_t geometryVertexCount(const nlohmann::json& doc);
 std::string findGeometryUri(const nlohmann::json& root);
 
 /// The scene node findGeometryUri reads the geometry url from — the figure instance — or nullptr.
+/// A node whose geometry is a placeholder for whatever is selected when the file is loaded
+/// ("name://@selection…": the figure a wearable saved "to be added" lists before itself) is no
+/// figure of the file and is passed over.
 const nlohmann::json* findFigureNode(const nlohmann::json& root);
 
-/// The modifier_library entry whose "id" equals @p id, or nullptr.
+/// WHICH FIGURE of a scene something belongs to. A preset's scene can hold several figures — a
+/// character, her eyelashes, her hair, a ring, a second character — and it lists every one's
+/// modifiers and materials side by side. A modifier names its figure through `parent` (the
+/// figure's node, "#Figure", or its geometry instance, "#geometry"), a material through
+/// `geometry`. Read without that, a character took the dials of everything saved with her: the
+/// eyelashes' "EyeMoisture" material replaced her own eye's, a suit's "Lips" her lips, a second
+/// character's whole skin hers, and a morph dialed on a follower was baked into HER cage by vertex
+/// index (found 2026-11-10 on user-saved scene subsets, which is how most custom characters are
+/// distributed).
+struct FigureScope {
+    /// False for a scene with ONE figure: everything in it is that figure's, whatever it names.
+    bool                     scoped = false;
+    std::string              nodeId;      ///< The figure's scene node id.
+    std::string              assetId;     ///< Its asset url's fragment, decoded — what a formula's output names the figure by.
+    std::string              assetFile;   ///< Its asset url's file part as written ("/data/…/Figure.dsf"): where the figure's own files live.
+    std::vector<std::string> geometryIds; ///< Its geometry instances' ids.
+    /// The node ids and asset ids of the scene's OTHER figures (never one this figure shares).
+    std::vector<std::string> otherFigures;
+
+    /// True when @p reference — a modifier's `parent` or a material's `geometry`, written "#id"
+    /// percent-encoded — names this figure. An empty reference names nobody in particular and is
+    /// everyone's; so is every reference of a scene with one figure.
+    bool owns(const std::string& reference) const;
+
+    /// True when @p name — the "Name:" a channel reference is prefixed with, decoded — is one of
+    /// the scene's other figures: a control saved on a character can drive a morph of her clothes
+    /// ("Suit:/…/Suit.dsf#Expand?value"), which is the clothes' shape and none of hers.
+    bool namesAnotherFigure(const std::string& name) const;
+};
+
+/// The scope of @p figureNode within @p root's scene (the first figure when @p figureNode is
+/// null); an unscoped, empty scope for a document with no figure node (a bare base file).
+FigureScope figureScopeOf(const nlohmann::json& root, const nlohmann::json* figureNode = nullptr);
+
+/// True when @p root is a document the figure importer loads: a base figure file (it carries a
+/// geometry_library) or a preset whose scene names a figure's geometry (findFigureNode) — the
+/// test loadFigureFile makes before anything else. A pose, material or shape preset is neither.
+bool isFigureRoot(const nlohmann::json& root);
+
+/// What a figure file holds, as far as opening it goes.
+enum class FigureFileKind {
+    NotAFigure, ///< isFigureRoot is false: a pose, material or shape preset, or not a scene file
+    Character,  ///< a figure that stands on its own with a skeleton: a character preset, a base
+                ///< figure file
+    Prop,       ///< a figure that stands on its own with no skeleton to speak of (a wand, a chair)
+    Wearable,   ///< a figure fitted onto another one or attached to it (its figure node names a
+                ///< conform_target or a parent): clothing, hair, an accessory, a prop on a bone
+};
+
+/// isFigureRoot over a file's raw bytes (plain or gzip-compressed), for a caller that has not
+/// parsed it — the Asset Manager asking which file in a folder is THE character — and what kind
+/// of figure it is. A preset lists its figure's bones as scene nodes (each with a parent in the
+/// file); a figure with at least kCharacterMinBones of them is a character. A file that names no geometry at all skips the JSON parse (the
+/// textual prefilter), so a folder of pose or material presets costs its reads; anything
+/// unreadable is NotAFigure, never an exception.
+FigureFileKind figureFileKind(std::vector<std::uint8_t> bytes);
+
+/// The modifier_library entry whose "id" equals @p id, or nullptr. @p id is the id as the file
+/// writes it — a reference's DECODED key, never its percent-encoded spelling.
 const nlohmann::json* findModifierById(const nlohmann::json& doc, const std::string& id);
 
-/// The modifier carrying a morph: the entry whose "id" equals @p fragment AND has a "morph", else
-/// the first entry that has a "morph" at all, else nullptr (a formula-only driver document).
+/// The modifier whose morph a reference to @p fragment applies: the entry whose "id" equals
+/// @p fragment if it carries a "morph" — nullptr if that entry is a control with none — and, only
+/// when @p fragment is empty or names no entry of this file, the first entry that has a "morph" at
+/// all (nullptr for a formula-only driver document).
 const nlohmann::json* findMorphModifier(const nlohmann::json& doc, const std::string& fragment);
 
 // --- Channel readers ---------------------------------------------------------------------------

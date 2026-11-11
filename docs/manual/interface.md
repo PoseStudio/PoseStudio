@@ -1,6 +1,6 @@
 # The Interface
 
-PoseStudio has one main window: a menu bar, the 3D viewport with its floating control strip, and a side panel with four tabs. Everything else — Preferences, the manual, the import progress dialogs — opens on top of it.
+PoseStudio has one main window: a menu bar, the 3D viewport with its floating control strip, and a side panel with five tabs. Everything else — Preferences, the manual, the import progress dialogs — opens on top of it.
 
 ## The main window
 
@@ -53,10 +53,11 @@ While the mouse is turning a joint (`B`, `S` or `T` with a joint selected: see [
 
 ## The side panel
 
-The four tabs sit on the panel's left edge.
+The five tabs sit on the panel's left edge.
 
 - **Asset Manager** — a tree of your asset libraries, Favorites and Collections above a thumbnail grid, with a search field at the top. Double-clicking an asset imports it. See [The Asset Manager](asset-manager.md).
 - **Transform** — the selected joint's rotation as three dials: Bend, Side-Side and Twist. See [The Transform tab](posing.md#the-transform-tab).
+- **Materials** — the selected object's material zones as sliders: colour, roughness, metallic, specular, opacity, the skin layers. See [Materials](materials.md).
 - **Soft Body Physics** — the switches and dials for the breasts' and the buttocks' motion: on and off, their softness, the breasts' bounce. See [The Soft Body Physics tab](posing.md#the-soft-body-physics-tab).
 - **Environment** — the lighting controls: the HDRI picker, the backdrop, exposure and tone, image-based lighting, the key light, shadows, and skin and rim accents. See [Lighting and Environment](environment.md).
 

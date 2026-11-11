@@ -35,6 +35,7 @@ struct FigureMaterial {
     std::string roughnessMapPath;  ///< The active lobe's roughness map (× the scalar), or empty.
     std::string specMaskMapPath;   ///< The active lobe's weight/reflectivity mask map, or empty.
     std::string translucencyMapPath; ///< Translucency color/weight map (see materialparser.h), or empty.
+    std::string translucencyWeightMapPath; ///< The Translucency Weight map itself (stored-only), or empty.
     std::string detailNormalMapPath; ///< Tiled micro-detail (pore) normal map, or empty.
     float       roughness = 0.7f;  ///< Scalar roughness (× the roughness map when present).
     float       normalStrength = 1.0f; ///< Dialed "Normal Map" strength (scales the map's texels).
@@ -46,11 +47,57 @@ struct FigureMaterial {
     float       lobe2Roughness = 0.7f;
     float       lobeRatio      = 1.0f;
     float       topCoatWeight    = 0.0f; ///< Thin clear-coat layer (reflectivity folded in).
+    bool        topCoatEnabled   = true;
     float       topCoatRoughness = 0.65f;
     float       translucencyWeight = 0.5f; ///< Per-region subsurface/transmission strength.
     float       detailWeight = 0.0f; ///< Micro-detail normal strength (0 = none).
     float       detailTiles  = 0.0f; ///< Micro-detail UV tiling (repeats across the mesh's UVs).
+    float       detailTilesV = 0.0f; ///< … vertically (stored-only), its offsets, roughness multiplier and maps:
+    glm::vec2   detailOffset{0.0f};
+    float       detailRoughness = 1.0f;
+    std::string detailWeightMapPath, detailRoughnessMapPath;
+    std::string displacementMapPath; ///< Displacement (stored-only): the map, cm black-to-white, the zero level, the subdivision.
+    float       displacementStrength = 0.2f;
+    float       displacementMidLevel = 0.5f;
+    float       displacementSubdiv = 0.0f;
     float       opacity   = 1.0f;  ///< < 1 => transparent (eye moisture/cornea, later hair/lashes).
+    // THE CANONICAL MATERIAL's further channels (2026-11-09): see MaterialRefs (materialparser.h).
+    glm::vec3   emissionColor{1.0f};
+    float       emission = 0.0f;
+    std::string emissionMapPath;
+    float       ior = 1.5f;
+    float       transmission = 0.0f;
+    glm::vec3   transmissionColor{1.0f};
+    float       transmissionDepth = 0.0f;
+    bool        thinWalled = false;
+    glm::vec3   subsurfaceColor{1.0f};
+    glm::vec3   subsurfaceRadiusColor{1.0f}; ///< the scattering colour (SSS Color), distance (cm) and direction
+    float       subsurfaceRadius = 1.0f;
+    float       subsurfaceAnisotropy = 0.0f;
+    std::string transmissionColorMapPath; ///< the transmission tint's map (stored-only)
+    std::string transmissionWeightMapPath;
+    float       coatAnisotropy = 0.0f;
+    float       coatAnisotropyRotation = 0.0f;
+    std::string coatAnisotropyMapPath, coatAnisotropyRotationMapPath;
+    float       sheen = 0.0f;
+    glm::vec3   sheenColor{1.0f};
+    float       sheenRoughness = 0.5f;
+    std::string sheenWeightMapPath, sheenColorMapPath, sheenRoughnessMapPath;
+    float       thinFilm = 0.0f;
+    float       thinFilmThickness = 500.0f;
+    float       thinFilmIor = 1.4f;
+    std::string thinFilmThicknessMapPath;
+    float       anisotropy = 0.0f;
+    float       anisotropyRotation = 0.0f;
+    float       diffuseRoughness = 0.0f;
+    std::string diffuseRoughnessMapPath; ///< its grayscale map, or empty (stored-only)
+    glm::vec3   coatColor{1.0f};
+    float       coatIor = 1.5f;
+    std::string coatWeightMapPath, coatColorMapPath, coatRoughnessMapPath, coatReflectivityMapPath, coatBumpMapPath; ///< stored-only
+    float       coatBumpStrength = 1.0f;
+    std::string specularColorMapPath, anisotropyMapPath, anisotropyRotationMapPath, lobe2RoughnessMapPath, lobeRatioMapPath; ///< stored-only
+    glm::vec2   uvTiling{1.0f};
+    glm::vec2   uvOffset{0.0f};
 };
 
 /// One material zone of a figure (e.g. "Torso", "Face", "Irises"): a triangulated, UV'd, de-indexed
@@ -99,6 +146,21 @@ struct VertexSkin {
     glm::vec4  weights{0.0f};
 };
 
+/// What became of the dials a preset sets on its figure — the character's shape. Reported, never
+/// consumed: the import service logs it and tools/figurecheck prints it, so a character that
+/// comes out as the base figure says why (which of its morph files is missing) instead of
+/// leaving it to be guessed from the picture.
+struct ShapeReport {
+    struct Morph {
+        std::string id;           ///< The morph's id ("Some Character Head").
+        float       weight = 0.0f; ///< The weight it was applied at.
+        std::size_t deltas = 0;    ///< How many vertices it moves.
+    };
+    std::vector<Morph>       applied;         ///< The shape morphs baked into the cage, in bake order.
+    std::vector<std::string> missing;         ///< Dialed or driven morphs that could not be applied: "<id>: <why>".
+    int                      jointsMoved = 0; ///< Bones whose rest origin the morphs moved.
+};
+
 /// One imported figure: its per-zone meshes plus the skeleton, per-base-vertex skin weights, and
 /// pose correctives. `vertexSkins` is index-aligned with the geometry's base vertices; both it and
 /// `bones` are empty for an unrigged import. Character-identity morphs don't appear here — they
@@ -129,6 +191,8 @@ struct FigureData {
     /// the set their scene material names (see uvparser.h); 0 for a figure on one layout. Only
     /// reported (the import service logs it); a merged follower's count is not carried over.
     int                         zonesOnOwnUvSet = 0;
+    /// The dialed shape as it was applied (see ShapeReport); a merged follower's is not carried over.
+    ShapeReport                 shape;
 };
 
 } // namespace pose

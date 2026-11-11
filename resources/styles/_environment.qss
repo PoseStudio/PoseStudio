@@ -1,7 +1,8 @@
 /**
  * @file _environment.qss
- * @brief The properties tabs: Environment (src/properties/environmentpanel.* and hdriselector.*)
- *        and Transform (src/properties/transformpanel.*).
+ * @brief The properties tabs: Environment (src/properties/environmentpanel.* and hdriselector.*),
+ *        Transform (src/properties/transformpanel.*), Materials (materialpanel.*) and Soft Body
+ *        Physics (softbodypanel.*).
  *
  * Concatenated after global.qss (shell/apptheme.cpp), so these rules override the base.
  * Everything is scoped under #EnvironmentPanel / #TransformPanel / #SoftBodyPanel or the tabs' own object names so
@@ -15,6 +16,8 @@
 #EnvironmentContent,
 #TransformPanel,
 #TransformContent,
+#MaterialPanel,
+#MaterialContent,
 #SoftBodyPanel,
 #SoftBodyContent {
     background-color: #252627; /* same as the QTabWidget::pane the tab sits in */
@@ -22,6 +25,7 @@
 
 #EnvironmentPanel QScrollArea,
 #TransformPanel QScrollArea,
+#MaterialPanel QScrollArea,
 #SoftBodyPanel QScrollArea {
     background: transparent;
     border: none;
@@ -30,6 +34,7 @@
 /* Row labels: the global QLabel rule is white/18px — far too big here. Reset to the app's body size. */
 #EnvironmentPanel QLabel,
 #TransformPanel QLabel,
+#MaterialPanel QLabel,
 #SoftBodyPanel QLabel {
     color: #c7c8cb;
     font-size: 12px;
@@ -37,7 +42,47 @@
 }
 /* A row whose dial the selected joint does not have (or no joint selected): the label dims with it. */
 #TransformPanel QLabel:disabled { color: #6f7073; }
+#MaterialPanel QLabel:disabled { color: #6f7073; }
 #SoftBodyPanel QLabel:disabled { color: #6f7073; }
+
+/* The Materials tab's heading (the selected object's name) and its hint lines (the zone note, the
+ * maps list, the how-to while nothing is selected). The Base Color swatch's look is set in code:
+ * its background IS the colour (materialpanel.cpp). */
+#MaterialPanel #MaterialObjectName {
+    color: #e0e0e0;
+    font-size: 13px;
+    font-weight: bold;
+}
+#MaterialPanel #MaterialHint { color: #8b9096; }
+#MaterialPanel QCheckBox { color: #c7c8cb; font-size: 12px; }
+#MaterialPanel QCheckBox:disabled { color: #6f7073; }
+
+/* Collapsible sections (propertyrows::addCollapsibleGroup — the Materials tab's Base, Specular,
+ * Coat …): a header button with an arrow over a body, framed like #PropertyGroup. */
+#PropertyCollapsible {
+    border: 1px solid #3a3b3d;
+    border-radius: 5px;
+    background: transparent;
+}
+#PropertyCollapsibleHeader {
+    color: #cfcfd2;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 5px 8px;
+    border: none;
+    border-radius: 4px;
+    text-align: left;
+    background: transparent;
+}
+#PropertyCollapsibleHeader:hover { background-color: #2d2e31; }
+#PropertyCollapsibleHeader:checked { color: #e0e0e0; }
+#PropertyCollapsibleBody { background: transparent; }
+
+/* The Textures group's rows: the bound map's name (elided), and the three small buttons —
+ * choose a file, clear, back to the imported map. */
+
+/* The Materials tab's layer switches, at the right of a section header. */
+#MaterialPanel #PropertyLayerToggle { spacing: 0px; }
 
 /* The Transform tab's heading (the selected joint's name) and its hint line under the rows. */
 #TransformPanel #TransformJointName {

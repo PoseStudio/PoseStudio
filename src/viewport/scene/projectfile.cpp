@@ -178,6 +178,151 @@ bool readFigure(const json& j, ProjectFigure& fig) {
         }
     }
 
+    // The Materials tab's per-zone edits: each entry names its zone and carries the values that
+    // differ from the struct's defaults (an absent value keeps the default; a non-numeric or
+    // non-finite one rejects the file, as everywhere).
+    const auto materialsIt = j.find("materials");
+    if (materialsIt != j.end()) {
+        if (!materialsIt->is_array()) {
+            return false;
+        }
+        for (const json& entry : *materialsIt) {
+            if (!entry.is_object()) {
+                return false;
+            }
+            const auto zoneIt = entry.find("zone");
+            if (zoneIt == entry.end() || !zoneIt->is_string()) {
+                return false;
+            }
+            ProjectMaterial m;
+            m.zone = zoneIt->get<std::string>();
+            const auto number = [&entry](const char* key, float& out) -> bool {
+                const auto it = entry.find(key);
+                if (it == entry.end()) {
+                    return true; // absent: the default stands
+                }
+                if (!it->is_number()) {
+                    return false;
+                }
+                const double v = it->get<double>();
+                if (!std::isfinite(v)) {
+                    return false;
+                }
+                out = static_cast<float>(v);
+                return true;
+            };
+            const auto colorIt = entry.find("baseColor");
+            if (colorIt != entry.end() && !readVec3(*colorIt, m.params.baseColor)) {
+                return false;
+            }
+            if (!number("opacity", m.params.opacity) || !number("roughness", m.params.roughness) ||
+                !number("metalness", m.params.metalness) || !number("specular", m.params.specular) ||
+                !number("normalStrength", m.params.normalStrength) || !number("translucency", m.params.translucency) ||
+                !number("topCoat", m.params.topCoat) || !number("topCoatRoughness", m.params.topCoatRoughness) ||
+                !number("detailWeight", m.params.detailWeight) || !number("detailTiles", m.params.detailTiles) ||
+                !number("detailTilesV", m.params.detailTilesV) || !number("detailOffsetU", m.params.detailOffset.x) ||
+                !number("detailOffsetV", m.params.detailOffset.y) || !number("detailRoughness", m.params.detailRoughness) ||
+                !number("displacementStrength", m.params.displacementStrength) || !number("displacementMidLevel", m.params.displacementMidLevel) ||
+                !number("displacementSubdiv", m.params.displacementSubdiv) || !number("aoWeight", m.params.aoWeight) ||
+                !number("subsurfaceAnisotropy", m.params.subsurfaceAnisotropy) || !number("coatAnisotropy", m.params.coatAnisotropy) ||
+                !number("coatAnisotropyRotation", m.params.coatAnisotropyRotation) || !number("uvRotation", m.params.uvRotation) ||
+                !number("lobe1Roughness", m.params.lobe1Roughness) || !number("lobe2Roughness", m.params.lobe2Roughness) ||
+                !number("lobeRatio", m.params.lobeRatio)) {
+                return false;
+            }
+            // The canonical material's further channels (absent = the default, as above).
+            const auto flag = [&entry](const char* key, bool& out) -> bool {
+                const auto it = entry.find(key);
+                if (it == entry.end()) {
+                    return true;
+                }
+                if (!it->is_boolean()) {
+                    return false;
+                }
+                out = it->get<bool>();
+                return true;
+            };
+            const auto color = [&entry](const char* key, glm::vec3& out) -> bool {
+                const auto it = entry.find(key);
+                return it == entry.end() || readVec3(*it, out);
+            };
+            const auto pair2 = [&entry](const char* key, glm::vec2& out) -> bool {
+                const auto it = entry.find(key);
+                if (it == entry.end()) {
+                    return true;
+                }
+                if (!it->is_array() || it->size() != 2) {
+                    return false;
+                }
+                for (std::size_t k = 0; k < 2; ++k) {
+                    const json& v = (*it)[k];
+                    if (!v.is_number() || !std::isfinite(v.get<double>())) {
+                        return false;
+                    }
+                    out[static_cast<glm::length_t>(k)] = static_cast<float>(v.get<double>());
+                }
+                return true;
+            };
+            if (!number("ior", m.params.ior) || !number("anisotropy", m.params.anisotropy) ||
+                !number("anisotropyRotation", m.params.anisotropyRotation) || !number("diffuseRoughness", m.params.diffuseRoughness) ||
+                !number("transmission", m.params.transmission) || !number("transmissionDepth", m.params.transmissionDepth) ||
+                !number("dispersion", m.params.dispersion) || !number("subsurfaceRadius", m.params.subsurfaceRadius) ||
+                !number("sheen", m.params.sheen) || !number("sheenRoughness", m.params.sheenRoughness) ||
+                !number("coatIor", m.params.coatIor) || !number("coatBumpStrength", m.params.coatBumpStrength) ||
+                !number("thinFilm", m.params.thinFilm) ||
+                !number("thinFilmThickness", m.params.thinFilmThickness) || !number("thinFilmIor", m.params.thinFilmIor) ||
+                !number("emission", m.params.emission) || !number("bumpStrength", m.params.bumpStrength)) {
+                return false;
+            }
+            if (!color("specularColor", m.params.specularColor) || !color("transmissionColor", m.params.transmissionColor) ||
+                !color("subsurfaceColor", m.params.subsurfaceColor) || !color("subsurfaceRadiusColor", m.params.subsurfaceRadiusColor) ||
+                !color("sheenColor", m.params.sheenColor) ||
+                !color("coatColor", m.params.coatColor) || !color("emissionColor", m.params.emissionColor)) {
+                return false;
+            }
+            if (!flag("thinWalled", m.params.thinWalled) || !flag("doubleSided", m.params.doubleSided) || !pair2("uvTiling", m.params.uvTiling) ||
+                !pair2("uvOffset", m.params.uvOffset) ||
+                !flag("topCoatEnabled", m.params.topCoatEnabled) ||
+                !flag("sheenEnabled", m.params.sheenEnabled) ||
+                !flag("thinFilmEnabled", m.params.thinFilmEnabled) ||
+                !flag("transmissionEnabled", m.params.transmissionEnabled) ||
+                !flag("subsurfaceEnabled", m.params.subsurfaceEnabled) ||
+                !flag("emissionEnabled", m.params.emissionEnabled) ||
+                !flag("displacementEnabled", m.params.displacementEnabled) ||
+                !flag("detailEnabled", m.params.detailEnabled) ||
+                !flag("baseEnabled", m.params.baseEnabled) ||
+                !flag("specularEnabled", m.params.specularEnabled) ||
+                !flag("geometryEnabled", m.params.geometryEnabled) ||
+                !flag("tilingEnabled", m.params.tilingEnabled)) {
+                return false;
+            }
+            // The texture slots the tab changed: a slot this version does not know is left out
+            // (forward compatible, like an unknown field); a malformed entry rejects the file.
+            const auto texturesIt = entry.find("textures");
+            if (texturesIt != entry.end()) {
+                if (!texturesIt->is_array()) {
+                    return false;
+                }
+                for (const json& t : *texturesIt) {
+                    if (!t.is_object()) {
+                        return false;
+                    }
+                    const auto slotIt = t.find("slot");
+                    const auto sourceIt = t.find("source");
+                    if (slotIt == t.end() || !slotIt->is_string() || sourceIt == t.end() || !sourceIt->is_string()) {
+                        return false;
+                    }
+                    MaterialMap map = MaterialMap::BaseColor;
+                    if (!materialMapByName(slotIt->get<std::string>(), map)) {
+                        continue;
+                    }
+                    m.textures.push_back({slotIt->get<std::string>(), sourceIt->get<std::string>()});
+                }
+            }
+            fig.materials.push_back(std::move(m));
+        }
+    }
+
     const auto rootBoneIt = j.find("rootBone");
     if (rootBoneIt != j.end()) {
         if (!rootBoneIt->is_string()) {
@@ -294,6 +439,92 @@ bool writeProjectFile(const std::string& path, const ProjectDocument& doc) {
             {"rotation",    json::array({fig.rotation.x, fig.rotation.y, fig.rotation.z, fig.rotation.w})},
             {"scale",       json::array({fig.scale.x, fig.scale.y, fig.scale.z})},
         };
+        if (!fig.materials.empty()) {
+            json materials = json::array();
+            for (const ProjectMaterial& m : fig.materials) {
+                const MaterialParams& p = m.params;
+                const auto vec3 = [](const glm::vec3& v) { return json::array({v.x, v.y, v.z}); };
+                json mat = {
+                    {"zone", m.zone},
+                    {"baseColor", vec3(p.baseColor)},
+                    {"opacity", p.opacity},
+                    {"roughness", p.roughness},
+                    {"metalness", p.metalness},
+                    {"specular", p.specular},
+                    {"normalStrength", p.normalStrength},
+                    {"translucency", p.translucency},
+                    {"topCoat", p.topCoat},
+                    {"topCoatRoughness", p.topCoatRoughness},
+                    {"detailWeight", p.detailWeight},
+                    {"detailTiles", p.detailTiles},
+                    {"detailTilesV", p.detailTilesV},
+                    {"detailOffsetU", p.detailOffset.x},
+                    {"detailOffsetV", p.detailOffset.y},
+                    {"detailRoughness", p.detailRoughness},
+                    {"displacementStrength", p.displacementStrength},
+                    {"displacementMidLevel", p.displacementMidLevel},
+                    {"displacementSubdiv", p.displacementSubdiv},
+                    {"aoWeight", p.aoWeight},
+                    {"lobe1Roughness", p.lobe1Roughness},
+                    {"lobe2Roughness", p.lobe2Roughness},
+                    {"lobeRatio", p.lobeRatio},
+                    // The canonical material's further channels (2026-11-09).
+                    {"ior", p.ior},
+                    {"anisotropy", p.anisotropy},
+                    {"anisotropyRotation", p.anisotropyRotation},
+                    {"diffuseRoughness", p.diffuseRoughness},
+                    {"specularColor", vec3(p.specularColor)},
+                    {"transmission", p.transmission},
+                    {"transmissionColor", vec3(p.transmissionColor)},
+                    {"transmissionDepth", p.transmissionDepth},
+                    {"dispersion", p.dispersion},
+                    {"thinWalled", p.thinWalled},
+                    {"doubleSided", p.doubleSided},
+                    {"topCoatEnabled", p.topCoatEnabled},
+                    {"sheenEnabled", p.sheenEnabled},
+                    {"thinFilmEnabled", p.thinFilmEnabled},
+                    {"transmissionEnabled", p.transmissionEnabled},
+                    {"subsurfaceEnabled", p.subsurfaceEnabled},
+                    {"emissionEnabled", p.emissionEnabled},
+                    {"displacementEnabled", p.displacementEnabled},
+                    {"detailEnabled", p.detailEnabled},
+                    {"baseEnabled", p.baseEnabled},
+                    {"specularEnabled", p.specularEnabled},
+                    {"geometryEnabled", p.geometryEnabled},
+                    {"tilingEnabled", p.tilingEnabled},
+                    {"uvRotation", p.uvRotation},
+                    {"coatAnisotropy", p.coatAnisotropy},
+                    {"coatAnisotropyRotation", p.coatAnisotropyRotation},
+                    {"subsurfaceColor", vec3(p.subsurfaceColor)},
+                    {"subsurfaceRadius", p.subsurfaceRadius},
+                    {"subsurfaceRadiusColor", vec3(p.subsurfaceRadiusColor)},
+                    {"subsurfaceAnisotropy", p.subsurfaceAnisotropy},
+                    {"sheen", p.sheen},
+                    {"sheenColor", vec3(p.sheenColor)},
+                    {"sheenRoughness", p.sheenRoughness},
+                    {"coatColor", vec3(p.coatColor)},
+                    {"coatIor", p.coatIor},
+                    {"coatBumpStrength", p.coatBumpStrength},
+                    {"thinFilm", p.thinFilm},
+                    {"thinFilmThickness", p.thinFilmThickness},
+                    {"thinFilmIor", p.thinFilmIor},
+                    {"emissionColor", vec3(p.emissionColor)},
+                    {"emission", p.emission},
+                    {"bumpStrength", p.bumpStrength},
+                    {"uvTiling", json::array({p.uvTiling.x, p.uvTiling.y})},
+                    {"uvOffset", json::array({p.uvOffset.x, p.uvOffset.y})},
+                };
+                if (!m.textures.empty()) {
+                    json textures = json::array();
+                    for (const ProjectTexture& t : m.textures) {
+                        textures.push_back({{"slot", t.slot}, {"source", t.source}});
+                    }
+                    mat["textures"] = std::move(textures);
+                }
+                materials.push_back(std::move(mat));
+            }
+            entry["materials"] = std::move(materials);
+        }
         figures.push_back(std::move(entry));
     }
     root["figures"] = std::move(figures);

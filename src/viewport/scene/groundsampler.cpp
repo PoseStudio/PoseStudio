@@ -21,7 +21,7 @@ void GroundSampler::reserve(std::size_t vertexCount, std::size_t triangleCount) 
     m_triangles.reserve(triangleCount);
 }
 
-void GroundSampler::add(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, bool pickable) {
+void GroundSampler::add(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, bool pickable, int mesh) {
     const uint32_t base = static_cast<uint32_t>(m_samples.size());
     for (const Vertex& v : vertices) {
         m_samples.push_back({v.pos, v.joints, v.weights});
@@ -31,20 +31,20 @@ void GroundSampler::add(const std::vector<Vertex>& vertices, const std::vector<u
     }
     for (std::size_t i = 0; i + 2 < indices.size(); i += 3) {
         if (indices[i] < vertices.size() && indices[i + 1] < vertices.size() && indices[i + 2] < vertices.size()) {
-            m_triangles.push_back({base + indices[i], base + indices[i + 1], base + indices[i + 2]});
+            m_triangles.push_back({base + indices[i], base + indices[i + 1], base + indices[i + 2], mesh});
         }
     }
 }
 
 bool GroundSampler::pickSurface(const Armature& armature, const Ray& ray, float& tOut, glm::vec3& hitWorld,
-                                int& bone) const {
+                                int& bone, int* meshOut) const {
     static const bool kTrace = std::getenv("POSESTUDIO_PICK_TRACE") != nullptr;
     if (kTrace) {
         std::fprintf(stderr, "[pick] skeleton=%d samples=%zu triangles=%zu origin(%.3f %.3f %.3f) dir(%.3f %.3f %.3f)\n",
                      armature.hasSkeleton() ? 1 : 0, m_samples.size(), m_triangles.size(), ray.origin.x, ray.origin.y, ray.origin.z,
                      ray.direction.x, ray.direction.y, ray.direction.z);
     }
-    if (!armature.hasSkeleton() || m_samples.empty() || m_triangles.empty()) {
+    if (m_samples.empty() || m_triangles.empty()) {
         return false;
     }
     const float dirLen = glm::length(ray.direction);
@@ -54,7 +54,10 @@ bool GroundSampler::pickSurface(const Armature& armature, const Ray& ray, float&
     const glm::vec3 dir = ray.direction / dirLen;
     // The skin as it stands: every sample CPU-skinned with the current pose (as lowestY: linear
     // blending, which agrees with the GPU's dual quaternions to millimetres — a pick's tolerance).
-    const std::size_t boneCount = armature.boneCount();
+    // (A STATIC model — an OBJ, a prop — has no skeleton: its samples go through the transform
+    // alone, so a click can find its material zone as it finds a figure's.)
+    const bool        skinned = armature.hasSkeleton() && armature.boneCount() > 0;
+    const std::size_t boneCount = skinned ? armature.boneCount() : 0;
     std::vector<glm::mat4> skin(boneCount);
     for (std::size_t i = 0; i < boneCount; ++i) {
         skin[i] = armature.transform() * armature.poseGlobal(i) * armature.inverseBind(i);
@@ -66,7 +69,10 @@ bool GroundSampler::pickSurface(const Armature& armature, const Ray& ray, float&
         const GroundSample& s = m_samples[i];
         const glm::vec4 p(s.pos, 1.0f);
         glm::vec3 posed(0.0f);
-        for (int j = 0; j < 4; ++j) {
+        if (!skinned) {
+            posed = glm::vec3(armature.transform() * p);
+        }
+        for (int j = 0; j < 4 && skinned; ++j) {
             const float w = s.weights[j];
             if (w > 0.0f && s.joints[j] < skin.size()) {
                 posed += w * glm::vec3(skin[s.joints[j]] * p);
@@ -142,6 +148,9 @@ bool GroundSampler::pickSurface(const Armature& armature, const Ray& ray, float&
     }
     if (bestTri < 0) {
         return false;
+    }
+    if (meshOut != nullptr) {
+        *meshOut = m_triangles[static_cast<std::size_t>(bestTri)].mesh;
     }
     // The bone: the joint that weighs most on the skin at the hit — the corners' weights blended
     // by the hit's barycentric coordinates.

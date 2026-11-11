@@ -21,6 +21,7 @@
 #include "armature.h" // IkScope
 #include "jointtransform.h"
 #include "lineoverlay.h" // PointerLine (setVrPointerLines)
+#include "materialparams.h" // MaterialView / MaterialParams (the Materials tab)
 
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
@@ -43,6 +44,7 @@ class OutlinePass;
 class ScenePipelines;
 class ShadowPass;
 class VulkanContext;
+struct DecodedImage;
 struct ModelData;
 struct Ray;
 struct SplatData;
@@ -336,6 +338,40 @@ public:
     /// row); false for a figure or with nothing static selected.
     bool setFigureScalePct(float pct);
 
+    // --- THE MATERIALS TAB (materialparams.h; scenematerials.cpp): the selected object's zones ---
+    /// What the tab shows: the selected model's zones and the selected zone's values, as they
+    /// stand and as imported. Invalid without a selected model that has meshes.
+    MaterialView materialView() const;
+    /// Selects zone @p index of the selected model (the tab's picker). A click on a model's
+    /// surface selects the zone it lands on (selectZoneAt, and the joint pick). Out of range or
+    /// -1 = the first zone.
+    void setSelectedZone(int index);
+    int  selectedZone() const { return m_selectedZone; }
+    /// Casts @p ray against the SELECTED model's surface and selects the zone it hits (a plain
+    /// click on a model: the joint pick does the same for a figure's skin). False on a miss.
+    bool selectZoneAt(const Ray& ray);
+    /// Sets the selected zone's material — and, @p linked, every other zone of the model whose
+    /// IMPORTED material equals its (the tab's linked zones: a figure's skin zones together).
+    /// True if anything changed.
+    bool setSelectedZoneMaterial(const MaterialParams& params, bool linked);
+    /// Every zone material of model @p model in mesh order (an undo snapshot), and its
+    /// re-application. Empty / no-op for a bad index.
+    std::vector<MaterialParams> captureMaterials(int model) const;
+    void applyMaterials(int model, const std::vector<MaterialParams>& materials);
+    /// The selected zone's material back to its imported values — its linked zones' too,
+    /// @p linked — or, @p allZones, every zone of the selected model's. True if anything changed.
+    bool resetZoneMaterials(bool allZones, bool linked);
+    /// THE TEXTURE SLOTS (the tab's Textures group; the Qt layer decodes and derives, this applies):
+    /// the plain image mesh @p mesh of model @p model carries in slot @p map now or as @p imported
+    /// (null = none; @p channel its packed channel), and the replacement — @p plain + @p channel +
+    /// @p gpuImage (the derived upload, see Mesh::setSlotImage) with @p source recorded — after a
+    /// device wait (the mesh's descriptor set is rewritten). A slot is the zone's own: never
+    /// linked across zones. The selected zone's index is selectedZoneIndex() (-1 without one).
+    std::shared_ptr<const DecodedImage> meshSlotImage(int model, int mesh, MaterialMap map, bool imported, int* channel = nullptr) const;
+    bool setMeshTexture(int model, int mesh, MaterialMap map, const std::shared_ptr<const DecodedImage>& plain, int channel,
+                        const std::shared_ptr<const DecodedImage>& gpuImage, const std::string& source);
+    int  selectedZoneIndex() const;
+
     // --- Pose snapshot (for undo/redo) ---
     std::vector<std::pair<std::string, glm::vec3>> capturePose() const;
     void applyPose(const std::vector<std::pair<std::string, glm::vec3>>& pose);
@@ -380,6 +416,8 @@ private:
     int m_activeFigure = -1;
     bool m_pick2D = false; ///< See setPick2D(). ///< See activeFigureIndex(): the posing target among the figures.
     int m_selectedModel = -1; ///< See selectedModelIndex(): the outlined model (-1 = none).
+    int m_selectedZone = -1;  ///< See selectedZone(): the selected model's zone the Materials tab shows (-1 = the first).
+    int m_pickedZone = -1;    ///< The zone the last skin cast of pickBoneAt landed on (selectBoneAt reads it).
 
     int m_shadeMode = kDefaultShadeMode; // picker-table index (shademode.h)
     // The key light's world direction this frame (keyLightDirection), computed once by

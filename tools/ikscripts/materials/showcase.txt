@@ -1,0 +1,95 @@
+# THE VIEWPORT'S MATERIALS (2026-11-10): six spheres in a row, one PBR layer each — what the viewport
+# draws of the canonical material, looked at with each layer on and then switched off.
+#   POSESTUDIO_TEST_FIGURE=<assets>/showcase.gltf tools/ikscripts/run.sh tools/ikscripts/materials/showcase.txt <out>
+# (the asset from tools/materials/make_test_assets.py). Left to right: Glass (transmission, a green
+# volume tint over the backdrop and the floor), Velvet (a sheen), Brushed (an anisotropic metal),
+# Iridescent (a thin film over a metal), CarPaint (a clear coat over a red metallic), Chalk (an Oren-Nayar diffuse
+# roughness, set here — glTF has none). The numbers assert what the reader filled; the shots are what
+# to look at (SHEET_COLS=3).
+view home
+select 0
+expect selection == 0
+expect zones == 6
+zone Glass
+expect mat.transmission == 100
+expect mat.ior == 1.5
+zone Velvet
+expect mat.sheen == 90
+zone Brushed
+expect mat.anisotropy == 90
+expect mat.metallic == 100
+zone Iridescent
+expect mat.thinfilm == 100
+zone CarPaint
+expect mat.topcoat == 100
+zone Chalk
+material diffuserough 100
+expect mat.diffuserough == 100
+lookat 0 0.5 0 3.4
+wait 5
+shot 01_home_all_on
+view front
+lookat 0 0.5 0 3.4
+wait 5
+shot 02_front_all_on
+# Each sphere close up (the home view's angle).
+view home
+lookat -2.75 0.5 0 0.62
+wait 3
+shot 10_glass
+lookat -1.65 0.5 0 0.62
+wait 3
+shot 11_velvet
+lookat -0.55 0.5 0 0.62
+wait 3
+shot 12_brushed
+lookat 0.55 0.5 0 0.62
+wait 3
+shot 13_iridescent
+lookat 1.65 0.5 0 0.62
+wait 3
+shot 14_carpaint
+lookat 2.75 0.5 0 0.62
+wait 3
+shot 15_chalk
+view front
+lookat 0 0.5 0 3.4
+wait 3
+# Each layer switched off in turn: the sheet shows what every layer adds.
+zone Glass
+material transmissionenabled 0
+zone Velvet
+material sheenenabled 0
+zone Brushed
+material anisotropy 0
+zone Iridescent
+material thinfilmenabled 0
+zone CarPaint
+material topcoatenabled 0
+zone Chalk
+material diffuserough 0
+wait 3
+shot 03_front_all_off
+view home
+lookat 0 0.5 0 3.4
+wait 3
+shot 04_home_all_off
+# Back on, and the coat coloured, the grain turned, the glass a thin sheet.
+zone Glass
+material transmissionenabled 1
+material thinwalled 1
+zone Velvet
+material sheenenabled 1
+zone Brushed
+material anisotropy 90
+material anisotropyrotation 90
+zone Iridescent
+material thinfilmenabled 1
+material thinfilmthickness 300
+zone CarPaint
+material topcoatenabled 1
+material coatcolor 1.0 0.6 0.2
+zone Chalk
+material diffuserough 100
+wait 3
+shot 05_home_variants

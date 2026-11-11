@@ -95,13 +95,8 @@ void Armature::setupButtocks() {
     if (root < 0 || static_cast<std::size_t>(root) >= m_bones.size()) {
         return;
     }
-    // The bind joint positions (model space; binds are translation-only).
-    std::vector<glm::vec3> bind(m_bones.size(), glm::vec3(0.0f));
-    for (std::size_t i = 0; i < m_bones.size(); ++i) {
-        const Bone& b = m_bones[i];
-        bind[i] = (b.parent >= 0 ? bind[static_cast<std::size_t>(b.parent)] : glm::vec3(0.0f)) + glm::vec3(b.localBind[3]);
-    }
-    const glm::vec3 hips = bind[static_cast<std::size_t>(root)];
+    const std::vector<glm::vec3> bind = bindJointPositions(); // (model space; binds are translation-only)
+    const glm::vec3              hips = bind[static_cast<std::size_t>(root)];
     // THE SKIN THAT MAY CARRY THE FIELD: the hips' and the pelvis bone's (either cheek), each
     // side's thigh and its twist helpers (that side's cheek). 1 = either side, 2 = left, 3 = right.
     m_buttockAllowed.assign(m_bones.size(), 0);
@@ -165,8 +160,14 @@ void Armature::setupButtocks() {
 }
 
 void Armature::setupSoftBodyFields() {
-    if (!m_buttocksReady && !m_bodyMesh.empty() && ensureIkRig()) {
+    if ((m_buttocksReady && m_breastFieldsReady) || m_bodyMesh.empty() || !ensureIkRig()) {
+        return;
+    }
+    if (!m_buttocksReady) {
         setupButtocks();
+    }
+    if (!m_breastFieldsReady) {
+        setupBreastFields(); // (armaturebreastfield.cpp: a breast no pectoral bone carries)
     }
 }
 
@@ -201,6 +202,11 @@ float Armature::softBodyFieldWeight(const glm::vec3& bindPos, int dominantBone, 
 }
 
 float Armature::softBodyWeight(int index) const {
+    if (index >= kSoftBodyBreastBase) {
+        // A boneless breast's field (armaturebreastfield.cpp): side × 3 + the chest axis.
+        const int k = index - kSoftBodyBreastBase;
+        return k < kSoftBodyBreastFields ? breastFieldDisplacement(k / 3, k % 3) : 0.0f;
+    }
     if (!softbody::buttockMotion() || !m_buttocksReady || !m_buttockDynamic || index < 0) {
         return 0.0f;
     }

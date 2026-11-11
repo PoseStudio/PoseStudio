@@ -4,6 +4,7 @@
  */
 
 #include "fbxfigureimporter.h"
+#include "specgloss.h"
 
 #include <ufbx.h>
 
@@ -465,6 +466,7 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                 if (info != nullptr) {
                     ++info->materials;
                 }
+                out.name = toStd(mat->name); // the Materials tab's zone name
                 const ufbx_material_map& base = mat->pbr.base_color.has_value || mat->pbr.base_color.texture ? mat->pbr.base_color : mat->fbx.diffuse_color;
                 if (base.has_value) {
                     out.baseColor = glm::vec3(srgbToLinear(static_cast<float>(base.value_vec4.x)), srgbToLinear(static_cast<float>(base.value_vec4.y)),
@@ -495,9 +497,64 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                 out.lobe2Roughness = out.roughness;
                 if (mat->pbr.roughness.texture != nullptr) {
                     out.roughnessMap = resolveTexture(textures, mat->pbr.roughness.texture, info);
+                    if (!out.roughnessMap.empty() && !mat->pbr.roughness.has_value) {
+                        out.roughness = 1.0f; // (the map carries it; the value is the factor where there is one)
+                    }
                 }
                 if (mat->pbr.metalness.has_value) {
                     out.metalness = std::max(0.0f, std::min(1.0f, static_cast<float>(mat->pbr.metalness.value_real)));
+                }
+                if (mat->pbr.metalness.texture != nullptr) {
+                    // The metalness MAP (the Materials tab, 2026-11-09): read into the parameter
+                    // image's green channel by the decode layer; the value is its factor.
+                    out.metalnessMap = resolveTexture(textures, mat->pbr.metalness.texture, info);
+                    if (!out.metalnessMap.empty() && !mat->pbr.metalness.has_value) {
+                        out.metalness = 1.0f;
+                    }
+                }
+                // THE ONE MATERIAL MODEL (specgloss.h): a SPECULAR / GLOSSINESS material — 3ds Max's
+                // PBR spec/gloss shader, whose specular colour IS a reflectance — is converted by the
+                // standard solve (the scalars here, the maps per texel in the decode layer); a PHONG
+                // or Lambert material's specular colour is a highlight, not a reflectance, and gives
+                // only the specular WEIGHT by its grey (Blender's and Maya's default 0.5 = the
+                // standard dielectric; black = matte). A material with a metalness of its own is
+                // left as it is.
+                if (mat->shader_type == UFBX_SHADER_3DS_MAX_PBR_SPEC_GLOSS && !mat->pbr.metalness.has_value &&
+                    mat->pbr.metalness.texture == nullptr) {
+                    const ufbx_material_map& spec = mat->pbr.specular_color;
+                    const glm::vec3 specColor = spec.has_value ? glm::vec3(srgbToLinear(static_cast<float>(spec.value_vec4.x)),
+                                                                           srgbToLinear(static_cast<float>(spec.value_vec4.y)),
+                                                                           srgbToLinear(static_cast<float>(spec.value_vec4.z)))
+                                                               : glm::vec3(0.04f);
+                    const float specFactor = mat->pbr.specular_factor.has_value ? static_cast<float>(mat->pbr.specular_factor.value_real) : 1.0f;
+                    const glm::vec3 diffuse = base.has_value ? out.baseColor : glm::vec3(0.8f);
+                    const MetallicRoughness mr = convertSpecGloss(out.diffuse.empty() ? diffuse : glm::vec3(0.8f), specColor * specFactor,
+                                                                  1.0f - out.roughness);
+                    out.convertSpecGloss = true;
+                    out.specularColorFactor = specColor * specFactor;
+                    out.specularColorMap = resolveTexture(textures, spec.texture, info);
+                    out.glossinessFactor = 1.0f - out.roughness;
+                    if (out.diffuse.empty() && out.specularColorMap.empty()) {
+                        out.baseColor = mr.baseColor; // the scalar solve: no maps to bake
+                        out.metalness = mr.metalness;
+                    }
+                    out.specularWeight = 1.0f; // (the solve's dielectric is the standard one)
+                    out.specularWeightWithMap = 1.0f;
+                    if (info != nullptr) {
+                        info->notes.push_back("material '" + out.name + "' converted from specular / glossiness to metallic / roughness");
+                    }
+                } else if (!mat->pbr.metalness.has_value && mat->pbr.metalness.texture == nullptr &&
+                           (mat->shader_type == UFBX_SHADER_FBX_PHONG || mat->shader_type == UFBX_SHADER_BLENDER_PHONG ||
+                            mat->shader_type == UFBX_SHADER_FBX_LAMBERT || mat->shader_type == UFBX_SHADER_UNKNOWN) &&
+                           mat->fbx.specular_color.has_value) {
+                    const ufbx_vec4& ks = mat->fbx.specular_color.value_vec4;
+                    const float     factor = mat->fbx.specular_factor.has_value ? static_cast<float>(mat->fbx.specular_factor.value_real) : 1.0f;
+                    const float weight = phongSpecularWeight(glm::vec3(static_cast<float>(ks.x), static_cast<float>(ks.y), static_cast<float>(ks.z)), factor);
+                    out.specularWeight = weight;
+                    out.specularWeightWithMap = weight;
+                    if (mat->fbx.specular_color.texture != nullptr) {
+                        out.specMask = resolveTexture(textures, mat->fbx.specular_color.texture, info); // the highlight's map as the mask
+                    }
                 }
                 float opacity = 1.0f;
                 if (mat->pbr.opacity.has_value) {
@@ -511,6 +568,112 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                 } else if (mat->fbx.transparency_color.texture != nullptr) {
                     out.opacityMask = resolveTexture(textures, mat->fbx.transparency_color.texture, info);
                 }
+                // THE CANONICAL MATERIAL's further channels, from ufbx's unified PBR view (every
+                // vendor shader it knows maps onto it; a channel the file does not author keeps the
+                // neutral default). A classic Phong / Lambert material's specular colour is its
+                // highlight, read above as the weight — never a tint here.
+                const auto pbrReal = [](const ufbx_material_map& m, float& value, float lo, float hi) {
+                    if (m.has_value) {
+                        value = std::max(lo, std::min(hi, static_cast<float>(m.value_real)));
+                    }
+                };
+                const auto pbrColor = [](const ufbx_material_map& m, glm::vec3& value) {
+                    if (m.has_value) {
+                        value = glm::vec3(static_cast<float>(m.value_vec3.x), static_cast<float>(m.value_vec3.y), static_cast<float>(m.value_vec3.z));
+                    }
+                };
+                {
+                    glm::vec3  e(1.0f);
+                    float      factor = 0.0f;
+                    const bool hasColor = mat->pbr.emission_color.has_value || mat->pbr.emission_color.texture != nullptr;
+                    pbrColor(mat->pbr.emission_color, e);
+                    if (mat->pbr.emission_factor.has_value) {
+                        factor = std::max(0.0f, static_cast<float>(mat->pbr.emission_factor.value_real));
+                    } else if (hasColor) {
+                        factor = 1.0f;
+                    }
+                    const float peak = std::max(e.x, std::max(e.y, e.z));
+                    if (factor > 0.0f && peak > 0.0f) {
+                        out.emissionColor = e / peak;
+                        out.emission = factor * peak;
+                        if (mat->pbr.emission_color.texture != nullptr) {
+                            out.emissionMap = resolveTexture(textures, mat->pbr.emission_color.texture, info);
+                        }
+                    }
+                }
+                const bool pbrShader = mat->shader_type != UFBX_SHADER_UNKNOWN && mat->shader_type != UFBX_SHADER_FBX_LAMBERT &&
+                                       mat->shader_type != UFBX_SHADER_FBX_PHONG && mat->shader_type != UFBX_SHADER_3DS_MAX_PBR_SPEC_GLOSS;
+                pbrReal(mat->pbr.specular_ior, out.ior, 1.0f, 3.0f);
+                if (pbrShader) {
+                    pbrColor(mat->pbr.specular_color, out.specularColor);
+                }
+                pbrReal(mat->pbr.specular_anisotropy, out.anisotropy, 0.0f, 1.0f);
+                if (mat->pbr.specular_rotation.has_value) {
+                    out.anisotropyRotation = static_cast<float>(mat->pbr.specular_rotation.value_real) * 360.0f; // (turns)
+                }
+                pbrReal(mat->pbr.diffuse_roughness, out.diffuseRoughness, 0.0f, 1.0f);
+                if (mat->pbr.diffuse_roughness.texture != nullptr) {
+                    out.diffuseRoughnessMap = resolveTexture(textures, mat->pbr.diffuse_roughness.texture, info);
+                    if (!out.diffuseRoughnessMap.empty() && !mat->pbr.diffuse_roughness.has_value) {
+                        out.diffuseRoughness = 1.0f; // (the map carries it)
+                    }
+                }
+                pbrReal(mat->pbr.transmission_factor, out.transmission, 0.0f, 1.0f);
+                pbrColor(mat->pbr.transmission_color, out.transmissionColor);
+                pbrReal(mat->pbr.transmission_depth, out.transmissionDepth, 0.0f, 1e6f);
+                pbrReal(mat->pbr.transmission_dispersion, out.dispersion, 0.0f, 1.0f);
+                pbrColor(mat->pbr.subsurface_color, out.subsurfaceColor);
+                pbrColor(mat->pbr.subsurface_radius, out.subsurfaceRadiusColor);
+                pbrReal(mat->pbr.subsurface_scale, out.subsurfaceRadius, 0.0f, 100.0f);
+                pbrReal(mat->pbr.subsurface_anisotropy, out.subsurfaceAnisotropy, -1.0f, 1.0f);
+                if (mat->pbr.subsurface_factor.texture != nullptr) {
+                    out.translucencyWeightMap = resolveTexture(textures, mat->pbr.subsurface_factor.texture, info);
+                }
+                pbrReal(mat->pbr.sheen_factor, out.sheen, 0.0f, 1.0f);
+                pbrColor(mat->pbr.sheen_color, out.sheenColor);
+                pbrReal(mat->pbr.sheen_roughness, out.sheenRoughness, 0.0f, 1.0f);
+                pbrReal(mat->pbr.coat_factor, out.topCoatWeight, 0.0f, 1.0f);
+                pbrReal(mat->pbr.coat_roughness, out.topCoatRoughness, 0.0f, 1.0f);
+                pbrColor(mat->pbr.coat_color, out.coatColor);
+                pbrReal(mat->pbr.coat_ior, out.coatIor, 1.0f, 3.0f);
+                const auto pbrMap = [&](const ufbx_material_map& m, TextureSource& slot) {
+                    if (m.texture != nullptr) {
+                        slot = resolveTexture(textures, m.texture, info);
+                    }
+                };
+                pbrMap(mat->pbr.coat_factor, out.coatWeightMap);
+                pbrMap(mat->pbr.coat_color, out.coatColorMap);
+                pbrMap(mat->pbr.coat_roughness, out.coatRoughnessMap);
+                pbrMap(mat->pbr.coat_ior, out.coatReflectivityMap);
+                pbrMap(mat->pbr.coat_normal, out.coatBumpMap);
+                pbrMap(mat->pbr.specular_color, out.specularColorSlotMap);
+                pbrMap(mat->pbr.specular_anisotropy, out.anisotropyMap);
+                pbrMap(mat->pbr.specular_rotation, out.anisotropyRotationMap);
+                pbrMap(mat->pbr.ambient_occlusion, out.aoMap);
+                pbrMap(mat->pbr.transmission_color, out.transmissionColorMap);
+                pbrMap(mat->pbr.transmission_factor, out.transmissionWeightMap);
+                pbrReal(mat->pbr.coat_anisotropy, out.coatAnisotropy, 0.0f, 1.0f);
+                pbrReal(mat->pbr.coat_rotation, out.coatAnisotropyRotation, 0.0f, 360.0f);
+                pbrMap(mat->pbr.coat_anisotropy, out.coatAnisotropyMap);
+                pbrMap(mat->pbr.coat_rotation, out.coatAnisotropyRotationMap);
+                pbrMap(mat->pbr.sheen_factor, out.sheenWeightMap);
+                pbrMap(mat->pbr.sheen_color, out.sheenColorMap);
+                pbrMap(mat->pbr.sheen_roughness, out.sheenRoughnessMap);
+                pbrMap(mat->pbr.thin_film_factor, out.thinFilmWeightMap);
+                pbrMap(mat->pbr.thin_film_thickness, out.thinFilmThicknessMap);
+                // Displacement: the unified map, else the classic one, its factor as the strength.
+                if (mat->pbr.displacement_map.texture != nullptr) {
+                    out.displacementMap = resolveTexture(textures, mat->pbr.displacement_map.texture, info);
+                } else if (mat->fbx.displacement.texture != nullptr) {
+                    out.displacementMap = resolveTexture(textures, mat->fbx.displacement.texture, info);
+                }
+                if (!out.displacementMap.empty() && mat->fbx.displacement_factor.has_value) {
+                    out.displacementStrength = std::clamp(static_cast<float>(mat->fbx.displacement_factor.value_real), -100.0f, 100.0f);
+                }
+                pbrReal(mat->pbr.thin_film_factor, out.thinFilm, 0.0f, 1.0f);
+                pbrReal(mat->pbr.thin_film_thickness, out.thinFilmThickness, 0.0f, 2000.0f);
+                pbrReal(mat->pbr.thin_film_ior, out.thinFilmIor, 1.0f, 3.0f);
+                out.thinWalled = mat->features.thin_walled.enabled;
             }
             model.meshes.push_back(std::move(out));
         }

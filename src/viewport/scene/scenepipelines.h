@@ -2,7 +2,7 @@
  * @file scenepipelines.h
  * @brief The scene's shared GPU plumbing: the four descriptor set layouts, the per-frame camera
  *        UBO sets, the scene-wide IBL/shadow set, the 1x1 fallback textures, and the main-pass
- *        mesh pipelines (opaque, transparent, wire, hidden-line fill, backdrop).
+ *        mesh pipelines (opaque, transparent, the transmission pair, wire, hidden-line fill, backdrop).
  *
  * Everything here is created once when the Scene is built and shared by every model and pass:
  * the layouts define the descriptor contract of the mesh shaders (set 0 = camera, 1 = material
@@ -83,6 +83,10 @@ public:
     // the backdrop) ---
     const VulkanPipeline& opaque() const { return *m_opaque; }          // depth write on
     const VulkanPipeline& transparent() const { return *m_transparent; } // alpha-blended, depth write off
+    // TRANSMISSION (2026-11-10): a transmissive zone is drawn twice in the transparent pass —
+    // the frame behind it MULTIPLIED by what it lets through, then its own light ADDED.
+    const VulkanPipeline& transmitMultiply() const { return *m_transmitMultiply; }
+    const VulkanPipeline& transmitAdd() const { return *m_transmitAdd; }
     const VulkanPipeline* wire() const { return m_wire.get(); }          // triangle EDGES; null: device can't
     const VulkanPipeline& hiddenLine() const { return *m_hiddenLine; }   // depth-only surface fill
     const VulkanPipeline& background() const { return *m_background; }   // HDRI backdrop (PBR mode)
@@ -125,6 +129,8 @@ private:
 
     std::unique_ptr<VulkanPipeline> m_opaque;
     std::unique_ptr<VulkanPipeline> m_transparent;
+    std::unique_ptr<VulkanPipeline> m_transmitMultiply;
+    std::unique_ptr<VulkanPipeline> m_transmitAdd;
     std::unique_ptr<VulkanPipeline> m_wire;
     std::unique_ptr<VulkanPipeline> m_hiddenLine;
     std::unique_ptr<VulkanPipeline> m_splat;

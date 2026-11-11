@@ -25,7 +25,7 @@ namespace pose {
 namespace {
 
 constexpr VkFormat kSpecFormat = VK_FORMAT_R16G16B16A16_SFLOAT; // linear-filterable HDR (widely supported)
-constexpr VkFormat kLutFormat  = VK_FORMAT_R16G16_SFLOAT;
+constexpr VkFormat kLutFormat  = VK_FORMAT_R16G16B16A16_SFLOAT; // GGX scale + bias, the sheen albedo
 
 // Packs an RGBA float texel into two 16F-pair uints (RG, BA) — the RGBA16F memory layout.
 void packRgba16f(const glm::vec4& c, uint32_t& lo, uint32_t& hi) {
@@ -69,11 +69,14 @@ IblMaps::IblMaps(VulkanContext& context, const PrefilteredSpecular& specular, co
         }
     }
 
-    // --- Pack the LUT (RG16F: one uint per texel).
+    // --- Pack the LUT (RGBA16F: two uints per texel).
     std::vector<uint32_t> lutStaging;
-    lutStaging.reserve(lut.data.size());
-    for (const glm::vec2& t : lut.data) {
-        lutStaging.push_back(glm::packHalf2x16(t));
+    lutStaging.reserve(lut.data.size() * 2);
+    for (const glm::vec4& t : lut.data) {
+        uint32_t lo, hi;
+        packRgba16f(t, lo, hi);
+        lutStaging.push_back(lo);
+        lutStaging.push_back(hi);
     }
     const uint32_t lutSize = static_cast<uint32_t>(std::max(1, lut.size));
 

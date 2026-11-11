@@ -193,6 +193,7 @@ void Scene::setSelectedModel(int index) {
         m_models[static_cast<std::size_t>(previous)]->setSelectedBone(-1);
     }
     m_selectedModel = index;
+    m_selectedZone = -1; // another object: the Materials tab shows its first zone until a click or a pick
     if (index >= 0 && m_models[static_cast<std::size_t>(index)]->hasSkeleton()) {
         m_activeFigure = index; // the selected figure is the posing target
     }
@@ -244,6 +245,7 @@ void Scene::removeModel(std::size_t index) {
         }
         if (m_selectedModel == static_cast<int>(index)) {
             m_selectedModel = -1;
+            m_selectedZone = -1;
         } else if (m_selectedModel > static_cast<int>(index)) {
             --m_selectedModel;
         }
@@ -252,6 +254,7 @@ void Scene::removeModel(std::size_t index) {
 
 void Scene::clearModels() {
     m_models.clear();     // destructors free buffers/descriptors, as the last removeModel would
+    m_selectedZone = -1;
     m_selectedModel = -1; // the selection with them — DIRECTLY: setSelectedModel(-1) reads the
                           // selection through the bounds check, which an empty list already fails,
                           // and returned early with the old index kept; the next model imported
@@ -364,14 +367,35 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
                           return a.distSq > b.distSq; // farthest first
                       });
             const VulkanPipeline& transparent = m_pipelines->transparent();
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, transparent.handle());
-            const VkPipelineLayout layout = transparent.layout();
+            const VulkanPipeline& transmitMultiply = m_pipelines->transmitMultiply();
+            const VulkanPipeline& transmitAdd = m_pipelines->transmitAdd();
+            const VkPipelineLayout layout = transparent.layout(); // (every mesh variant shares it)
+            VkPipeline boundPipeline = VK_NULL_HANDLE;
+            const auto bindPipeline = [&](const VulkanPipeline& pipeline) {
+                if (pipeline.handle() != boundPipeline) {
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
+                    boundPipeline = pipeline.handle();
+                }
+            };
             Model* bound = nullptr; // whose pose set (2) is currently bound
             for (const TransparentDraw& draw : m_transparentScratch) {
                 if (draw.model != bound) {
                     draw.model->bindPose(cmd, layout, 2, frameIndex);
                     bound = draw.model;
                 }
+                if (draw.mesh->isTransmissive()) {
+                    // TRANSMISSION: two draws — the frame behind the zone multiplied by what it
+                    // lets through (a per-channel tint), then its own reflection and what is
+                    // left of its diffuse added (ScenePipelines::transmitMultiply / transmitAdd).
+                    bindPipeline(transmitMultiply);
+                    draw.mesh->record(cmd, layout, draw.model->transform(), MeshDrawKind::TransmitMultiply,
+                                      draw.model->highlightBone(), draw.model->selectedHighlightTwin());
+                    bindPipeline(transmitAdd);
+                    draw.mesh->record(cmd, layout, draw.model->transform(), MeshDrawKind::TransmitAdd,
+                                      draw.model->highlightBone(), draw.model->selectedHighlightTwin());
+                    continue;
+                }
+                bindPipeline(transparent);
                 draw.mesh->record(cmd, layout, draw.model->transform(), MeshDrawKind::Transparent,
                                   draw.model->highlightBone(), draw.model->selectedHighlightTwin());
             }
@@ -493,16 +517,19 @@ bool Scene::pickBoneAt(float px, float py, float vpW, float vpH, const Camera& c
     const bool kPick2D = kPick2DEnv || m_pick2D;
     {
         float hitT = std::numeric_limits<float>::max();
+        m_pickedZone = -1;
         for (std::size_t m = 0; m < m_models.size() && !kPick2D; ++m) {
             const Model* fig = m_models[m].get();
             float     t = 0.0f;
             glm::vec3 point(0.0f);
             int       bone = -1;
-            if (fig->hasSkeleton() && fig->pickSurface(ray, t, point, bone) && t < hitT) {
+            int       zone = -1;
+            if (fig->hasSkeleton() && fig->pickSurface(ray, t, point, bone, &zone) && t < hitT) {
                 hitT = t;
                 pickedModel = static_cast<int>(m);
                 pickedBone = bone;
                 grab = point;
+                m_pickedZone = zone; // (the material zone under the click, for the Materials tab)
             }
         }
     }
@@ -666,6 +693,9 @@ int Scene::selectBoneAt(float px, float py, float vpW, float vpH, const Camera& 
     Model& figure = *m_models[static_cast<std::size_t>(pickedModel)];
     figure.setSelectedBone(pickedBone); // (a bone of the face rig selects the HEAD: Armature::posingBone)
     figure.setIkGrabPoint(pickedBone, grab);
+    if (m_pickedZone >= 0) {
+        m_selectedZone = m_pickedZone; // the zone the click landed on: what the Materials tab shows
+    }
     return figure.selectedBone();
 }
 

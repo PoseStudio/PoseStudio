@@ -40,6 +40,7 @@ namespace pose {
 
 class VulkanContext;
 class VulkanTexture;
+struct DecodedImage;
 struct ModelData;
 struct Ray;
 class SplatCloud;
@@ -111,8 +112,40 @@ public:
                           uint32_t frameIndex);
 
     /// The meshes that must be drawn in the alpha-blended pass (Mesh::isTransparent), partitioned
-    /// once at construction.
+    /// at construction and again when a material edit changes a mesh's transparency.
     const std::vector<const Mesh*>& transparentMeshes() const { return m_transparentMeshes; }
+
+    // --- THE MATERIALS TAB (2026-11-09): the zones' editable materials (materialparams.h) ---
+    std::size_t meshCount() const { return m_meshes.size(); }
+    const Mesh& mesh(std::size_t i) const { return m_meshes[i]; }
+    /// The key a project's material override addresses mesh @p i by: its zone name, or "#i" for
+    /// an unnamed zone (an MTL without names).
+    std::string zoneKey(std::size_t i) const;
+    /// Replaces mesh @p i's material values (Mesh::setMaterial), re-partitioning the meshes if its
+    /// transparency changed. True if anything changed; bumps materialRevision().
+    bool setMeshMaterial(std::size_t i, const MaterialParams& params);
+    /// Every mesh's material values in mesh order (an undo snapshot), and their re-application.
+    std::vector<MaterialParams> captureMaterials() const;
+    void applyMaterials(const std::vector<MaterialParams>& materials);
+    /// One zone's departure from the import (the .pss document's `materials` block): its key, its
+    /// values, and the texture slots whose source differs from the import's — (slot name, source;
+    /// "" = cleared). materialOverrides() lists every zone that differs; applyMaterialOverride is
+    /// the VALUES' inverse — every zone with key @p zone takes @p params (true if one did); the
+    /// slots come back through the window's applySlotSource.
+    struct MaterialOverride {
+        std::string                                      zone;
+        MaterialParams                                   params;
+        std::vector<std::pair<std::string, std::string>> textures;
+    };
+    std::vector<MaterialOverride> materialOverrides() const;
+    bool applyMaterialOverride(const std::string& zone, const MaterialParams& params);
+    /// THE TEXTURE SLOTS: replaces slot @p map of mesh @p i (Mesh::setSlotImage — the caller has
+    /// derived @p gpuImage and waited for the device), re-partitioning the meshes if the cutout
+    /// changed the mesh's transparency; bumps materialRevision(). False for a bad index.
+    bool setMeshTexture(std::size_t i, MaterialMap map, const std::shared_ptr<const DecodedImage>& plain, int channel,
+                        const std::shared_ptr<const DecodedImage>& gpuImage, const std::string& source);
+    /// Bumped by every material change — the cheap "has anything changed" the frame notify reads.
+    std::uint64_t materialRevision() const { return m_materialRevision; }
 
     /// The world-space point a transparent @p mesh (one of this model's) sorts by: its bind
     /// centroid carried by its weight-dominant joint's CURRENT skin transform, through the model
@@ -262,8 +295,10 @@ public:
     bool intersectRay(const Ray& ray, float& tOut) const;
     /// The FIRST point of the CURRENT pose's SKIN along @p ray (world) and the joint that weighs
     /// most on the skin there — what a click is ON (GroundSampler::pickSurface; the opaque meshes
-    /// only). False for a static model or a ray that misses.
-    bool pickSurface(const Ray& ray, float& tOut, glm::vec3& hitWorld, int& bone) const;
+    /// only) — and, in @p mesh when given, the mesh (material zone) the hit is on. A STATIC model's
+    /// surface is cast through its transform (its samples are kept up to a triangle cap). False
+    /// for a ray that misses or a model without samples.
+    bool pickSurface(const Ray& ray, float& tOut, glm::vec3& hitWorld, int& bone, int* mesh = nullptr) const;
 
     /// The world height of the CURRENT pose's lowest point (GroundSampler::lowestY): positive =
     /// hovering that far above the floor, negative = sunk into it. False when there is no
@@ -281,6 +316,10 @@ private:
     /// Which of the model's meshes a record path draws.
     enum class MeshFilter { Opaque, All, NotMasked };
 
+    /// Rebuilds m_opaqueMeshes / m_transparentMeshes from Mesh::isTransparent (at construction,
+    /// and after a material edit moved a mesh across).
+    void repartitionMeshes();
+
     /// The shaded record paths (recordOpaque / recordWire / recordDepthFill): binds the pose set
     /// at index 2 and draws the filtered meshes as @p kind through Mesh::record.
     void recordShaded(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t frameIndex,
@@ -295,6 +334,9 @@ private:
     /// hasn't seen the current Armature::skinVersion yet, and likewise the pose-corrective
     /// weights (CorrectiveSet::uploadIfDirty).
     void uploadJointsIfDirty(uint32_t frameIndex);
+    /// Copies every mesh's packed material (Mesh::gpu) into frame slot @p frameIndex's material
+    /// buffer if that slot hasn't seen the current materialRevision() yet (set 2 binding 3).
+    void uploadMaterialsIfDirty(uint32_t frameIndex);
 
     // Declared before the meshes and pose sets whose descriptors it owns, so it is destroyed
     // after them; RAII so a throwing constructor step (a mesh upload, a descriptor allocation)
@@ -313,6 +355,7 @@ private:
     Armature                 m_armature;
 
     std::string              m_sourcePath; // the import source file (the .pss document's reference)
+    std::uint64_t            m_materialRevision = 0; // see materialRevision()
     std::unique_ptr<SplatCloud> m_splats;    // a Gaussian splat scene's cloud (splatcloud.h); null for a mesh model
 
     // Skinning upload: the armature's dual quaternions (see Armature::skinDualQuats) reach the
@@ -325,6 +368,10 @@ private:
     std::array<VulkanBuffer, kMaxFramesInFlight>    m_jointBuffers;
     std::array<VkDescriptorSet, kMaxFramesInFlight> m_jointSets{}; // set 2; from m_descriptorPool
     std::array<std::uint64_t, kMaxFramesInFlight>   m_jointUploaded{}; // last skin version per slot
+    // THE MATERIAL BUFFER: every mesh's MaterialGpu per frame slot (binding 3 of the pose set),
+    // rewritten when a slot is behind m_materialRevision (uploadMaterialsIfDirty).
+    std::array<VulkanBuffer, kMaxFramesInFlight>    m_materialBuffers;
+    std::array<std::uint64_t, kMaxFramesInFlight>   m_materialUploaded{}; // materialRevision + 1 last written per slot
     // The joint buffer's SECOND HALF: per joint, whether its flesh is lit WITH the selection
     // (Armature::highlightedWithSelection — the face rig under a selected head, the group's
     // members), as the .x of one more entry per joint; written per slot when the selection
