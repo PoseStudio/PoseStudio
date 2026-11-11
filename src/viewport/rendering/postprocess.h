@@ -34,6 +34,26 @@ namespace pose {
 class VulkanContext;
 class VulkanPipeline;
 
+/// The composite's optional inputs (VR Mode — see VulkanRenderer::drawVrFrame): draw from the
+/// MIRROR source (setMirrorSource) instead of this chain's own targets, through a crop of its
+/// UV space (scale + offset — the desktop viewport shows a VR eye cropped to its own aspect),
+/// and encode sRGB in the shader when the target format cannot (a UNORM headset swapchain).
+/// Namespace scope because GCC refuses a nested struct with default member initializers as a
+/// `= {}` default argument of its own class's member (the enclosing class is incomplete
+/// there; MSVC accepts it); the class re-exports the name as PostProcess::CompositeOptions.
+struct PostProcessCompositeOptions {
+    bool  fromMirror = false;
+    float uvScale[2] = {1.0f, 1.0f};
+    float uvOffset[2] = {0.0f, 0.0f};
+    bool  encodeSrgb = false;
+    /// The share of the photo layer's UV space its current scale draws into
+    /// (HdrTarget::photoUvScale): the layer is sampled at uv × this.
+    float photoUvScale[2] = {1.0f, 1.0f};
+    /// The outline mask holds a splat scene's accumulated opacity (Scene::selectedIsSplat):
+    /// the outline follows its 50% contour rather than reading it as coverage.
+    bool  outlineFromSplats = false;
+};
+
 class PostProcess {
 public:
     /// @param swapchainRenderPass The pass the composite draws through (the swapchain's
@@ -82,22 +102,8 @@ public:
     /// resolution. Call between the HDR scene pass and the swapchain pass, PBR mode only.
     void recordBloom(VkCommandBuffer cmd);
 
-    /// The composite's optional inputs (VR Mode — see VulkanRenderer::drawVrFrame): draw from the
-    /// MIRROR source (setMirrorSource) instead of this chain's own targets, through a crop of its
-    /// UV space (scale + offset — the desktop viewport shows a VR eye cropped to its own aspect),
-    /// and encode sRGB in the shader when the target format cannot (a UNORM headset swapchain).
-    struct CompositeOptions {
-        bool  fromMirror = false;
-        float uvScale[2] = {1.0f, 1.0f};
-        float uvOffset[2] = {0.0f, 0.0f};
-        bool  encodeSrgb = false;
-        /// The share of the photo layer's UV space its current scale draws into
-        /// (HdrTarget::photoUvScale): the layer is sampled at uv × this.
-        float photoUvScale[2] = {1.0f, 1.0f};
-        /// The outline mask holds a splat scene's accumulated opacity (Scene::selectedIsSplat):
-        /// the outline follows its 50% contour rather than reading it as coverage.
-        bool  outlineFromSplats = false;
-    };
+    /// The composite's optional inputs: see PostProcessCompositeOptions above.
+    using CompositeOptions = PostProcessCompositeOptions;
 
     /// Records the fullscreen composite draw. The caller has begun the swapchain render pass and
     /// set the full-extent viewport/scissor. @p tonemap applies ACES (PBR + dial on); @p bloom
