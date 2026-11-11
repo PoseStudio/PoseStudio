@@ -21,6 +21,7 @@
 #define POSTPROCESS_H
 
 #include "attachmentimage.h"
+#include "selectionstyle.h" // the outline's default color (kSelectionAccentLinear)
 #include "vulkanhandles.h"
 
 #include <vulkan/vulkan.h>
@@ -33,15 +34,6 @@ namespace pose {
 class VulkanContext;
 class VulkanPipeline;
 
-/// The viewport's selection accent: the app's QSS accent blue #5b87cc (hover borders, the
-/// DragNumberBox glyphs), sRGB-decoded to LINEAR — the swapchain's sRGB store re-encodes it
-/// exactly. The one colour for everything the engine draws as "selected": the selection outline
-/// (pushed to composite.frag by PostProcess) and the selected-part highlight in mesh.frag, whose
-/// copy lives in shaders/include/colour.glsl (kSelectionAccent) — change both together. The
-/// darker selection FILL blue (#314D7A) is deliberately not used: against the viewport grey it
-/// doesn't read as a line.
-inline constexpr float kSelectionAccentLinear[3] = {0.1046f, 0.2423f, 0.6038f};
-
 class PostProcess {
 public:
     /// @param swapchainRenderPass The pass the composite draws through (the swapchain's
@@ -51,7 +43,7 @@ public:
     ///                            SSS V-pass, which adds it back after diffusing (the blur must
     ///                            never smear glints; smeared specular reads as wet skin).
     /// @param hdrPhotoResolve     The HDR target's resolved PHOTO LAYER — the Gaussian splats,
-    ///                            premultiplied colour + coverage in the trainers' own colour
+    ///                            premultiplied color + coverage in the trainers' own color
     ///                            space, which the composite lays over the tonemapped scene.
     /// @param outlineMask         The selection-outline coverage mask (OutlineMask) the composite
     ///                            dilates into the outline (re-fed on resize).
@@ -75,6 +67,11 @@ public:
                 const VkDescriptorImageInfo& hdrSpecResolve,
                 const VkDescriptorImageInfo& hdrPhotoResolve,
                 const VkDescriptorImageInfo& outlineMask);
+
+    /// The selection outline's color (LINEAR rgb) and opacity (0 = no outline, 1 = the color
+    /// itself over the frame): Preferences → Selection, through VulkanRenderer::setSelectionStyle.
+    /// Read at the next composite; nothing is rebuilt.
+    void setOutlineStyle(const glm::vec3& colorLinear, float opacity);
 
     /// Records the screen-space subsurface scattering blur: two full-res masked passes, HDR
     /// resolve -> scratch -> back into the HDR resolve (so everything downstream — bloom, the
@@ -184,11 +181,12 @@ private:
     VkRenderPass              m_depthResolvePass = VK_NULL_HANDLE; // borrowed (the session's)
     uint32_t                  m_depthSamples = 1;
 
-    // Selection-outline colour (linear rgb), pushed to the composite: the app's accent blue
-    // (kSelectionAccentLinear) — the composite paints it after tonemapping and the sRGB
-    // swapchain re-encodes it exactly.
+    // Selection-outline color (linear rgb) and opacity, pushed to the composite: the app's
+    // accent blue (kSelectionAccentLinear) in full until setOutlineStyle says otherwise — the
+    // composite paints it after tonemapping and the sRGB swapchain re-encodes it exactly.
     float m_outlineColor[3] = {kSelectionAccentLinear[0], kSelectionAccentLinear[1],
                                kSelectionAccentLinear[2]};
+    float m_outlineOpacity = 1.0f;
 
     std::unique_ptr<VulkanPipeline> m_brightPipeline; // bloom pass
     std::unique_ptr<VulkanPipeline> m_blurPipeline;   // bloom pass (direction via push constant)

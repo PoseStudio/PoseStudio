@@ -25,7 +25,7 @@ namespace pose {
 namespace {
 
 /// A fresh mesh-pass PipelineConfig: the shared state every variant starts from (push block,
-/// depth test + write, opaque, both HDR colour attachments declared, the mesh vertex layout, the
+/// depth test + write, opaque, both HDR color attachments declared, the mesh vertex layout, the
 /// four set layouts). Each variant then sets only its own deltas, so no state leaks from one
 /// variant's configuration into the next.
 PipelineConfig meshBaseConfig(const std::vector<VkDescriptorSetLayout>& layouts,
@@ -37,7 +37,7 @@ PipelineConfig meshBaseConfig(const std::vector<VkDescriptorSetLayout>& layouts,
     config.depthTestEnable = true;
     config.depthWriteEnable = true;
     config.blendEnable = false;
-    // The HDR pass has a second colour attachment: the SPECULAR target the SSS blur must not
+    // The HDR pass has a second color attachment: the SPECULAR target the SSS blur must not
     // smear. Only the opaque pipeline writes it (mesh.frag routes the PBR specular there); every
     // other variant masks it off.
     config.colorAttachmentCount = 2;
@@ -68,7 +68,7 @@ ScenePipelines::ScenePipelines(VulkanContext& context, VkRenderPass renderPass, 
                                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)});
     // Set 1: the mesh's texture maps (mesh.h's MaterialBinding: diffuse, detail normal/bump, the
     // parameter map, spec mask, translucency, pore normal, a bump beside a normal, emission, the
-    // layer map, the sheen colour).
+    // layer map, the sheen color).
     m_materialSetLayout = createDescriptorSetLayout(
         m_device, uniformBindings(kMaterialBindingCount, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                   VK_SHADER_STAGE_FRAGMENT_BIT));
@@ -176,9 +176,9 @@ ScenePipelines::ScenePipelines(VulkanContext& context, VkRenderPass renderPass, 
         m_wire = std::make_unique<VulkanPipeline>(context, renderPass, vertSpirv, fragSpirv, config);
     }
 
-    // Hidden-line surface fill: depth test + write with EVERY colour write masked, so the
+    // Hidden-line surface fill: depth test + write with EVERY color write masked, so the
     // surface occludes the grid and the wires behind it while the framebuffer keeps the viewport's
-    // clear colour — the classic hidden-line drawing once the wire pass draws over it.
+    // clear color — the classic hidden-line drawing once the wire pass draws over it.
     {
         PipelineConfig config = meshBaseConfig(layouts, binding, attrs);
         config.colorWriteRgb = false;
@@ -205,14 +205,14 @@ ScenePipelines::ScenePipelines(VulkanContext& context, VkRenderPass renderPass, 
     // vertex buffer; gl_InstanceIndex is the sorted slot), blended far-first into the PHOTO PASS
     // (hdrtarget.h: the layer, single-sample, over the resolved scene depth) — depth-tested
     // against the opaque geometry, never written (a translucent cloud must not occlude) — IN THE
-    // TRAINERS' OWN COLOUR SPACE: a splat's colour as the file has it, display-referred,
+    // TRAINERS' OWN COLOR SPACE: a splat's color as the file has it, display-referred,
     // accumulated premultiplied with its coverage (the standard "over" blend), which the
     // composite lays over the tonemapped scene. The first cut blended the splats into the HDR
-    // colour itself through the inverse tonemap, and the convex inverse weighed every bright
+    // color itself through the inverse tonemap, and the convex inverse weighed every bright
     // splat more than it was trained to: skin read as speckled, oily and sparkling, a sunlit
     // scene blew out; the second drew the layer as a third attachment of the scene pass, at its
     // MSAA, and four blends a pixel of every quad were the whole of a frame's GPU time (nothing
-    // of the splats touches the HDR colour, the SSS mask or the specular either way; a figure
+    // of the splats touches the HDR color, the SSS mask or the specular either way; a figure
     // standing inside a capture is shaded as ever and covered by the composite). Its own two-set
     // layout: 0 = camera UBO, 1 = the cloud's buffers; the push block is splat.vert's.
     {

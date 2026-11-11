@@ -5,7 +5,7 @@
  * Deliberately tiny: just the things every rendering file needs (error checking,
  * a human-readable VkResult string, the global frames-in-flight constant). Keep
  * heavyweight helpers in their own translation units so this stays cheap to include.
- * (Theme colours don't belong here either — the selection accent lives with the outline
+ * (Theme colors don't belong here either — the selection accent lives with the outline
  * code in postprocess.h.)
  *
  * NOTE: This subsystem links the Vulkan loader directly (CMake's Vulkan::Vulkan),

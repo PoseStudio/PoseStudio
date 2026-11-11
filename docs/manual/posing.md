@@ -156,13 +156,13 @@ Every dial reads on the same scale, whatever the joint:
 - **100** is fully bent: the joint's limit in that direction.
 - **Negative values** bend it the other way, in the same proportion, and stop where the joint's other limit is. A knee that folds a long way and straightens only a little past straight reads from about -7 to 100; a joint that turns equally far both ways reads from -100 to 100.
 
-The dials are scrub fields like the ones on the Environment tab: drag left or right across one to change it, or click it once to type a number (`Enter` confirms, `Esc` cancels). The bar fills from the rest pose toward the value, to the right for a positive value and to the left for a negative one. The small button beside a dial returns that one dial to 0, and **Reset All** returns all three.
+The dials are scrub fields like the ones on the Environment tab: drag left or right across one to change it, or click it once to type a number (`Enter` confirms, `Esc` cancels). A plain drag moves in **whole numbers**; hold **Shift** while you drag for fine control in **tenths** — 17.1, 17.2, 17.3 — at a tenth of the speed. You can press or let go of Shift in the middle of a drag. A dial shows a tenth only when the value has one: 17, or 17.3. The bar fills from the rest pose toward the value, to the right for a positive value and to the left for a negative one. The small button beside a dial returns that one dial to 0, and **Reset All** returns all three.
 
 - The figure moves as you scrub. A dial turns the one joint and nothing else follows: no balance, no planted feet. Press the [Ground button](#the-ground-button) afterwards if the feet left the floor.
 - A dial stops at the joint's limits, and at the body: a rotation that would push a limb into the torso or another limb stops there, and the dial shows where it stopped.
 - A dial the joint does not have is greyed out. An elbow and the end joints of the fingers only fold, so their Side-Side is disabled.
 - On a left and a right joint the same value gives the mirrored pose: 50 on both thighs' Side-Side moves both legs outward.
-- The dials follow the figure. Drag a joint in the viewport, turn it with `B` / `S` / `T`, undo, or load a pose, and they show the selected joint's new rotation.
+- The dials follow the figure. Drag a joint in the viewport, turn it with `B` / `S` / `T`, undo, or load a pose, and they show the selected joint's new rotation — to the tenth, since a joint posed that way rarely lands on a whole number. A plain drag of the dial takes it back onto whole numbers.
 - Each scrub, each typed value and each reset is one undo step.
 
 ### Turning several joints at once

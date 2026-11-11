@@ -1,4 +1,4 @@
-// colour.glsl — the tonemapping curve and the viewport's selection accent colour.
+// color.glsl — the tonemapping curve and the viewport's selection accent color.
 //
 // Included by mesh.frag (the matcap mode tonemaps inline; the selection highlight) and
 // composite.frag (the PBR chain's final ACES step). The stylized modes author display-ready
@@ -13,8 +13,3 @@ vec3 tonemapACES(vec3 x) {
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
-// The viewport's selection accent: the app's QSS accent blue #5b87cc, sRGB-decoded to LINEAR (the
-// swapchain's sRGB store re-encodes it exactly). The same value as kSelectionAccentLinear in
-// rendering/postprocess.h, which pushes it to the composite for the selection outline — change
-// both together.
-const vec3 kSelectionAccent = vec3(0.1046, 0.2423, 0.6038);

@@ -1,0 +1,171 @@
+# PREFERENCES -> SELECTION (2026-11-11): the color and the opacity of the two marks the viewport
+# puts on what is selected — the OUTLINE around the selected object and the HIGHLIGHT on the part
+# a selected joint moves — each set apart from the other.
+#
+# `outlinestyle <rrggbb> <opacity%>` / `jointstyle <rrggbb> <opacity%>` hand a color and an
+# opacity to the viewport as the Preferences page does (nothing is stored); `selstyle.outline.<r|g|
+# b|opacity>` / `selstyle.joint.<...>` read what the viewport holds (display bytes, percent).
+# `prefs <tab>` opens the Preferences dialog on a tab, `ui ...` drives its widgets, `uishot` saves
+# it as ui/<name>_dialog.png, `ui click preferences.close` closes it.
+#
+# A scripted run is ISOLATED from the stored preferences (PreferencesManager::isolatedRun): it
+# starts from the defaults and writes nothing, so this script leaves the user's own colors alone.
+
+view front
+click chest_2
+# The defaults: the accent blue #5b87cc for both, the outline in full, the highlight at 75 %.
+expect selstyle.outline.r == 91
+expect selstyle.outline.g == 135
+expect selstyle.outline.b == 204
+expect selstyle.outline.opacity == 100
+expect selstyle.joint.r == 91
+expect selstyle.joint.g == 135
+expect selstyle.joint.b == 204
+expect selstyle.joint.opacity == 75
+shot 00_defaults
+
+# THE OUTLINE alone: orange in full, at 30 %, and off — the highlight stays the default blue.
+outlinestyle ff8000 100
+expect selstyle.outline.r == 255
+expect selstyle.outline.g == 128
+expect selstyle.outline.b == 0
+expect selstyle.joint.b == 204
+shot 01_outline_orange
+outlinestyle ff8000 30
+expect selstyle.outline.opacity == 30
+shot 02_outline_orange_30
+outlinestyle ff8000 0
+expect selstyle.outline.opacity == 0
+shot 03_outline_off
+
+# THE JOINT HIGHLIGHT alone (the outline back at its default): green at 75 %, in full, and off.
+outlinestyle 5b87cc 100
+jointstyle 20c040 75
+expect selstyle.joint.r == 32
+expect selstyle.joint.g == 192
+expect selstyle.joint.b == 64
+expect selstyle.outline.b == 204
+shot 04_joint_green
+jointstyle 20c040 100
+expect selstyle.joint.opacity == 100
+shot 05_joint_green_full
+jointstyle 20c040 0
+expect selstyle.joint.opacity == 0
+shot 06_joint_off
+# What a color does to the tint: red, yellow, white (a brightened, greyed part) and black (the one
+# kind of color that darkens it).
+jointstyle e02020 75
+shot 07_joint_red
+jointstyle f0d020 75
+shot 08_joint_yellow
+jointstyle ffffff 75
+shot 09_joint_white
+jointstyle 000000 75
+shot 10_joint_black
+
+# Both changed at once, then back: the defaults again are the first picture again.
+outlinestyle ff8000 100
+jointstyle f0d020 60
+shot 11_both
+outlinestyle 5b87cc 100
+jointstyle 5b87cc 75
+expect selstyle.outline.r == 91
+expect selstyle.joint.opacity == 75
+shot 12_defaults_again
+
+# THE PAGE: Preferences -> Selection, driven through its own widgets. It opens on the defaults.
+prefs Selection
+wait 10
+expect uicount.selection.outline.opacity == 1
+expect uicount.selection.joint.opacity == 1
+expect uivalue.selection.outline.opacity.0 == 100
+expect uivalue.selection.joint.opacity.0 == 75
+uishot 20_page_defaults
+# The outline's Opacity field and its color reach the viewport at once — and not the highlight.
+ui set selection.outline.opacity 0 40
+expect selstyle.outline.opacity == 40
+expect selstyle.joint.opacity == 75
+ui call selection.panel 0 setOutlineRgb 16744448
+expect selstyle.outline.r == 255
+expect selstyle.outline.g == 128
+expect selstyle.outline.b == 0
+expect selstyle.joint.r == 91
+# The highlight's own rows — and not the outline.
+ui set selection.joint.opacity 0 100
+ui call selection.panel 0 setJointRgb 2146368
+expect selstyle.joint.opacity == 100
+expect selstyle.joint.r == 32
+expect selstyle.joint.g == 192
+expect selstyle.joint.b == 64
+expect selstyle.outline.opacity == 40
+expect selstyle.outline.r == 255
+wait 2
+shot 21_from_the_page
+uishot 21_page_changed
+# Each row's restore button returns that row alone.
+ui click selection.outline.restore.opacity 0
+expect selstyle.outline.opacity == 100
+expect uivalue.selection.outline.opacity.0 == 100
+expect selstyle.outline.r == 255
+ui click selection.outline.restore.color 0
+expect selstyle.outline.r == 91
+expect selstyle.outline.g == 135
+expect selstyle.outline.b == 204
+expect selstyle.joint.r == 32
+ui click selection.joint.restore.color 0
+expect selstyle.joint.r == 91
+expect selstyle.joint.opacity == 100
+ui click selection.joint.restore.opacity 0
+expect selstyle.joint.opacity == 75
+expect uivalue.selection.joint.opacity.0 == 75
+# Each mark's SWITCH: off, the viewport draws it at 0 — and the page keeps its color and opacity;
+# back on, they are what they were. One switch does not touch the other mark.
+ui set selection.outline.opacity 0 80
+ui check selection.outline.enabled 0 0
+expect selstyle.outline.opacity == 0
+expect uivalue.selection.outline.opacity.0 == 80
+expect selstyle.joint.opacity == 75
+shot 22_outline_switched_off
+ui check selection.joint.enabled 0 0
+expect selstyle.joint.opacity == 0
+expect uivalue.selection.joint.opacity.0 == 75
+shot 23_both_switched_off
+uishot 23_page_switched_off
+ui check selection.outline.enabled 0 1
+expect selstyle.outline.opacity == 80
+ui check selection.joint.enabled 0 1
+expect selstyle.joint.opacity == 75
+ui click selection.outline.restore.opacity 0
+# Closed by its Close button: the dialog is gone, the viewport keeps what was set.
+ui set selection.outline.opacity 0 60
+ui click preferences.close 0
+wait 5
+expect uicount.selection.outline.opacity == 0
+expect selstyle.outline.opacity == 60
+# Reopened, the page shows what was set (the run's own value: nothing was written).
+prefs Selection
+wait 10
+expect uivalue.selection.outline.opacity.0 == 60
+ui click selection.outline.restore.opacity 0
+ui click preferences.close 0
+wait 5
+expect selstyle.outline.opacity == 100
+
+# The viewport strip's Selection button opens the same page.
+expect uicount.viewport.selection == 1
+ui click viewport.selection 0
+wait 10
+expect uicount.selection.outline.enabled == 1
+uishot 30_strip_button
+ui click preferences.close 0
+wait 5
+expect uicount.selection.outline.enabled == 0
+
+# An application preference, not scene state: File -> New keeps it.
+outlinestyle ff8000 50
+jointstyle 20c040 90
+new
+expect selstyle.outline.r == 255
+expect selstyle.outline.opacity == 50
+expect selstyle.joint.g == 192
+expect selstyle.joint.opacity == 90

@@ -67,7 +67,7 @@ QMenu::item:disabled {
    menus, the viewport's shader picker, the HDRI menu). A clearly visible mid grey: the default
    near-black hairline vanished against the #252627 surface, so the groups read as one list.
    The same grey (Constants::COLOR_SEPARATOR) draws the Asset Manager's section and search
-   dividers and the HDRI menu's category rules — one separator colour app-wide. */
+   dividers and the HDRI menu's category rules — one separator color app-wide. */
 QMenu::separator {
     height: 1px;
     background: #6a6b6e;

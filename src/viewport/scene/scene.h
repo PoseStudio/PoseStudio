@@ -17,6 +17,7 @@
 
 #include "environment.h"
 #include "lightingsettings.h"
+#include "selectionstyle.h"
 #include "shademode.h"
 #include "armature.h" // IkScope
 #include "jointtransform.h"
@@ -101,6 +102,9 @@ public:
 
     /// Live lighting/exposure controls (the Environment panel drives these). All shader-side, so this
     /// is just a cached value read into the next frame's UBO — no re-bake.
+    /// How a selected joint's flesh is tinted (selectionstyle.h; the outline half of the style
+    /// is the composite's): read into the camera block at the next frame.
+    void                   setSelectionStyle(const SelectionStyle& style) { m_selectionStyle = style; }
     void                   setLightingSettings(const LightingSettings& settings) { m_lighting = settings; }
     const LightingSettings& lightingSettings() const { return m_lighting; }
 
@@ -371,6 +375,20 @@ public:
     bool setMeshTexture(int model, int mesh, MaterialMap map, const std::shared_ptr<const DecodedImage>& plain, int channel,
                         const std::shared_ptr<const DecodedImage>& gpuImage, const std::string& source);
     int  selectedZoneIndex() const;
+    /// THE OVERLAYS (materialoverlay.h; the Qt layer decodes and composites, this stores): mesh
+    /// @p mesh's stack as it stands, its replacement (the values — the slots the stack is painted
+    /// into are then rebound through setMeshTexture), the zone's material source for slot
+    /// @p map as recorded ("" / kImportedTexture / a path), and the zones an overlay on the mesh
+    /// is painted on (Model::overlayZones; empty for a bad index).
+    std::vector<MaterialOverlay> meshOverlays(int model, int mesh) const;
+    bool                         setMeshOverlays(int model, int mesh, const std::vector<MaterialOverlay>& overlays);
+    /// The overlays' METAL (Mesh::setMetalBaked): mesh @p mesh's Metallic value as it stands, the
+    /// value its bound parameter map was baked for (negative: not baked), and that record's setter.
+    float                        meshMetalness(int model, int mesh) const;
+    float                        meshMetalBaked(int model, int mesh) const;
+    void                         setMeshMetalBaked(int model, int mesh, float scalar);
+    std::string                  meshSlotSource(int model, int mesh, MaterialMap map) const;
+    std::vector<int>             overlayZones(int model, int mesh) const;
 
     // --- Pose snapshot (for undo/redo) ---
     std::vector<std::pair<std::string, glm::vec3>> capturePose() const;
@@ -431,6 +449,7 @@ private:
     EnvironmentSH    m_environmentSH;
     BrdfLut          m_brdfLut;
     LightingSettings m_lighting; // live exposure/diffuse/specular/fill/key/rotation/tonemap dials (Environment panel)
+    SelectionStyle   m_selectionStyle; // the selected-joint highlight's color + opacity (Preferences -> Selection)
 
     // The transparent pass's per-frame sort list (every model's transparent meshes together,
     // farthest first), kept as a member so the per-frame sort allocates nothing.

@@ -59,6 +59,7 @@ MaterialView Scene::materialView() const {
             ++view.linkedZones;
         }
     }
+    view.overlayZones = model->overlayZones(static_cast<std::size_t>(zone));
     view.revision = model->materialRevision();
     return view;
 }
@@ -157,6 +158,58 @@ bool Scene::setMeshTexture(int model, int mesh, MaterialMap map, const std::shar
     // environment swap and the delete do.
     vkDeviceWaitIdle(m_context.device());
     return m->setMeshTexture(static_cast<std::size_t>(mesh), map, plain, channel, gpuImage, source);
+}
+
+std::vector<MaterialOverlay> Scene::meshOverlays(int model, int mesh) const {
+    const Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr;
+    if (m == nullptr || mesh < 0 || static_cast<std::size_t>(mesh) >= m->meshCount()) {
+        return {};
+    }
+    return m->mesh(static_cast<std::size_t>(mesh)).material().overlays;
+}
+
+float Scene::meshMetalness(int model, int mesh) const {
+    const Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr;
+    if (m == nullptr || mesh < 0 || static_cast<std::size_t>(mesh) >= m->meshCount()) {
+        return 0.0f;
+    }
+    return m->mesh(static_cast<std::size_t>(mesh)).material().metalness;
+}
+
+float Scene::meshMetalBaked(int model, int mesh) const {
+    const Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr;
+    if (m == nullptr || mesh < 0 || static_cast<std::size_t>(mesh) >= m->meshCount()) {
+        return -1.0f;
+    }
+    return m->mesh(static_cast<std::size_t>(mesh)).metalBaked();
+}
+
+void Scene::setMeshMetalBaked(int model, int mesh, float scalar) {
+    Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr;
+    if (m != nullptr && mesh >= 0) {
+        m->setMeshMetalBaked(static_cast<std::size_t>(mesh), scalar);
+    }
+}
+
+bool Scene::setMeshOverlays(int model, int mesh, const std::vector<MaterialOverlay>& overlays) {
+    Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr;
+    return m != nullptr && mesh >= 0 && m->setMeshOverlays(static_cast<std::size_t>(mesh), overlays);
+}
+
+std::string Scene::meshSlotSource(int model, int mesh, MaterialMap map) const {
+    const Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr;
+    if (m == nullptr || mesh < 0 || static_cast<std::size_t>(mesh) >= m->meshCount()) {
+        return {};
+    }
+    return m->mesh(static_cast<std::size_t>(mesh)).material().maps[static_cast<std::size_t>(map)].source;
+}
+
+std::vector<int> Scene::overlayZones(int model, int mesh) const {
+    const Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr;
+    if (m == nullptr || mesh < 0) {
+        return {};
+    }
+    return m->overlayZones(static_cast<std::size_t>(mesh));
 }
 
 bool Scene::resetZoneMaterials(bool allZones, bool linked) {

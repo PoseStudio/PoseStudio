@@ -6,7 +6,7 @@
  * The tree's source model is a plain QStandardItemModel of physical folders and virtual rows.
  * This proxy overlays two things on it without touching the source.
  *
- * (1) Hit state. Each folder row's icon and text colour reflect whether the folder contains
+ * (1) Hit state. Each folder row's icon and text color reflect whether the folder contains
  * assets DIRECTLY (AssetScan's non-image-plus-same-basename-image rule), only somewhere BELOW
  * it (IndirectHit), or nowhere (NoHit, greyed); a Collection counts as a hit when it holds at
  * least one item that still exists on disk. Classifying a folder means walking its subtree,
@@ -43,7 +43,7 @@ class QMimeData;
 
 /**
  * @class AssetFolderProxyModel
- * @brief Intercepts data requests to overlay hit-state icons/colours on folder rows, owns the
+ * @brief Intercepts data requests to overlay hit-state icons/colors on folder rows, owns the
  *        deferred hit-classification cache, and validates Collection drag-drop reparenting.
  */
 class AssetFolderProxyModel : public QIdentityProxyModel {

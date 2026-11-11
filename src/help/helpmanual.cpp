@@ -27,8 +27,8 @@ const QString kManualRoot = QStringLiteral(":/manual/");
 
 /// The page palette. The body text and background come from the browser's QSS (_help.qss);
 /// these are the parts a QTextDocument carries in its own formats.
-const QColor kHeadingColour(QStringLiteral("#ffffff"));
-const QColor kLinkColour(Constants::COLOR_ACCENT);
+const QColor kHeadingColor(QStringLiteral("#ffffff"));
+const QColor kLinkColor(Constants::COLOR_ACCENT);
 const QColor kCodeText(QStringLiteral("#e8e8e8"));
 const QColor kCodeBackground(QStringLiteral("#2a2d30"));
 const QColor kCodeBlockBackground(QStringLiteral("#141516"));
@@ -237,7 +237,7 @@ void HelpManual::styleDocument(QTextDocument& document) const {
             QTextCharFormat heading;
             heading.setAnchor(true);
             heading.setAnchorNames({slug});
-            heading.setForeground(kHeadingColour);
+            heading.setForeground(kHeadingColor);
             heading.setFontWeight(QFont::Bold);
             cursor.mergeCharFormat(heading);
             blockFormat.setTopMargin(level == 1 ? 6.0 : 18.0);
@@ -265,7 +265,7 @@ void HelpManual::styleDocument(QTextDocument& document) const {
             muted.setFontItalic(true);
             cursor.mergeCharFormat(muted);
         }
-        // Inline: links in the accent colour, inline code on a darker field.
+        // Inline: links in the accent color, inline code on a darker field.
         for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
             const QTextFragment fragment = it.fragment();
             if (!fragment.isValid()) {
@@ -275,7 +275,7 @@ void HelpManual::styleDocument(QTextDocument& document) const {
             QTextCharFormat replacement;
             bool change = false;
             if (format.isAnchor() && !format.anchorHref().isEmpty()) {
-                replacement.setForeground(kLinkColour);
+                replacement.setForeground(kLinkColor);
                 replacement.setFontUnderline(false);
                 change = true;
             } else if (format.fontFixedPitch()) {

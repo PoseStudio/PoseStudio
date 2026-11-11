@@ -74,7 +74,7 @@ view home
 lookat 0 0.5 0 3.4
 wait 3
 shot 04_home_all_off
-# Back on, and the coat coloured, the grain turned, the glass a thin sheet.
+# Back on, and the coat colored, the grain turned, the glass a thin sheet.
 zone Glass
 material transmissionenabled 1
 material thinwalled 1

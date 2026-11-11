@@ -43,9 +43,18 @@ QString PreferencesManager::rememberedDirectory(const QString& key, const QStrin
     return stored;
 }
 
+bool PreferencesManager::isolatedRun() {
+    static const bool isolated = qEnvironmentVariableIsSet("POSESTUDIO_IK_SCRIPT") &&
+                                 qEnvironmentVariableIntValue("POSESTUDIO_IK_SCRIPT_PREFS") == 0;
+    return isolated;
+}
+
 void PreferencesManager::setValue(const QString& key, const QVariant& value) {
     // Update the cache first so callers see the new value immediately, even if the write below fails
     m_preferences.insert(key, value);
+    if (isolatedRun()) {
+        return; // a scripted test's settings are its own (see isolatedRun)
+    }
 
     QSqlDatabase db = appDatabase();
     QSqlQuery query(db);

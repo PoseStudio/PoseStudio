@@ -1,6 +1,6 @@
 /**
  * @file materialpanel.h
- * @brief The "Materials" properties tab: the selected object's material zones as sliders, colour
+ * @brief The "Materials" properties tab: the selected object's material zones as sliders, color
  *        swatches and texture slots on PoseStudio's one canonical material.
  *
  * A self-contained docker panel (its own module, like TransformPanel), built from the shared row
@@ -10,6 +10,9 @@
  * selected zone's material (materialparams.h — the OpenPBR-style parameter set every importer
  * fills and every renderer will read) in COLLAPSIBLE sections:
  *
+ *   Overlays      images layered over the zone's skin — tattoos, bruises, freckles, makeup — each
+ *                 a card of blend, opacity, tint and bitmap adjustments, gloss, and bump / normal
+ *                 / displacement images of its own (OverlayStack, overlaystack.h)
  *   Base          Base Color, Roughness, Metallic, Specular (0-100 %, 100 = the standard
  *                 dielectric), Specular Color, IOR, Diffuse Roughness, Anisotropy (+ rotation)
  *   Coat          Top Coat, its Roughness, Coat Color, Coat IOR
@@ -19,14 +22,14 @@
  *   Emission      Emission Color, Emission
  *   Thin Film     Thin Film, Thickness, IOR
  *   Geometry      Opacity, Normal / Bump Strength, Pore Detail + Tiles, UV Tiling and Offset
- *   Textures      one row per texture SLOT (base colour, normal, bump, roughness, metalness,
+ *   Textures      one row per texture SLOT (base color, normal, bump, roughness, metalness,
  *                 specular mask, translucency, emission, pore detail, cutout): what is bound,
  *                 Choose… (an image file), clear, and back to the imported map
  *
  * Base, Geometry and Textures are open; the others open by themselves for a zone that USES them
  * (a coat on skin, an emission on a lamp) and otherwise stay as the user left them. A parameter
  * the viewport does not render yet (anisotropy, the specular tint, sheen, thin film, the
- * subsurface colour …) is edited and saved all the same — the sections say so — for the
+ * subsurface color …) is edited and saved all the same — the sections say so — for the
  * rendering engines to come.
  *
  * Clicking a surface in the viewport selects the zone under the cursor (the joint pick and the
@@ -40,7 +43,7 @@
  * viewport whenever the selection, the zone or a material changes by other means — a click,
  * undo, a project opened (ViewportWidget::materialViewChanged).
  *
- * Undo: every completed gesture (a scrub, a type-in, a colour pick, a checkbox, a texture
+ * Undo: every completed gesture (a scrub, a type-in, a color pick, a checkbox, a texture
  * choice or clear, a row's restore button, Reset Zone, Reset All Zones) is ONE entry on the
  * viewport's unified undo stack, bracketed begin/endMaterialEdit. The restore buttons return a
  * value or a slot to what the file imported, never to a generic default. A project file carries
@@ -86,6 +89,7 @@ namespace pose {
 
 class DragNumberBox;
 class MenuPickerButton;
+class OverlayStack;
 class ViewportWidget;
 
 class MaterialPanel : public QWidget {
@@ -111,7 +115,7 @@ private:
         QWidget*       field = nullptr; ///< the box + restore (a slot's small thumbnail is inserted before them)
         QFormLayout*   form = nullptr;  ///< the section's form (a row shown for some materials only is hidden through it)
     };
-    /// One colour row: a swatch whose background is the colour, its hex as the caption.
+    /// One color row: a swatch whose background is the color, its hex as the caption.
     struct ColorRow {
         QLabel*      label = nullptr;
         QPushButton* swatch = nullptr;
@@ -150,7 +154,7 @@ private:
     /// the field's fill starts (the rest value: 1.5 for an IOR, 100 for a scale).
     void addRow(QFormLayout* form, MaterialField field, const QString& label, const QString& tip, double min, double max,
                 double step, int decimals, double origin = 0.0);
-    /// Adds one colour row (a swatch opening the colour dialog) wired to pickColor / restoreColor.
+    /// Adds one color row (a swatch opening the color dialog) wired to pickColor / restoreColor.
     void addColorRow(QFormLayout* form, MaterialColor which, const QString& label, const QString& tip);
     /// Names a slot (its label for the file dialog and the menus, its tooltip for its thumbnails).
     void defineSlot(MaterialMap map, const QString& label, const QString& tip);
@@ -165,8 +169,6 @@ private:
     void attachSlot(QWidget* field, MaterialMap map, const QString& tip);
     /// The thumbnails' context menu: Choose Image / Remove / Restore Imported Map.
     void showThumbMenu(MaterialMap map, const QPoint& globalPos);
-    /// A dimmed note under a section's rows (explicit line breaks: see the implementation).
-    void addHint(QFormLayout* form, const QString& text);
     /// Mirrors the viewport's selected object into the heading, the picker and every row (signals
     /// blocked: nothing here edits a material); opens the sections a newly shown zone uses.
     void refresh();
@@ -178,11 +180,11 @@ private:
     void restoreField(MaterialField field);
     /// Copies one field's value (the Roughness row's dual lobe with it) from @p src into @p dst.
     static void copyField(MaterialParams& dst, const MaterialParams& src, MaterialField field);
-    /// A colour swatch: opens the colour dialog (one bracket for the whole pick).
+    /// A color swatch: opens the color dialog (one bracket for the whole pick).
     void pickColor(MaterialColor which);
-    /// Sets a colour from a display (sRGB) colour, live.
+    /// Sets a color from a display (sRGB) color, live.
     void setColor(MaterialColor which, const QColor& srgb);
-    /// One bracket: a colour back to the imported one.
+    /// One bracket: a color back to the imported one.
     void restoreColor(MaterialColor which);
     /// The Thin Walled checkbox (one bracket).
     void setThinWalled(bool on);
@@ -222,14 +224,15 @@ private:
     QCheckBox*        m_doubleSided = nullptr;
     QToolButton*      m_doubleSidedRestore = nullptr;
     std::vector<Section> m_sections;
+    OverlayStack*     m_overlays = nullptr;   // the Overlays section: the zone's overlay stack (overlaystack.h)
     QPushButton*      m_resetZone = nullptr;
     QPushButton*      m_resetAll = nullptr;
     QStringList       m_zoneNames;            // the picker's items as last built
     MaterialView      m_view;                 // what the rows show now
     std::string       m_shownZone;            // which object + zone the sections were last opened for
     QColorDialog*     m_colorDialog = nullptr;
-    MaterialColor     m_colorPicking = MaterialColor::Base; // which colour the open dialog edits
-    QColor            m_colorAtOpen;          // that colour when the dialog opened (Cancel puts it back)
+    MaterialColor     m_colorPicking = MaterialColor::Base; // which color the open dialog edits
+    QColor            m_colorAtOpen;          // that color when the dialog opened (Cancel puts it back)
     std::unordered_map<const DecodedImage*, Thumb> m_thumbs;   // the 39 px thumbnails
     std::unordered_map<const DecodedImage*, Thumb> m_previews; // the hover previews
     /// Which slot a line item carries (MaterialMap::Count: none) — its restore arrow puts the map

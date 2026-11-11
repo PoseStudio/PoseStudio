@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pose {
@@ -36,6 +37,20 @@ class VulkanTexture;
 struct DecodedImage;
 struct MeshData;
 struct TextureUploadCache; // per-model dedup of texture uploads (textureuploadcache.h)
+
+/// The uploads of a model's texture slots AFTER import, shared by the image they were made from:
+/// the zones of one map (a figure's face, lips and ears) that are handed the same derived image —
+/// the map with its overlays painted in — bind ONE texture, as they did at import
+/// (TextureUploadCache is the import batch's; this is setSlotImage's). An entry is good while
+/// both its image and its texture are alive: the image's address alone could be a new image's.
+struct SlotUploads {
+    struct Entry {
+        std::weak_ptr<const DecodedImage> image;
+        std::weak_ptr<VulkanTexture>      texture;
+        bool                              srgb = false;
+    };
+    std::unordered_map<const DecodedImage*, Entry> entries;
+};
 
 /// Per-draw push-constant block for the mesh shaders. Must stay byte-identical to the
 /// `push_constant` block in mesh.vert / mesh.frag: the model matrix and `meta` — x the mesh's
@@ -62,13 +77,13 @@ struct MaterialGpu {
                                  //   w translucency weight
     glm::vec4 material3;         // x top-coat weight (0 = none), y top-coat roughness, z unused,
                                  //   w micro-detail packed as floor(tiles) + fract(weight) (0 = none)
-    glm::vec4 emission;          // rgb emission radiance factor (linear colour × luminance), w bump strength
+    glm::vec4 emission;          // rgb emission radiance factor (linear color × luminance), w bump strength
                                  //   (a bump map beside a normal map)
     glm::vec4 uvTransform;       // xy tiling, zw offset
     glm::vec4 specularColor;     // rgb specular tint, w anisotropy
     glm::vec4 transmission;      // x weight, y depth, z thin-walled (0/1), w index of refraction
     glm::vec4 transmissionColor; // rgb, w dispersion
-    glm::vec4 subsurface;        // rgb colour, w radius scale
+    glm::vec4 subsurface;        // rgb color, w radius scale
     glm::vec4 sheen;             // x weight, y roughness, z anisotropy rotation, w coat ior
     glm::vec4 sheenColor;        // rgb, w thin-film thickness
     glm::vec4 coatColor;         // rgb, w thin-film ior
@@ -83,7 +98,7 @@ static_assert(sizeof(MaterialGpu) == 16 * sizeof(glm::vec4), "MaterialGpu must m
 /// What a Mesh::record draw is for — pushed as meta.y's low bits. Opaque/Transparent select the
 /// alpha semantics (SSS mask vs blend opacity) in the lit passes; Wire is the wireframe overlay
 /// (every edge in a flat grey from the UBO's wire level, through the LINE-polygon-mode
-/// pipeline); DepthOnly is the hidden-line surface fill (its pipeline masks every colour write,
+/// pipeline); DepthOnly is the hidden-line surface fill (its pipeline masks every color write,
 /// so the shader returns at once — the draw exists to lay down depth).
 /// What a draw IS, for the shader (pushed in meta.y's low bits): the lit opaque pass, the
 /// alpha-blended transparent pass, the wireframe edges, the hidden-line depth fill, and the
@@ -102,7 +117,7 @@ struct ShadowPushConstants {
 
 /// The set-1 bindings (mesh.frag's samplers), in order.
 enum MaterialBinding : uint32_t {
-    kBindDiffuse = 0,     // sRGB base colour, the cutout mask in its alpha
+    kBindDiffuse = 0,     // sRGB base color, the cutout mask in its alpha
     kBindDetail = 1,      // the normal map (mode 1), or the bump map when there is no normal map (mode 2)
     kBindParams = 2,      // the PARAMETER map: roughness (R), metalness (G), ambient occlusion (B), transmission weight (A)
     kBindSpecMask = 3,
@@ -111,7 +126,7 @@ enum MaterialBinding : uint32_t {
     kBindBump = 6,        // a bump map CARRIED BESIDE a normal map
     kBindEmission = 7,
     kBindLayer = 8,       // the LAYER map: coat weight (R), coat roughness (G), sheen weight (B), thin-film thickness (A)
-    kBindSheenColor = 9,  // sRGB sheen colour map
+    kBindSheenColor = 9,  // sRGB sheen color map
     kMaterialBindingCount = 10
 };
 
@@ -150,7 +165,7 @@ public:
     /// the model's pose + material set (set 2). @p kind tells the shader what the draw is (alpha
     /// semantics / wire / depth fill); @p highlightJoint / @p highlightTwin (-1 = none) are the
     /// SELECTED joint and its twist partner — the vertex stage sums the vertex's skin weights on
-    /// them into the highlight amount the fragment tints in the selection colour.
+    /// them into the highlight amount the fragment tints in the selection color.
     void record(VkCommandBuffer cmd, VkPipelineLayout layout, const glm::mat4& model,
                 MeshDrawKind kind, int highlightJoint = -1, int highlightTwin = -1) const;
 
@@ -199,13 +214,30 @@ public:
     std::string slotPath(MaterialMap map) const;
     /// Replaces slot @p map: @p plain is the new plain image (null = none) and @p channel its
     /// channel; @p gpuImage the image to UPLOAD for the binding the slot drives — derived by the
-    /// caller (the base colour with the cutout baked into its alpha, the roughness/metalness
+    /// caller (the base color with the cutout baked into its alpha, the roughness/metalness
     /// parameter map; the plain image itself for the rest; null = the fallback) — and @p source
     /// what the material records for the slot ("" / kImportedTexture / a path). Uploads on its
     /// own submit and rewrites this mesh's descriptor set: THE CALLER HAS WAITED FOR THE DEVICE.
     /// The detail mode follows the Normal / Bump slots, the cutout flag the Opacity slot.
+    /// @p uploads (the owning Model's) lets zones handed the same @p gpuImage share one texture.
+    /// A slot may bind a texture with no plain image of its own: an OVERLAY's relief or gloss on
+    /// a zone without that map (a null @p plain, a non-null @p gpuImage).
     void setSlotImage(MaterialMap map, const std::shared_ptr<const DecodedImage>& plain, int channel,
-                      const std::shared_ptr<const DecodedImage>& gpuImage, const std::string& source);
+                      const std::shared_ptr<const DecodedImage>& gpuImage, const std::string& source,
+                      SlotUploads* uploads = nullptr);
+
+    /// THE OVERLAYS (materialoverlay.h): replaces the zone's stack. The values only — what the
+    /// slots bind follows through setSlotImage, with the stack painted into the images by the
+    /// caller. True if the stack changed.
+    bool setOverlays(const std::vector<MaterialOverlay>& overlays);
+
+    /// THE OVERLAYS' METAL: the parameter map this mesh binds carries the zone's ABSOLUTE
+    /// metalness — its Metallic value × its map with the overlays' metal painted on — baked for
+    /// the Metallic value @p scalar; the GPU then takes the value as 1 (a map is only a share of
+    /// the value, and no share of 0 is metal). Negative = not baked: the value and the map as
+    /// ever. The caller re-bakes when the zone's Metallic moves off metalBaked().
+    void  setMetalBaked(float scalar);
+    float metalBaked() const { return m_metalBaked; }
 
     /// Bind-pose centroid (local space) — the transparent pass's back-to-front sort key, carried
     /// through the dominant joint's pose by Model::posedCentroid.
@@ -240,6 +272,7 @@ private:
     float                          m_opacity = 1.0f;
     bool                           m_hasOpacityMask = false;
     bool                           m_transmissive = false; // see isTransmissive (set by packGpu)
+    float                          m_metalBaked = -1.0f;   // see setMetalBaked: the Metallic value baked into the bound map, < 0 = none
     // The material as packed for the GPU (see gpu()) and this mesh's index in its model's
     // material buffer, which record() pushes.
     MaterialGpu                    m_gpu{};

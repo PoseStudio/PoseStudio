@@ -122,8 +122,8 @@ public:
 
 /// THE TEXTURE SLOTS' helpers (the Materials tab, vulkanwindow_materials.cpp — the same decodes
 /// and bakes the import runs, on one file): an image file decoded to RGBA8 (capped like an
-/// import's), a cutout mask file (its gray in every channel), the base colour with a mask baked
-/// into its alpha (a white canvas at the mask's size without a base colour; a copy of the base
+/// import's), a cutout mask file (its gray in every channel), the base color with a mask baked
+/// into its alpha (a white canvas at the mask's size without a base color; a copy of the base
 /// without a mask; null with neither), the roughness / metalness parameter map (null with
 /// neither), and a QImage mask as a DecodedImage. Null on a failed decode (logged).
 std::shared_ptr<DecodedImage> decodeTextureFile(const std::string& path);

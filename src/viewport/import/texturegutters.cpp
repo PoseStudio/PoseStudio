@@ -42,13 +42,13 @@ int clampedTexel(double v) {
     return static_cast<int>(v);
 }
 
-// One level of the pull-push pyramid above the base image: the average colour of the covered
+// One level of the pull-push pyramid above the base image: the average color of the covered
 // texels beneath each coarse texel, plus whether any were covered at all.
 struct PyramidLevel {
     int                  w = 0;
     int                  h = 0;
     std::vector<uint8_t> rgba; // 4 bytes per texel
-    std::vector<uint8_t> has;  // 1 = carries a colour
+    std::vector<uint8_t> has;  // 1 = carries a color
 };
 
 // Rasterizes one mesh's UV triangles into the shared per-texel coverage mask (accumulating — a
@@ -202,9 +202,9 @@ void rasterizeCoverage(const std::vector<Vertex>& vertices, const std::vector<ui
     });
 }
 
-// Fills every uncovered texel of `pixels` (tightly-packed RGBA8, w×h) with colour dilated from the
+// Fills every uncovered texel of `pixels` (tightly-packed RGBA8, w×h) with color dilated from the
 // covered ones via a pull-push pyramid: PULL averages covered children upward level by level, PUSH
-// hands colours back down into the gaps. Covered texels are never modified.
+// hands colors back down into the gaps. Covered texels are never modified.
 void fillFromCoverage(std::vector<uint8_t>& pixels, int w, int h, const CoverageMask& covered) {
     // The mask is only READ here, after the rasterizer's threads have joined; relaxed loads are
     // plain loads on every target.
@@ -272,7 +272,7 @@ void fillFromCoverage(std::vector<uint8_t>& pixels, int w, int h, const Coverage
 
     // --- PUSH: from the coarsest level down, plug each level's gaps from its (already filled)
     // parent, then finally fill the base image's uncovered texels from the first pyramid level.
-    // The 1×1 top always has a colour (there is at least one covered texel), so this terminates.
+    // The 1×1 top always has a color (there is at least one covered texel), so this terminates.
     for (int li = static_cast<int>(levels.size()) - 2; li >= 0; --li) {
         PyramidLevel& level = levels[static_cast<std::size_t>(li)];
         const PyramidLevel& parent = levels[static_cast<std::size_t>(li) + 1];

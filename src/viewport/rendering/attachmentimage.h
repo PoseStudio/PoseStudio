@@ -9,7 +9,7 @@
  * vkCmdPipelineBarrier it". Centralising them here does three things: the target classes shrink
  * to their render pass + policy; a throwing constructor can no longer leak an image whose view
  * failed (the owner frees both); and one policy line — lazily-allocated memory for TRANSIENT
- * attachments, which is what makes an MSAA colour target memoryless on tile-based GPUs (Apple
+ * attachments, which is what makes an MSAA color target memoryless on tile-based GPUs (Apple
  * via MoltenVK) — applies everywhere instead of nowhere.
  *
  * Pure Vulkan + VMA + std, no Qt (the rendering/ rule).
@@ -93,14 +93,14 @@ inline VkImageSubresourceRange wholeImageRange(VkImageAspectFlags aspect, uint32
     return {aspect, 0, mipLevels, 0, layers};
 }
 
-/// One blocking submit that moves each (single-mip, single-layer, colour) image from UNDEFINED
+/// One blocking submit that moves each (single-mip, single-layer, color) image from UNDEFINED
 /// to SHADER_READ_ONLY_OPTIMAL. For targets a later pass samples unconditionally but whose own
 /// pass runs only sometimes (the outline mask, the bloom/SSS targets outside the PBR mode): a
 /// freshly created image would otherwise be bound in UNDEFINED layout — a validation violation
 /// and UB on hardware. Only for construction/resize, when the device is idle anyway.
 void initialiseToShaderRead(VulkanContext& context, std::initializer_list<VkImage> images);
 
-/// As initialiseToShaderRead, CLEARING each (colour, TRANSFER_DST-capable) image to zero on the
+/// As initialiseToShaderRead, CLEARING each (color, TRANSFER_DST-capable) image to zero on the
 /// way — for a target a later pass reads as "nothing drawn" while its own pass may never run
 /// (the photo layer's coverage 0): a fresh image's contents are undefined, not zero.
 void initialiseToShaderReadCleared(VulkanContext& context, std::initializer_list<VkImage> images);

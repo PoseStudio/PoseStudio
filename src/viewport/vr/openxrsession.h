@@ -167,7 +167,7 @@ private:
     std::vector<UniqueImageView>               m_imageViews[2];
     std::vector<UniqueFramebuffer>             m_framebuffers[2];
 
-    // The depth swapchains (optional), mirroring the colour ones; m_depthIndex is the image
+    // The depth swapchains (optional), mirroring the color ones; m_depthIndex is the image
     // acquired for the frame in flight.
     bool                                   m_depth = false;
     VkFormat                               m_depthFormat = VK_FORMAT_UNDEFINED;

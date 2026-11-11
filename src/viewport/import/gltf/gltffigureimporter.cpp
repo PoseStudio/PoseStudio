@@ -620,7 +620,7 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
                     out.diffuse = resolveImage(textures, imageOf(baseView->texture), info);
                     uvSet = baseView->texcoord;
                     if (!out.diffuse.empty() && !out.convertSpecGloss) {
-                        out.baseColor = glm::vec3(1.0f); // (the map carries the colour; the factor is folded in by most exporters)
+                        out.baseColor = glm::vec3(1.0f); // (the map carries the color; the factor is folded in by most exporters)
                     }
                     if (baseView->has_transform) {
                         // KHR_texture_transform on the base map: its scale, offset and rotation are

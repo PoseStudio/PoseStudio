@@ -25,7 +25,7 @@ namespace {
 //   blur:      xy = texel size, zw = blur direction
 //   sss:       xy = texel size, zw = blur direction (H then V; V adds the spec attachment back)
 //   composite: x = tonemap (0/1), y = bloom strength, z = bloom on (0/1),
-//              w = selection-outline width in pixels (0 = none); outline.rgb = its linear colour,
+//              w = selection-outline width in pixels (0 = none); outline.rgb = its linear color,
 //              outline.w = encode sRGB in the shader (0/1); uvRect = the UV crop (scale.xy,
 //              offset.xy — identity for the desktop's own composite, see CompositeOptions)
 // The bright/blur/sss shaders declare only the first vec4 — a shader block may be a prefix of
@@ -34,7 +34,8 @@ struct PostPush {
     float params[4];
     float outline[4];
     float uvRect[4];
-    float photo[4]; // xy = the photo layer's UV scale (CompositeOptions::photoUvScale)
+    float photo[4]; // xy = the photo layer's UV scale (CompositeOptions::photoUvScale); z = the
+                    // outline mask is a splat scene's opacity; w = the outline's opacity
 };
 
 } // namespace
@@ -267,6 +268,13 @@ void PostProcess::runFullscreenPass(VkCommandBuffer cmd, VkFramebuffer framebuff
     vkCmdEndRenderPass(cmd);
 }
 
+void PostProcess::setOutlineStyle(const glm::vec3& colorLinear, float opacity) {
+    m_outlineColor[0] = colorLinear.x;
+    m_outlineColor[1] = colorLinear.y;
+    m_outlineColor[2] = colorLinear.z;
+    m_outlineOpacity = std::clamp(opacity, 0.0f, 1.0f);
+}
+
 void PostProcess::recordSss(VkCommandBuffer cmd) {
     // Full-res masked blur, H into the scratch target, V back into the HDR resolve image — the
     // rest of the chain (bloom, composite) just sees the diffused image.
@@ -298,7 +306,8 @@ void PostProcess::recordComposite(VkCommandBuffer cmd, bool tonemap, bool bloom,
     const PostPush push{{tonemap ? 1.0f : 0.0f, kBloomStrength, bloom ? 1.0f : 0.0f, outlineWidthPx},
                         {m_outlineColor[0], m_outlineColor[1], m_outlineColor[2], options.encodeSrgb ? 1.0f : 0.0f},
                         {options.uvScale[0], options.uvScale[1], options.uvOffset[0], options.uvOffset[1]},
-                        {options.photoUvScale[0], options.photoUvScale[1], options.outlineFromSplats ? 1.0f : 0.0f, 0.0f}};
+                        {options.photoUvScale[0], options.photoUvScale[1], options.outlineFromSplats ? 1.0f : 0.0f,
+                         m_outlineOpacity}};
     const VkDescriptorSet set = (options.fromMirror && m_hasMirror) ? m_mirrorSet : m_compositeSet;
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_compositePipeline->handle());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_compositePipeline->layout(), 0,

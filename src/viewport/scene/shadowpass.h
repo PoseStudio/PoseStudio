@@ -34,7 +34,7 @@ class ShadowPass {
 public:
     /// Builds the shadow map and the depth-only pipeline (shadow.vert/frag: the mesh pass's
     /// skinned vertex layout rendered into the map's single-sample pass with a static depth bias
-    /// against acne and no colour attachment). Its only descriptor set is the per-model POSE
+    /// against acne and no color attachment). Its only descriptor set is the per-model POSE
     /// layout (@p poseSetLayout, bound at index 0 — see Model::recordShadow).
     ShadowPass(VulkanContext& context, VkDescriptorSetLayout poseSetLayout,
                const std::vector<char>& vertSpirv, const std::vector<char>& fragSpirv);

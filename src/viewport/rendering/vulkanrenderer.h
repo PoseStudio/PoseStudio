@@ -26,6 +26,7 @@
 #define VULKANRENDERER_H
 
 #include "camera.h"
+#include "selectionstyle.h"
 #include "vreyeview.h"
 #include "vulkancommon.h"
 #include "vulkanhandles.h"
@@ -121,6 +122,13 @@ public:
     /// display. Defaults to 1.
     void setUiScale(float scale) { m_uiScale = scale; }
 
+    /// How the selection is marked (selectionstyle.h; Preferences → Selection): the outline's
+    /// color and opacity go to the composite of the desktop chain and of VR Mode's, the joint
+    /// highlight's to the Scene's camera block. Takes effect at the next frame; at an outline
+    /// opacity of 0 the outline's mask pass is skipped altogether.
+    void                  setSelectionStyle(const SelectionStyle& style);
+    const SelectionStyle& selectionStyle() const { return m_selectionStyle; }
+
     /// Exposed so the window's input handlers can drive the view (orbit/pan/dolly).
     Camera& camera() { return m_camera; }
 
@@ -209,6 +217,7 @@ private:
                                               // scene (backdrop, meshes, overlays) — see scene.h
     std::unique_ptr<Grid>            m_grid;  // floor grid overlay (drawn into the HDR pass after the scene)
     float                            m_uiScale = 1.0f; // see setUiScale
+    SelectionStyle                   m_selectionStyle;  // see setSelectionStyle
 
     // GPU timestamps (lastGpuTimings): kTimingQueries queries per SLOT — the frame's first stamp,
     // the splat draw's begin/end for each of up to two scene passes (the desktop's one; an eye

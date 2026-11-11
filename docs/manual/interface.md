@@ -47,6 +47,7 @@ A row of controls floats in the viewport's top-right corner:
 | **Home** | Returns the camera to the default framing (also `5`). |
 | **Ground** | Drops the active figure so its lowest point rests on the floor; landing on her feet, she absorbs the drop with her knees. See [Posing](posing.md#the-ground-button). |
 | **Skeleton** | Toggles the bone overlay. Joints can be grabbed with it on or off. |
+| **Selection** | Opens [Preferences → Selection](preferences.md#selection): the selection outline and the joint highlight, each switched on or off and given its color and opacity. |
 | **VR** (right of the view picker) | Enter or leave VR Mode — see [VR Mode](vr.md); lit in blue while the headset has the scene. The view picker's last entry, VR Mode, does the same, and `Esc` leaves. |
 
 While the mouse is turning a joint (`B`, `S` or `T` with a joint selected: see [Posing](posing.md#turning-a-joint-with-the-mouse-b-s-t)), a small badge under the strip names the motion: Bend, Side-Side or Twist.
@@ -57,11 +58,23 @@ The five tabs sit on the panel's left edge.
 
 - **Asset Manager** — a tree of your asset libraries, Favorites and Collections above a thumbnail grid, with a search field at the top. Double-clicking an asset imports it. See [The Asset Manager](asset-manager.md).
 - **Transform** — the selected joint's rotation as three dials: Bend, Side-Side and Twist. See [The Transform tab](posing.md#the-transform-tab).
-- **Materials** — the selected object's material zones as sliders: colour, roughness, metallic, specular, opacity, the skin layers. See [Materials](materials.md).
+- **Materials** — the selected object's material zones as sliders: color, roughness, metallic, specular, opacity, the skin layers — and the overlays layered over the skin: tattoos, marks, makeup. See [Materials](materials.md).
 - **Soft Body Physics** — the switches and dials for the breasts' and the buttocks' motion: on and off, their softness, the breasts' bounce. See [The Soft Body Physics tab](posing.md#the-soft-body-physics-tab).
 - **Environment** — the lighting controls: the HDRI picker, the backdrop, exposure and tone, image-based lighting, the key light, shadows, and skin and rim accents. See [Lighting and Environment](environment.md).
 
 Drag the divider between the tree and the grid inside the Asset Manager to give either more room.
+
+## Value fields and fine control
+
+Every number in the tabs and in Preferences is the same kind of field: a bar that fills with the value, and the value written on it.
+
+- **Drag** left or right across the field to change the value. A plain drag moves in the field's own steps — whole numbers for most: a joint's dial, a percentage, an opacity.
+- **Shift + drag** is fine control: steps a tenth the size, at a tenth of the speed, so a dial that moves in whole numbers is set to 17.1, 17.2, 17.3. Press or let go of Shift at any point of a drag; the drag carries on from where it is at the other pace.
+- **Click** the field once to type a value — any value in its range, to whatever precision you type. `Enter` confirms, `Esc` cancels.
+
+A field shows the extra digit only when the value has one: 17 stays 17, and a value set finely, typed, or simply what the scene holds — a joint posed by dragging the body rarely lands on a whole number — reads 17.3. A plain drag takes such a value back onto whole steps.
+
+A few fields differ. The Soft Body dials step by 5 and, with Shift, by 1; the VR scales step by 0.05 and, with Shift, by 0.01. Fields that are whole counts — how many times a detail map repeats, a subdivision level — have no fine steps.
 
 ## Dialogs and overlays
 

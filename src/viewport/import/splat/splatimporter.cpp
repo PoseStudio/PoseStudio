@@ -301,7 +301,7 @@ SplatData loadSplat(const std::string& path) {
         data.positions[i] = glm::vec3(f[0], f[1], f[2]);
         data.scales[i] = glm::clamp(glm::vec3(f[3], f[4], f[5]), glm::vec3(1e-6f), glm::vec3(2.0f));
         const auto* u = reinterpret_cast<const uint8_t*>(rec + 24);
-        // The colour is the degree-0 term evaluated: (c - 0.5) / C0 puts it back as a coefficient.
+        // The color is the degree-0 term evaluated: (c - 0.5) / C0 puts it back as a coefficient.
         for (int c = 0; c < 3; ++c) {
             data.sh[i * 3 + static_cast<std::size_t>(c)] = (static_cast<float>(u[c]) / 255.0f - 0.5f) / kShC0;
         }
@@ -319,7 +319,7 @@ SplatData loadSplat(const std::string& path) {
 /// positions' fractional bits, a flags byte (bit 0: trained antialiased) and a reserved byte —
 /// then the attributes as WHOLE ARRAYS in this order: positions (version 1: three float16; else
 /// three 24-bit signed fixed-point integers over 2^fractionalBits), alphas (one byte: the opacity
-/// × 255), colours (three bytes: the degree-0 coefficient × 0.15 + 0.5, × 255), scales (three
+/// × 255), colors (three bytes: the degree-0 coefficient × 0.15 + 0.5, × 255), scales (three
 /// bytes: (log scale + 10) × 16), rotations (version 2: the quaternion's x, y, z as v × 127.5 +
 /// 127.5 with w ≥ 0 derived; version 3: "smallest three" in one 32-bit word — the top two bits the
 /// index of the largest component, then three 10-bit fields, a sign bit over a 9-bit magnitude

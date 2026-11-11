@@ -38,7 +38,7 @@ VulkanSwapchain::VulkanSwapchain(VulkanContext& context, VkExtent2D extentHint)
 
 void VulkanSwapchain::recreate(VkExtent2D extentHint) {
     cleanupResolutionResources();
-    // Render pass survives: it depends only on the colour format, which doesn't change on resize.
+    // Render pass survives: it depends only on the color format, which doesn't change on resize.
     createSwapchain(extentHint);
     createImageViews();
     createFramebuffers();
@@ -54,7 +54,7 @@ void VulkanSwapchain::cleanupResolutionResources() {
 VkSurfaceFormatKHR VulkanSwapchain::chooseSurfaceFormat(
     const std::vector<VkSurfaceFormatKHR>& available) const {
     // An sRGB 8-bit format: the whole engine relies on the swapchain's sRGB STORE doing the final
-    // gamma encode (the composite writes linear values; the grid, outline and clear colours are
+    // gamma encode (the composite writes linear values; the grid, outline and clear colors are
     // authored linear). BGRA is the common Windows/Linux default; RGBA the usual alternative.
     for (VkFormat wanted : {VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R8G8B8A8_SRGB}) {
         for (const auto& format : available) {
@@ -68,7 +68,7 @@ VkSurfaceFormatKHR VulkanSwapchain::chooseSurfaceFormat(
     // since every "the sRGB store encodes" assumption in the shaders is now false. (Plain stderr:
     // the rendering/ core is Qt-free.)
     std::fprintf(stderr,
-                 "[Vulkan] No sRGB swapchain format offered; using format %d (colour space %d) — "
+                 "[Vulkan] No sRGB swapchain format offered; using format %d (color space %d) — "
                  "the viewport will not be gamma-encoded correctly.\n",
                  static_cast<int>(available.front().format),
                  static_cast<int>(available.front().colorSpace));
@@ -219,11 +219,11 @@ void VulkanSwapchain::createImageViews() {
 }
 
 void VulkanSwapchain::createRenderPass() {
-    // One single-sample colour attachment: the swapchain image itself. loadOp DONT_CARE — the
+    // One single-sample color attachment: the swapchain image itself. loadOp DONT_CARE — the
     // composite's fullscreen triangle overwrites every pixel, so no clear is needed (and the
     // render-pass begin passes no clear values); stored and handed to presentation.
     //
-    // The one dependency orders this pass's colour writes after the image acquire: the submit
+    // The one dependency orders this pass's color writes after the image acquire: the submit
     // waits on the acquire semaphore at COLOR_ATTACHMENT_OUTPUT, and the external->0 dependency
     // at that same stage (no source access — the semaphore wait already made everything
     // available) is where the UNDEFINED->COLOR_ATTACHMENT layout transition is placed.

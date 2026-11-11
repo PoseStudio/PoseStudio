@@ -70,7 +70,7 @@ public:
     QString searchTextOf(const QString& file);
 
     /// Renders a page's Markdown into @p document: parses it (GitHub dialect), then restyles it for
-    /// the dark theme (heading colours, link colour, code backgrounds, table borders) and gives
+    /// the dark theme (heading colors, link color, code backgrounds, table borders) and gives
     /// every heading an anchor named by its slug so `scrollToAnchor(slug)` works.
     void render(const QString& file, QTextDocument& document);
     /// Renders @p markdown itself the same way (the What's New window's notes: a changelog

@@ -31,8 +31,8 @@ float markerRadius(const glm::vec3& center, const glm::vec3& cameraPos) {
 LineOverlay::LineOverlay(VulkanContext& context, VkRenderPass renderPass,
                          VkDescriptorSetLayout cameraSetLayout, const std::vector<char>& vertSpirv,
                          const std::vector<char>& fragSpirv) {
-    // Skeleton overlay: a coloured line list drawn over the figure (depth test OFF, so every joint
-    // is visible through the body). Uses set 0 (camera) only; per-vertex colour.
+    // Skeleton overlay: a colored line list drawn over the figure (depth test OFF, so every joint
+    // is visible through the body). Uses set 0 (camera) only; per-vertex color.
     PipelineConfig lineConfig;
     lineConfig.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
     lineConfig.depthTestEnable = false;

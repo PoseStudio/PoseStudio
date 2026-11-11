@@ -47,7 +47,7 @@
 
 /* The Materials tab's heading (the selected object's name) and its hint lines (the zone note, the
  * maps list, the how-to while nothing is selected). The Base Color swatch's look is set in code:
- * its background IS the colour (materialpanel.cpp). */
+ * its background IS the color (materialpanel.cpp). */
 #MaterialPanel #MaterialObjectName {
     color: #e0e0e0;
     font-size: 13px;
@@ -83,6 +83,47 @@
 
 /* The Materials tab's layer switches, at the right of a section header. */
 #MaterialPanel #PropertyLayerToggle { spacing: 0px; }
+
+/* The Overlays section's cards (overlaystack.cpp): one framed card per overlay — a header (the
+ * color image's thumbnail, the fold arrow + name, the on/off switch, move up / down, remove)
+ * over its controls. A shade lighter than the pane, so a stack of them reads as layers. */
+#OverlayCard {
+    border: 1px solid #3a3b3d;
+    border-radius: 5px;
+    background-color: #2a2b2d;
+}
+#OverlayCardHeader {
+    color: #dcdcdf;
+    font-size: 12px;
+    padding: 3px 4px;
+    border: none;
+    border-radius: 4px;
+    text-align: left;
+    background: transparent;
+}
+#OverlayCardHeader:hover { background-color: #333437; }
+/* The header's inline name editor (Rename…). */
+#OverlayNameEditor {
+    background-color: #1f2022;
+    color: #e0e0e0;
+    font-size: 12px;
+    border: 1px solid #5b87cc;
+    border-radius: 4px;
+    padding: 0 4px;
+    selection-background-color: #314D7A;
+    selection-color: #ffffff;
+}
+#OverlayCardButton {
+    color: #b8b9bc;
+    font-size: 15px;
+    border: none;
+    border-radius: 3px;
+    padding: 0;
+    background: transparent;
+}
+#OverlayCardButton:hover    { background-color: #314D7A; color: #ffffff; }
+#OverlayCardButton:pressed  { background-color: #2f3f5c; }
+#OverlayCardButton:disabled { color: #55565a; }
 
 /* The Transform tab's heading (the selected joint's name) and its hint line under the rows. */
 #TransformPanel #TransformJointName {

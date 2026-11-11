@@ -47,7 +47,8 @@ public:
     /// this id (a manifest `id`, e.g. "posing"), or leaves it where it was when @p pageId is empty.
     static void open(QWidget* owner, const QString& pageId = QString());
 
-    /// Turns to the page with this id (see open()). A missing id is ignored.
+    /// Turns to the page with this id (see open()) — or, "id#heading-slug", to that section of
+    /// it. A missing id is ignored.
     void showPage(const QString& pageId);
     /// Searches as if the words had been typed into the search field (the screenshot lever).
     void setSearchText(const QString& text);

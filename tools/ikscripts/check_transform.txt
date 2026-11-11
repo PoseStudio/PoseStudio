@@ -372,3 +372,48 @@ modalkeep
 expect euler.abdomenLower.x < -1
 expect euler.chestLower.x < -1
 reset
+
+# THE FINE SCRUB (2026-11-11): a dial's box scrubs in whole numbers, and in TENTHS with Shift held —
+# a tenth of the step and a tenth of the travel. `ui scrub <id> <n> <% of the box's width> [shift]`
+# is a press, a drag and a release on the box itself (transform.dial 0 / 1 / 2 = Bend / Side-Side /
+# Twist). The knee's dial spans 107.1 (-7.1 .. 100), so a fifth of the box is 21.4: 21.
+view front
+click lShin
+expect dial.forward == 0
+ui scrub transform.dial 0 20
+expect uivalue.transform.dial.0 > 20.99
+expect uivalue.transform.dial.0 < 21.01
+expect dial.forward > 20.99
+expect dial.forward < 21.01
+# With Shift the same drag is 2.14 more, to the tenth: 23.1 — and the box shows the tenth.
+ui scrub transform.dial 0 20 shift
+expect uivalue.transform.dial.0 > 23.09
+expect uivalue.transform.dial.0 < 23.11
+expect dial.forward > 23.09
+expect dial.forward < 23.11
+uishot 40_fine_scrub
+# A regular scrub from a value between whole numbers lands on whole numbers again.
+ui scrub transform.dial 0 -20
+expect uivalue.transform.dial.0 > 1.99
+expect uivalue.transform.dial.0 < 2.01
+# Each scrub was one edit.
+undo
+expect dial.forward > 23.09
+expect dial.forward < 23.11
+undo
+expect dial.forward > 20.99
+expect dial.forward < 21.01
+undo
+expect dial.forward == 0
+# The figure's own rows scrub the same way: Left-Right in whole centimetres, tenths with Shift
+# (its range is 1000 cm: 5 % of the box is 50 cm; 5.27 % with Shift is 5.27 cm more, to the tenth).
+ui scrub transform.figure 0 5
+expect figure.x > 49.99
+expect figure.x < 50.01
+ui scrub transform.figure 0 5.27 shift
+expect figure.x > 55.29
+expect figure.x < 55.31
+undo
+undo
+expect figure.x == 0
+reset

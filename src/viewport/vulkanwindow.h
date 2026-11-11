@@ -44,6 +44,7 @@
 #ifndef VULKANWINDOW_H
 #define VULKANWINDOW_H
 
+#include "rendering/selectionstyle.h" // SelectionStyle (Preferences → Selection: the outline, the joint highlight)
 #include "scene/camera.h"           // AxisView (the view hotkeys), Ray
 #include "scene/ik/cursorfilter.h"  // IkCursorFilter (the drag target low-pass)
 #include "scene/jointtransform.h"   // JointTransform (the Transform tab's view of the selected joint)
@@ -64,9 +65,11 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
+class QColor;
 class QSize;
 class QTimer;
 class QVulkanInstance;
@@ -76,6 +79,8 @@ namespace pose {
 class OpenXrSystem;
 struct VrInput;
 struct DecodedImage;
+struct OverlayImage;         // a decoded overlay image, cropped (scene/overlaycompositor.h)
+enum class OverlayImageKind; // … and what it is read as
 class Scene;
 class VulkanContext;
 class VulkanError;
@@ -234,6 +239,16 @@ public:
     /// nothing but the import's size cap; a roughness or metalness map with @p channel the one it
     /// reads), for the tab's thumbnails; null without one.
     std::shared_ptr<const DecodedImage> materialSlotImage(MaterialMap map, int* channel = nullptr) const;
+    /// THE OVERLAYS (materialoverlay.h; vulkanwindow_materials.cpp; the tab's Overlays section):
+    /// the selected zone's overlay stack replaced by @p overlays — an overlay added, removed,
+    /// moved, or one of its controls set — on EVERY zone painted on the zone's color map
+    /// (MaterialView::overlayZones), the stack composited into the maps they bind. One undo entry
+    /// (its own bracket, or the open edit's: a scrub's). False without a selected zone.
+    bool setMaterialOverlays(const std::vector<MaterialOverlay>& overlays);
+    /// An overlay image file decoded and cropped to where it does something (cached; re-read when
+    /// the file changes) — what the compositor paints from and the tab's thumbnails show. Null
+    /// when the file cannot be read.
+    std::shared_ptr<const OverlayImage> overlayImage(const QString& path, OverlayImageKind kind);
 
     /// THE JOINT MOUSE MODE, as the rest of the application drives it (the mode itself is
     /// described with its members below). toggleJointModal is the B / S / T key (@p kind 0/1/2 =
@@ -257,6 +272,14 @@ public:
     /// Remembered and applied once the renderer exists if it isn't built yet.
     void setShowSkeleton(bool on);
     bool showSkeleton() const;
+
+    /// Preferences → Selection (rendering/selectionstyle.h): the outline around the selected
+    /// object / the highlight on the flesh a selected joint drives, in @p color (a display
+    /// color) at @p opacity (0..1). An application preference, not scene state: remembered
+    /// across the lazy renderer build AND across File → New. selectionStyle() is what stands.
+    void                  setSelectionOutline(const QColor& color, float opacity);
+    void                  setJointHighlight(const QColor& color, float opacity);
+    const SelectionStyle& selectionStyle() const { return m_selectionStyle; }
 
     /// Restores the camera's default framing (the viewport's Home button). No-op before the
     /// renderer exists — the camera is created with that framing, so there'd be nothing to undo.
@@ -357,6 +380,20 @@ signals:
     /// (a key to the main window), click / rclick (a press and release there) or move (@p delta
     /// pixels in @p steps mouse moves there). ViewportWidget makes the events.
     void appInputRequested(const QString& what, const QPointF& delta, int steps);
+    /// The scripted test's `prefs <tab>`: the Preferences dialog is wanted on that tab — a
+    /// preferences page driven through its own widgets (`ui`), pictured (`uishot` saves an open
+    /// dialog as <name>_dialog.png) and closed by its Close button (`ui click preferences.close`).
+    void preferencesRequested(const QString& tab);
+    /// The scripted test's `ui`: one of the application's WIDGETS driven in-process — the widget
+    /// is the @p index-th (in creation order) carrying the dynamic property `testId` == @p id, and
+    /// @p verb is click (a button), set (a scrub field to @p value), check (a checkbox to
+    /// @p value >= 0.5) or pick (a picker's @p value-th entry). No desktop input is involved: the
+    /// widget's own slot runs, as a user's click would run it. And its metrics: @p what is count
+    /// (how many widgets carry the id), value (a scrub field's value, a checkbox's 0 / 1, a
+    /// picker's index) or enabled; @p ok false when there is no such widget. ViewportWidget
+    /// answers both (the query synchronously: a direct connection on the GUI thread).
+    void uiActionRequested(const QString& verb, const QString& id, int index, double value, const QString& text);
+    void uiQueryRequested(const QString& what, const QString& id, int index, double* value, bool* ok);
     /// Emitted when the shade mode changes (a picker-table index, scene/shademode.h) — only a
     /// real change is announced (setShadeMode de-duplicates against m_announcedShadeMode). The
     /// viewport strip mirrors it into its shader picker.
@@ -422,13 +459,38 @@ private:
     /// Ends a material edit's bracket: pushes the pre-edit zone materials as one undo entry if
     /// anything changed (and marks the document dirty).
     void commitMaterialUndo();
+    /// One edit's derived images, shared by the zones of a map (vulkanwindow_materials.cpp).
+    struct OverlayBake;
     /// Makes mesh @p mesh of model @p model carry in slot @p map what @p source says ("" none,
-    /// kImportedTexture the import's, else a file): decodes, derives the bound image with the
-    /// partner slot's, applies through the Scene. False when a file could not be read.
-    bool applySlotSource(int model, int mesh, MaterialMap map, const std::string& source);
+    /// kImportedTexture the import's, else a file): decodes, then bindSlot. False when a file
+    /// could not be read.
+    bool applySlotSource(int model, int mesh, MaterialMap map, const std::string& source, OverlayBake* bake = nullptr);
+    /// Binds slot @p map of the mesh to @p plain (+ @p channel, @p source recorded): derives the
+    /// image the binding samples from the slot, its partner slots and the zone's OVERLAYS, and
+    /// applies it through the Scene.
+    bool bindSlot(int model, int mesh, MaterialMap map, const std::shared_ptr<const DecodedImage>& plain, int channel,
+                  const std::string& source, OverlayBake& bake);
+    /// bindSlot with the slot as it stands (the overlays over it changed).
+    void rebindSlot(int model, int mesh, MaterialMap map, OverlayBake& bake);
+    /// @p base with the mesh's overlays that touch slot @p map painted over it (@p base itself
+    /// when none does), made once per edit for the zones that share it.
+    /// @p baseScale is the Metalness slot's: the zone's Metallic value, multiplied into the map
+    /// before the overlays' metal is painted (compositeOverlays).
+    std::shared_ptr<const DecodedImage> overlaid(int model, int mesh, MaterialMap map, const std::shared_ptr<const DecodedImage>& base,
+                                                 int channel, OverlayBake& bake, float baseScale = 1.0f);
+    /// THE OVERLAYS' METAL: a zone whose overlays paint its metalness binds a parameter map baked
+    /// for the zone's Metallic VALUE (Mesh::setMetalBaked). Re-bakes every zone of @p model whose
+    /// value has moved off the one its map was baked for — after anything that sets material
+    /// values: a slider, a reset, an undo.
+    void syncOverlayMetal(int model);
+    /// Gives mesh @p mesh the stack @p overlays and rebinds the slots whose composite it changes.
+    void applyZoneOverlays(int model, int mesh, const std::vector<MaterialOverlay>& overlays, OverlayBake& bake);
+    /// The project load's overlays: (mesh, stack) pairs of model @p model applied as one edit's
+    /// worth of composites (no undo entry: the caller's).
+    void setModelOverlays(int model, const std::vector<std::pair<int, std::vector<MaterialOverlay>>>& stacks);
     /// Every slot of every zone of @p model whose recorded source in @p materials (in mesh order)
-    /// differs from the mesh's — the undo swap's and the project load's texture half, run before
-    /// the values are applied.
+    /// differs from the mesh's, and every slot whose overlays do — the undo swap's and the
+    /// project load's texture half, run before the values are applied.
     void applyMaterialTextures(int model, const std::vector<MaterialParams>& materials);
 
     /// An import requested before the renderer existed, replayed in request order once it does
@@ -479,6 +541,7 @@ private:
     std::unique_ptr<VulkanContext>  m_context;
     std::unique_ptr<VulkanRenderer> m_renderer;
     DeferredSceneState              m_deferred;
+    SelectionStyle                  m_selectionStyle; // see setSelectionOutline (NOT in m_deferred: File → New resets that)
     int                            m_announcedShadeMode = kDefaultShadeMode; // last value announced via shadeModeChanged
 
     ProjectState m_project;      // the .pss document's runtime state (path + dirty, change signal)
@@ -754,6 +817,18 @@ private:
     int                         m_materialEditModel = -1;
     std::vector<MaterialParams> m_preEditMaterials;
     MaterialView                m_announcedMaterialView;
+    // THE OVERLAYS' decoded images (overlayImage): by kind + path, each cropped to where it does
+    // something, stamped with the file's time and size (re-read when it changes; a null image is
+    // remembered too — an unreadable file is not retried at every scrub step), least recently
+    // used out past a memory budget.
+    struct OverlayCacheEntry {
+        std::shared_ptr<const OverlayImage> image;
+        qint64                              stamp = -1;
+        qint64                              bytes = 0;
+        quint64                             used = 0;
+    };
+    std::unordered_map<std::string, OverlayCacheEntry> m_overlayImages;
+    quint64                                            m_overlayUse = 0;
 
     // THE JOINT MOUSE MODE (Blender's modal transforms): with a joint selected, B / S / T turns
     // on its Bend / Side-Side / Twist dial and MOVING THE MOUSE turns it — the limb goes the way
@@ -841,7 +916,7 @@ private:
     struct VrState; // complete only in vulkanwindow_vr.cpp (see m_vr below)
     /// THE CONTROLLERS (one frame's input, VrInput): locomotion on the play-space transform —
     /// the left stick walks head-relative, the right stick turns smoothly about the head — then each
-    /// hand's pointer ray: a hover pick colours it and ends it on the joint, the trigger is the
+    /// hand's pointer ray: a hover pick colors it and ends it on the joint, the trigger is the
     /// LEFT MOUSE BUTTON (a press on a joint selects it and begins the full-body-IK drag of it,
     /// the grabbed point then carried on the ray at its grab distance while the trigger is held,
     /// the right stick's Y pushing/pulling it; a press on empty space click-selects the model

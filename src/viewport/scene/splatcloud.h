@@ -89,7 +89,7 @@ public:
     /// Records the draw: binds this frame slot's set at index 1 (the caller has bound the splat
     /// pipeline and the camera set at 0), pushes the constants (the focal lengths off the
     /// camera's projection and viewport, the eye in the splat frame) and draws six vertices a
-    /// splat (into the pass's photo layer: the colours as trained, the composite lays them over).
+    /// splat (into the pass's photo layer: the colors as trained, the composite lays them over).
     void record(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t frameIndex, const Camera& camera,
                 const glm::mat4& model) const;
 

@@ -457,7 +457,7 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
             if (out.indices.size() < 3) {
                 continue;
             }
-            // The material: base colour and maps from the PBR view of the material (ufbx unifies
+            // The material: base color and maps from the PBR view of the material (ufbx unifies
             // the vendor materials), the classic FBX channels as the fallback.
             out.roughness = 0.65f;
             out.specularWeight = 0.6f;
@@ -475,7 +475,7 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                 const ufbx_texture* diffuseTex = mat->pbr.base_color.texture != nullptr ? mat->pbr.base_color.texture : mat->fbx.diffuse_color.texture;
                 out.diffuse = resolveTexture(textures, diffuseTex, info);
                 if (!out.diffuse.empty()) {
-                    out.baseColor = glm::vec3(1.0f); // (the map carries the colour)
+                    out.baseColor = glm::vec3(1.0f); // (the map carries the color)
                 }
                 const ufbx_texture* normalTex = mat->pbr.normal_map.texture != nullptr ? mat->pbr.normal_map.texture : mat->fbx.normal_map.texture;
                 if (normalTex != nullptr) {
@@ -513,9 +513,9 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                     }
                 }
                 // THE ONE MATERIAL MODEL (specgloss.h): a SPECULAR / GLOSSINESS material — 3ds Max's
-                // PBR spec/gloss shader, whose specular colour IS a reflectance — is converted by the
+                // PBR spec/gloss shader, whose specular color IS a reflectance — is converted by the
                 // standard solve (the scalars here, the maps per texel in the decode layer); a PHONG
-                // or Lambert material's specular colour is a highlight, not a reflectance, and gives
+                // or Lambert material's specular color is a highlight, not a reflectance, and gives
                 // only the specular WEIGHT by its grey (Blender's and Maya's default 0.5 = the
                 // standard dielectric; black = matte). A material with a metalness of its own is
                 // left as it is.
@@ -570,7 +570,7 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                 }
                 // THE CANONICAL MATERIAL's further channels, from ufbx's unified PBR view (every
                 // vendor shader it knows maps onto it; a channel the file does not author keeps the
-                // neutral default). A classic Phong / Lambert material's specular colour is its
+                // neutral default). A classic Phong / Lambert material's specular color is its
                 // highlight, read above as the weight — never a tint here.
                 const auto pbrReal = [](const ufbx_material_map& m, float& value, float lo, float hi) {
                     if (m.has_value) {

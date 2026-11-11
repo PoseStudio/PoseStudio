@@ -1,10 +1,10 @@
 # THE MATERIAL EXTENSIONS the glTF reader fills the wider material from (2026-11-09):
 #   POSESTUDIO_TEST_FIGURE=<assets>/ext_cube.gltf tools/ikscripts/run.sh tools/ikscripts/materials/ext_cube.txt <out>
 # (the asset from tools/materials/make_test_assets.py). Glow: an emissive factor × an emissive
-# strength of 4 with its colour kept apart, KHR_materials_ior 1.33, KHR_materials_specular (the
-# weight and a tint), clearcoat, sheen (its colour's peak is the weight), iridescence (the thin
+# strength of 4 with its color kept apart, KHR_materials_ior 1.33, KHR_materials_specular (the
+# weight and a tint), clearcoat, sheen (its color's peak is the weight), iridescence (the thin
 # film), anisotropy (its rotation in radians → degrees); Glass: transmission with a volume (the
-# attenuation colour and distance, metres → centimetres) and a KHR_texture_transform on the base
+# attenuation color and distance, metres → centimetres) and a KHR_texture_transform on the base
 # map read as the material's UV tiling and offset. Every value in the tab's display units.
 view front
 select 0

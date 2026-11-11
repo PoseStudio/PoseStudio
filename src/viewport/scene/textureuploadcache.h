@@ -6,7 +6,7 @@
  * arms and legs the body maps), and the decode layer already hands every referencing mesh the
  * SAME shared DecodedImage. This cache keys the GPU upload on that image's identity so a shared
  * image is uploaded ONCE per model — one staging copy + mip chain instead of one per zone, which
- * multiplied import time and GPU memory by the sharing factor. It is keyed separately per colour
+ * multiplied import time and GPU memory by the sharing factor. It is keyed separately per color
  * space: the same image could in principle feed both an sRGB slot and a LINEAR slot, which need
  * distinct VkImages. The cache lives only for the duration of a Model's constructor; the meshes
  * keep the textures alive through their shared_ptrs afterwards. Qt-free.
@@ -31,7 +31,7 @@ struct TextureUploadCache {
 };
 
 /// Returns the (shared) texture for @p image, uploading it into @p batch only on first use in
-/// the requested colour space. A null or empty image yields null (the caller binds the
+/// the requested color space. A null or empty image yields null (the caller binds the
 /// appropriate 1x1 fallback).
 std::shared_ptr<VulkanTexture> uploadShared(VulkanContext& context, TextureUploadCache& cache,
                                             const std::shared_ptr<const DecodedImage>& image,

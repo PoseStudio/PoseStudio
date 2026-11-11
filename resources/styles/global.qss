@@ -106,7 +106,7 @@ QToolTip {
 /* ONE indicator app-wide (the Environment tab's toggles, the General page's ping toggle, any
    checkbox a dialog grows): a dark well with the app's hover accent; checked = the accent check
    glyph in the well rather than a solid fill (a filled square read as a button). Only the label
-   colour/size differs per panel — see _environment.qss and _preferences.qss. */
+   color/size differs per panel — see _environment.qss and _preferences.qss. */
 QCheckBox::indicator {
     width: 15px;
     height: 15px;

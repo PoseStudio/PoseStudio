@@ -38,8 +38,18 @@ public:
     /// Returns the cached value for `key`, or `defaultValue` if it isn't set.
     QVariant getValue(const QString& key, const QVariant& defaultValue = QVariant()) const;
 
-    /// Updates the cache and immediately persists the new value to the database.
+    /// Updates the cache and immediately persists the new value to the database — except in an
+    /// isolated run (below), where the cache alone changes.
     void setValue(const QString& key, const QVariant& value);
+
+    /// A SCRIPTED TEST RUN (POSESTUDIO_IK_SCRIPT, tools/ikscripts) is ISOLATED from the stored
+    /// preferences: a script may drive a preferences page or a tab's switches, and what it sets
+    /// must serve that run and never become the user's own settings — so setValue() updates the
+    /// cache and writes nothing, and the appearance settings a run's pictures depend on
+    /// (Preferences → Selection) start at their defaults whatever is stored. With
+    /// POSESTUDIO_IK_SCRIPT_PREFS=1 a scripted run reads and writes the preferences as any
+    /// other run does (how the storing itself is checked).
+    static bool isolatedRun();
 
     /// The folder stored under `key` if it is set and still exists on disk, else `fallback`.
     /// The one implementation of the "start the file dialog where the user was last time"

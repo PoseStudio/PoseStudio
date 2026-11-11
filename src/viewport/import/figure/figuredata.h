@@ -71,7 +71,7 @@ struct FigureMaterial {
     float       transmissionDepth = 0.0f;
     bool        thinWalled = false;
     glm::vec3   subsurfaceColor{1.0f};
-    glm::vec3   subsurfaceRadiusColor{1.0f}; ///< the scattering colour (SSS Color), distance (cm) and direction
+    glm::vec3   subsurfaceRadiusColor{1.0f}; ///< the scattering color (SSS Color), distance (cm) and direction
     float       subsurfaceRadius = 1.0f;
     float       subsurfaceAnisotropy = 0.0f;
     std::string transmissionColorMapPath; ///< the transmission tint's map (stored-only)

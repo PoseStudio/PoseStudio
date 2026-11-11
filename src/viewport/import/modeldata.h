@@ -62,7 +62,7 @@ struct MeshData {
     // Material diffuse color when present, else this default for geometry with no material/texture:
     // a light neutral grey, hex #D1D1D1. Stored LINEAR (sRGB->linear of 209/209/209) because the lit
     // fragment output is hardware-encoded to the sRGB swapchain — so a fully-lit surface reads as
-    // exactly #D1D1D1 on screen. Same convention as the renderer's clear-colour note.
+    // exactly #D1D1D1 on screen. Same convention as the renderer's clear-color note.
     glm::vec3             baseColor{0.6376f, 0.6376f, 0.6376f};
 
     // Diffuse texture source (an external path or embedded bytes; see TextureSource). The Qt layer
@@ -72,7 +72,7 @@ struct MeshData {
     TextureSource         diffuse;
     DecodedImagePtr       diffuseImage;
     /// THE TEXTURE SLOTS' plain images (2026-11-09; set by the decode layer, kept by the Mesh for
-    /// the Materials tab's replacements): the base-colour map's plain decode (no cutout baked),
+    /// the Materials tab's replacements): the base-color map's plain decode (no cutout baked),
     /// the cutout mask (its gray in every channel), the roughness and metalness maps' plain
     /// decodes (their channels are roughnessChannel / metalnessChannel). Null = none.
     DecodedImagePtr       diffusePlainImage;
@@ -90,7 +90,7 @@ struct MeshData {
     /// a grayscale map multiplying Diffuse Roughness.
     TextureSource         diffuseRoughnessMap;
     DecodedImagePtr       diffuseRoughnessImage;
-    /// The top coat's maps (stored-only): weight, colour (sRGB), roughness, reflectivity, and the
+    /// The top coat's maps (stored-only): weight, color (sRGB), roughness, reflectivity, and the
     /// coat's own bump / normal map with its strength.
     TextureSource         coatWeightMap;
     DecodedImagePtr       coatWeightImage;
@@ -103,7 +103,7 @@ struct MeshData {
     TextureSource         coatBumpMap;
     DecodedImagePtr       coatBumpImage;
     float                 coatBumpStrength = 1.0f;
-    /// The translucency WEIGHT map (stored-only; the Translucency slot is the colour map, whose
+    /// The translucency WEIGHT map (stored-only; the Translucency slot is the color map, whose
     /// luminance the viewport uses as the weight — a weight map alone is also read into it).
     TextureSource         translucencyWeightMap;
     DecodedImagePtr       translucencyWeightImage;
@@ -122,7 +122,7 @@ struct MeshData {
 
     // Detail (surface) map: a tangent-space normal map or a grayscale bump/height map, selected by
     // normalMode. Decoded like the diffuse map, but uploaded as a LINEAR texture (it's data, not
-    // colour). Null => flat shading. normalMode: 0 none, 1 tangent-space normal, 2 grayscale bump.
+    // color). Null => flat shading. normalMode: 0 none, 1 tangent-space normal, 2 grayscale bump.
     TextureSource         normal;
     DecodedImagePtr       normalImage;
     int                   normalMode   = 0;
@@ -169,10 +169,10 @@ struct MeshData {
     bool                  hasRoughnessMap = false; // set by the decode layer: the parameter map carries a roughness (a map, or a baked glossiness)
     /// A SPECULAR / GLOSSINESS source (import/specgloss.h), converted at import: the reader sets
     /// convertSpecGloss with the maps and factors of the older convention — the diffuse map is
-    /// `diffuse` above with `diffuseFactor` on it, the specular colour map (sRGB) and its factor,
+    /// `diffuse` above with `diffuseFactor` on it, the specular color map (sRGB) and its factor,
     /// the glossiness map (a channel; glTF packs it in the specular map's alpha) and its factor —
     /// having already put the SCALAR solve into baseColor / metalness / roughness. With any of the
-    /// maps present the decode layer bakes the solve per texel into a base-colour map and a
+    /// maps present the decode layer bakes the solve per texel into a base-color map and a
     /// metalness map (and a roughness map from a glossiness map) in their place.
     bool                  convertSpecGloss = false;
     glm::vec4             diffuseFactor{1.0f};        // linear RGB × the diffuse map, alpha × its alpha
@@ -182,7 +182,7 @@ struct MeshData {
     int                   glossinessChannel = 0;      // 0 red … 2 blue, 3 alpha
     float                 glossinessFactor = 1.0f;
 
-    // Translucency map (sRGB colour: the flesh-red transmitted tint, or a grayscale weight map —
+    // Translucency map (sRGB color: the flesh-red transmitted tint, or a grayscale weight map —
     // luminance = per-region strength). White fallback = uniform.
     TextureSource         translucencyMap;
     DecodedImagePtr       translucencyImage;
@@ -271,7 +271,7 @@ struct MeshData {
     bool                  thinWalled = false;
     glm::vec3             subsurfaceColor{1.0f};
     float                 subsurfaceRadius = 1.0f; ///< the scattering distance, cm
-    glm::vec3             subsurfaceRadiusColor{1.0f}; ///< the scattering colour (SSS Color)
+    glm::vec3             subsurfaceRadiusColor{1.0f}; ///< the scattering color (SSS Color)
     float                 subsurfaceAnisotropy = 0.0f;   ///< the scattering direction, -1..1
     float                 sheen = 0.0f;
     glm::vec3             sheenColor{1.0f};

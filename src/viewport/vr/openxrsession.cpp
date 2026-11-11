@@ -179,7 +179,7 @@ bool OpenXrSession::createSwapchains(const OpenXrSystem& system, float renderSca
     m_extent.width = scaled(view.recommendedImageRectWidth, view.maxImageRectWidth);
     m_extent.height = scaled(view.recommendedImageRectHeight, view.maxImageRectHeight);
 
-    // --- The swapchain format: an sRGB colour format when offered (the store then encodes, as
+    // --- The swapchain format: an sRGB color format when offered (the store then encodes, as
     // the desktop swapchain's does), else a UNORM one with the composite encoding in-shader. ----
     uint32_t formatCount = 0;
     xrEnumerateSwapchainFormats(m_session, 0, &formatCount, nullptr);
@@ -212,7 +212,7 @@ bool OpenXrSession::createSwapchains(const OpenXrSystem& system, float renderSca
         return false;
     }
 
-    // --- The composite's render pass over the runtime's images: one single-sample colour
+    // --- The composite's render pass over the runtime's images: one single-sample color
     // attachment, loaded DONT_CARE (the fullscreen composite overwrites every pixel) and left in
     // COLOR_ATTACHMENT_OPTIMAL — the layout XR_KHR_vulkan_enable hands the images over in and
     // wants them back in. The dependencies: the pass's writes after whatever touched the image
@@ -305,7 +305,7 @@ bool OpenXrSession::createDepthSwapchains() {
 
     // A depth-only pass over the runtime's depth images: cleared, the resolve written, stored
     // and left in DEPTH_STENCIL_ATTACHMENT_OPTIMAL — the layout the runtime hands depth images
-    // over in and reads them back in. The dependencies mirror the colour pass's.
+    // over in and reads them back in. The dependencies mirror the color pass's.
     VkSubpassDependency before{};
     before.srcSubpass = VK_SUBPASS_EXTERNAL;
     before.dstSubpass = 0;
@@ -498,7 +498,7 @@ bool OpenXrSession::acquireEye(int eye, uint32_t& imageIndex) {
         uint32_t depthIndex = 0;
         if (!acquireAndWait(m_depthSwapchains[eye], depthIndex) || depthIndex >= m_depthFramebuffers[eye].size()) {
             XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-            xrReleaseSwapchainImage(m_swapchains[eye], &release); // the colour image, unrendered
+            xrReleaseSwapchainImage(m_swapchains[eye], &release); // the color image, unrendered
             return false;
         }
         m_depthIndex[eye] = depthIndex;

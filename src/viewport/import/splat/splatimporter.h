@@ -4,8 +4,8 @@
  *        rigging … these should look super realistic, as splats often do"): the reader for a 3D
  *        Gaussian Splatting scene — the trained `.ply` the reference implementation writes (one
  *        vertex per splat: position, log scales, a quaternion, a logit opacity and spherical-
- *        harmonic colour up to degree 3) and the compact `.splat` (32 bytes a splat: position,
- *        scales, an RGBA byte colour, a byte quaternion; degree 0 only) and the compressed `.spz`
+ *        harmonic color up to degree 3) and the compact `.splat` (32 bytes a splat: position,
+ *        scales, an RGBA byte color, a byte quaternion; degree 0 only) and the compressed `.spz`
  *        (Niantic's layout, versions 1-3: one gzip stream of byte-quantized attributes — see
  *        loadSpz in the .cpp) — into a format-neutral SplatData the scene uploads (SplatCloud).
  *        Qt-free (std + GLM); throws std::runtime_error with a readable message on anything it
@@ -34,7 +34,7 @@ struct SplatData {
     std::vector<glm::vec3> scales;    ///< Standard deviations along the splat's own axes (linear; the file's log scales exponentiated).
     std::vector<glm::vec4> rotations; ///< Unit quaternions (w, x, y, z).
     std::vector<float>     opacities; ///< 0..1 (the file's logits through the sigmoid).
-    int                    shDegree = 0; ///< 0..3 — 1, 4, 9 or 16 coefficients per colour channel.
+    int                    shDegree = 0; ///< 0..3 — 1, 4, 9 or 16 coefficients per color channel.
     /// Per splat, coefficient-major: coefficients() entries of (r, g, b) — the degree-0 term first
     /// (the reference's f_dc), then the higher terms in the reference's basis order.
     std::vector<float>     sh;

@@ -504,7 +504,7 @@ int runChecks() {
                                           {"parent", "#Lashes%20Shape"},
                                           {"channel", {{"id", "value"}, {"current_value", 1.0}}}}}));
         // The figure's own "Eye Moisture" extends a base whose id has a space in it and takes its
-        // colour from that base; the follower's "Eye Moisture", listed after it, is red.
+        // color from that base; the follower's "Eye Moisture", listed after it, is red.
         scene["material_library"] = json::array(
             {{{"id", "Eye Moisture"},
               {"diffuse", {{"channel", {{"id", "diffuse"}, {"type", "float_color"}, {"value", {0.2, 0.4, 0.6}}}}}}}});

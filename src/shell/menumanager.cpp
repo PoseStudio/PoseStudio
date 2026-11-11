@@ -456,6 +456,12 @@ void MenuManager::setViewportWidget(pose::ViewportWidget *viewport) {
             if (viewportWidget) viewportWidget->recenterVr();
         });
     }
+    // The viewport strip's Selection button, and the scripted test's `prefs <tab>`: the Preferences
+    // dialog on that tab. QUEUED — the dialog's exec() must run from the event loop, not inside the
+    // button's click or the script's own step, which goes on stepping (its timers fire in the
+    // dialog's loop) and closes the dialog through its button.
+    QObject::connect(viewport, &pose::ViewportWidget::preferencesRequested, this,
+                     [this](const QString &tab) { openPreferencesDialog(tab); }, Qt::QueuedConnection);
 }
 
 void MenuManager::explainVrUnavailable() {
@@ -824,6 +830,14 @@ void MenuManager::openPreferencesDialog(const QString &initialTab) {
                           assetManagerWidget, &AssetManagerWidget::refreshAssetManager);
         QObject::connect(&dialog, &PreferencesDialog::navigateToLibraryRequested,
                           assetManagerWidget, &AssetManagerWidget::navigateToLibraryRoot);
+    }
+    if (viewportWidget) {
+        // The Selection page: the viewport redraws with a color or an opacity as it changes,
+        // behind the open dialog.
+        QObject::connect(&dialog, &PreferencesDialog::selectionOutlineChanged,
+                          viewportWidget, &pose::ViewportWidget::setSelectionOutline);
+        QObject::connect(&dialog, &PreferencesDialog::jointHighlightChanged,
+                          viewportWidget, &pose::ViewportWidget::setJointHighlight);
     }
     dialog.exec();
 }

@@ -22,6 +22,7 @@ namespace pose {
 class Camera;
 struct EnvironmentSH;
 struct LightingSettings;
+struct SelectionStyle;
 struct ShadeMode;
 
 /// std140-compatible camera + lighting block. vec3 fields are padded to vec4. Must match the
@@ -40,12 +41,14 @@ struct CameraUbo {
     glm::vec4 ambient;     // rgb ambient/fill term
     glm::vec4 params;      // x = shade mode, y = exposure, z = specularIntensity, w = ambientFill
     glm::vec4 sh[9];       // environment diffuse irradiance: 9 SH coefficients (rgb in .xyz)
-    glm::vec4 params2;     // x = diffuseIntensity, y = keyIntensity, z = envRotation(rad), w = unused
-                           // (kept for the std140 layout: the tonemap flag rides composite.frag's
-                           // push constant now; no scene shader reads params2.w)
+    glm::vec4 params2;     // x = diffuseIntensity, y = keyIntensity, z = envRotation(rad),
+                           // w = the joint highlight color's luminance (jointTintLuminance: what
+                           // mesh.frag divides the tint by to match the surface's own)
     glm::vec4 params3;     // x = subsurface, y = rimIntensity, z = backdropMode, w = backdropBlur
     glm::vec4 params4;     // x = backdropBrightness, y = domeRadius, z = shadowIntensity,
                            // w = the wireframe overlay's linear grey (ShadeMode::wireLevel)
+    glm::vec4 selection;   // the selected-joint highlight (SelectionStyle): rgb = its color, linear;
+                           // a = its opacity at a full skin weight
 };
 
 /// The normalized world-space direction TO the key light from the Environment panel's
@@ -62,7 +65,8 @@ glm::vec3 keyLightDirection(const LightingSettings& lighting, bool pbrFollowsRot
 
 /// Fills @p ubo for one frame: the camera matrices, the fitted light matrix, the key direction
 /// (@p keyDir, from keyLightDirection), the fixed fill/rim/ambient rig, the shade mode's fragment
-/// mode + wire level, every live dial, and the environment's SH irradiance.
+/// mode + wire level, every live dial, the environment's SH irradiance, and the selected-joint
+/// highlight's color and opacity (@p selection — the outline half of it is the composite's).
 ///
 /// The default (PBR) mode is image-based-lit — its diffuse comes from the environment's SH
 /// irradiance and its specular from the prefiltered-environment cubemap (set 3). The analytic
@@ -74,7 +78,7 @@ glm::vec3 keyLightDirection(const LightingSettings& lighting, bool pbrFollowsRot
 /// figure pops off the grid).
 void fillCameraUbo(CameraUbo& ubo, const Camera& camera, const LightingSettings& lighting,
                    const ShadeMode& spec, const EnvironmentSH& sh, const glm::mat4& lightViewProj,
-                   const glm::vec3& keyDir);
+                   const glm::vec3& keyDir, const SelectionStyle& selection);
 
 } // namespace pose
 

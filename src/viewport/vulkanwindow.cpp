@@ -27,6 +27,7 @@
 #include "scene/scene.h"
 #include "vrsettings.h"
 
+#include <QColor>
 #include <QDebug>
 #include <QElapsedTimer>
 #include <QFileInfo>
@@ -35,6 +36,7 @@
 #include <QVulkanInstance>
 #include <QtGui/qevent.h> // QPlatformSurfaceEvent lives here (no separate qpa header in binary Qt)
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -197,6 +199,7 @@ void VulkanWindow::initializeVulkan() {
         m_renderer = std::make_unique<VulkanRenderer>(*m_context, toExtent(pixelExtent()),
                                                       m_shaderDir.toStdString());
         m_deferred.applyTo(*m_renderer);
+        m_renderer->setSelectionStyle(m_selectionStyle); // Preferences → Selection, as handed over so far
         m_renderer->setUiScale(static_cast<float>(devicePixelRatio())); // outline width in logical px
         noteView(ViewPreset::Home); // a fresh camera starts at its default framing (a rebuilt
                                     // renderer after a device loss must not keep a stale view)
@@ -258,7 +261,7 @@ void VulkanWindow::initializeVulkan() {
         }
     } catch (const VulkanError& e) {
         // Leave the surface intact (Qt owns it) but mark the device as failed so we don't retry
-        // every expose. The container just shows the clear-colour-less window.
+        // every expose. The container just shows the clear-color-less window.
         failDevice("Viewport initialisation", e);
     }
 }
@@ -382,6 +385,18 @@ void VulkanWindow::setShadeMode(int mode) {
     withRenderer([mode](VulkanRenderer& r) { r.scene().setShadeMode(mode); });
     m_announcedShadeMode = mode;
     emit shadeModeChanged(mode);
+}
+
+void VulkanWindow::setSelectionOutline(const QColor& color, float opacity) {
+    m_selectionStyle.outlineColor = selectionColorFromSrgb8(color.red(), color.green(), color.blue());
+    m_selectionStyle.outlineOpacity = std::clamp(opacity, 0.0f, 1.0f);
+    withRenderer([this](VulkanRenderer& r) { r.setSelectionStyle(m_selectionStyle); });
+}
+
+void VulkanWindow::setJointHighlight(const QColor& color, float opacity) {
+    m_selectionStyle.jointColor = selectionColorFromSrgb8(color.red(), color.green(), color.blue());
+    m_selectionStyle.jointOpacity = std::clamp(opacity, 0.0f, 1.0f);
+    withRenderer([this](VulkanRenderer& r) { r.setSelectionStyle(m_selectionStyle); });
 }
 
 void VulkanWindow::setShowSkeleton(bool on) {

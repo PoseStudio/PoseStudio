@@ -50,6 +50,7 @@ DragNumberBox* makePercentBox(const QString& tip) {
     auto* box = new DragNumberBox;
     box->setRange(0.0, 200.0);
     box->setSingleStep(5.0);
+    box->setFineStep(1.0); // Shift: whole percent (the dials are stored as whole numbers)
     box->setDecimals(0);
     box->setOrigin(100.0); // the calibrated amount: the bar fills from it, either way
     box->setToolTip(tip);

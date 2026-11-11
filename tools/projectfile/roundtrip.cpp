@@ -94,6 +94,36 @@ ProjectDocument makeDoc() {
     torso.params.uvOffset = glm::vec2(0.25f, -0.5f);
     torso.textures.push_back({"basecolor", "C:/textures/skin.png"});
     torso.textures.push_back({"cutout", ""});
+    // Two overlays: a tattoo moved from where it was painted, with every color control off its
+    // default, and a relief-only scar.
+    pose::MaterialOverlay tattoo;
+    tattoo.offset = glm::vec2(0.125f, -0.0625f);
+    tattoo.rotation = -37.5f;
+    tattoo.scale = 1.75f;
+    tattoo.color = "C:/overlays/dragon.png";
+    tattoo.name = "Dragon, left thigh";
+    tattoo.opacityMap = "C:/overlays/dragon_mask.png";
+    tattoo.blend = pose::OverlayBlend::SoftLight;
+    tattoo.opacity = 0.8f;
+    tattoo.tint = glm::vec3(0.9f, 0.5f, 0.25f);
+    tattoo.brightness = 0.1f;
+    tattoo.contrast = -0.2f;
+    tattoo.gamma = 1.4f;
+    tattoo.hue = -35.0f;
+    tattoo.saturation = 0.3f;
+    tattoo.gloss = 0.6f;
+    tattoo.metallic = 0.75f;
+    tattoo.metallicMap = "C:/overlays/dragon_gold.png";
+    pose::MaterialOverlay scar;
+    scar.enabled = false;
+    scar.bump = "C:/overlays/scar_bump.png";
+    scar.bumpStrength = -1.5f;
+    scar.normal = "C:/overlays/scar_normal.png";
+    scar.normalStrength = 2.0f;
+    scar.displacement = "C:/overlays/scar_disp.png";
+    scar.displacementStrength = 0.5f;
+    // ... and a third as the tab adds one: empty.
+    torso.params.overlays = {tattoo, scar, pose::MaterialOverlay()};
     f1.materials.push_back(torso);
     f1.rotation = glm::normalize(glm::vec4(0.0f, 0.7071068f, 0.0f, 0.7071068f));
     f1.scale = glm::vec3(1.5f, 2.25f, 0.75f);
@@ -156,6 +186,19 @@ void checkRoundTrip() {
               b.materials[0].textures[0].source == "C:/textures/skin.png" && b.materials[0].textures[1].slot == "cutout" &&
               b.materials[0].textures[1].source.empty(),
           "f1 material texture slots (a file and a cleared slot)");
+    check(b.materials.size() == 1 && b.materials[0].params.overlays.size() == 3 &&
+              b.materials[0].params.overlays[0].name == "Dragon, left thigh" && b.materials[0].params.overlays[1].name.empty() &&
+              b.materials[0].params.overlays[0].opacityMap == "C:/overlays/dragon_mask.png" && b.materials[0].params.overlays[1].opacityMap.empty() &&
+              b.materials[0].params.overlays[0].metallic == 0.75f && b.materials[0].params.overlays[0].metallicMap == "C:/overlays/dragon_gold.png" &&
+              b.materials[0].params.overlays[1].metallic == 0.0f &&
+              b.materials[0].params.overlays[2] == pose::MaterialOverlay() &&
+              b.materials[0].params.overlays == a.materials[0].params.overlays &&
+              b.materials[0].params.overlays[0].blend == pose::OverlayBlend::SoftLight && !b.materials[0].params.overlays[1].enabled &&
+              b.materials[0].params.overlays[0].offset == glm::vec2(0.125f, -0.0625f) &&
+              b.materials[0].params.overlays[0].rotation == -37.5f && b.materials[0].params.overlays[0].scale == 1.75f &&
+              b.materials[0].params.overlays[1].offset == glm::vec2(0.0f) && b.materials[0].params.overlays[1].rotation == 0.0f &&
+              b.materials[0].params.overlays[1].scale == 1.0f,
+          "f1 overlays (a tattoo's name, opacity map, metal, place, turn, size and color controls, a disabled relief-only scar, an empty one, in order)");
 
     const ProjectFigure& c = out.figures[1];
     check(c.source == path("model.obj") && c.pose.empty() && c.pins.empty() && c.materials.empty() &&
@@ -221,6 +264,31 @@ void checkForwardCompatibility() {
               d.figures[0].materials[0].params.metalness == 0.0f && // absent: the default
               d.figures[0].materials[0].textures.size() == 1 && d.figures[0].materials[0].textures[0].slot == "normal", // an unknown slot left out
           "a partial material entry reads with defaults");
+
+    // Overlays from a later version: an unknown key is ignored, an unknown blend keeps the
+    // default (Multiply), absent controls keep theirs; a malformed one rejects the file.
+    writeText(path("overlays.json"),
+              R"({"format":"posestudio.project","version":1,"figures":[{"source":"/x.duf",
+                  "materials":[{"zone":"Face","overlays":[{"color":"lips.png","blend":"glitter","opacity":0.5,"sparkle":3},
+                                                          {"bump":"scar.png"}]}]}]})");
+    d = ProjectDocument();
+    check(pose::readProjectFile(path("overlays.json"), d, error) && d.figures.size() == 1 && d.figures[0].materials.size() == 1 &&
+              d.figures[0].materials[0].params.overlays.size() == 2 &&
+              d.figures[0].materials[0].params.overlays[0].color == "lips.png" &&
+              d.figures[0].materials[0].params.overlays[0].blend == pose::OverlayBlend::Multiply &&
+              d.figures[0].materials[0].params.overlays[0].opacity == 0.5f &&
+              d.figures[0].materials[0].params.overlays[0].gamma == 1.0f && d.figures[0].materials[0].params.overlays[0].enabled &&
+              d.figures[0].materials[0].params.overlays[0].offset == glm::vec2(0.0f) &&
+              d.figures[0].materials[0].params.overlays[0].rotation == 0.0f && d.figures[0].materials[0].params.overlays[0].scale == 1.0f &&
+              d.figures[0].materials[0].params.overlays[0].metallic == 0.0f && d.figures[0].materials[0].params.overlays[0].metallicMap.empty() &&
+              d.figures[0].materials[0].params.overlays[0].name.empty() && d.figures[0].materials[0].params.overlays[0].opacityMap.empty() &&
+              d.figures[0].materials[0].params.overlays[1].bump == "scar.png" &&
+              d.figures[0].materials[0].params.overlays[1].bumpStrength == 1.0f,
+          "overlays read with defaults (an unknown blend and key ignored)");
+    writeText(path("badoverlay.json"),
+              R"({"format":"posestudio.project","version":1,"figures":[{"source":"/x.duf",
+                  "materials":[{"zone":"Face","overlays":[{"color":"lips.png","opacity":"half"}]}]}]})");
+    check(!pose::readProjectFile(path("badoverlay.json"), d, error), "a malformed overlay rejects the file");
 }
 
 } // namespace

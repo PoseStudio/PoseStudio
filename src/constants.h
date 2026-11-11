@@ -1,7 +1,7 @@
 /**
  * @file constants.h
  * @brief Cross-cutting compile-time constants: app identity, preference keys, shared UI
- *        geometry/colours/timings.
+ *        geometry/colors/timings.
  *
  * Anything two or more subsystems agree on lives here rather than as duplicated magic numbers
  * (e.g. the grid delegates' cell geometry, the one separator grey every divider uses). Viewport-
@@ -52,6 +52,9 @@ namespace Constants {
     inline constexpr const char* PREF_LAST_PROJECT_DIR = "LastProjectDir";
     /// Where the Materials tab's Choose-a-texture dialog opened last (2026-11-09).
     inline constexpr const char* PREF_LAST_TEXTURE_DIR = "LastTextureDir";
+    /// Where the Materials tab's Add Overlay dialog opened last (2026-11-11): overlays — tattoos,
+    /// makeup — live in a library of their own, apart from a figure's texture maps.
+    inline constexpr const char* PREF_LAST_OVERLAY_DIR = "LastOverlayDir";
 
     // Newline-separated list of content-root folders (each directly containing a "data/"
     // subfolder). The figure importer resolves a preset's cross-file references (geometry, morphs,
@@ -98,6 +101,18 @@ namespace Constants {
     /// late (the splats' fill is what a headset frame cannot afford at full size on most GPUs,
     /// hdrtarget.h) and brings it back as the GPU finds room; applies when VR Mode next starts.
     inline constexpr const char* PREF_VR_SPLAT_SCALE = "VrSplatScale";
+    /// Preferences → Selection (src/core/selectionsettings.h): how the viewport marks what is
+    /// selected — the outline around the selected object and the highlight on the part a selected
+    /// joint moves, each a color ("#rrggbb", absent = the accent) and an opacity in percent
+    /// (absent = 100 for the outline, 75 for the highlight).
+    inline constexpr const char* PREF_SELECTION_OUTLINE_COLOR = "SelectionOutlineColor";
+    inline constexpr const char* PREF_SELECTION_OUTLINE_OPACITY = "SelectionOutlineOpacity";
+    inline constexpr const char* PREF_JOINT_HIGHLIGHT_COLOR = "JointHighlightColor";
+    inline constexpr const char* PREF_JOINT_HIGHLIGHT_OPACITY = "JointHighlightOpacity";
+    /// ... and each mark's switch ("1"/"0", absent = on): off, the mark is not drawn and its
+    /// color and opacity are kept.
+    inline constexpr const char* PREF_SELECTION_OUTLINE_ENABLED = "SelectionOutlineEnabled";
+    inline constexpr const char* PREF_JOINT_HIGHLIGHT_ENABLED = "JointHighlightEnabled";
 
     // =========================================================================
     // UI DIMENSIONS & LAYOUT

@@ -23,7 +23,7 @@ PoseStudio renders with Vulkan, which needs a graphics driver that provides it. 
 - **Her hair, eyelashes or clothes are missing**: they were saved as separate figures in the character's file, and only the character is imported from such a file so far. See [Importing Content](importing.md#a-file-that-holds-several-figures).
 - **Skin looks like wet plastic** in the PBR mode: lower **Specular** under Image-Based Lighting, or try a less glossy environment. Most skin materials render as intended; the remaining cases are content whose maps were authored for another renderer.
 - **The figure is dark**: raise **Exposure**, or switch the HDRI — some panoramas are much dimmer than others.
-- **A black or missing texture**: the texture file the material refers to is not where the preset expects it. PoseStudio skips textures it cannot decode and uses the material's colour.
+- **A black or missing texture**: the texture file the material refers to is not where the preset expects it. PoseStudio skips textures it cannot decode and uses the material's color.
 - **Skin details sit slightly off** — a seam across the scalp, a patch of mismatched skin on the back, the throat's notch out of place: the figure's maps are painted on a UV layout other than the one its materials name. PoseStudio reads each zone through the layout its material names, so this only happens when the content itself names the wrong one.
 - **The figure floats or sinks**: press the **Ground** button. Figures import on the floor; loading a pose file, turning joints with `B` / `S` / `T` or the Transform tab, or lifting her with Ctrl + drag can leave her off it.
 

@@ -10,7 +10,7 @@
  * The fixed-function state every pipeline shares (dynamic viewport/scissor — so pipelines
  * survive resizes untouched) lives in the class; everything that differs between pipelines —
  * push constants, blending, depth, culling, topology, vertex input, descriptor set layouts,
- * sample count, colour-attachment count and write masks — arrives via PipelineConfig. Add a
+ * sample count, color-attachment count and write masks — arrives via PipelineConfig. Add a
  * knob there only when a real use case needs it, or introduce a small PipelineBuilder if the
  * permutations grow.
  */
@@ -32,10 +32,10 @@ class VulkanContext;
  * @struct PipelineConfig
  * @brief The fixed-function knobs that differ between the engine's pipelines.
  *
- * Defaults describe an opaque, depth-tested+written, vertex-buffer-less, single-colour-attachment
+ * Defaults describe an opaque, depth-tested+written, vertex-buffer-less, single-color-attachment
  * pipeline at the context's MSAA count with a vertex-only push constant. The engine's pipelines
  * are all variations on that: the grid flips on blending, off depth-write and alpha-write, binds
- * the scene's IBL/shadow set, and declares the HDR pass's second colour attachment (masked); the
+ * the scene's IBL/shadow set, and declares the HDR pass's second color attachment (masked); the
  * mesh pipelines supply the interleaved vertex layout, four descriptor set layouts and a
  * vertex+fragment push block, and the opaque one writes the second (specular) attachment; the
  * skeleton overlay is a LINE_LIST; the shadow pass is single-sample and depth-only with a static
@@ -55,7 +55,7 @@ struct PipelineConfig {
                                                                         // inconsistent)
     VkPrimitiveTopology topology          = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; // e.g. LINE_LIST for overlays
 
-    // Sample count + colour presence. `singleSample` false = the context's MSAA count (the HDR
+    // Sample count + color presence. `singleSample` false = the context's MSAA count (the HDR
     // scene pass and the outline mask, which resolve); true = single-sample (the depth-only
     // shadow pass, the post chain, and the swapchain composite — the present pass has no MSAA).
     // `hasColorAttachment` false = a depth-only render pass (no blend state at all), used with a
@@ -70,14 +70,14 @@ struct PipelineConfig {
     // their blending can't contaminate the mask — blend factors still use the shader's src alpha,
     // only the framebuffer alpha WRITE is masked off.
     bool  colorWriteAlpha    = true;
-    // RGB writes off = a depth-only draw through a colour pass: the hidden-line shade mode's
+    // RGB writes off = a depth-only draw through a color pass: the hidden-line shade mode's
     // surface fill lays down depth (so the surface occludes the grid and the wires behind it)
-    // while the framebuffer keeps the viewport's clear colour.
+    // while the framebuffer keeps the viewport's clear color.
     bool  colorWriteRgb      = true;
 
-    // Attachment 0's colour blend factors when blendEnable is set: straight alpha by default
+    // Attachment 0's color blend factors when blendEnable is set: straight alpha by default
     // (src.a / 1 − src.a). The transmissive mesh variants (scenepipelines.cpp) MULTIPLY the
-    // frame by the shader's colour (ZERO / SRC_COLOR) and ADD to it (ONE / ONE).
+    // frame by the shader's color (ZERO / SRC_COLOR) and ADD to it (ONE / ONE).
     VkBlendFactor srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
     VkBlendFactor dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 
@@ -87,14 +87,14 @@ struct PipelineConfig {
     // pixel wide (wider lines would need the wideLines feature).
     VkPolygonMode polygonMode = VK_POLYGON_MODE_FILL;
 
-    // Colour attachments in the target render pass. The HDR scene pass has TWO: attachment 0 is
+    // Color attachments in the target render pass. The HDR scene pass has TWO: attachment 0 is
     // the (SSS-blurred) diffuse scene, attachment 1 the SPECULAR the blur must never smear
     // (smeared glints read as a wet film on skin). Attachment 0 keeps this config's blend state;
     // attachment 1 is written plainly by the opaque mesh pipeline (writeColorAttachment1) and
     // masked off entirely for every other scene pipeline, whose shaders don't even declare it.
     // (The Gaussian splats' PHOTO LAYER is a single-attachment pass of its own — hdrtarget.h —
     // where the splat pipeline blends with this config's standard "over" state: premultiplied
-    // colour + coverage, src.a / 1 − src.a for the colour and 1 / 1 − src.a for the alpha.)
+    // color + coverage, src.a / 1 − src.a for the color and 1 / 1 − src.a for the alpha.)
     // (On a device without independentBlend the attachments must share one state — see
     // VulkanContext::supportsIndependentBlend() and the note in vulkanpipeline.cpp.)
     uint32_t colorAttachmentCount   = 1;

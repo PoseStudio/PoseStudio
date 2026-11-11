@@ -266,9 +266,12 @@ void VulkanWindow::mouseMoveEvent(QMouseEvent* event) {
             // in per-tick units) ran several times faster than designed.
         }
     } else if (active & Qt::LeftButton) {
-        // Drag right -> orbit right; drag up -> tilt up. Negated to feel like grabbing the scene.
+        // Grabbing the scene, both ways (the other 3D applications' turntable): drag right and the
+        // scene turns right; drag DOWN and it tips toward you — the camera rises to look from above
+        // — drag up and the camera sinks to look from below. (Until 2026-11-11 the vertical was the
+        // other way round, an airplane's yoke: mouse forward looked down.)
         camera.orbit(-static_cast<float>(delta.x()) * kOrbitRadiansPerPixel,
-                     -static_cast<float>(delta.y()) * kOrbitRadiansPerPixel);
+                     static_cast<float>(delta.y()) * kOrbitRadiansPerPixel);
         if (!delta.isNull()) {
             noteView(ViewPreset::Free); // orbited away from whatever named view this was
             noteCameraChange();

@@ -91,8 +91,8 @@ public:
     void recordWire(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t frameIndex);
 
     /// Records the OPAQUE meshes as a depth-only surface fill (the caller has bound the
-    /// hidden-line pipeline, whose colour writes are masked): the surface occludes what lies
-    /// behind it — the grid, the far side's wires — while showing the viewport's clear colour.
+    /// hidden-line pipeline, whose color writes are masked): the surface occludes what lies
+    /// behind it — the grid, the far side's wires — while showing the viewport's clear color.
     /// Transparent meshes are left out so an eye's iris wires stay visible through its shells.
     void recordDepthFill(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t frameIndex);
 
@@ -144,6 +144,15 @@ public:
     /// changed the mesh's transparency; bumps materialRevision(). False for a bad index.
     bool setMeshTexture(std::size_t i, MaterialMap map, const std::shared_ptr<const DecodedImage>& plain, int channel,
                         const std::shared_ptr<const DecodedImage>& gpuImage, const std::string& source);
+    /// THE OVERLAYS (materialoverlay.h): replaces mesh @p i's stack (the values; the caller
+    /// rebinds the slots the stack is painted into); bumps materialRevision(). True if it changed.
+    bool setMeshOverlays(std::size_t i, const std::vector<MaterialOverlay>& overlays);
+    /// Mesh @p i's metalness as BAKED into its bound parameter map for the Metallic value
+    /// @p scalar (Mesh::setMetalBaked; negative = not baked); bumps materialRevision().
+    void setMeshMetalBaked(std::size_t i, float scalar);
+    /// The zones an overlay on mesh @p i is painted on: @p i and every other mesh imported with
+    /// the same base-color map, in mesh order (MaterialView::overlayZones).
+    std::vector<int> overlayZones(std::size_t i) const;
     /// Bumped by every material change — the cheap "has anything changed" the frame notify reads.
     std::uint64_t materialRevision() const { return m_materialRevision; }
 
@@ -356,6 +365,7 @@ private:
 
     std::string              m_sourcePath; // the import source file (the .pss document's reference)
     std::uint64_t            m_materialRevision = 0; // see materialRevision()
+    SlotUploads              m_slotUploads;          // the texture slots' shared uploads (weak: see mesh.h)
     std::unique_ptr<SplatCloud> m_splats;    // a Gaussian splat scene's cloud (splatcloud.h); null for a mesh model
 
     // Skinning upload: the armature's dual quaternions (see Armature::skinDualQuats) reach the

@@ -5,13 +5,13 @@
  *
  * This is the layer that gets thrown away and rebuilt on every resize (and whenever the
  * surface goes out of date). VulkanContext stays alive across that; VulkanSwapchain does not.
- * The render pass depends only on the surface's colour format (which doesn't change on
+ * The render pass depends only on the surface's color format (which doesn't change on
  * resize), so recreate() keeps it and only rebuilds the resolution-dependent images/framebuffers.
  *
- * The pass is deliberately minimal: ONE single-sample colour attachment, loaded DONT_CARE and
+ * The pass is deliberately minimal: ONE single-sample color attachment, loaded DONT_CARE and
  * stored for presentation, no depth. Since the HDR/post rework the scene renders offscreen
  * (HdrTarget, at the context's MSAA count) and the only draw in this pass is the fullscreen
- * composite, which overwrites every pixel with depth testing off — a multisampled colour target
+ * composite, which overwrites every pixel with depth testing off — a multisampled color target
  * + depth buffer here would be cleared and resolved every frame (~236 MB at 5120x1440 4x) for
  * nothing. Pipelines built against this pass (the composite) are therefore single-sample.
  */

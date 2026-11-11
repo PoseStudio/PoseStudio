@@ -345,7 +345,7 @@ void SplatCloud::record(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t f
     // The focal lengths in pixels off the projection: for a perspective P[0][0] = 1 / (aspect ·
     // tan(fov/2)) and P[1][1] its negated twin (Vulkan's y), for an orthographic 1 / half-extent.
     push.focal = glm::vec4(std::abs(proj[0][0]) * w * 0.5f, std::abs(proj[1][1]) * h * 0.5f, w, h);
-    // POSESTUDIO_SPLAT_SH_DEGREE=<0..3> caps the harmonics evaluated (a diagnostic: the colour
+    // POSESTUDIO_SPLAT_SH_DEGREE=<0..3> caps the harmonics evaluated (a diagnostic: the color
     // with its view dependence off).
     static const int kDegreeCap = std::getenv("POSESTUDIO_SPLAT_SH_DEGREE") ? std::atoi(std::getenv("POSESTUDIO_SPLAT_SH_DEGREE")) : 3;
     // POSESTUDIO_SPLAT_TINY=1: every quad a pixel — the vertex stage's cost alone, the fill's

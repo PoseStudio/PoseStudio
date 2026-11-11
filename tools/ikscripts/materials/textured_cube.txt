@@ -3,7 +3,7 @@
 # (the asset from tools/materials/make_test_assets.py). The Mapped material carries a diffuse map
 # (a red / blue checker) and a spec/gloss map (left half gold specular with gloss 0.9, right half
 # 4 % grey with gloss 0.3): the decode layer bakes the solve per texel, so the zone ends with a
-# base-colour map, a metalness map and a roughness map, and its scalars at 1 — the maps carry
+# base-color map, a metalness map and a roughness map, and its scalars at 1 — the maps carry
 # everything. The Plain material has factors only.
 view front
 select 0

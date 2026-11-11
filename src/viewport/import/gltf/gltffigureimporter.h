@@ -13,11 +13,11 @@
  * file saved mid-animation imports at rest; a joint's bind frame is the inverse of its inverse
  * bind matrix; up to four influences per vertex (the first joint and weight sets), normalized.
  * A mesh without a skin rides the nearest bone above its node. Materials: the metallic-roughness
- * model (base colour factor and map, the metallic-roughness map's green channel as the roughness
+ * model (base color factor and map, the metallic-roughness map's green channel as the roughness
  * map, the normal map with its scale, the alpha mode as the opacity and the base map's alpha as
  * the cutout) with the older specular-glossiness extension as the fallback. Skinless leaf joints
  * (an exporter's end markers) are left out of the skeleton and kept as their parents' tips.
- * Not read: morph targets, vertex colours, animations, texture transforms, the second UV set;
+ * Not read: morph targets, vertex colors, animations, texture transforms, the second UV set;
  * a file that REQUIRES Draco or meshopt compression, or Basis Universal textures, is refused
  * with a message that says so. Qt-free (std + GLM + cgltf).
  */

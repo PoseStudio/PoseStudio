@@ -319,6 +319,60 @@ bool readFigure(const json& j, ProjectFigure& fig) {
                     m.textures.push_back({slotIt->get<std::string>(), sourceIt->get<std::string>()});
                 }
             }
+            // The zone's overlays, lowest first: each an object of image paths and controls (an
+            // absent value keeps its default; a blend this version does not know keeps Multiply;
+            // a malformed entry rejects the file).
+            const auto overlaysIt = entry.find("overlays");
+            if (overlaysIt != entry.end()) {
+                if (!overlaysIt->is_array()) {
+                    return false;
+                }
+                for (const json& oj : *overlaysIt) {
+                    if (!oj.is_object()) {
+                        return false;
+                    }
+                    MaterialOverlay o;
+                    const auto      value = [&oj](const char* key, float& out) -> bool {
+                        const auto it = oj.find(key);
+                        if (it == oj.end()) {
+                            return true;
+                        }
+                        if (!it->is_number() || !std::isfinite(it->get<double>())) {
+                            return false;
+                        }
+                        out = it->get<float>();
+                        return true;
+                    };
+                    const auto text = [&oj](const char* key, std::string& out) -> bool {
+                        const auto it = oj.find(key);
+                        if (it == oj.end()) {
+                            return true;
+                        }
+                        if (!it->is_string()) {
+                            return false;
+                        }
+                        out = it->get<std::string>();
+                        return true;
+                    };
+                    std::string blend;
+                    const auto  tintIt = oj.find("tint");
+                    if (!value("offsetX", o.offset.x) || !value("offsetY", o.offset.y) || !value("rotation", o.rotation) ||
+                        !value("scale", o.scale) ||
+                        !text("name", o.name) || !readBoolSetting(oj, "enabled", o.enabled) || !text("color", o.color) || !text("opacityMap", o.opacityMap) ||
+                        !text("blend", blend) ||
+                        !value("opacity", o.opacity) || (tintIt != oj.end() && !readVec3(*tintIt, o.tint)) ||
+                        !value("brightness", o.brightness) || !value("contrast", o.contrast) || !value("gamma", o.gamma) ||
+                        !value("hue", o.hue) || !value("saturation", o.saturation) || !value("gloss", o.gloss) ||
+                        !value("metallic", o.metallic) || !text("metallicMap", o.metallicMap) ||
+                        !text("bump", o.bump) || !value("bumpStrength", o.bumpStrength) || !text("normal", o.normal) ||
+                        !value("normalStrength", o.normalStrength) || !text("displacement", o.displacement) ||
+                        !value("displacementStrength", o.displacementStrength)) {
+                        return false;
+                    }
+                    overlayBlendByName(blend, o.blend);
+                    m.params.overlays.push_back(std::move(o));
+                }
+            }
             fig.materials.push_back(std::move(m));
         }
     }
@@ -520,6 +574,39 @@ bool writeProjectFile(const std::string& path, const ProjectDocument& doc) {
                         textures.push_back({{"slot", t.slot}, {"source", t.source}});
                     }
                     mat["textures"] = std::move(textures);
+                }
+                if (!p.overlays.empty()) {
+                    json overlays = json::array();
+                    for (const MaterialOverlay& o : p.overlays) {
+                        overlays.push_back({
+                            {"name", o.name},
+                            {"enabled", o.enabled},
+                            {"offsetX", o.offset.x},
+                            {"offsetY", o.offset.y},
+                            {"rotation", o.rotation},
+                            {"scale", o.scale},
+                            {"color", o.color},
+                            {"opacityMap", o.opacityMap},
+                            {"blend", overlayBlendName(o.blend)},
+                            {"opacity", o.opacity},
+                            {"tint", vec3(o.tint)},
+                            {"brightness", o.brightness},
+                            {"contrast", o.contrast},
+                            {"gamma", o.gamma},
+                            {"hue", o.hue},
+                            {"saturation", o.saturation},
+                            {"gloss", o.gloss},
+                            {"metallic", o.metallic},
+                            {"metallicMap", o.metallicMap},
+                            {"bump", o.bump},
+                            {"bumpStrength", o.bumpStrength},
+                            {"normal", o.normal},
+                            {"normalStrength", o.normalStrength},
+                            {"displacement", o.displacement},
+                            {"displacementStrength", o.displacementStrength},
+                        });
+                    }
+                    mat["overlays"] = std::move(overlays);
                 }
                 materials.push_back(std::move(mat));
             }

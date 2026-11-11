@@ -11,6 +11,27 @@
 **Show What's New after an update** (on by default). The first time a new version of PoseStudio starts, a window with that version's release notes opens once the splash screen is dismissed — see [Privacy and Updates](privacy-updates.md#whats-new-after-an-update). **Help → What's New…** opens the same window on demand.
 
 **Count camera changes as unsaved** (off by default). Moving the camera — orbiting, panning, dollying, switching named views, framing the selection — does not mark a project dirty, so closing the window or starting a new scene after a camera move asks nothing. Turn this on if you want a changed framing to count as an unsaved change; the camera is always saved with the project file either way.
+
+## Selection
+
+How the viewport marks what is selected. The **Selection** button at the right end of the viewport's strip opens this page directly. There are two marks, and each has its own switch, **Color** and **Opacity**:
+
+- **Object Outline** — the line drawn around the selected object (a figure, a model, a Gaussian splat scene).
+- **Joint Highlight** — the tint on the part of the body a selected joint moves: the thigh when you click a thigh, the whole face when you click the head.
+
+Both start as the same blue, the outline at 100 and the highlight at 75.
+
+- **Color**: click the swatch for a color picker. The color changes in the viewport as you choose, behind the dialog; **Cancel** puts it back.
+- **The checkbox in front of each title** is that mark's switch. Switched off, the mark is not drawn, and its color and opacity are kept for when you switch it back on.
+- **Opacity**: 0 to 100. Drag across the field or click it to type. At 0 the mark is not drawn at all.
+- The small button beside each row returns that one setting to its default.
+
+A change shows in the viewport at once, so select an object or click a joint *before* opening Preferences and watch it as you adjust.
+
+The joint highlight is a **tint**: the part keeps its own light and shadow and takes the color's hue. A dark blue and a bright blue therefore tint alike; white brightens and greys the part a little; only a color close to black darkens it. If you want the highlight stronger or fainter, use its Opacity.
+
+These are settings of the application, not of a scene: they are not saved in project files, and **File → New** leaves them alone.
+
 ## Posing
 
 The soft-body switches and dials — on and off, the breasts' Softness and Bounce, the buttocks' Softness — live in the side panel's **Soft Body Physics** tab (see [The Soft Body Physics tab](posing.md#the-soft-body-physics-tab)). They are remembered between sessions like a preference.

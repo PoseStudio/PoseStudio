@@ -181,8 +181,10 @@ void HelpWindow::open(QWidget* owner, const QString& pageId) {
 }
 
 void HelpWindow::showPage(const QString& pageId) {
-    if (const ManualPage* page = m_manual.pageById(pageId)) {
-        openLocation({page->file, QString()}, true);
+    // A page's id, or "id#heading-slug" for one of its sections (the links' own form).
+    const qsizetype hash = pageId.indexOf(QLatin1Char('#'));
+    if (const ManualPage* page = m_manual.pageById(hash < 0 ? pageId : pageId.left(hash))) {
+        openLocation({page->file, hash < 0 ? QString() : pageId.mid(hash + 1)}, true);
     }
 }
 

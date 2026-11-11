@@ -305,7 +305,7 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
         if (tcPresent && tcWeightRaw > 0.0f) {
             const float tcReflectivity =
                 std::clamp(scalarChannel("Top Coat Reflectivity", 0.5f), 0.0f, 1.0f);
-            // The coat's COLOUR scales it: a dark-grey Top Coat Color is how 2017-era skins tame a
+            // The coat's COLOR scales it: a dark-grey Top Coat Color is how 2017-era skins tame a
             // "top coat as the main specular" setup (weight dialed far above 1 riding a custom
             // Fresnel curve) — ignoring it rendered those skins as a full-strength white glaze,
             // i.e. wet plastic. The >1 weight itself is the curve trick, not a stronger coat: cap
@@ -451,8 +451,8 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
             ref.thinWalled = channelBool(*c, false);
         }
         // The Translucency Color is the tint skins author under the surface (the map's own tint);
-        // the VOLUME's scattering is SSS Color (the per-channel scattering colour), the Scattering
-        // Measurement Distance (cm) and SSS Direction — OpenPBR's subsurface radius colour, radius
+        // the VOLUME's scattering is SSS Color (the per-channel scattering color), the Scattering
+        // Measurement Distance (cm) and SSS Direction — OpenPBR's subsurface radius color, radius
         // scale and scatter anisotropy.
         if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "Translucency Color")) {
             channelColor(*c, ref.subsurfaceColor);
@@ -479,9 +479,9 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
         if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "Top Coat Color")) {
             channelColor(*c, ref.coatColor);
             // The shader's Top Coat Color tints the coat's REFLECTION, and its luminance is folded
-            // into the weight above (a dark grey coat colour is a weak coat). The canonical
-            // material's coat colour is the tint of what passes THROUGH the coat (OpenPBR's), which
-            // the viewport draws, so only the HUE is kept: a grey coat colour is white here, and a
+            // into the weight above (a dark grey coat color is a weak coat). The canonical
+            // material's coat color is the tint of what passes THROUGH the coat (OpenPBR's), which
+            // the viewport draws, so only the HUE is kept: a grey coat color is white here, and a
             // skin's coat darkens nothing twice.
             const float lum = glm::dot(ref.coatColor, glm::vec3(0.2126f, 0.7152f, 0.0722f));
             ref.coatColor = lum > 1e-4f ? glm::clamp(ref.coatColor / lum, 0.0f, 1.0f) : glm::vec3(1.0f);
@@ -517,7 +517,7 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
                 ref.thinFilmIor = std::clamp(scalarChannel("Thin Film IOR", 1.5f), 1.0f, 3.0f);
             }
         }
-        // The top coat's maps (stored-only slots): the weight, colour, roughness and reflectivity
+        // The top coat's maps (stored-only slots): the weight, color, roughness and reflectivity
         // (or IOR) channels' images, and the coat's own bump map with its strength.
         ref.coatWeightImageUri = channelMapUri("Top Coat Weight");
         ref.coatColorImageUri = channelMapUri("Top Coat Color");

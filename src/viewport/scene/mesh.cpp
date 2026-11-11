@@ -17,12 +17,13 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <iterator>
 
 namespace pose {
 
 namespace {
 
-/// Whether a slot's texture is a COLOUR (sampled through an sRGB view) or data (linear).
+/// Whether a slot's texture is a COLOR (sampled through an sRGB view) or data (linear).
 bool slotIsSrgb(MaterialMap map) {
     return map == MaterialMap::BaseColor || map == MaterialMap::Opacity || map == MaterialMap::Translucency ||
            map == MaterialMap::Emission || map == MaterialMap::CoatColor || map == MaterialMap::SpecularColor ||
@@ -114,7 +115,7 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
         m_maps.present[idx(map)] = image != nullptr;
         m_material.maps[idx(map)].source = image ? kImportedTexture : "";
     };
-    // The base colour's plain image: the decode layer's, or the uploaded image itself where no
+    // The base color's plain image: the decode layer's, or the uploaded image itself where no
     // cutout was baked (an older ModelData, a mesh with no mask).
     plain(MaterialMap::BaseColor, data.diffusePlainImage ? data.diffusePlainImage : (data.hasOpacityMask ? nullptr : data.diffuseImage),
           data.diffuse.path);
@@ -154,7 +155,7 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
     plain(MaterialMap::SheenRoughness, data.sheenRoughnessImage, data.sheenRoughnessMap.path);
     plain(MaterialMap::ThinFilmWeight, data.thinFilmWeightImage, data.thinFilmWeightMap.path);
     plain(MaterialMap::ThinFilmThickness, data.thinFilmThicknessImage, data.thinFilmThicknessMap.path);
-    // A slot that is a cutout alone: the baked diffuse exists with no base-colour map.
+    // A slot that is a cutout alone: the baked diffuse exists with no base-color map.
     if (data.hasOpacityMask && !data.diffusePlainImage) {
         m_maps.present[idx(MaterialMap::BaseColor)] = false;
         m_material.maps[idx(MaterialMap::BaseColor)].source = "";
@@ -180,7 +181,7 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
     m_slotTexture[idx(MaterialMap::Emission)] = uploadShared(context, uploads, data.emissionImage, /*srgb=*/true, batch);
     // The parameter map carries the ambient occlusion (B) and transmission weight (A) maps too;
     // the LAYER map packs the coat weight, coat roughness, sheen weight and thin-film thickness
-    // (modelimportservice's buildPackedMap); the sheen colour map binds on its own.
+    // (modelimportservice's buildPackedMap); the sheen color map binds on its own.
     m_slotTexture[idx(MaterialMap::AmbientOcclusion)] = params;
     m_slotTexture[idx(MaterialMap::TransmissionWeight)] = params;
     const std::shared_ptr<VulkanTexture> layer = uploadShared(context, uploads, data.layerMapImage, /*srgb=*/false, batch);
@@ -316,7 +317,9 @@ void Mesh::packGpu() {
     const float modePacked =
         static_cast<float>(m_normalMode) +
         std::clamp(detailStrength, 0.0f, 7.9f) * 0.125f * (m_normalMode > 0 ? 1.0f : 0.0f);
-    g.material = glm::vec4(m.roughness, modePacked, m.baseEnabled ? m.metalness : 0.0f, m.specularEnabled ? m.specular : 0.0f);
+    // (The overlays' metal baked into the bound map — setMetalBaked — the map IS the metalness.)
+    const float metalness = m_metalBaked >= 0.0f ? 1.0f : m.metalness;
+    g.material = glm::vec4(m.roughness, modePacked, m.baseEnabled ? metalness : 0.0f, m.specularEnabled ? m.specular : 0.0f);
     // The layer switches: an off layer is its weight at 0 for the shader, its value kept.
     g.material2 = glm::vec4(m.lobe1Roughness, m.lobe2Roughness, m.lobeRatio, m.subsurfaceEnabled ? m.translucency : 0.0f);
     // material3.w packs the micro-detail layer: integer part = UV tiling, fraction = weight;
@@ -359,6 +362,7 @@ bool Mesh::setMaterial(const MaterialParams& params) {
     // slots applyMaterialTextures has already put right).
     MaterialParams next = params;
     next.maps = m_material.maps;
+    next.overlays = m_material.overlays; // (the overlays are the mesh's own too: setOverlays)
     if (next == m_material) {
         return false;
     }
@@ -395,23 +399,57 @@ std::string Mesh::slotPath(MaterialMap map) const {
     return source == kImportedTexture ? m_importedSlotPath[idx(map)] : source;
 }
 
+void Mesh::setMetalBaked(float scalar) {
+    if (scalar == m_metalBaked) {
+        return;
+    }
+    m_metalBaked = scalar;
+    packGpu();
+}
+
+bool Mesh::setOverlays(const std::vector<MaterialOverlay>& overlays) {
+    if (m_material.overlays == overlays) {
+        return false;
+    }
+    m_material.overlays = overlays;
+    return true;
+}
+
 void Mesh::setSlotImage(MaterialMap map, const std::shared_ptr<const DecodedImage>& plain, int channel,
-                        const std::shared_ptr<const DecodedImage>& gpuImage, const std::string& source) {
+                        const std::shared_ptr<const DecodedImage>& gpuImage, const std::string& source, SlotUploads* uploads) {
     m_slotPlain[idx(map)] = plain;
     m_slotChannel[idx(map)] = channel;
     m_material.maps[idx(map)].source = plain ? source : std::string();
     m_maps.present[idx(map)] = plain != nullptr;
-    // The texture the slot drives, uploaded on its own submit (a one-off: the caller waited for
-    // the device so the descriptor can be rewritten).
+    // The texture the slot drives: the one another zone of the model already uploaded from this
+    // very image (the zones of one map share it), else uploaded on its own submit (a one-off:
+    // the caller waited for the device so the descriptor can be rewritten).
     std::shared_ptr<VulkanTexture> texture;
     if (materialMapIsRendered(map) && gpuImage && gpuImage->width > 0 && gpuImage->height > 0 && !gpuImage->pixels.empty()) {
-        texture = std::make_shared<VulkanTexture>(*m_context, gpuImage->pixels.data(), gpuImage->width, gpuImage->height,
-                                                  slotIsSrgb(map));
+        const bool srgb = slotIsSrgb(map);
+        if (uploads != nullptr) {
+            const auto it = uploads->entries.find(gpuImage.get());
+            if (it != uploads->entries.end() && it->second.srgb == srgb && it->second.image.lock() == gpuImage) {
+                texture = it->second.texture.lock();
+            }
+        }
+        if (!texture) {
+            texture = std::make_shared<VulkanTexture>(*m_context, gpuImage->pixels.data(), gpuImage->width, gpuImage->height, srgb);
+            if (uploads != nullptr) {
+                if (uploads->entries.size() >= 64) {
+                    // (Entries whose image or texture has gone are dead weight: drop them.)
+                    for (auto e = uploads->entries.begin(); e != uploads->entries.end();) {
+                        e = (e->second.image.expired() || e->second.texture.expired()) ? uploads->entries.erase(e) : std::next(e);
+                    }
+                }
+                uploads->entries[gpuImage.get()] = SlotUploads::Entry{gpuImage, texture, srgb};
+            }
+        }
     }
     switch (map) {
     case MaterialMap::BaseColor:
     case MaterialMap::Opacity:
-        // One baked image for both: the base colour with the cutout in its alpha.
+        // One baked image for both: the base color with the cutout in its alpha.
         m_slotTexture[idx(MaterialMap::BaseColor)] = texture;
         m_slotTexture[idx(MaterialMap::Opacity)] = texture;
         if (map == MaterialMap::Opacity) {

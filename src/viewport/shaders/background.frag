@@ -13,7 +13,7 @@
 // Pass:    the HDR scene pass, first draw (depth test/write off).
 // Inputs:  set 0.0 the camera UBO (exposure, rotation, the backdrop dials); set 1.0 the
 //          prefiltered environment cube (the scene's IBL set bound at index 1).
-// Outputs: location 0 -> colour attachment 0 (linear HDR, alpha 0); attachment 1 masked.
+// Outputs: location 0 -> color attachment 0 (linear HDR, alpha 0); attachment 1 masked.
 
 #extension GL_GOOGLE_include_directive : enable
 #include "camera_ubo.glsl" // cam + rotateY

@@ -18,6 +18,7 @@
 #include "helpwindow.h"
 #include "constants.h"
 #include "preferencesmanager.h"
+#include "selectionsettings.h"
 #include "installping.h"
 #include "updatecheck.h"
 #include "assetmanagerwidget.h"
@@ -139,6 +140,15 @@ int main(int argc, char *argv[]) {
     // related lives behind this facade (see src/viewport/). If Vulkan is unavailable it
     // degrades to an inline message rather than failing to launch.
     pose::ViewportWidget *viewport = new pose::ViewportWidget(mainSplitter);
+    // Preferences → Selection: the stored color and opacity of the selection outline and of the
+    // joint highlight. (An isolated scripted run starts from the defaults, in the viewport and on
+    // the page alike — its pictures are compared with references; nothing is written: see
+    // PreferencesManager::isolatedRun.)
+    if (PreferencesManager::isolatedRun()) {
+        SelectionSettings::restoreDefaults();
+    }
+    viewport->setSelectionOutline(SelectionSettings::outlineColor(), SelectionSettings::outlineDrawnOpacity());
+    viewport->setJointHighlight(SelectionSettings::jointColor(), SelectionSettings::jointDrawnOpacity());
 
     // Document state changes (save/open/new, dirty transitions) re-title the window — the
     // facade's signal is the only wiring point, per its contract.
@@ -195,15 +205,20 @@ int main(int argc, char *argv[]) {
     // --- 4. Execution ---
     mainWindow.show();
 
-    // Boot branding screen; dismisses itself on the user's next click anywhere
-    SplashOverlay *splash = new SplashOverlay(&mainWindow);
-    splash->show();
-    // The What's New window (see whatsnewdialog.h): on the first start of a new version, its
-    // release notes — raised once the splash is dismissed, so they are the first thing seen of
-    // the version and never sit under the branding. POSESTUDIO_WHATS_NEW=1 raises it at once.
-    QObject::connect(splash, &SplashOverlay::dismissed, &mainWindow, [&mainWindow]() {
-        WhatsNewDialog::showIfUpdated(&mainWindow);
-    });
+    // Boot branding screen; dismisses itself on the user's next click anywhere. A SCRIPTED RUN
+    // (POSESTUDIO_IK_SCRIPT) has none: nobody is there to dismiss it, and the press that
+    // dismisses it is CONSUMED — the first mouse press a script sent to a widget (`ui scrub`, an
+    // `app click`) went to the splash and did nothing.
+    if (!qEnvironmentVariableIsSet("POSESTUDIO_IK_SCRIPT")) {
+        SplashOverlay *splash = new SplashOverlay(&mainWindow);
+        splash->show();
+        // The What's New window (see whatsnewdialog.h): on the first start of a new version, its
+        // release notes — raised once the splash is dismissed, so they are the first thing seen of
+        // the version and never sit under the branding. POSESTUDIO_WHATS_NEW=1 raises it at once.
+        QObject::connect(splash, &SplashOverlay::dismissed, &mainWindow, [&mainWindow]() {
+            WhatsNewDialog::showIfUpdated(&mainWindow);
+        });
+    }
     if (qEnvironmentVariableIsSet("POSESTUDIO_WHATS_NEW")) {
         QTimer::singleShot(800, &mainWindow, [&mainWindow]() {
             WhatsNewDialog::showIfUpdated(&mainWindow);

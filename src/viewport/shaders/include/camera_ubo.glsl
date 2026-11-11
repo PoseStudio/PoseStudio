@@ -2,7 +2,7 @@
 // and the environment-rotation helper that goes with its params2.z dial.
 //
 // ONE declaration for every stage that binds the block. It mirrors Scene's CameraUbo (scene.cpp,
-// 528 bytes std140) member for member; a stage that needs only the view-projection still declares
+// 544 bytes std140) member for member; a stage that needs only the view-projection still declares
 // the whole block through this include — a partial-but-misordered subset (e.g. skipping `view`)
 // would put later fields at the wrong std140 offsets, and a full declaration costs nothing.
 //
@@ -22,11 +22,14 @@ layout(set = 0, binding = 0) uniform CameraUbo {
     vec4 ambient;
     vec4 params;  // x = shade mode, y = exposure, z = specularIntensity, w = ambientFill
     vec4 sh[9];   // environment diffuse irradiance: 9 SH coefficients (rgb in .xyz)
-    vec4 params2; // x = diffuseIntensity, y = keyIntensity, z = envRotation(rad), w = free
+    vec4 params2; // x = diffuseIntensity, y = keyIntensity, z = envRotation(rad),
+                  // w = the joint highlight color's luminance (what the tint divides by)
     vec4 params3; // x = subsurface, y = rimIntensity, z = backdrop mode (1 = environment,
                   // 2 = ground-projected dome), w = backdrop blur (prefiltered mips)
     vec4 params4; // x = backdrop brightness, y = dome radius (world units),
                   // z = shadow intensity (0..1), w = the wireframe overlay's linear grey
+    vec4 selection; // the SELECTED-JOINT highlight (Preferences -> Selection): rgb = its color,
+                    // LINEAR; a = its opacity at a full skin weight
 } cam;
 
 // Rotates a direction about the vertical (Y) axis — used to spin the lighting environment (its SH

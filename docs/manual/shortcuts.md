@@ -72,6 +72,14 @@ The keys work on the number row and on the numeric keypad. With NumLock off, the
 | Double-click a folder | Open the folder |
 | Drag a thumbnail | Reorder (in Favorites and Collections), or drop onto Favorites / a Collection in the tree |
 
+## Value fields (every tab)
+
+| Gesture | Action |
+| --- | --- |
+| Drag across a value | Scrub it, in whole steps |
+| Shift + drag across a value | Fine control: a tenth of the step, at a tenth of the speed |
+| Click a value | Type it; `Enter` confirms, `Esc` cancels |
+
 ## Environment tab
 
 | Gesture | Action |
@@ -84,7 +92,8 @@ The keys work on the number row and on the numeric keypad. With NumLock off, the
 
 | Gesture | Action |
 | --- | --- |
-| Drag across a dial | Scrub the selected joint's Bend, Side-Side or Twist |
+| Drag across a dial | Scrub the selected joint's Bend, Side-Side or Twist, in whole numbers |
+| Shift + drag across a dial | The same in tenths |
 | Click a dial | Type a value; `Enter` confirms, `Esc` cancels |
 | The small button beside a dial | Return that dial to 0, the rest pose |
 
@@ -95,8 +104,11 @@ The keys work on the number row and on the numeric keypad. With NumLock off, the
 | Click a surface in the viewport | Select the object and the material zone under the cursor |
 | Drag across a value | Scrub it (every matching zone with it, while **Edit matching zones together** is on) |
 | Click a value | Type it; `Enter` confirms, `Esc` cancels |
-| Click the Base Color swatch | Open the colour picker; `Cancel` puts the colour back |
+| Click the Base Color swatch | Open the color picker; `Cancel` puts the color back |
 | The small button beside a row | Return that value to what the file imported with |
+| **+ Add Overlay** | Add an empty overlay over the zone's skin, to make into a tattoo, a mark or makeup on its card (see [Overlays](materials.md#overlays-tattoos-marks-and-makeup)) |
+| Click a small square on an overlay's card | Choose that row's image — the picture on Base Color, the mask on Opacity, the Metallic map, a Bump, Normal or Displacement image; right-click to remove the image or open its folder |
+| Right-click an overlay's name | **Rename…** it (Enter keeps the new name, Esc drops it) |
 
 ## This manual
 

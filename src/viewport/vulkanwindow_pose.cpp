@@ -363,7 +363,7 @@ void VulkanWindow::setSelectedMaterial(const MaterialParams& params, bool linked
         return;
     }
     if (scene().selectedModelIndex() != m_materialEditModel) {
-        // The selection moved under an open bracket (a click while a colour dialog is up): the
+        // The selection moved under an open bracket (a click while a color dialog is up): the
         // first object's entry is committed and the edit goes on with the new selection.
         endMaterialEdit();
         if (!beginMaterialEdit()) {
@@ -371,6 +371,7 @@ void VulkanWindow::setSelectedMaterial(const MaterialParams& params, bool linked
         }
     }
     if (scene().setSelectedZoneMaterial(params, linked)) {
+        syncOverlayMetal(m_materialEditModel); // (a Metallic value moved under an overlay's baked metal)
         requestUpdate(); // the values ride the push block: the next frame shows them
     }
 }
@@ -412,6 +413,7 @@ void VulkanWindow::resetSelectedMaterial(bool linked, bool allZones) {
         return;
     }
     scene().resetZoneMaterials(allZones, linked);
+    syncOverlayMetal(m_materialEditModel);
     endMaterialEdit(); // registers no entry if nothing differed from the imported values
 }
 
@@ -689,8 +691,18 @@ int VulkanWindow::loadProjectFile(const QString& path,
         // The saved material edits, by zone key (a zone the re-imported file no longer has is
         // left out, as an unknown pose row would be).
         const int modelIndex = static_cast<int>(scene().modelCount()) - 1;
+        std::vector<std::pair<int, std::vector<MaterialOverlay>>> overlayStacks;
         for (const ProjectMaterial& m : fig.materials) {
             model->applyMaterialOverride(m.zone, m.params);
+            // … its overlays, painted once every slot below is in place (an overlay image that
+            // is gone is left out of the composite, with a warning in the log; the stack keeps it).
+            if (!m.params.overlays.empty()) {
+                for (std::size_t i = 0; i < model->meshCount(); ++i) {
+                    if (model->zoneKey(i) == m.zone) {
+                        overlayStacks.emplace_back(static_cast<int>(i), m.params.overlays);
+                    }
+                }
+            }
             // … and its texture slots: a replaced map decoded from its file (a file that is gone
             // leaves the import's own, with a warning in the log), a cleared one cleared.
             for (const ProjectTexture& t : m.textures) {
@@ -705,6 +717,7 @@ int VulkanWindow::loadProjectFile(const QString& path,
                 }
             }
         }
+        setModelOverlays(modelIndex, overlayStacks);
     }
 
     // 5. ENVIRONMENT — the saved dials + HDRI (a no-op path keeps the startup bake, as does a
@@ -778,6 +791,7 @@ void VulkanWindow::swapUndoEntry(std::vector<UndoEntry>& from, std::vector<UndoE
         counter.materials = scene().captureMaterials(entry.figure);
         applyMaterialTextures(entry.figure, entry.materials); // the slots first: the values keep the mesh's maps
         scene().applyMaterials(entry.figure, entry.materials);
+        syncOverlayMetal(entry.figure); // (the values just applied: an overlay's metal is baked for the zone's Metallic)
         scene().setSelectedModel(entry.figure);
     } else {
         counter.lighting = m_deferred.lighting; // the current dials

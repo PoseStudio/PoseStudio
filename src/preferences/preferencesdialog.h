@@ -8,6 +8,7 @@
 
 #include <QDialog>
 
+class QColor;
 class QListWidget;
 class QStackedWidget;
 class PreferencesPanel;
@@ -36,6 +37,12 @@ signals:
     /// Forwarded from AssetsPreferencesPanel when the user double-clicks a library row.
     /// The dialog closes itself right after, so the caller's navigation is actually visible.
     void navigateToLibraryRequested(const QString& path);
+
+    /// Forwarded from SelectionPreferencesPanel: the selection outline / the joint highlight as
+    /// it now stands (its color as shown, its opacity 0..1) — announced on every change, a
+    /// color being picked included, so the caller's viewport shows it at once.
+    void selectionOutlineChanged(const QColor& color, double opacity);
+    void jointHighlightChanged(const QColor& color, double opacity);
 
 private:
     /// Registers a panel as a tab: adds its label to the left nav and its page to the stack.

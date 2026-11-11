@@ -11,8 +11,14 @@
  *    instead — empty at rest, growing either way — with a hairline marking the origin.
  *  - Foreground: the current value, centered.
  *  - Press + horizontal drag scrubs the value (a full-width sweep covers the whole
- *    range). The cursor shows a left-right arrow whenever it hovers the box, so the
- *    scrubbability is discoverable before pressing.
+ *    range — or, for a box given a SCRUB SPAN, that much of it: a placement whose range
+ *    is wide and whose useful moves are small). The cursor shows a left-right arrow
+ *    whenever it hovers the box, so the scrubbability is discoverable before pressing.
+ *  - SHIFT + drag is the FINE scrub: a tenth of the travel and a tenth of the step — a
+ *    dial that scrubs in whole numbers is set to a tenth with Shift held. Shift may go
+ *    down or up in the middle of a scrub; the scrub carries on from where it is at the
+ *    other pace. A value off the regular grid (set fine, typed, or simply what the scene
+ *    has) is shown to the fine step's digits — 17.3 — and a value on it as ever — 17.
  *  - A plain click (press + release with no drag) opens inline type-in editing.
  *
  * Use this for any bounded scalar parameter row (properties panels, future material
@@ -68,6 +74,15 @@ public:
     /// and a scrub lands on origin + n * step, so the origin itself is always reachable (anchored
     /// at a fractional minimum the grid would step over it).
     void setOrigin(double origin);
+    /// How much of the value a full-width sweep of the box scrubs — the whole range until one
+    /// is set. For a value whose range is wide but whose useful moves are small (a placement:
+    /// anywhere on a map, set to a fraction of a percent): the scrub is as fine as the span
+    /// says, and a longer move is several sweeps, or typed. 0 or less = the whole range again.
+    void setScrubSpan(double span);
+    /// The step of the FINE scrub (Shift held) — a tenth of the single step until one is set.
+    /// 0 = no fine scrub: a whole COUNT (subdivision levels, repeats), where Shift scrubs as
+    /// usual and the value is shown to the box's own decimals alone.
+    void setFineStep(double step);
 
     double value() const { return m_value; }
     double minimum() const { return m_min; }
@@ -113,6 +128,8 @@ private:
     void cancelEdit(); // Esc: discard the typed text
     void abandonScrub(); // the release is lost: end the press/scrub as if it had arrived
     QString formattedValue() const;
+    double fineStep() const;   // the Shift scrub's step in effect (0 = none; see setFineStep)
+    int    shownDecimals() const; // the most digits a value is shown to: the box's own, or the fine step's
 
     double m_min = 0.0;
     double m_max = 1.0;
@@ -121,13 +138,16 @@ private:
     double m_value = 0.0;
     bool   m_hasOrigin = false; // see setOrigin: until set, the fill and the step grid start at m_min
     double m_origin = 0.0;
+    double m_scrubSpan = 0.0;   // see setScrubSpan: 0 = a full-width sweep covers the whole range
+    double m_fineStep = -1.0;   // see setFineStep: < 0 = a tenth of m_step, 0 = no fine scrub
 
-    // Scrub state. The drag is anchored: value = pressValue + (dx / width) * range, so
-    // overshooting a bound and dragging back retraces symmetrically.
+    // Scrub state. The drag is anchored: value = pressValue + (dx / width) * range (or the scrub
+    // span), so overshooting a bound and dragging back retraces symmetrically.
     bool    m_pressed = false;  // left button is down on us
     bool    m_dragging = false; // moved past the threshold: this press is a scrub, not a click
     QPointF m_pressPos;
     double  m_pressValue = 0.0;
+    bool    m_fineScrub = false; // the scrub's last move had Shift held (a change re-anchors it)
 
     bool       m_hovered = false;
     bool       m_editing = false;

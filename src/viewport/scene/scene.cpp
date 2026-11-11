@@ -312,7 +312,7 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
     // Update this frame's camera + lighting UBO (see fillCameraUbo for what feeds which mode).
     CameraUbo ubo{};
     fillCameraUbo(ubo, camera, m_lighting, spec, m_environmentSH, m_shadowPass->lightViewProj(),
-                  m_keyLightDir);
+                  m_keyLightDir, m_selectionStyle);
     std::memcpy(m_pipelines->cameraUboData(frameIndex), &ubo, sizeof(ubo));
     const VkDescriptorSet cameraSet = m_pipelines->cameraSet(frameIndex);
     const VkDescriptorSet iblSet = m_pipelines->iblSet();
@@ -400,8 +400,8 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
                                   draw.model->highlightBone(), draw.model->selectedHighlightTwin());
             }
         } else if (spec.fill == FillKind::HiddenLine) {
-            // Depth only (colour writes masked): the surface hides what's behind it and shows the
-            // viewport's clear colour; the wire pass then draws only the edges facing the camera.
+            // Depth only (color writes masked): the surface hides what's behind it and shows the
+            // viewport's clear color; the wire pass then draws only the edges facing the camera.
             const VulkanPipeline& hiddenLine = m_pipelines->hiddenLine();
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, hiddenLine.handle());
             for (const std::unique_ptr<Model>& model : m_models) {

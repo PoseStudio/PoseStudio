@@ -8,7 +8,7 @@ A project file (`.pss`) saves the whole scene — every figure with its pose and
 - **File → Save As…** (`Ctrl+Shift+S`) picks a new `.pss` location and becomes the project's file from then on. The dialog opens in the folder you used last time; `.pss` is added to the name if you leave it off.
 - **File → Open** (`Ctrl+O`) loads a `.pss` project. Everything currently in the scene is replaced by the project's content.
 
-A save is tiny — kilobytes, not megabytes: the file stores references and numbers, never geometry or textures. Opening a project re-imports the figure files it names through the normal import pipeline and restores their poses, transforms, [material edits](materials.md) (the zones whose material differs from the import, by zone name — every value, and each texture slot that was replaced by a file or cleared; a replaced map is referenced by its path, like the figure file itself), the environment (HDRI and every lighting dial) and the camera framing on top.
+A save is tiny — kilobytes, not megabytes: the file stores references and numbers, never geometry or textures. Opening a project re-imports the figure files it names through the normal import pipeline and restores their poses, transforms, [material edits](materials.md) (the zones whose material differs from the import, by zone name — every value, and each texture slot that was replaced by a file or cleared, and each zone's [overlays](materials.md#overlays-tattoos-marks-and-makeup) with their controls; a replaced map and an overlay image are referenced by their paths, like the figure file itself), the environment (HDRI and every lighting dial) and the camera framing on top.
 
 ## If a figure file has moved
 

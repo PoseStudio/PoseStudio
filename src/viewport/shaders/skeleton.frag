@@ -1,6 +1,6 @@
 #version 450
 
-// Flat-colour fragment shader for the skeleton posing overlay.
+// Flat-color fragment shader for the skeleton posing overlay.
 
 layout(location = 0) in vec3 vColor;
 

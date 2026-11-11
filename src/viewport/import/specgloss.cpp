@@ -24,7 +24,7 @@ float solveMetallic(float diffuseBrightness, float specularBrightness, float one
         return 0.0f;
     }
     // A metallic-roughness material's specular is mix(0.04, base, m) and its diffuse base × (1 − m):
-    // with the source's diffuse and specular given, m solves a quadratic in which the base colour
+    // with the source's diffuse and specular given, m solves a quadratic in which the base color
     // has been eliminated (the Khronos glTF sample's derivation).
     const float a = kDielectricSpecular;
     const float b = diffuseBrightness * oneMinusSpecularStrength / (1.0f - kDielectricSpecular) + specularBrightness -

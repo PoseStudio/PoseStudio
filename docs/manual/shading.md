@@ -37,11 +37,11 @@ These show one component of the material or the lighting, for checking content r
 
 | Mode | What you see |
 | --- | --- |
-| **Albedo** | The diffuse colour maps, unlit. |
+| **Albedo** | The diffuse color maps, unlit. |
 | **Ambient Occlusion** | The baked ambient occlusion as grey. |
 | **Roughness Map** | The materials' roughness as grey: black is glossy, white is matte. |
 | **Specular Only** | Only the specular reflections of the PBR mode. |
-| **Normals** | Surface normals as colour. |
+| **Normals** | Surface normals as color. |
 | **UV Checker** | A checker pattern mapped through the models' texture coordinates. |
 
 ## The selection outline
@@ -54,4 +54,4 @@ The selected model wears a blue outline. It is drawn around the object's whole s
 
 ## Anti-aliasing and the picture
 
-The viewport renders with multisample anti-aliasing (4× where the graphics card supports it) and in high dynamic range; the PBR mode's picture goes through subsurface scattering for skin, bloom for the brightest highlights and the ACES filmic tone mapper before it reaches the screen. The other modes skip that chain and show their colours directly. Rendering happens only when something changes, so an idle PoseStudio uses no graphics power.
+The viewport renders with multisample anti-aliasing (4× where the graphics card supports it) and in high dynamic range; the PBR mode's picture goes through subsurface scattering for skin, bloom for the brightest highlights and the ACES filmic tone mapper before it reaches the screen. The other modes skip that chain and show their colors directly. Rendering happens only when something changes, so an idle PoseStudio uses no graphics power.

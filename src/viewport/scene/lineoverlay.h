@@ -34,7 +34,7 @@ class Model;
 class VulkanContext;
 class VulkanPipeline;
 
-/// A vertex of the line overlay: a world-space point + its colour. Must match skeleton.vert.
+/// A vertex of the line overlay: a world-space point + its color. Must match skeleton.vert.
 struct LineVertex {
     glm::vec3 pos;
     glm::vec3 color;

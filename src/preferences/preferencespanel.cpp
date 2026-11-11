@@ -39,6 +39,12 @@ void PreferencesPanel::addPlaceholder(const QString& message) {
     m_contentLayout->addWidget(label);
 }
 
+QLabel* PreferencesPanel::rowLabel(const QString& text) {
+    auto* label = new QLabel(text, this);
+    label->setObjectName(QStringLiteral("PreferencesRowLabel"));
+    return label;
+}
+
 QLabel* PreferencesPanel::addDescription(const QString& text) {
     auto* label = new QLabel(text, this);
     label->setObjectName(QStringLiteral("PreferencesDescription"));

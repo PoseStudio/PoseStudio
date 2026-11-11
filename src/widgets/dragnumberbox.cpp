@@ -28,6 +28,10 @@ constexpr double kDragThresholdPx = 3.0;
 
 // Corner radius matching the app's input fields (spin boxes, HDRI button: 4px).
 constexpr double kCornerRadius = 4.0;
+
+// The FINE scrub (Shift held): this share of the regular travel per pixel, and — unless the box
+// names its own fine step — of the regular step.
+constexpr double kFineScrubShare = 0.1;
 } // namespace
 
 DragNumberBox::DragNumberBox(QWidget* parent) : QWidget(parent) {
@@ -60,6 +64,29 @@ void DragNumberBox::setOrigin(double origin) {
     update();
 }
 
+void DragNumberBox::setScrubSpan(double span) {
+    m_scrubSpan = std::max(0.0, span);
+}
+
+void DragNumberBox::setFineStep(double step) {
+    m_fineStep = std::max(0.0, step);
+    update();
+}
+
+double DragNumberBox::fineStep() const {
+    return m_fineStep < 0.0 ? m_step * kFineScrubShare : m_fineStep;
+}
+
+int DragNumberBox::shownDecimals() const {
+    // The digits the fine step needs (0.1 -> 1, 0.5 -> 1, 0.05 -> 2), never fewer than the box's own.
+    const double fine = fineStep();
+    if (fine <= 0.0) {
+        return m_decimals;
+    }
+    const int fineDigits = static_cast<int>(std::ceil(-std::log10(fine) - 1e-9));
+    return std::max(m_decimals, std::clamp(fineDigits, 0, 6));
+}
+
 void DragNumberBox::setValue(double value) {
     const double clamped = std::clamp(value, m_min, m_max);
     // Half-a-step epsilon-of-step comparisons would fight typed precision; compare against a
@@ -81,7 +108,19 @@ QSize DragNumberBox::minimumSizeHint() const {
 }
 
 QString DragNumberBox::formattedValue() const {
-    QString text = QString::number(m_value, 'f', m_decimals);
+    // To the fine step's digits where the value HAS them — 17.3 — and to the box's own decimals
+    // where it does not — 17, 1.00: the zeros past those are dropped.
+    const int digits = shownDecimals();
+    QString   text = QString::number(m_value, 'f', digits);
+    if (digits > m_decimals) {
+        const int keep = static_cast<int>(text.indexOf(QLatin1Char('.'))) + 1 + m_decimals;
+        while (text.size() > keep && text.endsWith(QLatin1Char('0'))) {
+            text.chop(1);
+        }
+        if (text.endsWith(QLatin1Char('.'))) {
+            text.chop(1);
+        }
+    }
     if (text.startsWith(QLatin1Char('-')) && text.toDouble() == 0.0) {
         text.remove(0, 1); // a small negative that rounds to zero reads "0", not "-0"
     }
@@ -145,6 +184,7 @@ void DragNumberBox::mousePressEvent(QMouseEvent* event) {
     m_dragging = false;
     m_pressPos = event->position();
     m_pressValue = m_value;
+    m_fineScrub = false;
     event->accept();
 }
 
@@ -152,6 +192,14 @@ void DragNumberBox::mouseMoveEvent(QMouseEvent* event) {
     if (!m_pressed) {
         QWidget::mouseMoveEvent(event);
         return;
+    }
+    // SHIFT = the fine scrub. Shift going down or up in the MIDDLE of a scrub re-anchors it:
+    // the scrub carries on from the value and the place it is at, at the other pace (anchored
+    // at the press, the value would jump by the travel so far times the change of pace).
+    const bool fine = fineStep() > 0.0 && event->modifiers().testFlag(Qt::ShiftModifier);
+    if (m_dragging && fine != m_fineScrub) {
+        m_pressPos = event->position();
+        m_pressValue = m_value;
     }
     const double dx = event->position().x() - m_pressPos.x();
     if (!m_dragging && std::abs(dx) < kDragThresholdPx) {
@@ -161,13 +209,17 @@ void DragNumberBox::mouseMoveEvent(QMouseEvent* event) {
         m_dragging = true;
         emit editingStarted(); // before the first scrub value lands, so listeners see pre-edit state
     }
+    m_fineScrub = fine;
 
-    // Anchored scrub: a full-widget-width sweep covers the whole range, snapped to the step
-    // so the readout lands on the same values the old slider/spin pair produced.
-    const double range = m_max - m_min;
+    // Anchored scrub: a full-widget-width sweep covers the whole range (or the scrub span, for a
+    // box given one) — a tenth of that with Shift held — snapped to the step (the fine step with
+    // Shift), so a regular scrub lands on the same values the old slider/spin pair produced
+    // whatever the value it began from.
+    const double step = fine ? fineStep() : m_step;
+    const double range = ((m_scrubSpan > 0.0) ? m_scrubSpan : (m_max - m_min)) * (fine ? kFineScrubShare : 1.0);
     const double raw = m_pressValue + (dx / std::max(1, width())) * range;
     const double anchor = m_hasOrigin ? m_origin : m_min; // the step grid's anchor (see setOrigin)
-    const double snapped = anchor + std::round((raw - anchor) / m_step) * m_step;
+    const double snapped = anchor + std::round((raw - anchor) / step) * step;
     setValue(snapped);
     event->accept();
 }
@@ -280,7 +332,7 @@ void DragNumberBox::beginEdit() {
     }
     // Self-contained styling (the widget must look right in any container, styled or not):
     // same surface and text as the painted box, the hover-accent border to signal edit mode.
-    // Built from the colour properties on every edit — not hard-coded — so a QSS re-theme
+    // Built from the color properties on every edit — not hard-coded — so a QSS re-theme
     // (qproperty-backgroundColor etc.) restyles the editor along with the painted look.
     m_editor->setStyleSheet(QStringLiteral(
                                 "#DragNumberBoxEditor {"

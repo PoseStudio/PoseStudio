@@ -87,6 +87,7 @@ void TransformPanel::buildUi() {
             row.box->setOrigin(100.0); // (as imported)
         }
         row.box->setToolTip(figureTips[static_cast<std::size_t>(i)]);
+        row.box->setProperty("testId", QStringLiteral("transform.figure")); // (the scripted test's `ui`: row i)
         connect(row.box, &DragNumberBox::editingStarted, this, [this]() {
             if (m_viewport) {
                 m_viewport->beginJointTransformEdit();
@@ -157,6 +158,7 @@ void TransformPanel::buildUi() {
         row.box->setSingleStep(1.0);
         row.box->setDecimals(0);
         row.box->setToolTip(tips[static_cast<std::size_t>(i)]);
+        row.box->setProperty("testId", QStringLiteral("transform.dial")); // (the scripted test's `ui`: 0 Bend, 1 Side-Side, 2 Twist)
         // One undo entry per completed gesture (a scrub or a type-in), not one per value it
         // passes through: the box brackets the user's changes with these two signals.
         connect(row.box, &DragNumberBox::editingStarted, this, [this]() {

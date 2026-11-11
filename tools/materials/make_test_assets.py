@@ -11,9 +11,13 @@ Writes into the folder given as argv[1]:
                      must match: a gold metal + a red plastic)
   pbr_cube.obj/.mtl  an OBJ whose MTL uses the PBR extension (Pr / Pm) on one material and the
                      classic Ks / Ns on another, plus a map_Pm on a third
-  tex_red.png        a flat red colour map, tex_mask.png a black / white checker cutout, and
+  tex_red.png        a flat red color map, tex_mask.png a black / white checker cutout, and
   tex_rough.png      a left-to-right roughness ramp — the Materials tab's texture slots
                      (tools/ikscripts/materials/textures.txt)
+  overlay_dots.png   THE OVERLAYS' images (tools/ikscripts/materials/overlays.txt): dark blue discs
+  overlay_mask.png   on transparency, a white makeup mask (diagonal bands in its alpha), and an
+  overlay_bump.png   opaque height and an opaque normal map of domes — each a pattern over the
+  overlay_normal.png whole UV square, so it shows on any zone of any figure
   ext_cube.gltf      the KHR material extensions (emissive strength, ior, specular, clearcoat,
                      sheen, iridescence, anisotropy, transmission + volume, texture transform)
                      on two materials — the wider material's import (materials/ext_cube.txt)
@@ -182,7 +186,7 @@ for f in range(6):
 open(os.path.join(out, "pbr_cube.obj"), "w").write("\n".join(obj) + "\n")
 
 # --- Loose textures for the Materials tab's texture slots (tools/ikscripts/materials/textures.txt):
-# a flat red colour map, a black / white checker cutout, and a left-to-right roughness ramp.
+# a flat red color map, a black / white checker cutout, and a left-to-right roughness ramp.
 size = 32
 red_rows = [[200, 40, 40, 255] * size for _ in range(size)]
 checker_rows = [sum(([255, 255, 255, 255] if ((x // 8) + (y // 8)) % 2 == 0 else [0, 0, 0, 255] for x in range(size)), [])
@@ -191,6 +195,46 @@ ramp_rows = [sum(([int(255 * x / (size - 1))] * 3 + [255] for x in range(size)),
 open(os.path.join(out, "tex_red.png"), "wb").write(png(size, size, red_rows))
 open(os.path.join(out, "tex_mask.png"), "wb").write(png(size, size, checker_rows))
 open(os.path.join(out, "tex_rough.png"), "wb").write(png(size, size, ramp_rows))
+
+# --- Overlays (tools/ikscripts/materials/overlays.txt): images layered over a zone's maps. Each is
+# a pattern over the WHOLE UV square, so it shows on any zone of any figure whatever its layout,
+# and 512 square — smaller than a figure's maps, so the size mapping is exercised too.
+#   overlay_dots.png    a transparent image with dark blue discs on a grid (the "ink")
+#   overlay_mask.png    a WHITE image whose alpha is diagonal bands (a makeup mask: takes a tint)
+#   overlay_bump.png    an opaque mid-grey height with a raised dome per grid cell
+#   overlay_normal.png  an opaque flat normal map with the same domes as normals
+osize, period, radius = 512, 64, 18.0
+def disc(x, y, offset):
+    """Distance from (x, y) to the nearest grid cell centre (the grid shifted by `offset`), in texels."""
+    dx = ((x - offset) % period) - period / 2
+    dy = ((y - offset) % period) - period / 2
+    return math.hypot(dx, dy), dx, dy
+dots, mask, bump, normal = [], [], [], []
+for y in range(osize):
+    drow, mrow, brow, nrow = [], [], [], []
+    for x in range(osize):
+        d, _, _ = disc(x, y, 0)
+        a = max(0.0, min(1.0, radius - d))                      # a one-texel feathered edge
+        drow += [20, 40, 160, int(255 * a + 0.5)]
+        band = ((x + y) % 96) / 96.0                            # diagonal bands, a third of them painted
+        ma = max(0.0, min(1.0, (0.33 - abs(band - 0.5)) * 24.0))
+        mrow += [255, 255, 255, int(255 * ma + 0.5)]
+        d2, dx, dy = disc(x, y, period // 2)                    # the relief sits BETWEEN the dots
+        t = min(1.0, d2 / (radius * 1.2))
+        dome = math.sqrt(max(0.0, 1.0 - t * t))                 # a hemisphere's height, 0 at its edge
+        h = 128 + int(127 * dome) if t < 1.0 else 128
+        brow += [h, h, h, 255]
+        if t < 1.0:
+            nx, ny = dx / (radius * 1.2), dy / (radius * 1.2)   # the hemisphere's normal
+            nz = math.sqrt(max(0.0, 1.0 - nx * nx - ny * ny))
+            nrow += [int(127.5 + 127.5 * nx), int(127.5 + 127.5 * ny), int(127.5 + 127.5 * nz), 255]
+        else:
+            nrow += [128, 128, 255, 255]
+    dots.append(drow); mask.append(mrow); bump.append(brow); normal.append(nrow)
+open(os.path.join(out, "overlay_dots.png"), "wb").write(png(osize, osize, dots))
+open(os.path.join(out, "overlay_mask.png"), "wb").write(png(osize, osize, mask))
+open(os.path.join(out, "overlay_bump.png"), "wb").write(png(osize, osize, bump))
+open(os.path.join(out, "overlay_normal.png"), "wb").write(png(osize, osize, normal))
 
 # ext_cube: the KHR material extensions the glTF reader fills the wider material from — a glowing,
 # coated, sheened, iridescent, anisotropic dielectric with a specular tint (Glow), and a tinted

@@ -3,9 +3,9 @@
  * @brief Styling for the User Manual window (src/help/helpwindow.cpp): the toolbar with its
  *        back / forward buttons and search field, the contents tree and the page browser.
  *
- * The PAGE's own typography (heading colours, links, code, tables) is not QSS — a Markdown
+ * The PAGE's own typography (heading colors, links, code, tables) is not QSS — a Markdown
  * document carries its formats itself, and HelpManual::render sets them (helpmanual.cpp);
- * only the browser's body text colour, background and font come from here.
+ * only the browser's body text color, background and font come from here.
  */
 
 /* =========================================================================

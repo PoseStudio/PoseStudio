@@ -1,0 +1,396 @@
+# THE OVERLAYS (2026-11-11): images layered over a zone's maps — tattoos, bruises, freckles, makeup —
+# driven on the base figure the way the Materials tab's Overlays section drives them:
+#   POSESTUDIO_TEST_FIGURE=<figure> tools/ikscripts/run.sh tools/ikscripts/materials/overlays.txt <out> POSESTUDIO_IK_SCRIPT_ASSETS=<assets>
+# (the overlay_*.png patterns from tools/materials/make_test_assets.py: each covers the whole UV
+# square, so it shows on any zone). `overlay add [image]` puts an overlay on top of the selected
+# zone's stack — EMPTY, as the tab's + Add Overlay does, or with its picture — `overlay <n> <field>
+# <value>` sets a control in the tab's units (<n> from 0, the lowest layer), `overlay <n> tint r g b`
+# its Base Color, `overlay <n> map <color|opacity|metallic|bump|normal|displacement> <image|none>`
+# an image (`map opacity` is the Opacity row's map: the overlay's MASK), `overlay <n> name <text>`
+# its name, `overlay move <n> <to>`, `overlay remove <n>`; `overlays` counts the zone's stack,
+# `overlay.<n>.<field>` reads a control, `overlay.<n>.has.<element>` an image,
+# `overlay.<n>.named.<name>` its name (a space written _), `overlayzones` the
+# zones the stack is painted on; `metalbaked` the Metallic value (percent) the zone's bound
+# metalness was baked for under a metallic overlay, -1 when there is none. Every edit is one undo
+# entry; the stack rides the project file.
+# An overlay's PLACE is four of its fields, each acting on every image of the overlay together:
+# `offsetx` / `offsety` in percent of the map (+x to the right, +y up), `rotation` in degrees
+# (+ clockwise on the map) and `scale` in percent of the painted size, both about the overlay's
+# own centre.
+# The shots are what to LOOK at: dots in the skin (moved half a grid cell; turned and enlarged), a
+# tinted glossy band over them, domes in relief.
+view front
+click chest
+expect zonename.Torso == 1
+expect overlays == 0
+closeup chest 0.55
+shot 00_plain
+
+# One overlay, as it arrives: named "Overlay 1", Multiply at full opacity, on, its picture alone.
+overlay add overlay_dots.png
+expect overlays == 1
+expect overlay.0.named.overlay_1 == 1
+expect overlay.0.enabled == 1
+expect overlay.0.blend == 0
+expect overlay.0.opacity == 100
+expect overlay.0.gamma == 1
+expect overlay.0.has.color == 1
+expect overlay.0.has.bump == 0
+expect dirty == 1
+shot 01_dots_multiplied
+
+# Its controls: each one undoable edit.
+overlay 0 blend normal
+expect overlay.0.blend == 1
+overlay 0 opacity 60
+overlay 0 hue 120
+overlay 0 saturation 50
+overlay 0 brightness 20
+overlay 0 contrast -25
+overlay 0 gamma 1.5
+expect overlay.0.opacity == 60
+expect overlay.0.hue == 120
+expect overlay.0.saturation == 50
+expect overlay.0.brightness == 20
+expect overlay.0.contrast == -25
+expect overlay.0.gamma == 1.5
+shot 02_dots_adjusted
+undo
+expect overlay.0.gamma == 1
+undo
+undo
+undo
+undo
+expect overlay.0.hue == 0
+expect overlay.0.opacity == 60
+undo
+undo
+expect overlay.0.blend == 0
+expect overlay.0.opacity == 100
+expect overlays == 1
+
+# Its PLACE: moved across the map from where it was painted (the dots' grid is an eighth of the
+# map, so 6.25 percent stands them half a cell over, each way) — and back, an undo at a time.
+expect overlay.0.offsetx == 0
+expect overlay.0.offsety == 0
+overlay 0 offsetx 6.25
+overlay 0 offsety -6.25
+expect overlay.0.offsetx == 6.25
+expect overlay.0.offsety == -6.25
+shot 02b_dots_moved
+overlay 0 offsetx 500
+expect overlay.0.offsetx == 100
+undo
+undo
+expect overlay.0.offsety == 0
+expect overlay.0.offsetx == 6.25
+undo
+expect overlay.0.offsetx == 0
+
+# TURNED and SCALED about its own centre (the dots cover the whole square, so that is the middle of
+# the map): the grid stands on its corner, half as large again — clamped at half a turn and at a
+# tenth of the size — and back, an undo at a time.
+expect overlay.0.rotation == 0
+expect overlay.0.scale == 100
+overlay 0 rotation 45
+overlay 0 scale 150
+expect overlay.0.rotation == 45
+expect overlay.0.scale == 150
+shot 02c_dots_turned_scaled
+overlay 0 rotation 500
+expect overlay.0.rotation == 180
+overlay 0 scale 1
+expect overlay.0.scale == 10
+undo
+undo
+undo
+expect overlay.0.scale == 100
+expect overlay.0.rotation == 45
+undo
+expect overlay.0.rotation == 0
+
+# METALLIC: the dots turned to metal. The zone's own Metallic value stays 0 — the metal is the
+# overlay's, painted on the zone's absolute metalness (`metalbaked`) — then only where a metallic
+# map lets it; and the zone's Metallic moved under it re-bakes the map for the new value.
+expect metalbaked == -1
+overlay 0 metallic 100
+expect overlay.0.metallic == 100
+expect mat.metallic == 0
+expect metalbaked == 0
+shot 02d_dots_metallic
+overlay 0 map metallic overlay_mask.png
+expect overlay.0.has.metallic == 1
+shot 02e_dots_metallic_in_bands
+material metallic 50
+expect mat.metallic == 50
+expect metalbaked == 50
+undo
+expect mat.metallic == 0
+expect metalbaked == 0
+undo
+undo
+expect overlay.0.metallic == 0
+expect overlay.0.has.metallic == 0
+expect metalbaked == -1
+
+# A second overlay on top, made as the tab makes one: added EMPTY (it paints nothing, and is
+# "Overlay 2"), then given a Base Color and an OPACITY MAP — the overlay's mask — and no picture:
+# makeup. It covers (Normal) and is glossy where the map is.
+overlay add
+expect overlays == 2
+expect overlay.1.named.overlay_2 == 1
+expect overlay.1.has.color == 0
+expect overlay.1.has.opacity == 0
+expect overlay.1.opacity == 100
+overlay 1 map opacity overlay_mask.png
+overlay 1 blend normal
+overlay 1 tint 0.75 0.125 0.25
+overlay 1 gloss 80
+expect overlay.1.has.opacity == 1
+expect overlay.1.has.color == 0
+expect overlay.1.tint.r == 0.75
+expect overlay.1.tint.g == 0.125
+expect overlay.1.gloss == 80
+shot 03_mask_over_dots
+
+# The order decides: the mask moved under the dots (each keeps its name), then switched off.
+overlay move 1 0
+expect overlay.0.gloss == 80
+expect overlay.1.gloss == 0
+expect overlay.0.named.overlay_2 == 1
+expect overlay.1.named.overlay_1 == 1
+shot 04_mask_under_dots
+overlay 0 enabled 0
+expect overlay.0.enabled == 0
+expect overlay.0.gloss == 80
+shot 05_mask_off
+
+# Relief: a third overlay with no color of its own — a bump image, then a normal image beside it.
+overlay add overlay_dots.png
+overlay 2 map bump overlay_bump.png
+overlay 2 map color none
+expect overlay.2.has.color == 0
+expect overlay.2.has.bump == 1
+overlay 2 bumpstrength 300
+expect overlay.2.bumpstrength == 300
+shot 06_bump_domes
+overlay 2 bumpstrength -300
+shot 07_bump_inverted
+# THE RELIEF IS ITS OWN: with an opacity map of bands and the Opacity at 0, the domes are what
+# they were (this shot is 07 again) — the Opacity and its map are the color's, the gloss's and
+# the metal's.
+overlay 2 map opacity overlay_mask.png
+overlay 2 opacity 0
+expect overlay.2.has.opacity == 1
+shot 07b_bump_ignores_opacity
+overlay 2 opacity 100
+overlay 2 map opacity none
+expect overlay.2.has.opacity == 0
+overlay 2 map bump none
+overlay 2 map normal overlay_normal.png
+overlay 2 normalstrength 200
+expect overlay.2.has.normal == 1
+expect overlay.2.has.bump == 0
+shot 08_normal_domes
+overlay 2 map displacement overlay_bump.png
+overlay 2 displacementstrength 150
+expect overlay.2.has.displacement == 1
+expect overlay.2.displacementstrength == 150
+overlay remove 2
+expect overlays == 2
+undo
+expect overlays == 3
+expect overlay.2.has.normal == 1
+redo
+expect overlays == 2
+undo
+expect overlays == 3
+expect overlay.2.displacementstrength == 150
+undo
+undo
+undo
+undo
+undo
+undo
+undo
+undo
+undo
+undo
+undo
+undo
+undo
+undo
+expect overlays == 2
+
+# The stack through a project: saved, the scene emptied, opened — the overlays painted again,
+# the moved one where it was moved to.
+overlay 0 enabled 1
+overlay 1 offsetx 6.25
+overlay 1 rotation 30
+overlay 1 scale 80
+overlay 1 metallic 40
+saveproject overlays.pss
+new
+expect figures == 0
+openproject overlays.pss
+click chest
+expect zonename.Torso == 1
+expect overlays == 2
+expect overlay.0.gloss == 80
+expect overlay.0.tint.r == 0.75
+expect overlay.0.blend == 1
+expect overlay.1.has.color == 1
+expect overlay.0.has.opacity == 1
+expect overlay.0.has.color == 0
+expect overlay.0.named.overlay_2 == 1
+expect overlay.1.named.overlay_1 == 1
+expect overlay.1.offsetx == 6.25
+expect overlay.1.rotation == 30
+expect overlay.1.scale == 80
+expect overlay.1.metallic == 40
+expect overlay.0.metallic == 0
+expect metalbaked == 0
+expect overlay.0.offsetx == 0
+expect overlay.0.rotation == 0
+expect overlay.0.scale == 100
+expect dirty == 0
+closeup chest 0.55
+shot 09_after_project
+
+# THE CARDS THEMSELVES: the `ui` command drives the section's own widgets in-process (the n-th
+# widget carrying a testId; a card's n is its overlay's) — each control is wired to ITS overlay,
+# the arrows move the way they point (the top of the stack is the highest overlay), the restore
+# buttons go back to the defaults, and the cards follow an undo.
+expect uicount.overlay.remove == 2
+# + Add Overlay asks for no file: an empty overlay on top, its card with it — and removed again.
+ui click overlay.add
+expect overlays == 3
+expect uicount.overlay.remove == 3
+expect overlay.2.has.color == 0
+expect overlay.2.has.opacity == 0
+expect overlay.2.named.overlay_3 == 1
+expect uienabled.overlay.offsetx.2 == 0
+expect uienabled.overlay.opacity.2 == 1
+ui click overlay.remove 2
+expect overlays == 2
+expect uicount.overlay.remove == 2
+# NAMES: the header's Rename… opens an editor in place (`ui call` runs what the menu entry runs).
+# Enter keeps the text — one undo entry, nothing re-painted — and Esc drops it.
+expect uicount.overlay.name == 0
+ui call overlay.stack 0 beginRename 1
+expect uicount.overlay.name == 1
+ui type overlay.name 0 Blue dots
+ui key overlay.name 0 enter
+expect uicount.overlay.name == 0
+expect overlay.1.named.blue_dots == 1
+expect overlay.0.named.overlay_2 == 1
+ui call overlay.stack 0 beginRename 0
+ui type overlay.name 0 Not this
+ui key overlay.name 0 esc
+expect uicount.overlay.name == 0
+expect overlay.0.named.overlay_2 == 1
+undo
+expect overlay.1.named.overlay_1 == 1
+expect uivalue.overlay.gloss.0 == 80
+expect uivalue.overlay.blend.0 == 1
+expect uivalue.overlay.enabled.1 == 1
+expect uivalue.overlay.offsetx.1 == 6.25
+expect uienabled.overlay.offsety.0 == 1
+ui set overlay.offsety 1 -12.5
+expect overlay.1.offsety == -12.5
+expect overlay.1.offsetx == 6.25
+expect overlay.0.offsety == 0
+ui click overlay.restore.offsety 1
+expect overlay.1.offsety == 0
+ui click overlay.restore.offsetx 1
+expect overlay.1.offsetx == 0
+expect uivalue.overlay.rotation.1 == 30
+expect uivalue.overlay.scale.1 == 80
+expect uivalue.overlay.metallic.1 == 40
+ui set overlay.metallic 0 -25
+expect overlay.0.metallic == -25
+expect overlay.1.metallic == 40
+ui click overlay.restore.metallic 0
+ui click overlay.restore.metallic 1
+expect overlay.0.metallic == 0
+expect overlay.1.metallic == 0
+expect metalbaked == -1
+ui set overlay.rotation 1 -45
+expect overlay.1.rotation == -45
+expect overlay.0.rotation == 0
+ui click overlay.restore.rotation 1
+expect overlay.1.rotation == 0
+ui set overlay.scale 0 120
+expect overlay.0.scale == 120
+expect overlay.1.scale == 80
+ui click overlay.restore.scale 0
+ui click overlay.restore.scale 1
+expect overlay.0.scale == 100
+expect overlay.1.scale == 100
+ui set overlay.opacity 1 40
+expect overlay.1.opacity == 40
+expect overlay.0.opacity == 100
+ui click overlay.restore.opacity 1
+expect overlay.1.opacity == 100
+ui check overlay.enabled 0 0
+expect overlay.0.enabled == 0
+expect overlay.1.enabled == 1
+ui check overlay.enabled 0 1
+expect overlay.0.enabled == 1
+ui pick overlay.blend 1 4
+expect overlay.1.blend == 4
+ui click overlay.restore.blend 1
+expect overlay.1.blend == 0
+ui set overlay.hue 1 -90
+ui click overlay.restore.basecolor 0
+expect overlay.1.hue == -90
+expect overlay.0.tint.g == 1
+undo
+undo
+expect overlay.0.tint.g == 0.125
+expect overlay.1.hue == 0
+expect uienabled.overlay.up.1 == 0
+expect uienabled.overlay.down.1 == 1
+expect uienabled.overlay.down.0 == 0
+ui click overlay.down 1
+expect overlay.0.gloss == 0
+expect overlay.1.gloss == 80
+ui click overlay.down 1
+expect overlay.0.gloss == 80
+ui click overlay.remove 1
+expect overlays == 1
+expect uicount.overlay.remove == 1
+expect overlay.0.gloss == 80
+undo
+expect overlays == 2
+expect uicount.overlay.remove == 2
+expect uivalue.overlay.opacity.1 == 100
+
+# An overlay belongs to the MAP: one added on the face is on the lips and the ears too (they are
+# painted on the face's color map), and removing it there removes it everywhere.
+closeup head 0.2
+click head 0 30
+zone Face
+expect zonename.Face == 1
+expect overlayzones >= 2
+overlay add overlay_dots.png
+expect overlays == 1
+zone Lips
+expect overlays == 1
+overlay 0 opacity 50
+zone Face
+expect overlay.0.opacity == 50
+shot 10_face_and_lips
+overlay remove 0
+expect overlays == 0
+zone Lips
+expect overlays == 0
+
+# The torso's stack is its own: untouched by the face's, and cleared one by one.
+click chest
+expect overlays == 2
+overlay remove 1
+overlay remove 0
+expect overlays == 0
+closeup chest 0.55
+shot 11_cleared

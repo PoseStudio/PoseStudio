@@ -270,6 +270,15 @@ ViewportStrip::ViewportStrip(QWidget* owner)
     connect(m_skeletonButton, &QPushButton::toggled, this, &ViewportStrip::skeletonToggled);
     row->addWidget(m_skeletonButton);
 
+    // The Selection button: straight to Preferences → Selection, where the selection outline and
+    // the joint highlight are switched on and off and given their color and opacity.
+    m_selectionButton = makeIconButton(this, QStringLiteral("ViewportSelectionButton"),
+                                       QStringLiteral(":/resources/icons/selection.png"),
+                                       tr("Selection outline and joint highlight settings"), fieldHeight, false);
+    m_selectionButton->setProperty("testId", QStringLiteral("viewport.selection")); // (the scripted test's `ui click`)
+    connect(m_selectionButton, &QPushButton::clicked, this, &ViewportStrip::selectionSettingsClicked);
+    row->addWidget(m_selectionButton);
+
     // The joint-mode badge, under the strip's right end (below the Skeleton button): visible
     // only while the joint mouse mode is on (B / S / T with a joint selected: setJointModeBadge).
     m_modeBadge = new JointModeBadge(this, fieldHeight);

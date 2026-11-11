@@ -5,7 +5,7 @@
  *
  * Takes already-decoded, tightly-packed RGBA8 pixels (the Qt layer decodes image files via
  * QImage and hands the raw bytes down — keeping rendering/ free of any image-codec dependency).
- * Move-only RAII. The colour space is the caller's choice per map: colour maps (diffuse,
+ * Move-only RAII. The color space is the caller's choice per map: color maps (diffuse,
  * translucency) are created sRGB, so the view's _SRGB format linearises on sample; data maps
  * (normal, bump, roughness, spec mask, micro-detail) are created linear (_UNORM) and sampled
  * verbatim. The sampler is NOT owned — every texture uses the same repeat/trilinear sampler,
@@ -37,7 +37,7 @@ public:
     VulkanTexture() = default;
     /// @param pixels Tightly packed RGBA8, exactly width*height*4 bytes. Uploads on its own
     ///   submit + fence wait (fine for a one-off texture).
-    /// @param srgb  true for colour maps (diffuse — the view linearises on sample); false for data
+    /// @param srgb  true for color maps (diffuse — the view linearises on sample); false for data
     ///   maps (normal/bump/roughness), which must be sampled verbatim as a LINEAR (_UNORM) texture.
     VulkanTexture(VulkanContext& context, const uint8_t* pixels, uint32_t width, uint32_t height,
                   bool srgb = true);

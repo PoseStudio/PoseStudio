@@ -153,7 +153,7 @@ void AssetFolderProxyModel::dispatchHitChecks() const {
 }
 
 /**
- * @brief Intercepts data requests from the view to inject dynamic icons and text colours.
+ * @brief Intercepts data requests from the view to inject dynamic icons and text colors.
  */
 QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) const {
     if (proxyIndex.column() != 0) return QIdentityProxyModel::data(proxyIndex, role);
@@ -194,7 +194,7 @@ QVariant AssetFolderProxyModel::data(const QModelIndex &proxyIndex, int role) co
     }
 
     // ---------------------------------------------------------
-    // 3. Folders and Collections: icon + colour from the (deferred) hit state
+    // 3. Folders and Collections: icon + color from the (deferred) hit state
     // ---------------------------------------------------------
     if (role == Qt::DecorationRole || role == Qt::ForegroundRole) {
         const bool isCollection = AssetNode::isCollection(path);

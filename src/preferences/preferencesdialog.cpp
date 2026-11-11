@@ -8,6 +8,7 @@
 #include "generalpreferencespanel.h"
 #include "assetspreferencespanel.h"
 #include "placeholderpreferencespanel.h"
+#include "selectionpreferencespanel.h"
 #include "vrpreferencespanel.h"
 #include "factoryresetpreferencespanel.h"
 
@@ -53,6 +54,7 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     auto* buttonBox = new QDialogButtonBox(QDialogButtonBox::Close, Qt::Horizontal, this);
     // The standard Close label comes from Qt's own (absent) translation; give it ours.
     buttonBox->button(QDialogButtonBox::Close)->setText(tr("Close"));
+    buttonBox->button(QDialogButtonBox::Close)->setProperty("testId", QStringLiteral("preferences.close")); // (the scripted test's way out)
     footer->addStretch(1);
     footer->addWidget(buttonBox);
     outer->addLayout(footer);
@@ -75,6 +77,12 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
              new PlaceholderPreferencesPanel(
                  tr("Interface"),
                  tr("Interface and appearance settings will appear here."), this));
+    auto* selectionPanel = new SelectionPreferencesPanel(this);
+    connect(selectionPanel, &SelectionPreferencesPanel::outlineChanged,
+            this, &PreferencesDialog::selectionOutlineChanged);
+    connect(selectionPanel, &SelectionPreferencesPanel::jointHighlightChanged,
+            this, &PreferencesDialog::jointHighlightChanged);
+    addPanel(tr("Selection"),     selectionPanel);
     addPanel(tr("Assets"),        assetsPanel);
     addPanel(tr("Input"),
              new PlaceholderPreferencesPanel(

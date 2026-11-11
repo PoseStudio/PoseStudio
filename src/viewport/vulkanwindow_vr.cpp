@@ -97,7 +97,7 @@ constexpr float kHandGrabRadius = 0.15f;
 /// The small controller glyph at each ray's origin: a stub back along the ray and an up tick.
 constexpr float kGlyphStubLength = 0.06f;
 constexpr float kGlyphTickLength = 0.03f;
-/// The ray's colours (linear): at rest, over a joint, and carrying one.
+/// The ray's colors (linear): at rest, over a joint, and carrying one.
 const glm::vec3 kPointerIdle(0.55f, 0.55f, 0.6f);
 const glm::vec3 kPointerHover(0.1046f, 0.2423f, 0.6038f); // the selection accent (postprocess.h)
 const glm::vec3 kPointerDrag(0.95f, 0.45f, 0.08f);

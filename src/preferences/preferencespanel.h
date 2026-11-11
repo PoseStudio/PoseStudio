@@ -46,6 +46,11 @@ protected:
     /// it (rather than each panel hand-rolling its own QLabel + font-size).
     QLabel* addDescription(const QString& text);
 
+    /// The label of a setting's row in a QFormLayout (form->addRow(rowLabel(tr("…")), field)):
+    /// the pages' body size and ink. A bare addRow(QString, …) makes a QLabel at the
+    /// application's default 18 px, sized for the main window — twice the copy around it.
+    QLabel* rowLabel(const QString& text);
+
 private:
     QVBoxLayout* m_contentLayout = nullptr;
 };

@@ -162,7 +162,7 @@ QMenu#AssetManagerContextMenu::icon {
     padding-left: 12px; 
 }
 
-/* Separators: the global QMenu::separator rule (_menumanager.qss) — one colour app-wide. */
+/* Separators: the global QMenu::separator rule (_menumanager.qss) — one color app-wide. */
 
 QMenu#AssetManagerContextMenu::item:disabled {
     color: #666666; /* Muted, greyed-out text */

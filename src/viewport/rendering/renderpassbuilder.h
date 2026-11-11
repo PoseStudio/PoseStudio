@@ -1,13 +1,13 @@
 /**
  * @file renderpassbuilder.h
- * @brief Builds the engine's single-subpass render passes (colour / resolve / depth attachments +
+ * @brief Builds the engine's single-subpass render passes (color / resolve / depth attachments +
  *        external dependencies) and the framebuffers that go with them.
  *
  * Every pass in this engine is one subpass over a short attachment list — the HDR scene target,
  * the outline mask, the bloom/SSS targets, the swapchain composite, the depth-only shadow map —
  * and four of them were typed out as the same 60 lines of VkAttachmentDescription/Reference/
  * SubpassDependency filling. The builder expresses a pass as its attachment list in order
- * (colour, an optional resolve for the colour just added, an optional depth) plus the
+ * (color, an optional resolve for the color just added, an optional depth) plus the
  * dependencies, so the attachment order the framebuffer and the clear-value array must follow
  * is visible in one place per target.
  *
@@ -42,13 +42,13 @@ namespace pose {
  */
 class RenderPassBuilder {
 public:
-    /// Appends a colour attachment. Stencil ops are DONT_CARE; initialLayout is UNDEFINED
+    /// Appends a color attachment. Stencil ops are DONT_CARE; initialLayout is UNDEFINED
     /// (every pass either clears or fully overwrites its targets, so prior contents never matter
     /// and no layout transition is owed on entry).
     RenderPassBuilder& color(VkFormat format, VkSampleCountFlagBits samples, VkAttachmentLoadOp loadOp,
                              VkAttachmentStoreOp storeOp, VkImageLayout finalLayout);
 
-    /// Appends a single-sample resolve target for the colour attachment most recently added
+    /// Appends a single-sample resolve target for the color attachment most recently added
     /// (loadOp DONT_CARE — the resolve overwrites it — storeOp STORE).
     RenderPassBuilder& resolve(VkFormat format, VkImageLayout finalLayout);
 

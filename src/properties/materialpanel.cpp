@@ -6,6 +6,8 @@
 #include "materialpanel.h"
 
 #include "constants.h"
+#include "materialthumbbutton.h"
+#include "overlaystack.h"
 #include "dragnumberbox.h"
 #include "menupickerbutton.h"
 #include "preferencesmanager.h"
@@ -83,7 +85,7 @@ std::size_t at(MaterialMap map) {
     return static_cast<std::size_t>(map);
 }
 
-/// The swatch's look: its background IS the colour, the caption in a contrasting ink.
+/// The swatch's look: its background IS the color, the caption in a contrasting ink.
 void paintSwatch(QPushButton* swatch, const QColor& c, bool enabled) {
     const bool dark = c.lightnessF() < 0.5;
     swatch->setText(enabled ? c.name(QColor::HexRgb).toUpper() : QString());
@@ -92,12 +94,6 @@ void paintSwatch(QPushButton* swatch, const QColor& c, bool enabled) {
                                          "QPushButton#MaterialColorButton:hover { border-color: #5b87cc; }"
                                          "QPushButton#MaterialColorButton:disabled { background-color: #2a2b2d; color: #6a6b6e; }")
                               .arg(c.name(QColor::HexRgb), dark ? QStringLiteral("#e0e0e0") : QStringLiteral("#1b1c1e")));
-}
-
-/// The note the sections that are stored but not drawn share (Displacement alone, since the
-/// viewport round of 2026-11-10).
-QString storedNote() {
-    return MaterialPanel::tr("Stored with the material for rendering engines;\nnot shown in the viewport yet.");
 }
 
 } // namespace
@@ -156,36 +152,37 @@ void MaterialPanel::buildUi() {
     m_linkedNote = new QLabel;
     m_linkedNote->setObjectName(QStringLiteral("MaterialHint"));
     zone->addRow(QString(), m_linkedNote);
-    // How the maps are handled — a word-wrapped label in the column (a wrapped label inside a
-    // form row keeps its one-line height; a long unwrapped one widens the whole panel).
-    auto* mapsHint = new QLabel(tr("A map is the small picture beside the value it scales: click it to choose an image file, right-click it to remove the map, "
-                                   "put the imported one back or open its folder; rest the pointer on it for a preview."));
-    mapsHint->setObjectName(QStringLiteral("MaterialHint"));
-    mapsHint->setWordWrap(true);
-    col->addWidget(mapsHint);
 
-    // --- Base: the colour and the specular response ---
+    // --- Overlays: images layered over the zone's skin (tattoos, bruises, freckles, makeup) —
+    // first under the zone, where the thing most often reached for is not twelve sections down.
+    // The section is OverlayStack's (overlaystack.h); it edits through the viewport and says so.
+    QFormLayout* overlays = addSection(col, tr("Overlays"), /*expanded=*/true, [](const MaterialView& v) { return !v.params.overlays.empty(); });
+    m_overlays = new OverlayStack(m_viewport);
+    connect(m_overlays, &OverlayStack::edited, this, &MaterialPanel::refresh);
+    overlays->addRow(m_overlays);
+
+    // --- Base: the color and the specular response ---
     QFormLayout* base = addSection(col, tr("Base"), /*expanded=*/true, nullptr, MaterialLayer::Base);
     addColorRow(base, MaterialColor::Base, tr("Base Color"),
-                tr("The surface's colour. With a base-colour map it tints the map: white leaves the map as painted."));
+                tr("The surface's color. With a base-color map it tints the map: white leaves the map as painted."));
     addRow(base, MaterialField::Roughness, tr("Roughness"),
            tr("How matte the surface is: 0 is mirror-smooth, 100 is fully rough. Over a roughness map it scales the map."), 0.0, 100.0, 1.0, 0);
     addRow(base, MaterialField::Metallic, tr("Metallic"),
-           tr("0 is a dielectric (plastic, skin, cloth), 100 a metal, whose reflections take the base colour and which has no diffuse colour of its own. "
+           tr("0 is a dielectric (plastic, skin, cloth), 100 a metal, whose reflections take the base color and which has no diffuse color of its own. "
               "Over a metalness map it scales the map."),
            0.0, 100.0, 1.0, 0);
     addRow(base, MaterialField::DiffuseRoughness, tr("Diffuse Roughness"),
            tr("How rough the diffuse surface is at the micro scale (cloth, chalk, the moon): 0 is a smooth Lambertian surface, 100 flattens the shading toward the light."),
            0.0, 100.0, 1.0, 0);
 
-    // --- Specular: the dielectric reflection (a metal's is its base colour) ---
+    // --- Specular: the dielectric reflection (a metal's is its base color) ---
     QFormLayout* specular = addSection(col, tr("Specular"), /*expanded=*/true, nullptr, MaterialLayer::Specular);
     addRow(specular, MaterialField::Specular, tr("Specular"),
            tr("How much a dielectric reflects at normal incidence: 100 is the standard dielectric (4 %), skin is authored around 30-80, 0 reflects nothing. "
               "Over a specular mask it scales the mask."),
            0.0, 100.0, 1.0, 0);
     addColorRow(specular, MaterialColor::Specular, tr("Specular Color"),
-                tr("A tint on the dielectric reflection — white for nearly every real material; a coloured tint is the look of some stylized or coated "
+                tr("A tint on the dielectric reflection — white for nearly every real material; a colored tint is the look of some stylized or coated "
                    "surfaces. The PBR Shaded mode tints its reflection with it."));
     addRow(specular, MaterialField::Ior, tr("IOR"),
            tr("The index of refraction: 1.5 is glass and the standard dielectric, water 1.33, skin about 1.4, a diamond 2.4. "
@@ -218,7 +215,7 @@ void MaterialPanel::buildUi() {
     addRow(coat, MaterialField::TopCoatRoughness, tr("Roughness"), tr("How sharp the top coat's reflections are: 0 glassy, 100 dull."), 0.0, 100.0,
            1.0, 0);
     addColorRow(coat, MaterialColor::Coat, tr("Color"),
-                tr("The coat's tint: what passes through it to the surface below takes this colour (a candy-apple red over metal flakes); white is a clear coat."));
+                tr("The coat's tint: what passes through it to the surface below takes this color (a candy-apple red over metal flakes); white is a clear coat."));
     addRow(coat, MaterialField::CoatIor, tr("IOR"), tr("The coat layer's index of refraction: 1.5 is the standard 4% coat, a lacquer about 1.5-1.6, water 1.33."),
            1.0, 3.0, 0.01, 2, 1.5);
     addRow(coat, MaterialField::CoatBumpStrength, tr("Bump Strength"),
@@ -235,13 +232,13 @@ void MaterialPanel::buildUi() {
     QFormLayout* sheen = addSection(col, tr("Sheen"), /*expanded=*/false, [](const MaterialView& v) { return v.params.sheen > 0.0f; }, MaterialLayer::Sheen);
     addRow(sheen, MaterialField::Sheen, tr("Sheen"), tr("The soft back-scatter of fibres at grazing angles — velvet, felt, peach fuzz. 0 is none."), 0.0,
            100.0, 1.0, 0);
-    addColorRow(sheen, MaterialColor::Sheen, tr("Sheen Color"), tr("The fuzz's colour (white for most cloth)."));
+    addColorRow(sheen, MaterialColor::Sheen, tr("Sheen Color"), tr("The fuzz's color (white for most cloth)."));
     addRow(sheen, MaterialField::SheenRoughness, tr("Sheen Roughness"), tr("How broad the sheen is: 0 a tight rim, 100 a soft bloom over the whole surface."),
            0.0, 100.0, 1.0, 0);
 
     // --- Thin film: iridescence (soap bubbles, oil on water, beetle shells) ---
     QFormLayout* film = addSection(col, tr("Thin Film"), /*expanded=*/false, [](const MaterialView& v) { return v.params.thinFilm > 0.0f; }, MaterialLayer::ThinFilm);
-    addRow(film, MaterialField::ThinFilm, tr("Thin Film"), tr("How much a thin surface film colours the reflection by interference. 0 is none."), 0.0, 100.0,
+    addRow(film, MaterialField::ThinFilm, tr("Thin Film"), tr("How much a thin surface film colors the reflection by interference. 0 is none."), 0.0, 100.0,
            1.0, 0);
     addRow(film, MaterialField::ThinFilmThickness, tr("Thickness"), tr("The film's thickness in nanometres (a soap bubble is a few hundred)."), 0.0,
            2000.0, 10.0, 0, 500.0);
@@ -271,7 +268,6 @@ void MaterialPanel::buildUi() {
         }
     });
     transmission->addRow(QString(), propertyrows::rowWithRestore(m_thinWalled, m_thinWalledRestore));
-    addHint(transmission, tr("What is behind the surface shows through it, tinted,\nunder its reflection: not bent, not blurred.\nDepth and Dispersion are stored for rendering engines."));
 
     // --- Subsurface: light under the surface (skin, wax, marble, leaves) ---
     QFormLayout* subsurface = addSection(col, tr("Subsurface"), /*expanded=*/false, [](const MaterialView& v) {
@@ -283,13 +279,13 @@ void MaterialPanel::buildUi() {
               "0 is an opaque material like plastic. Scaled by the translucency map where there is one."),
            0.0, 200.0, 5.0, 0);
     addColorRow(subsurface, MaterialColor::Subsurface, tr("Translucency Color"),
-                tr("The colour light takes on under the surface (skin's is reddish, wax's warm, jade's green). With a translucency colour map it tints the map. "
+                tr("The color light takes on under the surface (skin's is reddish, wax's warm, jade's green). With a translucency color map it tints the map. "
                    "Stored for rendering engines; the viewport's skin profile is fixed."));
-    // The volume's scattering (OpenPBR's subsurface radius colour, radius scale and anisotropy —
+    // The volume's scattering (OpenPBR's subsurface radius color, radius scale and anisotropy —
     // the source app's SSS Color, Scattering Measurement Distance and SSS Direction).
     addColorRow(subsurface, MaterialColor::ScatterColor, tr("Scattering Color"),
-                tr("How far each colour of light scatters relative to the others — red deepest in skin, so its scattering colour is reddish; white scatters "
-                   "all colours alike. Stored for rendering engines."));
+                tr("How far each color of light scatters relative to the others — red deepest in skin, so its scattering color is reddish; white scatters "
+                   "all colors alike. Stored for rendering engines."));
     addRow(subsurface, MaterialField::SubsurfaceRadius, tr("Scattering Distance"),
            tr("How far light travels under the surface before it comes back, in centimetres (skin about 0.1-0.3, wax a few). Stored for rendering engines."),
            0.0, 100.0, 0.05, 2, 1.0);
@@ -301,10 +297,9 @@ void MaterialPanel::buildUi() {
     QFormLayout* emission = addSection(col, tr("Emission"), /*expanded=*/false, [](const MaterialView& v) {
         return v.params.emission > 0.0f || v.maps.has(MaterialMap::Emission);
     }, MaterialLayer::Emission);
-    addColorRow(emission, MaterialColor::Emission, tr("Emission Color"), tr("The colour the surface gives off. With an emission map it tints the map."));
+    addColorRow(emission, MaterialColor::Emission, tr("Emission Color"), tr("The color the surface gives off. With an emission map it tints the map."));
     addRow(emission, MaterialField::Emission, tr("Emission"),
-           tr("How brightly the surface glows: 0 is none, 1 the colour at the scene's full radiance, more for a lamp or a screen."), 0.0, 100.0, 0.5, 1);
-    addHint(emission, tr("Shown in the PBR Shaded mode, where a bright emission blooms."));
+           tr("How brightly the surface glows: 0 is none, 1 the color at the scene's full radiance, more for a lamp or a screen."), 0.0, 100.0, 0.5, 1);
 
     // --- Geometry: opacity, the detail maps' strengths, the UV placement ---
     QFormLayout* geometry = addSection(col, tr("Geometry"), /*expanded=*/true, nullptr, MaterialLayer::Geometry);
@@ -349,7 +344,7 @@ void MaterialPanel::buildUi() {
     addRow(displacement, MaterialField::DisplacementSubdiv, tr("Subdivision"),
            tr("How many times a renderer subdivides the mesh before displacing it (0 none, 2-3 for fine detail). Stored for rendering engines."),
            0.0, 5.0, 1.0, 0);
-    addHint(displacement, storedNote());
+    m_rows[at(MaterialField::DisplacementSubdiv)].box->setFineStep(0.0); // a count of levels: no fine scrub
 
     // --- Detail: the tiled micro-detail normal over the surface (pores, weave, grain) ---
     QFormLayout* detail = addSection(col, tr("Detail"), /*expanded=*/false, [](const MaterialView& v) { return v.maps.has(MaterialMap::PoreDetail); }, MaterialLayer::Detail);
@@ -370,6 +365,9 @@ void MaterialPanel::buildUi() {
            512.0, 1.0, 0, 1.0);
     addRow(detail, MaterialField::DetailOffsetV, tr("Vertical Offset"), tr("Shifts the detail map across the zone vertically, in repeats."),
            -1000.0, 1000.0, 0.01, 2);
+    // (The detail layer repeats a whole number of times: the viewport floors the count.)
+    m_rows[at(MaterialField::PoreTiles)].box->setFineStep(0.0);
+    m_rows[at(MaterialField::DetailTilesV)].box->setFineStep(0.0);
 
     // --- Tiling: the material's UV repeat and shift, every map together ---
     QFormLayout* tiling = addSection(col, tr("Tiling"), /*expanded=*/false, [](const MaterialView& v) {
@@ -389,7 +387,7 @@ void MaterialPanel::buildUi() {
 
     // --- THE SLOTS: each map's label and tip. A slot's thumbnail lives on the line of the value it
     // scales (attachSlot below); the Detail Weight Mask scales no value and gets a row of its own. ---
-    defineSlot(MaterialMap::BaseColor, tr("Base Color"), tr("The colour map (sRGB). The Base Color swatch tints it."));
+    defineSlot(MaterialMap::BaseColor, tr("Base Color"), tr("The color map (sRGB). The Base Color swatch tints it."));
     defineSlot(MaterialMap::Normal, tr("Normal"), tr("A tangent-space normal map. Normal Strength scales it."));
     defineSlot(MaterialMap::Bump, tr("Bump"), tr("A grayscale height map. Bump Strength scales it; with a normal map both apply."));
     defineSlot(MaterialMap::Roughness, tr("Roughness"), tr("A grayscale roughness map (a chosen file's red channel), multiplied by Roughness."));
@@ -432,7 +430,7 @@ void MaterialPanel::buildUi() {
     defineSlot(MaterialMap::CoatAnisotropy, tr("Top Coat Anisotropy"), tr("A grayscale map scaling the coat's anisotropy per texel. Stored for rendering engines."));
     defineSlot(MaterialMap::CoatAnisotropyRotation, tr("Top Coat Anisotropy Rotation"), tr("The coat grain's direction per texel. Stored for rendering engines."));
     defineSlot(MaterialMap::SheenWeight, tr("Sheen"), tr("A grayscale map scaling Sheen per texel."));
-    defineSlot(MaterialMap::SheenColor, tr("Sheen Color"), tr("The fuzz's colour map (sRGB); Sheen Color tints it."));
+    defineSlot(MaterialMap::SheenColor, tr("Sheen Color"), tr("The fuzz's color map (sRGB); Sheen Color tints it."));
     defineSlot(MaterialMap::SheenRoughness, tr("Sheen Roughness"), tr("A grayscale map scaling Sheen Roughness per texel. Stored for rendering engines."));
     defineSlot(MaterialMap::ThinFilmWeight, tr("Thin Film"), tr("A grayscale map scaling Thin Film per texel. Stored for rendering engines."));
     defineSlot(MaterialMap::ThinFilmThickness, tr("Thin Film Thickness"),
@@ -500,7 +498,7 @@ void MaterialPanel::buildUi() {
     m_resetZone = new QPushButton(tr("Reset Zone"));
     m_resetZone->setObjectName(QStringLiteral("PropertyResetButton"));
     m_resetZone->setToolTip(tr("Returns this zone's material values (and its matching zones', when editing them together) to the values the file imported with. "
-                               "The texture slots are put back one by one with their arrows."));
+                               "The texture slots are put back one by one with their arrows, and the overlays are removed with their own buttons."));
     connect(m_resetZone, &QPushButton::clicked, this, [this]() {
         if (m_viewport) {
             m_viewport->resetSelectedMaterial(linked(), /*allZones=*/false);
@@ -543,7 +541,7 @@ QFormLayout* MaterialPanel::addSection(QVBoxLayout* col, const QString& title, b
         toggle->setObjectName(QStringLiteral("PropertyLayerToggle"));
         QString meaning;
         switch (layer) {
-        case MaterialLayer::Base: meaning = tr("Off: no diffuse colour and no metal — a black dielectric, the state of glass or a coat alone."); break;
+        case MaterialLayer::Base: meaning = tr("Off: no diffuse color and no metal — a black dielectric, the state of glass or a coat alone."); break;
         case MaterialLayer::Specular: meaning = tr("Off: no dielectric reflection — a matte surface; the top coat still reflects."); break;
         case MaterialLayer::Geometry: meaning = tr("Off: the normal, bump and occlusion maps at rest — a smooth surface; opacity and Double Sided stay."); break;
         case MaterialLayer::Tiling: meaning = tr("Off: the maps as painted — one repeat, no offset, no rotation."); break;
@@ -626,200 +624,11 @@ void MaterialPanel::addColorRow(QFormLayout* form, MaterialColor which, const QS
     row.swatch->setToolTip(tip);
     connect(row.swatch, &QPushButton::clicked, this, [this, which]() { pickColor(which); });
     row.restore = propertyrows::makeRestoreButton();
-    row.restore->setToolTip(tr("Back to the colour the file imported with"));
+    row.restore->setToolTip(tr("Back to the color the file imported with"));
     connect(row.restore, &QToolButton::clicked, this, [this, which]() { restoreColor(which); });
     row.field = propertyrows::rowWithRestore(row.swatch, row.restore);
     form->addRow(row.label, row.field);
 }
-
-namespace {
-/// The thumbnail's side in logical pixels.
-constexpr int kThumbPx = 39;
-/// … and its corner radius.
-constexpr int kThumbRadiusPx = 6;
-/// The line items' small thumbnail (beside the value its map scales) and its radius.
-constexpr int kThumbSmallPx = 24;
-constexpr int kThumbSmallRadiusPx = 4;
-/// The hover preview: the map at this size, after this delay.
-constexpr int kPreviewPx = 240;
-constexpr int kPreviewDelayMs = 450;
-
-
-} // namespace
-
-/// THE THUMBNAIL BUTTON: the map, the rounded frame and its hover drawn in ONE pass — the image
-/// clipped to the rounded rect and the 1 px border stroked over the clip's edge with the same
-/// path, so the two antialiased edges can never disagree (a QSS border on the button around a
-/// separately rounded icon left the background peeking through at the corners and the image
-/// bleeding over the frame). Empty: the dark field inside the frame.
-class MaterialThumbButton : public QAbstractButton {
-public:
-    MaterialThumbButton(int px, int radius, QWidget* parent = nullptr) : QAbstractButton(parent), m_px(px), m_radius(radius) {
-        setFixedSize(px, px);
-        setCursor(Qt::PointingHandCursor);
-        setAttribute(Qt::WA_Hover);
-    }
-    ~MaterialThumbButton() override { delete m_popup; }
-    /// The map as a plain square pixmap (kThumbPx at the device pixel ratio), or a null pixmap.
-    void setImage(const QPixmap& pixmap) {
-        m_image = pixmap;
-        update();
-    }
-    /// THE HOVER PREVIEW: @p provider gives the map at kPreviewPx (asked only when the pointer has
-    /// rested on the button for kPreviewDelayMs), @p caption names it under the picture.
-    void setPreview(std::function<QPixmap()> provider, const QString& caption) {
-        m_preview = std::move(provider);
-        m_caption = caption;
-    }
-    QSize sizeHint() const override { return QSize(m_px, m_px); }
-
-protected:
-    void enterEvent(QEnterEvent* event) override {
-        QAbstractButton::enterEvent(event);
-        if (m_preview && !m_image.isNull()) {
-            if (!m_timer) {
-                m_timer = new QTimer(this);
-                m_timer->setSingleShot(true);
-                connect(m_timer, &QTimer::timeout, this, [this]() { showPreview(); });
-            }
-            m_timer->start(kPreviewDelayMs);
-        }
-    }
-    void leaveEvent(QEvent* event) override {
-        QAbstractButton::leaveEvent(event);
-        hidePreview();
-    }
-    void mousePressEvent(QMouseEvent* event) override {
-        hidePreview();
-        QAbstractButton::mousePressEvent(event);
-    }
-    void hideEvent(QHideEvent* event) override {
-        hidePreview();
-        QAbstractButton::hideEvent(event);
-    }
-
-private:
-    /// The preview window: a tool-tip-class top level (never activated, above everything) painting
-    /// the map with the thumbnails' one-pass frame and the caption under it.
-    class Popup : public QWidget {
-    public:
-        Popup() : QWidget(nullptr, Qt::ToolTip | Qt::FramelessWindowHint) {
-            setAttribute(Qt::WA_ShowWithoutActivating);
-            setObjectName(QStringLiteral("MaterialTexturePreview"));
-        }
-        void setContent(const QPixmap& pixmap, const QString& caption) {
-            m_pixmap = pixmap;
-            m_caption = caption;
-            const QFontMetrics metrics(font());
-            m_captionHeight = caption.isEmpty() ? 0 : metrics.height() + 4;
-            const QSize logical = pixmap.isNull() ? QSize(kPreviewPx, kPreviewPx) : pixmap.deviceIndependentSize().toSize();
-            resize(logical.width() + 2 * kPad, logical.height() + 2 * kPad + m_captionHeight);
-        }
-
-    protected:
-        void paintEvent(QPaintEvent*) override {
-            QPainter painter(this);
-            painter.setRenderHint(QPainter::Antialiasing);
-            painter.setRenderHint(QPainter::SmoothPixmapTransform);
-            painter.fillRect(rect(), QColor(0x25, 0x26, 0x27));
-            painter.setPen(QPen(QColor(0x3a, 0x3b, 0x3d), 1.0));
-            painter.drawRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5));
-            const QSize  logical = m_pixmap.deviceIndependentSize().toSize();
-            const QRectF image(kPad, kPad, logical.width(), logical.height());
-            QPainterPath path;
-            path.addRoundedRect(image.adjusted(0.5, 0.5, -0.5, -0.5), kThumbRadiusPx, kThumbRadiusPx);
-            painter.save();
-            painter.setClipPath(path);
-            painter.drawPixmap(image.toRect(), m_pixmap);
-            painter.restore();
-            painter.setPen(QPen(QColor(0x3a, 0x3b, 0x3d), 1.0));
-            painter.setBrush(Qt::NoBrush);
-            painter.drawPath(path);
-            if (m_captionHeight > 0) {
-                painter.setPen(QColor(0xc7, 0xc8, 0xcb));
-                const QFontMetrics metrics(font());
-                const QRect        text(kPad, kPad + logical.height() + 2, logical.width(), m_captionHeight);
-                painter.drawText(text, Qt::AlignHCenter | Qt::AlignVCenter, metrics.elidedText(m_caption, Qt::ElideMiddle, logical.width()));
-            }
-        }
-
-    private:
-        static constexpr int kPad = 8;
-        QPixmap              m_pixmap;
-        QString              m_caption;
-        int                  m_captionHeight = 0;
-    };
-
-    void showPreview() {
-        if (!underMouse() || !m_preview) {
-            return;
-        }
-        const QPixmap pixmap = m_preview();
-        if (pixmap.isNull()) {
-            return;
-        }
-        if (!m_popup) {
-            m_popup = new Popup;
-        }
-        m_popup->setContent(pixmap, m_caption);
-        // Beside the button — to its left, where the panel's open space is; to its right when the
-        // screen ends there — centred on it and kept on the screen.
-        const QRect  button(mapToGlobal(QPoint(0, 0)), size());
-        const QScreen* screen = this->screen() ? this->screen() : QGuiApplication::primaryScreen();
-        const QRect  avail = screen ? screen->availableGeometry() : QRect(0, 0, 10000, 10000);
-        int          x = button.left() - m_popup->width() - 6;
-        if (x < avail.left()) {
-            x = button.right() + 7;
-        }
-        int y = button.center().y() - m_popup->height() / 2;
-        y = std::clamp(y, avail.top(), std::max(avail.top(), avail.bottom() - m_popup->height()));
-        m_popup->move(x, y);
-        m_popup->show();
-    }
-    void hidePreview() {
-        if (m_timer) {
-            m_timer->stop();
-        }
-        if (m_popup) {
-            m_popup->hide();
-        }
-    }
-
-    std::function<QPixmap()> m_preview;
-    QString                  m_caption;
-    QTimer*                  m_timer = nullptr;
-    Popup*                   m_popup = nullptr;
-
-    void paintEvent(QPaintEvent*) override {
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing);
-        painter.setRenderHint(QPainter::SmoothPixmapTransform);
-        // The frame's path runs through the middle of the 1 px border so the stroke lands on
-        // whole device pixels; the image fills the path to its outer edge, under the stroke.
-        const QRectF outer = QRectF(rect());
-        const QRectF frame = outer.adjusted(0.5, 0.5, -0.5, -0.5);
-        QPainterPath path;
-        path.addRoundedRect(frame, m_radius, m_radius);
-        painter.fillPath(path, QColor(0x1f, 0x20, 0x22));
-        if (!m_image.isNull()) {
-            painter.save();
-            painter.setClipPath(path);
-            painter.setOpacity(isEnabled() ? 1.0 : 0.4);
-            painter.drawPixmap(outer.toRect(), m_image);
-            painter.restore();
-        }
-        const QColor border = !isEnabled() ? QColor(0x2e, 0x2f, 0x31)
-                              : (underMouse() || isDown()) ? QColor(0x5b, 0x87, 0xcc)
-                                                           : QColor(0x3a, 0x3b, 0x3d);
-        painter.setPen(QPen(border, 1.0));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawPath(path);
-    }
-
-    int     m_px;
-    int     m_radius;
-    QPixmap m_image;
-};
 
 QPixmap MaterialPanel::slotThumbnail(MaterialMap map) {
     return slotPixmap(map, kThumbPx, m_thumbs);
@@ -878,7 +687,7 @@ QPixmap MaterialPanel::slotPixmap(MaterialMap map, int px, std::unordered_map<co
                 dst[1] = px[1];
                 dst[2] = px[2];
             }
-            dst[3] = 255; // (a cutout's alpha is shown as the base colour's own picture)
+            dst[3] = 255; // (a cutout's alpha is shown as the base color's own picture)
             dst += 4;
         }
     }
@@ -968,14 +777,6 @@ void MaterialPanel::showThumbMenu(MaterialMap map, const QPoint& globalPos) {
     }
 }
 
-void MaterialPanel::addHint(QFormLayout* form, const QString& text) {
-    auto* hint = new QLabel(text);
-    hint->setObjectName(QStringLiteral("MaterialHint"));
-    // (No word wrap: a wrapped label inside a QFormLayout row keeps its one-line height and is
-    // clipped by the group — the text carries its own line breaks instead.)
-    form->addRow(hint);
-}
-
 void MaterialPanel::setField(MaterialField field, double value) {
     if (!m_viewport || !m_view.valid) {
         return;
@@ -1031,7 +832,7 @@ void MaterialPanel::pickColor(MaterialColor which) {
     m_colorPicking = which;
     m_colorAtOpen = displayColor(materialColorValue(m_view.params, which));
     // The app's own themed dialog (the native one ignores the dark theme), non-modal so the
-    // colour can be judged on the figure while it changes.
+    // color can be judged on the figure while it changes.
     m_colorDialog = new QColorDialog(m_colorAtOpen, this);
     m_colorDialog->setOption(QColorDialog::DontUseNativeDialog, true);
     m_colorDialog->setWindowTitle(m_colors[at(which)].label ? m_colors[at(which)].label->text() : tr("Color"));
@@ -1039,7 +840,7 @@ void MaterialPanel::pickColor(MaterialColor which) {
     connect(m_colorDialog, &QColorDialog::currentColorChanged, this, [this](const QColor& c) { setColor(m_colorPicking, c); });
     connect(m_colorDialog, &QColorDialog::finished, this, [this](int result) {
         if (result != QDialog::Accepted) {
-            setColor(m_colorPicking, m_colorAtOpen); // Cancel: the colour as it was when the dialog opened
+            setColor(m_colorPicking, m_colorAtOpen); // Cancel: the color as it was when the dialog opened
         }
         if (m_viewport) {
             m_viewport->endMaterialEdit(); // one undo entry for the whole pick
@@ -1164,7 +965,7 @@ void MaterialPanel::refresh() {
                           : linked()                ? tr("%1 other zones follow this zone's edits.").arg(view.linkedZones)
                                                     : tr("%1 other zones share this material.").arg(view.linkedZones));
 
-    // The colour swatches: each colour as the screen shows it.
+    // The color swatches: each color as the screen shows it.
     for (std::size_t i = 0; i < m_colors.size(); ++i) {
         ColorRow& row = m_colors[i];
         if (row.swatch == nullptr) {
@@ -1185,8 +986,15 @@ void MaterialPanel::refresh() {
         }
         const auto field = static_cast<MaterialField>(i);
         bool       on = view.valid;
+        // (An OVERLAY's relief counts as a normal map: the viewport draws an overlay's normal
+        // image AND its bump image through the zone's normal map, so a zone without one of its
+        // own still has a Normal Strength to set once a scar is layered on it.)
+        const auto overlaid = [&view](MaterialMap map) {
+            return std::any_of(view.params.overlays.begin(), view.params.overlays.end(),
+                               [map](const MaterialOverlay& o) { return overlayAffects(o, map); });
+        };
         if (field == MaterialField::NormalStrength) {
-            on = on && view.maps.has(MaterialMap::Normal);
+            on = on && (view.maps.has(MaterialMap::Normal) || overlaid(MaterialMap::Normal) || overlaid(MaterialMap::Bump));
         } else if (field == MaterialField::BumpStrength) {
             on = on && view.maps.has(MaterialMap::Bump);
         } else if (field == MaterialField::PoreDetail || field == MaterialField::PoreTiles || field == MaterialField::DetailRoughness ||
@@ -1236,6 +1044,9 @@ void MaterialPanel::refresh() {
     m_doubleSidedRestore->setEnabled(view.valid);
 
     refreshSlots();
+    if (m_overlays != nullptr) {
+        m_overlays->setView(view);
+    }
 
     // A section opens as its material COMES INTO USE — a zone newly shown that uses it, or a map
     // or value arriving by any path (the tab, a script, undo, a project) — and closes never: the

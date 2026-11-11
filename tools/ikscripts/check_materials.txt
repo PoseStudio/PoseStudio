@@ -3,7 +3,7 @@
 # tab shows, `material <field> <value>` sets one field the way the tab does (one bracketed, undoable
 # edit; the fields and their display units are the tab's: roughness, metallic, specular, normal, pore,
 # tiles, opacity, subsurface, topcoat, topcoatrough in percent — tiles a count — and `material color
-# r g b` the linear base colour), `matlink on|off` whether an edit reaches the zones that share the
+# r g b` the linear base color), `matlink on|off` whether an edit reaches the zones that share the
 # imported material (the tab's "Edit matching zones together", on by default), `matreset [all]` the
 # tab's Reset Zone / Reset All Zones. Metrics: `mat.<field>` and `mat.color.<r|g|b>` read the selected
 # zone, `matimported.<field>` what it imported with, `zone` the selected zone's index, `zones` the
@@ -63,7 +63,7 @@ expect matimported.specular > 20
 expect matimported.specular < 200
 material specular 100
 expect mat.specular == 100
-# The base colour: a red tint on the torso's map, read back as set (linear).
+# The base color: a red tint on the torso's map, read back as set (linear).
 material color 1 0.3 0.3
 expect mat.color.r == 1
 expect mat.color.g == 0.3

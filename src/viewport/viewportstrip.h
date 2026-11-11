@@ -74,6 +74,8 @@ signals:
     /// VR Mode entry. The shell decides (a headset-less launch gets an explanation instead); the
     /// outcome comes back through setVrActive.
     void vrModeToggled(bool on);
+    /// The Selection button: the user wants the selection settings (Preferences → Selection).
+    void selectionSettingsClicked();
 
 private:
     MenuPickerButton* m_shaderPicker = nullptr;  // "#ShaderModeButton"
@@ -81,6 +83,7 @@ private:
     QPushButton*      m_homeButton = nullptr;    // resets the camera to default framing
     QPushButton*      m_groundButton = nullptr;  // drops the figure onto the floor plane
     QPushButton*      m_skeletonButton = nullptr; // toggles the skeleton overlay (checkable)
+    QPushButton*      m_selectionButton = nullptr; // opens Preferences → Selection (the outline's and the highlight's look)
     JointModeBadge*   m_modeBadge = nullptr;     // "the mouse is turning Bend / Side-Side / Twist", under the buttons
     QPushButton*      m_vrButton = nullptr;      // "VR", right of the view picker: enters / leaves VR Mode, lit while on
     QAction*          m_vrMenuAction = nullptr;  // "VR Mode" at the bottom of the view picker's menu

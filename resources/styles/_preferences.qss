@@ -57,6 +57,19 @@
     font-size: 13px;
 }
 
+/* A setting row's label (PreferencesPanel::rowLabel): the checkboxes' size and ink. */
+#PreferencesRowLabel {
+    color: #c8c8c8;
+    font-size: 13px;
+}
+
+/* A block's heading within a page (the Selection page's two marks). */
+#PreferencesSubheading {
+    color: #e6e6e6;
+    font-size: 13px;
+    font-weight: bold;
+}
+
 #PreferencesDescription {
     color: #9a9a9a;
     font-size: 12px;
@@ -159,4 +172,12 @@
     background-color: #262a30;
     color: #6a7280;
     border: 1px solid #34404f;
+}
+
+/* A block's heading that is also its switch (the Selection page: the checkbox in front of the
+ * title). After the page's QCheckBox rule, and more specific, so the heading's look wins. */
+#PreferencesPanel QCheckBox#PreferencesSubheadingCheck {
+    color: #e6e6e6;
+    font-size: 13px;
+    font-weight: bold;
 }

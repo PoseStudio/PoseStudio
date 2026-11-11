@@ -1,12 +1,12 @@
 /**
  * @file hdrtarget.h
- * @brief The offscreen HDR scene target: MSAA RGBA16F colour + depth, resolved to a sampleable
+ * @brief The offscreen HDR scene target: MSAA RGBA16F color + depth, resolved to a sampleable
  *        single-sample HDR texture — and the PHOTO PASS beside it, where the Gaussian splats go.
  *
  * The scene (backdrop, meshes, grid, overlays) renders here instead of straight into the
  * swapchain, in LINEAR HDR — the PBR shader no longer tonemaps inline. The resolved texture then
  * feeds the post-processing chain (the screen-space SSS blur, bloom bright-extract, and the
- * fullscreen composite that tonemaps into the swapchain). The pass carries TWO colour
+ * fullscreen composite that tonemaps into the swapchain). The pass carries TWO color
  * attachments — the scene (diffuse in the PBR mode, whose alpha is the SSS mask) and the PBR
  * opaque pass's SPECULAR, kept apart so the SSS blur can never smear glints into a wet film —
  * each with its own single-sample resolve, plus a depth attachment, all at the context's MSAA
@@ -14,7 +14,7 @@
  * resize() rebuilds images + framebuffer but keeps the pass — scene pipelines never rebuild.
  *
  * THE PHOTO PASS (recordPhotoPass): the Gaussian splats — accumulated display-referred in the
- * trainers' own colour space as premultiplied colour + coverage, which the composite lays over
+ * trainers' own color space as premultiplied color + coverage, which the composite lays over
  * the tonemapped scene — are drawn in a pass of their own, SINGLE-SAMPLE, after the scene pass.
  * A translucent splat is a blend per covered sample, and drawn inside the scene pass at its 4×
  * MSAA (as it was until 2026-11-05) every pixel of every quad of a capture of half a million
@@ -74,7 +74,7 @@ public:
     /// The resolved (single-sample) HDR texture, in SHADER_READ_ONLY layout after the pass.
     VkDescriptorImageInfo resolveInfo() const;
 
-    /// The resolved SPECULAR texture (colour attachment 1) — the opaque mesh pass routes its
+    /// The resolved SPECULAR texture (color attachment 1) — the opaque mesh pass routes its
     /// specular here so the screen-space SSS blur (which runs on the main resolve) can never
     /// smear glints into a wet-looking film; the blur's V pass adds it back after diffusing.
     VkDescriptorImageInfo specResolveInfo() const;
@@ -85,12 +85,12 @@ public:
     VkDescriptorImageInfo depthInfo() const;
 
     /// Number of attachments in the pass — the render-pass-begin clear array must cover them.
-    /// Attachment order (the clear array follows it): MSAA = colourMS(0) / depth(1) /
-    /// resolve(2) / specMS(3) / specResolve(4); single-sample = colour(0) / depth(1) / spec(2).
+    /// Attachment order (the clear array follows it): MSAA = colorMS(0) / depth(1) /
+    /// resolve(2) / specMS(3) / specResolve(4); single-sample = color(0) / depth(1) / spec(2).
     uint32_t attachmentCount() const { return m_attachmentCount; }
 
     // --- The photo pass (see the file comment) ---------------------------------------------
-    /// The pass the splat pipeline builds against: one single-sample RGBA16F colour attachment
+    /// The pass the splat pipeline builds against: one single-sample RGBA16F color attachment
     /// (the layer, cleared to coverage 0) and a read-only single-sample depth (the scene's).
     VkRenderPass photoRenderPass() const { return m_photoPass.get(); }
     /// The layer's size (the scene's × photoScale): the viewport recordPhotoPass sets, and what
@@ -110,7 +110,7 @@ public:
     /// runs only if the layer still holds a drawing (the one clear after the last splat model
     /// goes), else nothing is recorded. Call after the scene pass, before the layer is composited.
     void recordPhotoPass(VkCommandBuffer cmd, const std::function<void()>& draw);
-    /// The photo layer — premultiplied colour + coverage — in SHADER_READ_ONLY layout whenever
+    /// The photo layer — premultiplied color + coverage — in SHADER_READ_ONLY layout whenever
     /// no pass is writing it (from creation on: it is cleared and moved there before any frame).
     VkDescriptorImageInfo photoInfo() const;
 
@@ -127,8 +127,8 @@ private:
     VkSampler        m_depthSampler = VK_NULL_HANDLE; // nearest, borrowed
     uint32_t         m_attachmentCount = 0;
 
-    // MSAA colour + specular (transient) + MSAA depth + their single-sample resolve targets.
-    // Single-sample fallback: the colour/spec images ARE the sampleable results (no resolves).
+    // MSAA color + specular (transient) + MSAA depth + their single-sample resolve targets.
+    // Single-sample fallback: the color/spec images ARE the sampleable results (no resolves).
     AttachmentImage   m_color;
     AttachmentImage   m_depth;
     AttachmentImage   m_resolve;

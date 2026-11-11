@@ -2,7 +2,7 @@
 #   POSESTUDIO_TEST_FIGURE=<figure> tools/ikscripts/run.sh tools/ikscripts/materials/textures.txt <out> POSESTUDIO_IK_SCRIPT_ASSETS=<assets>
 # (the PNGs from tools/materials/make_test_assets.py; a relative path in `texture` resolves
 # against POSESTUDIO_IK_SCRIPT_ASSETS, else the output folder). The torso imports with a
-# base-colour map and no cutout: a file replaces the map, undo brings the import's back, the slot
+# base-color map and no cutout: a file replaces the map, undo brings the import's back, the slot
 # is cleared and restored; a cutout chosen on a zone without one makes it a cutout zone and the
 # arrow takes it away again; a project round trip carries a chosen map and a cleared slot.
 view front
@@ -41,7 +41,7 @@ texture emission tex_red.png
 expect matmap.emission == 1
 texture emission none
 expect matmap.emission == 0
-# The project round trip: a chosen base colour and a cleared normal slot come back.
+# The project round trip: a chosen base color and a cleared normal slot come back.
 texture basecolor tex_red.png
 texture normal none
 saveproject textures.pss
@@ -76,7 +76,7 @@ expect mattex.coatweight == 0
 texture coatcolor none
 expect matmap.coatcolor == 0
 
-# The translucency weight map (2026-11-10), stored-only beside the rendered colour map.
+# The translucency weight map (2026-11-10), stored-only beside the rendered color map.
 texture translucencyweight tex_rough.png
 expect mattex.translucencyweight == 2
 expect matmap.translucency == 1
@@ -121,7 +121,7 @@ expect mat.aoweight == 60
 texture ao none
 expect matmap.ao == 0
 
-# The scattering rows and the transmission colour map (2026-11-10), stored-only.
+# The scattering rows and the transmission color map (2026-11-10), stored-only.
 texture transmissioncolor tex_red.png
 expect mattex.transmissioncolor == 2
 material sssdirection 30

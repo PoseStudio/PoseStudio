@@ -5,10 +5,10 @@
  *        a project file carries, and what a rendering engine will consume — plus which maps the
  *        zone carries and what the tab shows for the selected object.
  *
- * The model is OpenPBR Surface's: base (colour, metalness, diffuse roughness), specular (weight,
- * colour, roughness, index of refraction, anisotropy), transmission (weight, colour, depth,
- * dispersion, thin-walled), subsurface (weight, colour, radius), sheen (fuzz), coat (weight,
- * colour, roughness, ior), thin film, emission, and geometry (opacity, detail-map strengths, UV
+ * The model is OpenPBR Surface's: base (color, metalness, diffuse roughness), specular (weight,
+ * color, roughness, index of refraction, anisotropy), transmission (weight, color, depth,
+ * dispersion, thin-walled), subsurface (weight, color, radius), sheen (fuzz), coat (weight,
+ * color, roughness, ior), thin film, emission, and geometry (opacity, detail-map strengths, UV
  * tiling) — with PoseStudio's skin extension, the dual specular lobe and the tiled pore-detail
  * normal. The VIEWPORT renders an approximation of it (mesh.frag reads what it can from the
  * packed MaterialGpu — Mesh::packGpu); a production renderer gets the whole set. Nothing here
@@ -22,12 +22,15 @@
 #ifndef MATERIALPARAMS_H
 #define MATERIALPARAMS_H
 
+#include "materialoverlay.h" // MaterialOverlay (the images layered over a zone's maps)
+
 #include <glm/glm.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -37,7 +40,7 @@ namespace pose {
 /// is a file (or an embedded image) the material was imported with, a file the user chose on the
 /// tab, or none.
 enum class MaterialMap {
-    BaseColor,    ///< sRGB colour (binding 0; the cutout mask baked into its alpha)
+    BaseColor,    ///< sRGB color (binding 0; the cutout mask baked into its alpha)
     Normal,       ///< tangent-space normal map (linear)
     Bump,         ///< grayscale height map (linear)
     Roughness,    ///< the roughness map (its channel → the parameter map's red)
@@ -46,11 +49,11 @@ enum class MaterialMap {
     Translucency, ///< the Translucency COLOR map (sRGB): the tint light takes under the surface, its luminance the weight
     Emission,     ///< sRGB emission map
     PoreDetail,   ///< the DETAIL NORMAL MAP: the tiled micro-detail normal (linear; the script name stays `pore`)
-    Opacity,      ///< the cutout mask (grayscale; baked into the base colour's alpha)
+    Opacity,      ///< the cutout mask (grayscale; baked into the base color's alpha)
     // --- The slots after this line are STORED-ONLY (2026-11-10) — maps a renderer reads and the
     // viewport does not sample: kept with the material, shown in the tab, saved with the project,
     // no set-1 binding — EXCEPT the seven materialMapIsRendered names (the coat weight and
-    // roughness, the sheen weight and colour, the thin-film thickness, the ambient occlusion and
+    // roughness, the sheen weight and color, the thin-film thickness, the ambient occlusion and
     // the transmission weight), packed into two bindings the same day. Add a slot here (and its
     // name below, its MeshData field, the importers that carry it, a tab row).
     DiffuseRoughness, ///< grayscale: multiplies Diffuse Roughness per texel
@@ -74,7 +77,7 @@ enum class MaterialMap {
     CoatAnisotropy,     ///< grayscale: the top coat's anisotropy per texel
     CoatAnisotropyRotation, ///< grayscale: the top coat's grain direction per texel
     SheenWeight,        ///< grayscale: the sheen's weight per texel
-    SheenColor,         ///< sRGB: the sheen's colour map
+    SheenColor,         ///< sRGB: the sheen's color map
     SheenRoughness,     ///< grayscale: the sheen's roughness per texel
     ThinFilmWeight,     ///< grayscale: the thin film's weight per texel
     ThinFilmThickness,  ///< grayscale: the thin film's thickness per texel (black = 0, white = the Thickness row)
@@ -147,7 +150,7 @@ inline bool materialMapIsRendered(MaterialMap map) {
     // The ten slots with a binding of their own (or a share of one), and since 2026-11-10 the
     // six PACKED into two more: the ambient occlusion and transmission weight maps ride the
     // parameter map's blue and alpha, the coat weight, coat roughness, sheen weight and
-    // thin-film thickness maps the LAYER map's four channels, and the sheen colour map has
+    // thin-film thickness maps the LAYER map's four channels, and the sheen color map has
     // its own binding (mesh.h's MaterialBinding).
     case MaterialMap::AmbientOcclusion:
     case MaterialMap::TransmissionWeight:
@@ -171,11 +174,11 @@ inline bool materialMapByName(const std::string& name, MaterialMap& out) {
     return false;
 }
 
-/// The editable material values of one zone. Colours are LINEAR; weights are 0..1 unless said.
+/// The editable material values of one zone. Colors are LINEAR; weights are 0..1 unless said.
 struct MaterialParams {
     // --- Base ---
-    glm::vec3 baseColor{1.0f};      ///< The colour itself untextured, a tint on the map.
-    float     metalness = 0.0f;     ///< 0 dielectric … 1 metal (F0 = the base colour).
+    glm::vec3 baseColor{1.0f};      ///< The color itself untextured, a tint on the map.
+    float     metalness = 0.0f;     ///< 0 dielectric … 1 metal (F0 = the base color).
     float     diffuseRoughness = 0.0f; ///< Oren-Nayar roughness of the diffuse lobe (rendered on the key light).
     // --- Specular ---
     float     specular = 1.0f;      ///< The F0 weight: 1 = the dielectric's own reflectance at `ior` (4 % at 1.5), 0 = none.
@@ -203,18 +206,18 @@ struct MaterialParams {
     // --- Coat (the native shaders' Top Coat) ---
     float     topCoat = 0.0f;       ///< The thin clear layer's weight (0 = none).
     float     topCoatRoughness = 0.65f;
-    glm::vec3 coatColor{1.0f};      ///< The coat's tint: what passes through it takes this colour (rendered).
+    glm::vec3 coatColor{1.0f};      ///< The coat's tint: what passes through it takes this color (rendered).
     float     coatIor = 1.5f;       ///< The coat's index: 1.5 = the standard 4% coat; a lacquer 1.5 – 1.6 (rendered).
     float     coatBumpStrength = 1.0f; ///< The coat's own bump map's strength (stored; nothing without a map).
     float     coatAnisotropy = 0.0f;   ///< The coat's highlight stretch (rendered).
     float     coatAnisotropyRotation = 0.0f; ///< … and its grain's direction, degrees (rendered).
-    // --- Thin film (iridescence; rendered: the film's interference colours in the reflection) ---
+    // --- Thin film (iridescence; rendered: the film's interference colors in the reflection) ---
     float     thinFilm = 0.0f;
     float     thinFilmThickness = 500.0f; ///< Nanometres.
     float     thinFilmIor = 1.4f;
     // --- Emission ---
     glm::vec3 emissionColor{1.0f};
-    float     emission = 0.0f;      ///< Luminance factor: 0 = none, 1 = the colour at full radiance.
+    float     emission = 0.0f;      ///< Luminance factor: 0 = none, 1 = the color at full radiance.
     // --- Geometry ---
     float     opacity = 1.0f;       ///< < 1 draws the zone in the alpha-blended pass.
     float     normalStrength = 1.0f; ///< The normal map's strength; nothing without a map.
@@ -262,6 +265,10 @@ struct MaterialParams {
     bool      tilingEnabled = true;
     // --- Textures ---
     std::array<MaterialTextureRef, kMaterialMapCount> maps{};
+    // --- Overlays (materialoverlay.h): images layered over the zone's own maps, lowest first.
+    // Like the maps they are the MESH's own — a value edit (a linked zone's, an undo snapshot's,
+    // Reset Zone) never moves them; they change through the overlay calls alone.
+    std::vector<MaterialOverlay> overlays;
 
     /// Sets the roughness the way the tab's slider does: the two lobes of a dual-lobe material
     /// scale with it, so a skin material stays a skin material (its broad and its tight lobe keep
@@ -314,7 +321,7 @@ struct MaterialParams {
                uvTiling == o.uvTiling && uvOffset == o.uvOffset && lobe1Roughness == o.lobe1Roughness &&
                lobe2Roughness == o.lobe2Roughness && lobeRatio == o.lobeRatio;
     }
-    bool operator==(const MaterialParams& o) const { return sameValues(o) && maps == o.maps; }
+    bool operator==(const MaterialParams& o) const { return sameValues(o) && maps == o.maps && overlays == o.overlays; }
     bool operator!=(const MaterialParams& o) const { return !(*this == o); }
 
     /// Equal to within @p eps on every VALUE — "the same material" for the tab's linked zones (a
@@ -350,6 +357,105 @@ struct MaterialParams {
                close(lobe2Roughness, o.lobe2Roughness) && close(lobeRatio, o.lobeRatio);
     }
 };
+
+/// Whether overlay @p o changes the image the viewport binds for slot @p map — its color the
+/// base color map, its gloss the roughness map, its bump and normal images theirs. (The
+/// displacement image is a renderer's: Displacement answers for an export, nothing is bound.)
+inline bool overlayAffects(const MaterialOverlay& o, MaterialMap map) {
+    if (!o.enabled) {
+        return false;
+    }
+    switch (map) {
+    // (The color is a picture, or a flat Base Color — through an opacity map, or over the whole
+    // map when it is not white; the gloss and the metal go wherever the overlay does.)
+    case MaterialMap::BaseColor: return overlayHasColor(o) && o.opacity > 0.0f;
+    case MaterialMap::Roughness: return o.gloss != 0.0f;
+    case MaterialMap::Metalness: return o.metallic != 0.0f;
+    case MaterialMap::Bump: return !o.bump.empty() && o.bumpStrength != 0.0f;
+    case MaterialMap::Normal: return !o.normal.empty() && o.normalStrength != 0.0f;
+    case MaterialMap::Displacement: return !o.displacement.empty() && o.displacementStrength != 0.0f;
+    default: return false;
+    }
+}
+
+/// The slots an overlay stack is composited into FOR THE VIEWPORT, in the order they are rebound:
+/// the color map, the roughness map (the gloss), the metalness map (the metal — it shares the
+/// roughness map's BINDING, the parameter map) and the normal map — which carries the overlays'
+/// BUMP images too, as slopes (the viewport's own bump path keeps pore-scale grain alone, by
+/// design: a scar's ridge would cancel out of it). The bump map itself is composited for an
+/// export, not bound.
+constexpr std::array<MaterialMap, 4> kOverlaySlots = {MaterialMap::BaseColor, MaterialMap::Roughness, MaterialMap::Metalness, MaterialMap::Normal};
+
+/// Everything about @p overlays that decides slot @p map's composite, as one string — "" when no
+/// overlay touches the slot. Two stacks with the same signature paint the same image over the
+/// same base, so a scrub of one control re-composites only the slot it changes (a hue scrub the
+/// color map, never the bump), and the zones of one map share one composite. @p bumpAsNormal
+/// (the viewport's Normal slot): the overlays' bump images count toward the normal map's.
+inline std::string overlaySignature(const std::vector<MaterialOverlay>& overlays, MaterialMap map, bool bumpAsNormal = false) {
+    std::string out;
+    char        buffer[256];
+    char        number[160];
+    for (const MaterialOverlay& o : overlays) {
+        // The overlay's PLACE moves every one of its images: its offset, its rotation, its scale
+        // — and, turned or scaled, the image it does so about (another anchor is another centre).
+        std::snprintf(number, sizeof(number), "@%a,%a,%a,%a", static_cast<double>(o.offset.x), static_cast<double>(o.offset.y),
+                      static_cast<double>(o.rotation), static_cast<double>(o.scale));
+        std::string place = number;
+        if (overlayTransformed(o)) {
+            place += '^';
+            place += overlayAnchorSource(o);
+        }
+        if (bumpAsNormal && map == MaterialMap::Normal && overlayAffects(o, MaterialMap::Bump)) {
+            std::snprintf(buffer, sizeof(buffer), "|bump %a|", static_cast<double>(o.bumpStrength));
+            out += o.bump;
+            out += buffer;
+            out += place;
+        }
+        if (!overlayAffects(o, map)) {
+            continue;
+        }
+        switch (map) {
+        case MaterialMap::BaseColor:
+            std::snprintf(buffer, sizeof(buffer), "|%d;%a;%a;%a;%a;%a;%a;%a;%a;%a|", static_cast<int>(o.blend),
+                          static_cast<double>(o.opacity), static_cast<double>(o.tint.x), static_cast<double>(o.tint.y),
+                          static_cast<double>(o.tint.z), static_cast<double>(o.brightness), static_cast<double>(o.contrast),
+                          static_cast<double>(o.gamma), static_cast<double>(o.hue), static_cast<double>(o.saturation));
+            out += o.color;
+            out += '~'; // (the opacity map: the shape of the color, the gloss and the metal)
+            out += o.opacityMap;
+            break;
+        case MaterialMap::Roughness:
+            std::snprintf(buffer, sizeof(buffer), "|%a|", static_cast<double>(o.gloss));
+            out += o.color;
+            out += '~';
+            out += o.opacityMap;
+            break;
+        case MaterialMap::Metalness:
+            std::snprintf(buffer, sizeof(buffer), "|%a|", static_cast<double>(o.metallic));
+            out += o.color;
+            out += '~';
+            out += o.opacityMap;
+            out += '&';
+            out += o.metallicMap;
+            break;
+        case MaterialMap::Bump:
+            std::snprintf(buffer, sizeof(buffer), "|%a|", static_cast<double>(o.bumpStrength));
+            out += o.bump;
+            break;
+        case MaterialMap::Normal:
+            std::snprintf(buffer, sizeof(buffer), "|%a|", static_cast<double>(o.normalStrength));
+            out += o.normal;
+            break;
+        default:
+            std::snprintf(buffer, sizeof(buffer), "|%a|", static_cast<double>(o.displacementStrength));
+            out += o.displacement;
+            break;
+        }
+        out += buffer;
+        out += place;
+    }
+    return out;
+}
 
 /// The layered sections a header switch turns on or off (the switch is a material value: saved,
 /// undoable, linked across matching zones, restorable to the imported state).
@@ -659,7 +765,7 @@ inline bool materialFieldByName(const std::string& name, MaterialField& out) {
     return false;
 }
 
-/// The tab's COLOUR rows (swatches), with the same one-definition treatment.
+/// The tab's COLOR rows (swatches), with the same one-definition treatment.
 enum class MaterialColor { Base, Specular, Transmission, Subsurface, Sheen, Coat, Emission, ScatterColor, Count };
 
 inline glm::vec3& materialColorRef(MaterialParams& p, MaterialColor which) {
@@ -723,6 +829,11 @@ struct MaterialView {
     std::array<std::string, kMaterialMapCount> mapNames{}; ///< What each bound map is: a file name, or "embedded".
     std::array<std::string, kMaterialMapCount> mapPaths{}; ///< … and its file on disk ("" for an embedded image).
     int                      linkedZones = 0; ///< The OTHER zones whose imported material equals this one's (edited together when linked).
+    /// The zones an OVERLAY on the selected zone is painted on: the zone itself and every other
+    /// zone that was imported with the same base-color map (a face map serves the face, the lips
+    /// and the ears: a makeup image reaches all of them). In mesh order; the zone alone when it
+    /// shares its map with none, or has none.
+    std::vector<int>         overlayZones;
     std::uint64_t            revision = 0;    ///< Bumped by every material edit of the model (the frame notify's cheap key).
 
     /// The cheap "has what the tab shows changed" test the frame notify runs: not the values

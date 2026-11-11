@@ -7,7 +7,7 @@
  * QComboBox makes its popup render item states inconsistently (the hover highlight paints as a
  * faint native tint no matter how the view/items are styled) and the popup repositions to align
  * the current row with the field. A QPushButton whose menu is a genuine QMenu looks and behaves
- * EXACTLY like the File/Edit/Help menus — colours, hover, spacing, top-down drop — for free,
+ * EXACTLY like the File/Edit/Help menus — colors, hover, spacing, top-down drop — for free,
  * because it inherits the global QMenu QSS (_menumanager.qss).
  *
  * This widget is that pattern packaged once: give it the choices, it builds an exclusive,

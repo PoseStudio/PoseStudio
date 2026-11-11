@@ -6,7 +6,7 @@
  * behaviour): the style engine draws only the selection/hover background, and the delegate
  * lays out the icon and text itself so separators can be slim hairlines, search-result rows
  * can grey their ancestor path prefix, and the inline rename editor can sit exactly over the
- * painted text. The separator colour comes from the view's `separatorColor` Q_PROPERTY, which
+ * painted text. The separator color comes from the view's `separatorColor` Q_PROPERTY, which
  * _assetmanager.qss sets, so QSS drives this C++ painting.
  */
 

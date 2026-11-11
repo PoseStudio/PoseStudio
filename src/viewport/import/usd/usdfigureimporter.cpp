@@ -597,7 +597,7 @@ ModelData UsdFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                     }
                     if (s.useSpecularWorkflow) {
                         // THE ONE MATERIAL MODEL (specgloss.h): a preview surface in the SPECULAR
-                        // workflow gives its reflectance at normal incidence as a colour; the standard
+                        // workflow gives its reflectance at normal incidence as a color; the standard
                         // solve turns it into a metalness (the scalars here, the maps per texel in
                         // the decode layer).
                         const glm::vec3 specular(s.specularColor.value[0], s.specularColor.value[1], s.specularColor.value[2]);
@@ -638,7 +638,7 @@ ModelData UsdFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                         out.opacity = 1.0f;
                     }
                     // The canonical material's further channels a preview surface carries: the
-                    // emissive colour (and its map), the index of refraction, the clearcoat.
+                    // emissive color (and its map), the index of refraction, the clearcoat.
                     {
                         const glm::vec3 e(s.emissiveColor.value[0], s.emissiveColor.value[1], s.emissiveColor.value[2]);
                         const float     peak = std::max(e.x, std::max(e.y, e.z));
@@ -670,7 +670,7 @@ ModelData UsdFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                     out.lobe2Roughness = out.roughness;
                     out.metalness = std::max(0.0f, std::min(1.0f, s.base_metalness.value));
                 } else if (info != nullptr && !notedMaterialX) {
-                    info->notes.push_back("a material without a UsdPreviewSurface (a MaterialX network, say) renders with its colour alone");
+                    info->notes.push_back("a material without a UsdPreviewSurface (a MaterialX network, say) renders with its color alone");
                     notedMaterialX = true;
                 }
             }

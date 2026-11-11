@@ -189,7 +189,7 @@ void AssetManagerWidget::setupUI() {
     addLibraryHintLabel->setObjectName("AssetManagerAddLibraryHint");
     addLibraryHintLabel->setTextFormat(Qt::RichText);
     // Qt's QSS engine doesn't apply selectors to rich-text <a> links inside a QLabel, so the
-    // link colour is inline in the HTML.
+    // link color is inline in the HTML.
     addLibraryHintLabel->setText(tr("<a href=\"#\" style=\"color: #ffffff;\">%1</a>")
                                   .arg(tr("Add Asset Folder")));
     addLibraryHintLabel->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
@@ -770,7 +770,7 @@ void AssetManagerWidget::runSearch(const QString& query) {
     clearSearchButton->setEnabled(true);
     searchInput->setEnabled(true);
 
-    // The root's icon/colour reflect whether there are results now.
+    // The root's icon/color reflect whether there are results now.
     proxyModel->refreshNode(searchProxyIdx);
 
     if (searchProxyIdx.isValid()) {

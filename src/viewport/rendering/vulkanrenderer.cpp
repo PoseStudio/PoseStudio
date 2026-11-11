@@ -199,6 +199,7 @@ void VulkanRenderer::beginVr(VkRenderPass eyeRenderPass, VkExtent2D eyeExtent, b
         vr->hdr->photoInfo(), vr->outline->descriptorInfo(), eyeExtent, shaders.get("fullscreen.vert"),
         shaders.get("bloombright.frag"), shaders.get("bloomblur.frag"), shaders.get("composite.frag"),
         shaders.get("sssblur.frag"));
+    vr->post->setOutlineStyle(m_selectionStyle.outlineColor, m_selectionStyle.outlineOpacity);
     if (depthResolve) {
         vr->post->enableDepthResolve(eyeDepthRenderPass, vr->hdr->depthInfo(),
                                      static_cast<uint32_t>(m_context.sampleCount()), shaders.get("fullscreen.vert"),
@@ -552,7 +553,7 @@ bool VulkanRenderer::drawFrame() {
  *   3. Offscreen HDR SCENE pass (HdrTarget, at the context's MSAA count, in LINEAR HDR):
  *      the HDRI backdrop -> opaque meshes -> transparent meshes (+ wire/hidden-line variants per
  *      shade mode) -> the floor grid -> the line overlays (skeleton, pins, ortho floor line);
- *      resolved into the sampleable colour + specular images.
+ *      resolved into the sampleable color + specular images.
  *   4. Screen-space SSS blur (H into a scratch target, V back into the HDR resolve) and then BLOOM
  *      (half-res bright-extract + separable blur) — PBR mode only.
  *   5. Swapchain pass (single-sample, no depth): the fullscreen COMPOSITE — HDR + bloom, ACES
@@ -660,16 +661,31 @@ void VulkanRenderer::timingRead(uint32_t slot, GpuTimings& into) {
     into.valid = true;
 }
 
+void VulkanRenderer::setSelectionStyle(const SelectionStyle& style) {
+    m_selectionStyle = style;
+    if (m_postProcess) {
+        m_postProcess->setOutlineStyle(style.outlineColor, style.outlineOpacity);
+    }
+    if (m_vr && m_vr->post) {
+        m_vr->post->setOutlineStyle(style.outlineColor, style.outlineOpacity);
+    }
+    if (m_scene) {
+        m_scene->setSelectionStyle(style);
+    }
+}
+
 bool VulkanRenderer::recordScenePasses(VkCommandBuffer cmd, const Camera& camera, uint32_t frameSlot,
                                        HdrTarget& hdr, OutlineMask& outline, PostProcess& post,
                                        VkExtent2D extent, bool postEffects, bool asyncSplatSort) {
-    // Selection-outline mask (its own small pass, skipped when nothing is selected): the
-    // composite dilates it into the outline, so it too must precede the composite's pass.
-    const bool outlined = m_scene->recordOutlinePass(cmd, camera, frameSlot, outline, asyncSplatSort);
+    // Selection-outline mask (its own small pass, skipped when nothing is selected — or when the
+    // outline's opacity is 0: Preferences → Selection): the composite dilates it into the outline,
+    // so it too must precede the composite's pass.
+    const bool outlined = m_selectionStyle.outlineOpacity > 0.0f &&
+                          m_scene->recordOutlinePass(cmd, camera, frameSlot, outline, asyncSplatSort);
 
     // --- Offscreen HDR scene pass: backdrop + meshes + grid, in LINEAR HDR. --------------------
     // Five clear slots cover every attachment layout the HDR target uses (MSAA:
-    // colourMS/depth/resolve/specMS/specResolve; single-sample: colour/depth/spec) — the
+    // colorMS/depth/resolve/specMS/specResolve; single-sample: color/depth/spec) — the
     // SPECULAR attachments clear to zero (no specular where nothing draws). The swapchain pass
     // below needs none: its one attachment loads DONT_CARE.
     std::array<VkClearValue, 5> clears{};
@@ -789,7 +805,7 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageInde
     }
 
     // --- Swapchain pass: the fullscreen composite (tonemap + bloom add + outline). -------------
-    // No clear values: the pass's single colour attachment loads DONT_CARE, since the composite's
+    // No clear values: the pass's single color attachment loads DONT_CARE, since the composite's
     // fullscreen triangle overwrites every pixel.
     VkRenderPassBeginInfo presentPass{};
     presentPass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;

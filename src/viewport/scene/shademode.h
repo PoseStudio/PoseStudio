@@ -26,7 +26,7 @@ enum class FillKind {
     Shaded,     ///< The lit/unlit mesh passes, shaded by mesh.frag's `fragMode`.
     None,       ///< No surface at all (the wire-only mode).
     HiddenLine, ///< Depth only: the surface occludes (the grid, the wires behind it) but shows the
-                ///< viewport's clear colour — the classic hidden-line drawing.
+                ///< viewport's clear color — the classic hidden-line drawing.
 };
 
 struct ShadeMode {

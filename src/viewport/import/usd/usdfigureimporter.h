@@ -15,7 +15,7 @@
  * geometry bind transform and the skeleton's own transform, the joints' bind frames the
  * Skeleton's world-space `bindTransforms`; one skeleton per file (the one with the most joints
  * when a file has several; the others' meshes come in rigid). A mesh without a binding is rigid,
- * on the figure's root bone. Materials: UsdPreviewSurface — diffuse colour and map, roughness
+ * on the figure's root bone. Materials: UsdPreviewSurface — diffuse color and map, roughness
  * (value or map, whichever channel the map's output names), metalness, the normal map, opacity
  * (the base map's alpha when that is what the opacity reads). A USDZ's textures are read out of
  * the package; a plain file's are found beside it. Skinless leaf joints are left out of the

@@ -11,7 +11,7 @@
 // Inputs:  set 0.0 the HDR target's MSAA depth (sampler2DMS); push: params.x = the sample
 //          count, params.y = the source texels per destination texel (a photo layer at a
 //          reduced scale: the nearest over the whole block that maps to the texel; 0 or 1 = one).
-// Outputs: gl_FragDepth only (no colour attachment).
+// Outputs: gl_FragDepth only (no color attachment).
 
 layout(set = 0, binding = 0) uniform sampler2DMS uDepth;
 

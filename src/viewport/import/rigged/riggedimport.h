@@ -97,7 +97,7 @@ bool isImageFile(const std::filesystem::path& p);
 /// ASCII lower case.
 std::string lowerCopy(std::string s);
 
-/// sRGB -> linear (the renderer's base colour is linear; authored colours are often sRGB).
+/// sRGB -> linear (the renderer's base color is linear; authored colors are often sRGB).
 float srgbToLinear(float c);
 
 /// Gives every vertex without a normal (a zero vector) the smooth normal of the triangles around

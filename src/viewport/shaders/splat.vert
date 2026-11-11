@@ -11,7 +11,7 @@
 // alpha-blended fill is the dearest part of a capture of half a million splats, in a headset
 // above all — place the quad's corner in pixels; the fragment then reads the Gaussian off the
 // corner's local (σ-unit) coordinates. The
-// colour is the splat's spherical harmonics evaluated along the eye→splat direction IN THE
+// color is the splat's spherical harmonics evaluated along the eye→splat direction IN THE
 // SPLAT'S OWN FRAME (the model matrix never touches the harmonics), handed on AS TRAINED — the
 // trainers' display-referred values — to the pass's photo layer, where the splats blend in that
 // space and the composite lays them over the tonemapped scene (see splat.frag).
@@ -20,7 +20,7 @@
 //          against the resolved scene depth, no depth write, into the photo layer.
 // Inputs:  set 0 the camera UBO; set 1 the splat buffers (0 = position+opacity / covariance,
 //          1 = the harmonics as packed halves, 2 = this frame's draw order); push constants.
-// Outputs: vLocal (the corner in σ units), vColor (the colour as trained + the splat's opacity).
+// Outputs: vLocal (the corner in σ units), vColor (the color as trained + the splat's opacity).
 
 #extension GL_GOOGLE_include_directive : enable
 #include "camera_ubo.glsl"
@@ -145,7 +145,7 @@ void main() {
     gl_Position = vec4(clip.xy + offsetNdc * clip.w, clip.z, clip.w);
     vLocal = local * rad;
 
-    // The colour: the harmonics along the eye→splat direction in the splat's own frame.
+    // The color: the harmonics along the eye→splat direction in the splat's own frame.
     uint degree = uint(pc.params.x + 0.5);
     uint base = splat * uint(pc.params.y + 0.5);
     vec3 dir = normalize(p0.xyz - pc.camPos.xyz);
@@ -167,7 +167,7 @@ void main() {
             }
         }
     }
-    // The colour AS TRAINED — the trainers' display-referred 0..1 values, sRGB-encoded as their
+    // The color AS TRAINED — the trainers' display-referred 0..1 values, sRGB-encoded as their
     // photographs were — goes to the photo layer untouched: the splats must blend in that space
     // to come out as the training did (decoded, or put through the inverse tonemap, before the
     // blend, every bright splat weighed more than it was trained to: speckles, a sheen).

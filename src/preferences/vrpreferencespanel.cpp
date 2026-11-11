@@ -41,10 +41,11 @@ VrPreferencesPanel::VrPreferencesPanel(QWidget* parent)
     auto* scaleBox = new pose::DragNumberBox(this);
     scaleBox->setRange(VrSettings::kMinRenderScale, VrSettings::kMaxRenderScale);
     scaleBox->setSingleStep(0.05);
+    scaleBox->setFineStep(0.01); // Shift: hundredths (what is stored)
     scaleBox->setDecimals(2);
     scaleBox->setValue(VrSettings::renderScale());
     scaleBox->setFixedWidth(120);
-    form->addRow(tr("Render scale"), scaleBox);
+    form->addRow(rowLabel(tr("Render scale")), scaleBox);
     contentLayout()->addLayout(form);
     addDescription(
         tr("The per-eye render resolution as a fraction of the headset's recommended size. 1.00 is the "
@@ -73,10 +74,11 @@ VrPreferencesPanel::VrPreferencesPanel(QWidget* parent)
     auto* splatBox = new pose::DragNumberBox(this);
     splatBox->setRange(VrSettings::kMinSplatScale, 1.0);
     splatBox->setSingleStep(0.05);
+    splatBox->setFineStep(0.01);
     splatBox->setDecimals(2);
     splatBox->setValue(VrSettings::splatScale());
     splatBox->setFixedWidth(120);
-    splatForm->addRow(tr("Splat scale"), splatBox);
+    splatForm->addRow(rowLabel(tr("Splat scale")), splatBox);
     contentLayout()->addLayout(splatForm);
     addDescription(
         tr("The most of each eye's size a Gaussian splat scene is drawn at. Drawing the splats is the dearest "

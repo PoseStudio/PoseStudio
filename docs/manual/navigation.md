@@ -6,7 +6,7 @@ The viewport has an orbit camera: it looks at a target point and turns around it
 
 | Gesture | What it does |
 | --- | --- |
-| **Left-drag** on empty space or on a model's body | Orbits: drag right to turn right, drag up to tilt the view up — as if you were grabbing the scene. |
+| **Left-drag** on empty space or on a model's body | Orbits, as if you were grabbing the scene: drag right and it turns right; drag down and it tips toward you, so you look from higher up; drag up and you look from lower down. |
 | **Middle-drag** | Pans: the view slides with the mouse. |
 | **Mouse wheel** | Zooms in and out (dollies toward and away from the target). |
 | **Left-click** (no movement) | Selects the model under the cursor, or clears the selection on empty space. See [Selecting objects](#selecting-objects). |

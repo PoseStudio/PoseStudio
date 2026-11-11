@@ -62,7 +62,7 @@ struct MaterialRefs {
     // grayscale weight map) localizes it. Default 0.5 = the old uniform dial behaviour for
     // materials that don't author translucency channels.
     float       translucencyWeight = 0.5f;
-    std::string translucencyImageUri;       ///< The Translucency COLOR map (the weight map where the colour has none: the viewport's one slot).
+    std::string translucencyImageUri;       ///< The Translucency COLOR map (the weight map where the color has none: the viewport's one slot).
     std::string translucencyWeightImageUri; ///< The Translucency Weight map itself (stored-only).
 
     // Micro-detail normal: the newer skin shader's tiled pore-grain map ("Detail Normal Map",
@@ -88,14 +88,14 @@ struct MaterialRefs {
     // engines to come.
     glm::vec3   emissionColor{1.0f};     ///< "Emission Color" (black = none) …
     float       emission = 0.0f;         ///< … × "Luminance" / 1000 (cd/m² → the engine's radiance factor).
-    std::string emissionImageUri;        ///< The emission colour's map, or empty.
+    std::string emissionImageUri;        ///< The emission color's map, or empty.
     float       ior = 1.5f;              ///< "Refraction Index".
     float       transmission = 0.0f;     ///< "Refraction Weight" (the clear shells' signal, kept for the renderer).
     glm::vec3   transmissionColor{1.0f}; ///< "Transmitted Color".
     float       transmissionDepth = 0.0f; ///< "Transmitted Measurement Distance" (cm → m).
     bool        thinWalled = false;      ///< "Thin Walled".
     glm::vec3   subsurfaceColor{1.0f};   ///< "Translucency Color" (the tint skins author under the surface).
-    glm::vec3   subsurfaceRadiusColor{1.0f}; ///< "SSS Color": the volume's scattering colour.
+    glm::vec3   subsurfaceRadiusColor{1.0f}; ///< "SSS Color": the volume's scattering color.
     float       subsurfaceRadius = 1.0f;     ///< "Scattering Measurement Distance" (cm).
     float       subsurfaceAnisotropy = 0.0f; ///< "SSS Direction" (-1..1).
     std::string transmissionColorImageUri;   ///< "Transmitted Color"'s map (stored-only slot).

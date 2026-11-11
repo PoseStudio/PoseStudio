@@ -647,12 +647,45 @@ bool Model::setMeshTexture(std::size_t i, MaterialMap map, const std::shared_ptr
     }
     Mesh&      mesh = m_meshes[i];
     const bool wasTransparent = mesh.isTransparent();
-    mesh.setSlotImage(map, plain, channel, gpuImage, source);
+    mesh.setSlotImage(map, plain, channel, gpuImage, source, &m_slotUploads);
     if (mesh.isTransparent() != wasTransparent) {
         repartitionMeshes();
     }
     ++m_materialRevision;
     return true;
+}
+
+void Model::setMeshMetalBaked(std::size_t i, float scalar) {
+    if (i >= m_meshes.size() || m_meshes[i].metalBaked() == scalar) {
+        return;
+    }
+    m_meshes[i].setMetalBaked(scalar);
+    ++m_materialRevision;
+}
+
+bool Model::setMeshOverlays(std::size_t i, const std::vector<MaterialOverlay>& overlays) {
+    if (i >= m_meshes.size() || !m_meshes[i].setOverlays(overlays)) {
+        return false;
+    }
+    ++m_materialRevision;
+    return true;
+}
+
+std::vector<int> Model::overlayZones(std::size_t i) const {
+    std::vector<int> zones;
+    if (i >= m_meshes.size()) {
+        return zones;
+    }
+    // The zones painted on mesh i's color map: those IMPORTED with the same base-color image
+    // (the decode shares one image between the zones of one map, so identity is the test; the
+    // imported image, so a map replaced on the tab does not break the group apart).
+    const std::shared_ptr<const DecodedImage> map = m_meshes[i].slotImage(MaterialMap::BaseColor, /*imported=*/true);
+    for (std::size_t k = 0; k < m_meshes.size(); ++k) {
+        if (k == i || (map && m_meshes[k].slotImage(MaterialMap::BaseColor, /*imported=*/true) == map)) {
+            zones.push_back(static_cast<int>(k));
+        }
+    }
+    return zones;
 }
 
 std::vector<MaterialParams> Model::captureMaterials() const {

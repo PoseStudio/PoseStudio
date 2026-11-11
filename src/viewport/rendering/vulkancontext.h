@@ -86,7 +86,7 @@ public:
     /// upload path asks for every map whether the format supports linear blits for mip generation).
     const VkFormatProperties& formatProperties(VkFormat format) const;
 
-    /// The MSAA sample count the viewport renders at — min(4x, device max) supported for both colour
+    /// The MSAA sample count the viewport renders at — min(4x, device max) supported for both color
     /// and depth attachments. VK_SAMPLE_COUNT_1_BIT when the device can't multisample (then the
     /// offscreen scene target uses its plain single-sample path). Chosen once at device creation.
     VkSampleCountFlagBits sampleCount() const { return m_sampleCount; }
@@ -97,7 +97,7 @@ public:
 
     /// Whether the device supports per-attachment blend/write-mask state (the independentBlend
     /// feature, enabled at device creation when present). VulkanPipeline consults it: without
-    /// the feature every colour attachment of a pipeline must share one blend state.
+    /// the feature every color attachment of a pipeline must share one blend state.
     bool supportsIndependentBlend() const { return m_supportsIndependentBlend; }
 
     /// Whether the device meets the VulkanContextOptions it was created with: the preferred

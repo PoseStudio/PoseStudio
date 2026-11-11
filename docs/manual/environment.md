@@ -2,7 +2,7 @@
 
 The **Environment** tab on the side panel lights the scene. In the PBR shading mode the figure is lit by an HDR panorama — the environment surrounds it, reflects in it and casts its soft light from every direction — plus one adjustable key light for the direct sun or lamp and its shadow. The simpler shading modes use just the key light and a fixed studio rig.
 
-Every dial is a **scrub field**: drag left or right across it to change the value, or click it once to type a number. Each row has a small **restore** button that returns that one setting to its default, and **Restore All Defaults** at the bottom resets everything. Changes show immediately, and each one is an undo step (`Ctrl+Z`) like a pose edit — except choosing an HDRI, which is not undoable.
+Every dial is a **scrub field**: drag left or right across it to change the value, or click it once to type a number. Hold **Shift** while you drag for fine control — a tenth of the step, at a tenth of the speed (see [Fine control](interface.md#value-fields-and-fine-control)). Each row has a small **restore** button that returns that one setting to its default, and **Restore All Defaults** at the bottom resets everything. Changes show immediately, and each one is an undo step (`Ctrl+Z`) like a pose edit — except choosing an HDRI, which is not undoable.
 
 ## Choosing an HDRI
 
@@ -37,7 +37,7 @@ What is drawn *behind* the figure in the PBR mode. Lighting is unaffected by the
 | Setting | Range | Default | What it does |
 | --- | --- | --- | --- |
 | **Exposure** | 0 – 3 | 0.65 | Overall brightness of the lit picture. |
-| **ACES filmic tonemap** | on / off | on | The filmic curve that keeps bright highlights from clipping. Off, colours are simply clamped. |
+| **ACES filmic tonemap** | on / off | on | The filmic curve that keeps bright highlights from clipping. Off, colors are simply clamped. |
 
 ## Image-based lighting
 

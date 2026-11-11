@@ -30,7 +30,7 @@ struct FigureScope;
 class UriResolver;
 
 /// Applies @p root's `scene.materials` onto @p fig: each zone the scene names gets its resolved
-/// colours/maps/opacity, other zones keep what they have. @p referringDir resolves relative
+/// colors/maps/opacity, other zones keep what they have. @p referringDir resolves relative
 /// texture references (the directory of the document @p root came from). Shared by the main
 /// figure path (the preset's own materials) and the addon path (a follower's materials preset).
 /// @p scope, when given, keeps the materials to the ones the scene lists for THAT figure's

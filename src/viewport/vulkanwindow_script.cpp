@@ -214,6 +214,8 @@ void VulkanWindow::scriptStep() {
             runPoseUtility(PoseUtility::ResetPose);
         } else if (cmd == QLatin1String("undo")) {
             undo();
+        } else if (cmd == QLatin1String("redo")) {
+            redo();
         } else if (cmd == QLatin1String("ground")) {
             groundFigure();
         } else if (cmd == QLatin1String("lift") && w.size() > 1) {
@@ -293,8 +295,8 @@ void VulkanWindow::scriptStep() {
                 setMaterialZone(index);
             }
         } else if (cmd == QLatin1String("material") && w.size() > 2) {
-            // material <field> <value> | material <colour> <r> <g> <b> (linear; `color` the base
-            // colour, else a materialColorName — specularcolor, coatcolor, sheencolor,
+            // material <field> <value> | material <color> <r> <g> <b> (linear; `color` the base
+            // color, else a materialColorName — specularcolor, coatcolor, sheencolor,
             // transmissioncolor, emissioncolor, subsurfacecolor, scattercolor): the selected zone's
             // material set the way the Materials tab does it (one bracketed, undoable edit; the
             // fields and their display units are the tab's — materialparams.h), reaching the zones
@@ -352,6 +354,111 @@ void VulkanWindow::scriptStep() {
                     say("[ikscript]   texture '%s' could not be applied\n", qPrintable(what));
                 }
             }
+        } else if (cmd == QLatin1String("overlay") && w.size() > 1) {
+            // THE OVERLAYS (materialoverlay.h), the way the tab's Overlays section edits the
+            // selected zone's stack — every form one undoable edit, reaching every zone painted
+            // on the zone's color map:
+            //   overlay add [image]                     a new overlay on top: EMPTY, as the tab's
+            //                                           + Add Overlay makes it, or with its picture
+            //   overlay remove <n> | overlay move <n> <to>
+            //   overlay <n> <field> <value>             enabled, opacity, brightness, contrast, gamma,
+            //                                           hue, saturation, gloss, metallic,
+            //                                           bumpstrength, normalstrength,
+            //                                           displacementstrength, offsetx, offsety,
+            //                                           rotation, scale (the tab's units),
+            //                                           blend <name|index>
+            //   overlay <n> tint <r> <g> <b>            the card's Base Color: display (sRGB) values 0..1
+            //   overlay <n> name <text…>                its name (a new one is "Overlay N")
+            //   overlay <n> map <color|opacity|metallic|bump|normal|displacement> <image|none>
+            // (`map opacity` is the Opacity row's map: the overlay's mask.)
+            // <n> counts from 0, the lowest layer. A relative image path is a test asset's (as
+            // `texture`'s: POSESTUDIO_IK_SCRIPT_ASSETS, else the output folder).
+            std::vector<MaterialOverlay> stack = materialView().params.overlays;
+            const QString                what = w[1].toLower();
+            const auto                   imagePath = [&](const QString& given) -> std::string {
+                if (given.compare(QLatin1String("none"), Qt::CaseInsensitive) == 0) {
+                    return std::string();
+                }
+                if (QFileInfo(given).isRelative()) {
+                    const QString assets = qEnvironmentVariable("POSESTUDIO_IK_SCRIPT_ASSETS");
+                    return QDir(assets.isEmpty() ? s.outDir : assets).filePath(given).toStdString();
+                }
+                return given.toStdString();
+            };
+            bool changed = false;
+            if (what == QLatin1String("add")) {
+                MaterialOverlay overlay;
+                overlay.name = "Overlay " + std::to_string(nextOverlayNumber(stack, "Overlay")); // (as the tab names one)
+                if (w.size() > 2) {
+                    overlay.color = imagePath(w[2]);
+                }
+                stack.push_back(std::move(overlay));
+                changed = true;
+            } else if (w.size() > 2) {
+                const bool indexFirst = what != QLatin1String("remove") && what != QLatin1String("move");
+                bool       ok = false;
+                const int  n = (indexFirst ? w[1] : w[2]).toInt(&ok);
+                if (!ok || n < 0 || static_cast<std::size_t>(n) >= stack.size()) {
+                    say("[ikscript]   overlay %s: no such overlay (the zone has %d)\n", qPrintable(indexFirst ? w[1] : w[2]),
+                        static_cast<int>(stack.size()));
+                } else if (what == QLatin1String("remove")) {
+                    stack.erase(stack.begin() + n);
+                    changed = true;
+                } else if (what == QLatin1String("move") && w.size() > 3) {
+                    const int       to = std::clamp(w[3].toInt(), 0, static_cast<int>(stack.size()) - 1);
+                    MaterialOverlay moved = std::move(stack[static_cast<std::size_t>(n)]);
+                    stack.erase(stack.begin() + n);
+                    stack.insert(stack.begin() + to, std::move(moved));
+                    changed = true;
+                } else if (indexFirst && w.size() > 3 && w[2].compare(QLatin1String("name"), Qt::CaseInsensitive) == 0) {
+                    stack[static_cast<std::size_t>(n)].name = w.mid(3).join(QLatin1Char(' ')).toStdString();
+                    changed = true;
+                } else if (indexFirst && w.size() > 5 && w[2].compare(QLatin1String("tint"), Qt::CaseInsensitive) == 0) {
+                    stack[static_cast<std::size_t>(n)].tint = glm::clamp(glm::vec3(num(3), num(4), num(5)), glm::vec3(0.0f), glm::vec3(1.0f));
+                    changed = true;
+                } else if (indexFirst && w.size() > 4 && w[2].compare(QLatin1String("map"), Qt::CaseInsensitive) == 0) {
+                    OverlayElement element = OverlayElement::Color;
+                    if (overlayElementByName(w[3].toLower().toStdString(), element)) {
+                        overlayElementSource(stack[static_cast<std::size_t>(n)], element) = imagePath(w[4]);
+                        changed = true;
+                    } else {
+                        say("[ikscript]   overlay element '%s' unknown\n", qPrintable(w[3]));
+                    }
+                } else if (indexFirst && w.size() > 3) {
+                    OverlayField field = OverlayField::Opacity;
+                    OverlayBlend blend = OverlayBlend::Multiply;
+                    if (!overlayFieldByName(w[2].toLower().toStdString(), field)) {
+                        say("[ikscript]   overlay field '%s' unknown\n", qPrintable(w[2]));
+                    } else if (field == OverlayField::Blend && overlayBlendByName(w[3].toLower().toStdString(), blend)) {
+                        stack[static_cast<std::size_t>(n)].blend = blend;
+                        changed = true;
+                    } else {
+                        setOverlayField(stack[static_cast<std::size_t>(n)], field, num(3));
+                        changed = true;
+                    }
+                }
+            }
+            if (changed && !setMaterialOverlays(stack)) {
+                say("[ikscript]   overlay: no zone selected\n");
+            }
+        } else if (cmd == QLatin1String("ui") && w.size() > 2) {
+            // ui click <id> [n] | ui set <id> <n> <value> | ui check <id> <n> <0|1> | ui pick <id> <n> <k>:
+            // one of the application's widgets driven in-process — the n-th (from 0, in creation
+            // order) carrying the dynamic property `testId` == <id> — through its own slot, as a
+            // user's click, scrub or pick would run it; no desktop input. What a panel's `overlay`
+            // / `material` commands cannot show: that ITS buttons are wired to the right thing.
+            // (The tabs follow the rendered frame, which the script does not wait for: bring them
+            // up to date first.)
+            notifyJointTransform();
+            notifyMaterialView();
+            // (Also: ui call <id> <n> <slot> [int] — one of the widget's own slots or invokables
+            // taking an int; ui type <id> <n> <text…> — a line edit's text; ui key <id> <n>
+            // <enter|esc> — that key to the widget. What opens, fills and closes an inline editor.
+            // And: ui scrub <id> <n> <% of its width> [shift] — a press, a drag that far and a
+            // release on a scrub field, through its own mouse handlers; `shift` holds Shift (the
+            // fine scrub).)
+            emit uiActionRequested(w[1].toLower(), w[2], w.size() > 3 ? w[3].toInt() : 0, w.size() > 4 ? w[4].toDouble() : 0.0,
+                                   w.size() > 4 ? w.mid(4).join(QLatin1Char(' ')) : QString());
         } else if (cmd == QLatin1String("dial") && w.size() > 2) {
             // dial <forward|sideways|twist> <value> [abs]: the selected joint's Transform-tab dial set
             // to that value, the way the tab does it (one bracketed, undoable edit); with a group the
@@ -437,6 +544,23 @@ void VulkanWindow::scriptStep() {
                 status < 0 ? error.c_str() : "", status == 1 ? (" " + missing.front()).c_str() : "");
         } else if (cmd == QLatin1String("new")) {
             resetToEmptyScene(); // File -> New's scene reset (the menu's prompt and panel reset are not driven here)
+        } else if ((cmd == QLatin1String("outlinestyle") || cmd == QLatin1String("jointstyle")) && w.size() > 2) {
+            // outlinestyle <rrggbb> <opacity%> / jointstyle <rrggbb> <opacity%>: the selection
+            // outline's / the joint highlight's color (hex, no #: a # begins a comment) and opacity,
+            // as Preferences → Selection hands them to the viewport — nothing is stored.
+            const QColor color = QColor::fromString(QLatin1Char('#') + w[1]);
+            if (!color.isValid()) {
+                say("[ikscript]   %s: '%s' is no rrggbb color\n", qPrintable(cmd), qPrintable(w[1]));
+            } else if (cmd == QLatin1String("outlinestyle")) {
+                setSelectionOutline(color, static_cast<float>(num(2) / 100.0));
+            } else {
+                setJointHighlight(color, static_cast<float>(num(2) / 100.0));
+            }
+        } else if (cmd == QLatin1String("prefs") && w.size() > 1) {
+            // prefs <tab>: the Preferences dialog opened on that tab, as Edit → Preferences opens it
+            // (from the event loop: give it a `wait` before driving its widgets with `ui`; picture
+            // it with `uishot`, close it with `ui click preferences.close`).
+            emit preferencesRequested(w.mid(1).join(QLatin1Char(' ')));
         } else if (cmd == QLatin1String("uishot") && w.size() > 1) {
             // uishot <name>: ui/<name>.png of the application's widgets — the side tabs (start on
             // one with POSESTUDIO_TAB=<title>); in a folder of its own, beside the viewport's shots
@@ -852,6 +976,29 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         value = isProjectDirty() ? 1.0 : 0.0;
         return true;
     }
+    // PREFERENCES → SELECTION as the viewport holds it: `selstyle.outline.<r|g|b|opacity>` and
+    // `selstyle.joint.<r|g|b|opacity>` — the color as display bytes (0-255), the opacity in percent.
+    if (name.startsWith(QLatin1String("selstyle."), Qt::CaseInsensitive)) {
+        const QStringList part = name.toLower().split(QLatin1Char('.'));
+        if (part.size() == 3 && (part[1] == QLatin1String("outline") || part[1] == QLatin1String("joint"))) {
+            const bool       outline = part[1] == QLatin1String("outline");
+            const glm::vec3& linear = outline ? m_selectionStyle.outlineColor : m_selectionStyle.jointColor;
+            const auto displayByte = [](float c) {
+                c = std::clamp(c, 0.0f, 1.0f);
+                return std::round((c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f) * 255.0f);
+            };
+            if (part[2] == QLatin1String("opacity")) {
+                value = std::round((outline ? m_selectionStyle.outlineOpacity : m_selectionStyle.jointOpacity) * 100.0f);
+                return true;
+            }
+            const int channel = part[2] == QLatin1String("r") ? 0 : part[2] == QLatin1String("g") ? 1 : part[2] == QLatin1String("b") ? 2 : -1;
+            if (channel >= 0) {
+                value = displayByte(linear[channel]);
+                return true;
+            }
+        }
+        return false;
+    }
     if (name.compare(QLatin1String("selection"), Qt::CaseInsensitive) == 0) {
         value = m_renderer ? static_cast<double>(scene().selectedModelIndex()) : -1.0; // -1 = nothing selected
         return true;
@@ -860,7 +1007,7 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
     // `zone` (the selected zone's index, -1 with nothing selected), `zonename.<name>` (1 when that
     // zone is selected), `matlinked` (the other zones sharing the imported material),
     // `mat.<field>` / `matimported.<field>` (the selected zone's values in the tab's display units,
-    // as they stand / as imported; `mat.color.<r|g|b>` the linear base colour).
+    // as they stand / as imported; `mat.color.<r|g|b>` the linear base color).
     if (name.compare(QLatin1String("zones"), Qt::CaseInsensitive) == 0) {
         const MaterialView view = materialView();
         value = view.valid ? static_cast<double>(view.zones.size()) : 0.0;
@@ -894,6 +1041,82 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         value = tex ? (source.empty() ? 0.0 : source == kImportedTexture ? 1.0 : 2.0) : (view.maps.has(map) ? 1.0 : 0.0);
         return true;
     }
+    // THE WIDGETS' metrics (the `ui` command's): `uicount.<id>` (how many widgets carry that
+    // testId), `uivalue.<id>.<n>` (the n-th's value: a scrub field's, a checkbox's 0 / 1, a
+    // picker's index) and `uienabled.<id>.<n>`. An id may itself contain dots.
+    if (name.startsWith(QLatin1String("uicount."), Qt::CaseInsensitive) || name.startsWith(QLatin1String("uivalue."), Qt::CaseInsensitive) ||
+        name.startsWith(QLatin1String("uienabled."), Qt::CaseInsensitive)) {
+        const int     dot = name.indexOf(QLatin1Char('.'));
+        const QString what = name.left(dot).mid(2).toLower(); // count / value / enabled
+        QString       id = name.mid(dot + 1);
+        int           index = 0;
+        if (what != QLatin1String("count")) {
+            const int last = id.lastIndexOf(QLatin1Char('.'));
+            bool      isNumber = false;
+            const int n = last > 0 ? id.mid(last + 1).toInt(&isNumber) : 0;
+            if (isNumber) {
+                index = n;
+                id = id.left(last);
+            }
+        }
+        notifyMaterialView(); // (the tabs follow the rendered frame: bring them up to date)
+        bool ok = false;
+        emit uiQueryRequested(what, id, index, &value, &ok);
+        return ok;
+    }
+    // THE OVERLAYS' metrics: `overlays` (how many the selected zone carries), `overlayzones` (the
+    // zones the stack is painted on — those sharing the zone's color map, itself included),
+    // `overlay.<n>.<field>` (the tab's units; `blend` the mode's index), `overlay.<n>.tint.<r|g|b>`
+    // and `overlay.<n>.has.<color|bump|normal|displacement>` (1 when that image is set).
+    if (name.compare(QLatin1String("overlays"), Qt::CaseInsensitive) == 0) {
+        const MaterialView view = materialView();
+        value = view.valid ? static_cast<double>(view.params.overlays.size()) : 0.0;
+        return true;
+    }
+    if (name.compare(QLatin1String("overlayzones"), Qt::CaseInsensitive) == 0) {
+        value = static_cast<double>(materialView().overlayZones.size());
+        return true;
+    }
+    if (name.compare(QLatin1String("metalbaked"), Qt::CaseInsensitive) == 0) {
+        // The Metallic value (percent) the selected zone's bound metalness was baked for — an
+        // overlay's metal is painted on the zone's absolute metalness — or -1: not baked.
+        const float baked = m_renderer ? scene().meshMetalBaked(scene().selectedModelIndex(), scene().selectedZoneIndex()) : -1.0f;
+        value = baked < 0.0f ? -1.0 : static_cast<double>(baked) * 100.0;
+        return true;
+    }
+    if (name.startsWith(QLatin1String("overlay."), Qt::CaseInsensitive)) {
+        const MaterialView view = materialView();
+        const QStringList  part = name.toLower().split(QLatin1Char('.'));
+        bool               ok = false;
+        const int          n = part.size() > 2 ? part[1].toInt(&ok) : -1;
+        if (!view.valid || !ok || n < 0 || static_cast<std::size_t>(n) >= view.params.overlays.size()) {
+            return false;
+        }
+        const MaterialOverlay& o = view.params.overlays[static_cast<std::size_t>(n)];
+        if (part[2] == QLatin1String("tint") && part.size() > 3) {
+            value = part[3] == QLatin1String("g") ? o.tint.y : part[3] == QLatin1String("b") ? o.tint.z : o.tint.x;
+            return true;
+        }
+        if (part[2] == QLatin1String("has") && part.size() > 3) {
+            OverlayElement element = OverlayElement::Color;
+            if (!overlayElementByName(part[3].toStdString(), element)) {
+                return false;
+            }
+            value = overlayElementSource(o, element).empty() ? 0.0 : 1.0;
+            return true;
+        }
+        if (part.size() > 3 && part[2] == QLatin1String("named")) {
+            // overlay.<n>.named.<name>: 1 if that is its name (case ignored, a space written _).
+            value = QString::fromStdString(o.name).toLower().replace(QLatin1Char(' '), QLatin1Char('_')) == part.mid(3).join(QLatin1Char('.')) ? 1.0 : 0.0;
+            return true;
+        }
+        OverlayField field = OverlayField::Opacity;
+        if (!overlayFieldByName(part[2].toStdString(), field)) {
+            return false;
+        }
+        value = overlayFieldValue(o, field);
+        return true;
+    }
     if (name.startsWith(QLatin1String("zonename."), Qt::CaseInsensitive)) {
         const MaterialView view = materialView();
         const QString      want = name.mid(9);
@@ -912,8 +1135,8 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         const MaterialParams& p = imported ? view.imported : view.params;
         const QString         rest = name.mid(imported ? 12 : 4).toLower();
         {
-            // mat.color.<r|g|b> is the linear base colour; mat.<colour>.<r|g|b> any of the
-            // material's colours by the tab's names (materialColorName).
+            // mat.color.<r|g|b> is the linear base color; mat.<color>.<r|g|b> any of the
+            // material's colors by the tab's names (materialColorName).
             const int dot = rest.indexOf(QLatin1Char('.'));
             if (dot > 0) {
                 const QString colorName = rest.left(dot);

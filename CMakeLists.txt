@@ -256,7 +256,7 @@ add_executable(
     src/assets/assetnodeids.h             # node-id / grid-role vocabulary (header-only)
     src/assets/assetfolderproxymodel.cpp  # tree proxy: folder hit icons + collection drag-reparent
     src/assets/assetfolderproxymodel.h
-    src/assets/assettreeview.cpp          # the tree view: QSS separator colour, drop highlight, spring-loading
+    src/assets/assettreeview.cpp          # the tree view: QSS separator color, drop highlight, spring-loading
     src/assets/assettreeview.h
     src/assets/assettreedelegate.cpp      # tree row painting
     src/assets/assettreedelegate.h
@@ -292,6 +292,9 @@ add_executable(
     src/properties/transformpanel.h
     src/properties/materialpanel.cpp     # the Materials tab: the selected object's material zones as sliders
     src/properties/materialpanel.h
+    src/properties/materialthumbbutton.h # the tab's map thumbnail button (image + frame + hover preview)
+    src/properties/overlaystack.cpp      # the tab's Overlays section: the zone's overlay stack as cards
+    src/properties/overlaystack.h
     src/properties/propertyrows.cpp      # the row builders every properties tab shares (group, restore button)
     src/properties/propertyrows.h
     src/properties/softbodypanel.cpp     # the Soft Body Physics tab: the breasts' and the buttocks' switches and dials
@@ -383,6 +386,7 @@ add_executable(
     src/viewport/rendering/outlinemask.h
     src/viewport/rendering/postprocess.cpp # bloom chain + the tonemapping composite (+ the selection outline)
     src/viewport/rendering/postprocess.h
+    src/viewport/rendering/selectionstyle.h # the selection outline's and the joint highlight's color + opacity (Preferences → Selection)
     src/viewport/rendering/vulkancommands.cpp
     src/viewport/rendering/vulkancommands.h
     src/viewport/rendering/vulkanrenderer.cpp
@@ -503,6 +507,9 @@ add_executable(
     src/viewport/scene/armaturedials.cpp    # the transform dials: a joint's rotation as Bend Forward / Bend Sideways / Twist, 0-100
     src/viewport/scene/jointtransform.h     # ... and what the Transform tab shows of them (plain data)
     src/viewport/scene/materialparams.h     # the Materials tab's per-zone values and view (plain data)
+    src/viewport/scene/materialoverlay.h    # a zone's overlays: tattoos, bruises, makeup layered over its maps (plain data)
+    src/viewport/scene/overlaycompositor.cpp # ... composited into the images the zone's slots bind
+    src/viewport/scene/overlaycompositor.h
     src/viewport/scene/shadowpass.cpp    # the key light's depth-only pass: map, pipeline, frustum fit
     src/viewport/scene/shadowpass.h
     src/viewport/scene/outlinepass.cpp   # the selection-outline mask pass
@@ -555,6 +562,8 @@ add_executable(
     src/preferences/generalpreferencespanel.h
     src/preferences/vrpreferencespanel.cpp  # VR support toggle, headset status, render scale
     src/preferences/vrpreferencespanel.h
+    src/preferences/selectionpreferencespanel.cpp # the selection outline's and the joint highlight's color + opacity
+    src/preferences/selectionpreferencespanel.h
     src/preferences/assetspreferencespanel.cpp
     src/preferences/assetspreferencespanel.h
     src/preferences/placeholderpreferencespanel.cpp # one class for every not-yet-built tab (Interface/Input/Navigation/System)
@@ -578,6 +587,8 @@ add_executable(
     src/core/updatecheck.h
     src/core/vrsettings.cpp                # VR Mode's preferences + the startup headset report
     src/core/vrsettings.h
+    src/core/selectionsettings.cpp         # Preferences → Selection, stored: the two marks' colors and opacities
+    src/core/selectionsettings.h
     
     # --- Embedded Resources ---
     resources/resources.qrc   # Injects images, UI styles, and SQL templates
@@ -806,6 +817,28 @@ target_include_directories(PoseStudioProjectFileCheck PRIVATE
 )
 add_test(NAME project-file-check COMMAND PoseStudioProjectFileCheck)
 
+# The overlay compositor's guard (tools/overlay): the blend modes and bitmap adjustments on known
+# colors, the crop of an overlay image, and whole composites — color over a skin map, gloss into
+# the roughness map, a height added about mid grey, a normal blended, a stack's order, a
+# mismatched overlay size, a zone without the map. scene/overlaycompositor.cpp alone; the Vulkan
+# HEADERS only (modeldata.h's vertex layout names them) — no Qt, no device.
+add_executable(PoseStudioOverlayCheck
+    tools/overlay/check_overlay.cpp
+    src/viewport/scene/overlaycompositor.cpp
+)
+target_include_directories(PoseStudioOverlayCheck PRIVATE
+    src/viewport/scene
+    src/viewport/import
+    src/viewport/util
+    ${glm_SOURCE_DIR}
+)
+target_compile_definitions(PoseStudioOverlayCheck PRIVATE
+    GLM_FORCE_RADIANS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+)
+target_link_libraries(PoseStudioOverlayCheck PRIVATE Vulkan::Headers)
+add_test(NAME overlay-check COMMAND PoseStudioOverlayCheck)
+
 # The script-link reader's guard (tools/scriptlink): writes synthetic content-library scripts —
 # folder links, file loaders, web links, chains, programs, an encrypted one — and checks where
 # AssetScriptLink::follow() leads, and which folders loneFigureIn() opens. Qt6::Core plus the
@@ -998,7 +1031,7 @@ set(SHADER_INCLUDES
     "${SHADER_INCLUDE_DIR}/camera_ubo.glsl"   # the set-0 camera/lighting UBO + rotateY
     "${SHADER_INCLUDE_DIR}/skinning.glsl"     # joint buffer + dual-quaternion skinning blend
     "${SHADER_INCLUDE_DIR}/correctives.glsl"  # pose-corrective buffers + per-vertex blend
-    "${SHADER_INCLUDE_DIR}/colour.glsl"       # ACES tonemap + the selection accent colour
+    "${SHADER_INCLUDE_DIR}/color.glsl"       # ACES tonemap + the selection accent color
     "${SHADER_INCLUDE_DIR}/fullscreen.glsl"   # the fullscreen triangle
 )
 

@@ -24,7 +24,7 @@ layout(location = 0) in vec3 vNearPoint;
 layout(location = 1) in vec3 vFarPoint;
 layout(location = 0) out vec4 outColor;
 
-// --- Tunables. Colours are LINEAR: the swapchain is sRGB, so the GPU encodes on store. ---
+// --- Tunables. Colors are LINEAR: the swapchain is sRGB, so the GPU encodes on store. ---
 const vec3  kLineColor    = vec3(0.16);  // soft grey, a touch lighter than the #3E4042 floor
 const float kMinorSpacing = 1.0;         // world units between fine lines
 const float kMajorEvery   = 10.0;        // every Nth line is a brighter "major" line

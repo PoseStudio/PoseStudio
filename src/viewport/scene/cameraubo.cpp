@@ -8,6 +8,7 @@
 #include "camera.h"
 #include "environment.h"
 #include "lightingsettings.h"
+#include "selectionstyle.h"
 #include "shademode.h"
 
 #include <algorithm>
@@ -30,7 +31,7 @@ glm::vec3 keyLightDirection(const LightingSettings& lighting, bool pbrFollowsRot
 
 void fillCameraUbo(CameraUbo& ubo, const Camera& camera, const LightingSettings& lighting,
                    const ShadeMode& spec, const EnvironmentSH& sh, const glm::mat4& lightViewProj,
-                   const glm::vec3& keyDir) {
+                   const glm::vec3& keyDir, const SelectionStyle& selection) {
     // The fixed halves of the analytic rig never change, so normalize them once rather than
     // once per frame.
     static const glm::vec4 kFillDir(glm::normalize(glm::vec3(-0.6f, 0.28f, 0.5f)), 0.0f);  // fill: opposite, lower
@@ -51,16 +52,18 @@ void fillCameraUbo(CameraUbo& ubo, const Camera& camera, const LightingSettings&
     // itself never reaches the shader); a row without a shaded surface pushes 0, unread.
     ubo.params = glm::vec4(static_cast<float>(std::max(spec.fragMode, 0)), lighting.exposure,
                            lighting.specularIntensity, lighting.ambientFill);
-    // params2.w is free: the tonemap flag rides composite.frag's push constant now (tonemapping
-    // moved to the composite pass so bloom sees real radiance) — no scene shader reads it.
+    // params2.w: the joint highlight color's own luminance — the tint is the color over this,
+    // times the surface's luminance (mesh.frag), so the part keeps its light and shadow.
     ubo.params2 = glm::vec4(lighting.diffuseIntensity, lighting.keyIntensity,
-                            glm::radians(lighting.environmentRotationDeg), 0.0f);
+                            glm::radians(lighting.environmentRotationDeg),
+                            jointTintLuminance(selection.jointColor));
+    ubo.selection = glm::vec4(selection.jointColor, std::clamp(selection.jointOpacity, 0.0f, 1.0f));
     ubo.params3 = glm::vec4(lighting.subsurface, lighting.rimIntensity,
                             static_cast<float>(lighting.backdropMode), lighting.backdropBlur);
     ubo.params4 = glm::vec4(lighting.backdropBrightness, lighting.domeRadius,
                             lighting.shadowIntensity, spec.wireLevel);
     // Environment diffuse irradiance (SH). The PBR mode reconstructs per-normal ambient from these
-    // instead of the flat `ambient` constant, so shadow sides pick up the environment's colour.
+    // instead of the flat `ambient` constant, so shadow sides pick up the environment's color.
     for (int i = 0; i < 9; ++i) {
         ubo.sh[i] = glm::vec4(sh.c[i], 0.0f);
     }

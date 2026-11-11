@@ -40,7 +40,7 @@ VulkanContext::VulkanContext(VkInstance instance, VkSurfaceKHR surface, uint32_t
     createAllocator(apiVersion);
     m_samplers = std::make_unique<SamplerCache>(m_device);
 
-    // Pick the MSAA level once: the highest of {4x, 2x} the device supports for BOTH colour and depth
+    // Pick the MSAA level once: the highest of {4x, 2x} the device supports for BOTH color and depth
     // framebuffers, else single-sample. 4x is the quality/perf sweet spot for a viewport; the HDR
     // scene pass, the outline mask, and every scene pipeline are built against this count.
     VkPhysicalDeviceProperties props{};
@@ -183,7 +183,7 @@ void VulkanContext::createLogicalDevice(const std::vector<std::string>& extraExt
     }
 
     VkPhysicalDeviceFeatures features{};
-    // Per-attachment blend/write-mask states: the HDR scene pass has two colour attachments
+    // Per-attachment blend/write-mask states: the HDR scene pass has two color attachments
     // (diffuse + the specular the SSS blur must not smear) with different write masks per
     // pipeline. Universally supported on desktop hardware (and by MoltenVK); guard anyway so an
     // exotic device degrades gracefully at pipeline creation (VulkanPipeline collapses the two

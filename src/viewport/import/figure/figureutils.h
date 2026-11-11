@@ -12,7 +12,7 @@
  *
  *  - The channel readers come in TWO deliberate flavours, documented side by side below: the
  *    "current wins" readers (channelScalar/channelDouble/channelBool/channelColor) for DIALED values
- *    — a material colour, a morph weight — and the "rest wins" reader (restVec3Channels) for BIND
+ *    — a material color, a morph weight — and the "rest wins" reader (restVec3Channels) for BIND
  *    transforms, where a scene's current_value is the posed state and the bind must come from rest.
  *  - parseChannelRef() returns BOTH the raw and the percent-decoded id, and AN ID IS COMPARED
  *    DECODED: a reference writes it percent-encoded ("#Some%20Character%20Body"), the file that
@@ -165,7 +165,7 @@ const nlohmann::json* findMorphModifier(const nlohmann::json& doc, const std::st
 
 // --- Channel readers ---------------------------------------------------------------------------
 // A channel object carries the channel default in "value" and the DIALED state in "current_value".
-// For everything a preset dials — material colours and scalars, morph weights, enable flags — the
+// For everything a preset dials — material colors and scalars, morph weights, enable flags — the
 // dialed value must win: reading "value" alone once rendered every zone with the 0.75-grey channel
 // default (textures ~25% too dark) and drew black-dialed pupils as bright dots. These readers try
 // "current_value" first, then "value", then the fallback.

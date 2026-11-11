@@ -19,17 +19,17 @@
 // regardless of winding); and alpha = the per-draw opacity, so the same shader serves the opaque
 // and the alpha-blended transparent pass. Two further DRAW KINDS bypass the modes entirely
 // (pc.meta.y): the wireframe overlay's edges (a flat grey) and the hidden-line surface fill
-// (depth only; its pipeline masks the colour writes).
+// (depth only; its pipeline masks the color writes).
 //
 // Pass:    the HDR scene pass (HdrTarget), opaque + transparent + wire + hidden-line variants.
 // Inputs:  set 0.0 the camera/lighting UBO (camera_ubo.glsl); set 1.0-5 the material maps; set 3
 //          the IBL maps + shadow map; push: the 128-byte MeshPushConstants block (mesh.h).
-// Outputs: location 0 -> colour attachment 0 (scene; alpha = SSS mask in the opaque pass),
-//          location 1 -> colour attachment 1 (the PBR opaque pass's specular; masked elsewhere).
+// Outputs: location 0 -> color attachment 0 (scene; alpha = SSS mask in the opaque pass),
+//          location 1 -> color attachment 1 (the PBR opaque pass's specular; masked elsewhere).
 
 #extension GL_GOOGLE_include_directive : enable
 #include "camera_ubo.glsl" // the set-0 camera/lighting block (cam) + rotateY
-#include "colour.glsl"     // tonemapACES (the matcap mode) + kSelectionAccent (the highlight)
+#include "color.glsl"     // tonemapACES (the matcap mode)
 
 #define MATERIAL_SET 2 // the per-model material buffer (binding 3 of the pose set)
 #include "material.glsl"
@@ -39,7 +39,7 @@
 // 1 transparent (alpha = blend opacity), 2 wireframe edges, 3 hidden-line depth fill, 4 and 5 a
 // transmissive zone's MULTIPLY and ADD draws — see the PBR branch's end) packed with
 // the selected joint + its twist twin (read by the vertex stage). The MATERIAL itself — base
-// colour, roughness, metalness, the lobes, the coat, the detail layers — is the buffer entry
+// color, roughness, metalness, the lobes, the coat, the detail layers — is the buffer entry
 // main() fetches into `surf` before shading (it rode in the push block until 2026-11-09, at the
 // 128-byte limit).
 layout(push_constant) uniform Push {
@@ -50,7 +50,7 @@ layout(push_constant) uniform Push {
 MaterialGpu surf; // this draw's material (set in main)
 bool gTransmitShaded = false; // a transmission draw (kinds 4 / 5) answered by the PBR branch (see main)
 
-layout(set = 1, binding = 0) uniform sampler2D uDiffuse;   // sRGB colour map (white 1x1 fallback)
+layout(set = 1, binding = 0) uniform sampler2D uDiffuse;   // sRGB color map (white 1x1 fallback)
 layout(set = 1, binding = 1) uniform sampler2D uDetail;    // linear normal/bump map (flat fallback)
 layout(set = 1, binding = 2) uniform sampler2D uRoughMap;  // linear PARAMETER map: roughness (R), metalness (G), ambient occlusion (B), transmission weight (A); white fallback
 layout(set = 1, binding = 3) uniform sampler2D uSpecMask;  // linear spec-weight mask (white fallback)
@@ -59,7 +59,7 @@ layout(set = 1, binding = 5) uniform sampler2D uMicroNormal; // linear tiled por
 layout(set = 1, binding = 6) uniform sampler2D uBump;        // linear bump / height map beside a normal map (flat fallback)
 layout(set = 1, binding = 7) uniform sampler2D uEmission;    // sRGB emission map (white fallback)
 layout(set = 1, binding = 8) uniform sampler2D uLayerMap;    // linear LAYER map: coat weight (R), coat roughness (G), sheen weight (B), thin-film thickness (A); white fallback
-layout(set = 1, binding = 9) uniform sampler2D uSheenColor;  // sRGB sheen colour map (white fallback)
+layout(set = 1, binding = 9) uniform sampler2D uSheenColor;  // sRGB sheen color map (white fallback)
 
 // The slope a grayscale bump (height) map gives the normal at uv — tangent space, applied as
 // (-dH.x, -dH.y, 1): a mip-stable texture-space central difference, HIGH-PASSED — a second
@@ -100,7 +100,7 @@ layout(location = 4) in vec4 vTangent; // baked UV tangent + handedness (w = 0 -
 layout(location = 5) in float vSelect; // skin weight on the SELECTED joint (+ twin): the highlight amount
 
 layout(location = 0) out vec4 outColor;
-// The HDR pass's second colour attachment: the PBR opaque pass's SPECULAR, kept out of the
+// The HDR pass's second color attachment: the PBR opaque pass's SPECULAR, kept out of the
 // screen-space SSS blur (blurred glints smear into a wet-looking film) and added back by the
 // blur's V pass. Only the opaque mesh pipeline writes this attachment (others mask it off).
 layout(location = 1) out vec4 outSpec;
@@ -229,7 +229,7 @@ float visNeubelt(float ndv, float ndl) {
 
 // --- Thin-film interference (Belcour & Barla 2017, in the form the glTF iridescence model takes):
 // the reflectance of a film of index filmIor and thickness thicknessNm over a base of reflectance
-// baseF0, seen at cosTheta — the colours of a soap bubble, oil on water, a beetle's shell. Three
+// baseF0, seen at cosTheta — the colors of a soap bubble, oil on water, a beetle's shell. Three
 // Gaussians stand in for the eye's spectral sensitivity (in XYZ, converted to linear Rec.709).
 vec3 filmSensitivity(float opd, vec3 shift) {
     float phase = 2.0 * PI * opd * 1.0e-9;
@@ -340,7 +340,7 @@ void shade() {
     outSpec = vec4(0.0); // only the PBR opaque path routes specular here
     // pc.meta.y packs the DRAW KIND (its low 3 bits — the rest is the selected joint, read by
     // the vertex stage). Kinds beyond the lit passes: the hidden-line DEPTH FILL (3) has every
-    // colour write masked in its pipeline — nothing to shade, so return before any texture
+    // color write masked in its pipeline — nothing to shade, so return before any texture
     // fetch — and the WIREFRAME edges (2) are a flat grey from the UBO's wire level (the wire
     // pipeline rasterizes each triangle as its edges; alpha 0 keeps the SSS mask untouched).
     // (The transmission's kinds 4 and 5 are LIT draws of the transparent pass: see the PBR
@@ -529,7 +529,7 @@ void shade() {
 
     // --- PBR: Cook-Torrance GGX with image-based lighting (the default photoreal mode) ---
     // The environment does the heavy lifting: SH-reconstructed diffuse irradiance gives the soft,
-    // directional, colour-bleeding ambient a flat term never could, and one analytic key light adds
+    // directional, color-bleeding ambient a flat term never could, and one analytic key light adds
     // crisp form + a highlight on top. No fill/rim lights — the environment supplies wrap + rim.
     // Mode 14 (the Roughness / Specular Map view) runs this same path and outputs only the
     // material specular it accumulates (see the end of the branch).
@@ -558,7 +558,7 @@ void shade() {
         // The dielectric's own reflectance is its INDEX OF REFRACTION's, ((ior-1)/(ior+1))²: 4% at
         // the standard 1.5 (the literal, so every material at the default is bit-identical to
         // before), 2% at water's 1.33, 17% at a diamond's 2.4 — × the weight, tinted by the
-        // material's specular colour (white for nearly every real material).
+        // material's specular color (white for nearly every real material).
         float ior = surf.transmission.w;
         float f0Dielectric = ior == 1.5 ? 0.04 : pow((ior - 1.0) / (ior + 1.0), 2.0);
         vec3  f0 = mix(vec3(f0Dielectric) * specWeight * surf.specularColor.rgb, albedo, metallic);
@@ -570,7 +570,7 @@ void shade() {
         vec3  kD = (1.0 - kS) * (1.0 - metallic);
 
         // THIN FILM (extra.y weight, sheenColor.w thickness in nm, coatColor.w the film's index):
-        // the film's interference colours replace the base's plain Fresnel by the film's weight
+        // the film's interference colors replace the base's plain Fresnel by the film's weight
         // — at the key light's half vector below, and at the view for the environment here.
         // (The LAYER map: the coat weight (R), the coat roughness (G), the sheen weight (B) and the
         // thin-film thickness (A) per texel — 1 where the material has no such map.)
@@ -643,7 +643,7 @@ void shade() {
         }
         bool  dualLobe = lobeRatio < 0.999;
 
-        // Per-region translucency: authored weight × the map (a flesh-red colour map carries the
+        // Per-region translucency: authored weight × the map (a flesh-red color map carries the
         // transmitted tint; a grayscale weight map reads through its luminance; white fallback =
         // uniform). Scales the skin wrap AND the backlit transmission — cloth/props authored at
         // 0 stop wrapping like skin.
@@ -711,7 +711,7 @@ void shade() {
             // Backlit transmission: key light entering from BEHIND glows through thin translucent
             // regions (ears, nostrils, finger webbing). The through-vector is the light bent by
             // the surface; blood makes transmitted light red, so the tint is the translucency
-            // map's colour × a warm absorption profile over the albedo. Deliberately NOT gated by
+            // map's color × a warm absorption profile over the albedo. Deliberately NOT gated by
             // the shadow map — this is exactly the light that passes through the occluder.
             if (transAmount > 0.0) {
                 vec3  through = normalize(-l + n * 0.35);
@@ -810,8 +810,8 @@ void shade() {
             // so every skin's coat is bit-identical), 5.3% at a 1.6 lacquer, 2% at water's 1.33.
             float coatIor = surf.sheen.w;
             vec3  f0c = vec3(coatIor == 1.5 ? 0.04 : pow((coatIor - 1.0) / (coatIor + 1.0), 2.0));
-            // COAT COLOUR (coatColor.rgb): what passes through the coat to the surface takes its
-            // tint — the base, diffuse and specular, under a coloured lacquer (candy-apple red
+            // COAT COLOR (coatColor.rgb): what passes through the coat to the surface takes its
+            // tint — the base, diffuse and specular, under a colored lacquer (candy-apple red
             // over metal flakes). White leaves it as it was.
             if (any(lessThan(surf.coatColor.rgb, vec3(0.999)))) {
                 vec3 coatTint = mix(vec3(1.0), clamp(surf.coatColor.rgb, 0.0, 1.0), tcWeight);
@@ -895,9 +895,9 @@ void shade() {
         // frame behind it by what it lets through (kind 4), then ADDING its own reflection and
         // what is left of its diffuse (kind 5) — so the scene shows through tinted glass with the
         // environment's reflection on it. What passes is the transmission's share of the light
-        // the surface does not reflect (1 − Fresnel), tinted by the transmission colour; through
+        // the surface does not reflect (1 − Fresnel), tinted by the transmission color; through
         // a SOLID the path lengthens as the view grazes it (Snell), so the tint deepens toward the
-        // edges, while a thin-walled sheet is its colour throughout. The view is not bent and a
+        // edges, while a thin-walled sheet is its color throughout. The view is not bent and a
         // rough glass does not blur what is behind it (that needs the opaque frame as a texture).
         float Tw = 0.0;
         vec3  transmittance = vec3(1.0);
@@ -915,7 +915,7 @@ void shade() {
         }
         color *= exposure;
         specSum *= exposure;
-        // EMISSION: the surface as a light — the material's colour × luminance (emission.rgb, 0 = none)
+        // EMISSION: the surface as a light — the material's color × luminance (emission.rgb, 0 = none)
         // × its map — added as radiance, which the composite's bloom then spreads for a lamp or a
         // screen. (A uniform branch: an unlit material's shading is untouched, sample and all.)
         if (surf.emission.x + surf.emission.y + surf.emission.z > 0.0) {
@@ -971,7 +971,7 @@ void shade() {
 
 // The SELECTED-JOINT highlight, over whatever shade() produced, in every shade mode (the wire
 // modes tint their wires): vSelect is the vertex's skin weight on the selected joint and its
-// twist twin, so exactly the flesh that joint drives tints toward the selection blue, fading
+// twist twin, so exactly the flesh that joint drives tints toward the selection color, fading
 // where the weights blend into the neighbouring bones — the "you grabbed THIS part" cue, with
 // no bones drawn. Luminance-matched: the surface keeps its shading (form, highlights) and only
 // its hue moves, with a floor so dark cavities still read as selected. Alpha is untouched (it
@@ -994,11 +994,11 @@ void main() {
         }
     }
     if (vSelect > 0.001 && !(drawKind > 3.5 && drawKind < 4.5)) { // (a multiply draw tints nothing)
-        // kSelectionAccent (colour.glsl): linear #5b87cc, the same value PostProcess pushes for the outline.
-        const float kAccentLum = 0.239;  // its Rec.709 luminance
-        const float kStrength = 0.75;    // tint at full weight
+        // cam.selection (Preferences -> Selection; selectionstyle.h): rgb = the highlight's color,
+        // linear (the accent #5b87cc unless set), a = its opacity at a full weight (0.75);
+        // cam.params2.w = that color's own Rec.709 luminance (0.239 for the accent), divided out.
         float lum = max(dot(outColor.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.08);
-        vec3 target = kSelectionAccent * (lum / kAccentLum) * 1.3;
-        outColor.rgb = mix(outColor.rgb, target, clamp(vSelect, 0.0, 1.0) * kStrength);
+        vec3 target = cam.selection.rgb * (lum / cam.params2.w) * 1.3;
+        outColor.rgb = mix(outColor.rgb, target, clamp(vSelect, 0.0, 1.0) * cam.selection.a);
     }
 }

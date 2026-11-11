@@ -3,7 +3,7 @@
 # and, as the reference it must match, the same on <assets>/mr_cube.gltf — the metallic-roughness
 # cube with the same two materials written directly. The assets come from
 # tools/materials/make_test_assets.py. A static model: `select 0` stands in for the click.
-# Gold: black diffuse, gold specular, gloss 0.8 -> a metal with the gold as its base colour.
+# Gold: black diffuse, gold specular, gloss 0.8 -> a metal with the gold as its base color.
 # RedPlastic: red diffuse, 4 % grey specular, gloss 0.5 -> a dielectric with the red kept.
 view front
 select 0

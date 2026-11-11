@@ -3,7 +3,7 @@
  * @brief The Asset Manager's directory/collections tree view.
  *
  * A QTreeView with three additions the stock view can't provide: (1) a `separatorColor`
- * Q_PROPERTY so _assetmanager.qss can drive the colour AssetTreeDelegate paints separator rows
+ * Q_PROPERTY so _assetmanager.qss can drive the color AssetTreeDelegate paints separator rows
  * with (QSS can't reach C++ painting any other way); (2) its own single drop-target highlight,
  * painted over exactly the node a drag may land on, because Qt's built-in drop indicator (lines
  * between rows plus stray edge rectangles) reads as confusing ghost highlights mid-drag, so

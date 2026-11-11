@@ -22,7 +22,7 @@ ShadowPass::ShadowPass(VulkanContext& context, VkDescriptorSetLayout poseSetLayo
                        const std::vector<char>& vertSpirv, const std::vector<char>& fragSpirv)
     : m_shadowMap(std::make_unique<ShadowMap>(context)) {
     // Depth-only shadow pipeline: same skinned vertex layout as the mesh pass, rendered into the
-    // shadow map's own single-sample pass with a static depth bias (acne) and no colour
+    // shadow map's own single-sample pass with a static depth bias (acne) and no color
     // attachment. Its only descriptor set is the pose layout (bound at index 0 — see
     // Model::recordShadow).
     PipelineConfig shadowConfig;

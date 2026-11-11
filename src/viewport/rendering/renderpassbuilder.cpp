@@ -40,7 +40,7 @@ RenderPassBuilder& RenderPassBuilder::color(VkFormat format, VkSampleCountFlagBi
 
 RenderPassBuilder& RenderPassBuilder::resolve(VkFormat format, VkImageLayout finalLayout) {
     if (m_colorRefs.empty()) {
-        throw VulkanError("RenderPassBuilder::resolve() needs a preceding colour attachment.");
+        throw VulkanError("RenderPassBuilder::resolve() needs a preceding color attachment.");
     }
     const uint32_t index = attachmentCount();
     m_attachments.push_back(describe(format, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_DONT_CARE,
@@ -93,8 +93,8 @@ UniqueRenderPass RenderPassBuilder::build(VkDevice device) const {
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = static_cast<uint32_t>(m_colorRefs.size());
     subpass.pColorAttachments = m_colorRefs.empty() ? nullptr : m_colorRefs.data();
-    // pResolveAttachments must be either null or one entry per colour attachment (UNUSED where a
-    // colour attachment has no resolve).
+    // pResolveAttachments must be either null or one entry per color attachment (UNUSED where a
+    // color attachment has no resolve).
     subpass.pResolveAttachments = m_hasResolve ? m_resolveRefs.data() : nullptr;
     subpass.pDepthStencilAttachment = m_hasDepth ? &m_depthRef : nullptr;
 
@@ -130,7 +130,7 @@ std::array<VkSubpassDependency, 2> sampledTargetDependencies(bool withDepth) {
     deps[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT | depthWrite;
     deps[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | depthStages;
     deps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | depthReadWrite;
-    // (1) After this pass: its colour (and depth) writes must be visible to the fragment reads of
+    // (1) After this pass: its color (and depth) writes must be visible to the fragment reads of
     // the passes that sample it.
     deps[1].srcSubpass = 0;
     deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;

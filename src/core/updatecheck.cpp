@@ -199,7 +199,7 @@ void UpdateCheck::promptNewer(const QString& version, const QUrl& page) {
     box->setWindowTitle(tr("Update Available"));
     box->setIcon(QMessageBox::Information);
     box->setTextFormat(Qt::RichText);
-    // Qt's QSS engine does not style <a> inside a QLabel: the link colour goes inline, the
+    // Qt's QSS engine does not style <a> inside a QLabel: the link color goes inline, the
     // app's accent (see the same pattern in the Asset Manager's hint label).
     box->setText(tr("<b>PoseStudio %1 is available.</b><br>You are running %2.<br><br>"
                     "<a href=\"%3\" style=\"color:%4;\">%3</a>")

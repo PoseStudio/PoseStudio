@@ -29,6 +29,7 @@
 #include <string>
 #include <vector>
 
+class QColor;
 class QVulkanInstance;
 class QShowEvent;
 class QHideEvent;
@@ -43,8 +44,11 @@ class VulkanWindow;
 struct JointTransform;
 enum class MaterialMap;
 struct DecodedImage;
+struct MaterialOverlay;
 struct MaterialParams;
 struct MaterialView;
+struct OverlayImage;
+enum class OverlayImageKind;
 class JointModalInput;
 struct LightingSettings;
 
@@ -145,6 +149,12 @@ public:
     /// The selected zone's image in slot @p map (VulkanWindow::materialSlotImage), for the tab's
     /// thumbnails; null without one.
     std::shared_ptr<const DecodedImage> materialSlotImage(MaterialMap map, int* channel = nullptr) const;
+    /// THE OVERLAYS (materialoverlay.h): the selected zone's overlay stack replaced — on every
+    /// zone painted on its color map — and composited into the maps (VulkanWindow::
+    /// setMaterialOverlays; one undo entry, or the open edit's); and an overlay image file
+    /// decoded and cropped, for the tab's thumbnails (null when it cannot be read).
+    bool setMaterialOverlays(const std::vector<MaterialOverlay>& overlays);
+    std::shared_ptr<const OverlayImage> overlayImage(const QString& path, OverlayImageKind kind);
     /// The B / S / T key, wherever the keyboard focus is (the Edit menu's actions carry the keys
     /// application-wide): the joint mouse mode on dial @p kind (0/1/2 = Bend / Side-Side /
     /// Twist) of the selected joint — on, off again, or switched to it
@@ -170,6 +180,14 @@ public:
     void groundFigure();
     /// The Soft Body Physics tab's settings changed: every figure re-posed with them.
     void applySoftBodySettings();
+
+    /// Preferences → Selection: the outline around the selected object / the highlight on the
+    /// part a selected joint moves, drawn in @p color (as the screen shows it) at @p opacity
+    /// (0 = not drawn, 1 = the color in full) from the next frame on. Nothing is stored here —
+    /// the page stores (core/selectionsettings.h), main.cpp hands over the stored values at
+    /// startup. No-op if the viewport degraded.
+    void setSelectionOutline(const QColor& color, double opacity);
+    void setJointHighlight(const QColor& color, double opacity);
 
     /// Toggles the skeleton overlay (the joint→parent bone lines drawn over the figure). Off by
     /// default — joints are grabbed directly on the figure — but joints stay clickable either way.
@@ -208,6 +226,9 @@ public:
     void recenterVr();
 
 signals:
+    /// The Preferences dialog is wanted on that tab — the strip's Selection button, and the
+    /// scripted test's `prefs <tab>` (the shell opens it — MenuManager::openPreferencesDialog).
+    void preferencesRequested(const QString& tab);
     /// Re-emitted from the viewport when VR Mode starts or ends (by the user or because the
     /// headset session was lost); the View menu's checkable entry follows it.
     void vrModeChanged(bool on);

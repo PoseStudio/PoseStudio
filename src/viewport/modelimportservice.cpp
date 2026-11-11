@@ -243,8 +243,8 @@ std::shared_ptr<DecodedImage> buildLayerMap(const std::shared_ptr<const DecodedI
 }
 
 /// THE SPECULAR / GLOSSINESS BAKE (import/specgloss.h): the standard solve run per texel over a
-/// mesh's diffuse map, specular-colour map and glossiness map (any of them may be missing — its
-/// factor stands in), at the largest of their sizes, into a base-colour map (sRGB, the diffuse's
+/// mesh's diffuse map, specular-color map and glossiness map (any of them may be missing — its
+/// factor stands in), at the largest of their sizes, into a base-color map (sRGB, the diffuse's
 /// alpha kept), a metalness map (grayscale) and — from a glossiness map — a roughness map.
 struct SpecGlossBake {
     std::shared_ptr<DecodedImage> base, metal, rough;
@@ -283,9 +283,9 @@ SpecGlossBake bakeSpecGloss(const std::shared_ptr<DecodedImage>& diffuse, const 
     const auto encode = [](float linear) {
         return kToSrgb[static_cast<std::size_t>(std::clamp(static_cast<int>(std::lround(linear * 4095.0f)), 0, 4095))];
     };
-    const bool bakeColour = d != nullptr || s != nullptr; // (a glossiness map alone leaves the scalar solve's colour and metalness)
+    const bool bakeColor = d != nullptr || s != nullptr; // (a glossiness map alone leaves the scalar solve's color and metalness)
     const std::size_t texels = static_cast<std::size_t>(width) * height;
-    if (bakeColour) {
+    if (bakeColor) {
         out.base = std::make_shared<DecodedImage>();
         out.base->width = width;
         out.base->height = height;
@@ -455,8 +455,8 @@ void ModelImportService::decodeModelTextures(ModelData& data) {
         }
     }
     // ---- 2a. THE SPECULAR / GLOSSINESS BAKE (specgloss.h): a mesh whose material came in the
-    // older convention WITH maps gets the standard solve per texel — a base-colour map and a
-    // metalness map in place of its diffuse and specular-colour maps, a roughness map from a
+    // older convention WITH maps gets the standard solve per texel — a base-color map and a
+    // metalness map in place of its diffuse and specular-color maps, a roughness map from a
     // glossiness map — once per unique combination of inputs and factors; the scalars that the
     // maps now carry become 1.
     {
@@ -581,7 +581,7 @@ void ModelImportService::decodeModelTextures(ModelData& data) {
     // brow card's shape, an older figure's eye-shell fade) rides in the diffuse map's ALPHA channel,
     // so the shader needs no extra texture/binding. The bake COPIES the diffuse first — the plain
     // shared decode must stay pristine for meshes using it unmasked. Runs before the gutter fill so
-    // the baked alpha gets the same seam treatment as the colours.
+    // the baked alpha gets the same seam treatment as the colors.
     struct Combo {
         std::string                   diffuseKey, maskKey;
         std::shared_ptr<DecodedImage> image;
@@ -630,7 +630,7 @@ void ModelImportService::decodeModelTextures(ModelData& data) {
             mesh.diffuseImage = combo.image;
             mesh.hasOpacityMask = combo.masked;
             if (combo.masked) {
-                // The slots' own images (the Materials tab): the plain base colour and the mask.
+                // The slots' own images (the Materials tab): the plain base color and the mask.
                 mesh.diffusePlainImage = k.diffuse.empty() ? nullptr : images[k.diffuse];
                 const auto maskIt = masks.find(k.mask);
                 if (maskIt != masks.end() && !maskIt->second.isNull()) {
@@ -853,7 +853,7 @@ std::shared_ptr<DecodedImage> maskToDecoded(const QImage& mask) {
 std::shared_ptr<DecodedImage> bakeCutoutIntoBaseColor(const std::shared_ptr<const DecodedImage>& base,
                                                       const std::shared_ptr<const DecodedImage>& mask) {
     if (!mask) {
-        // No cutout: the plain base colour is the whole image (a copy — the shared decode must stay
+        // No cutout: the plain base color is the whole image (a copy — the shared decode must stay
         // pristine; null without one, for the fallback).
         return base ? std::make_shared<DecodedImage>(*base) : nullptr;
     }

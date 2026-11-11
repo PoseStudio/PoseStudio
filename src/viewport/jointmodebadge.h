@@ -6,7 +6,7 @@
  * joint selected: VulkanWindow::beginJointModal) — the mouse's meaning is MODAL then (moving it
  * bends, tilts or twists the joint; a click keeps the result, Esc or a right-click drops it), so
  * the mode must be visible. A rotation-arrow glyph and the dial's name as the Transform tab
- * labels it, in the accent colour, on the same surface as the strip's buttons. Painted, not an
+ * labels it, in the accent color, on the same surface as the strip's buttons. Painted, not an
  * icon file.
  */
 

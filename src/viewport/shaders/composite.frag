@@ -7,7 +7,7 @@
 // (tonemap + bloom both off).
 //
 // The selection outline is a UI element, not scene light: it is painted AFTER tonemapping so it
-// keeps its exact theme colour whatever the exposure/tonemap dials do. uOutline is the selected
+// keeps its exact theme color whatever the exposure/tonemap dials do. uOutline is the selected
 // object's coverage mask (OutlineMask, MSAA-resolved so its silhouette edge is fractional). The
 // outline lives OUTSIDE the object: the mask is dilated by the outline width (the max over a ring
 // of taps) and the outline weight is the excess of that dilation over the pixel's own coverage —
@@ -22,13 +22,13 @@
 //
 // Pass:    the swapchain present pass (single-sample), the frame's only draw there.
 // Inputs:  set 0.0 the (SSS-diffused) HDR resolve, 0.1 the bloom target, 0.2 the outline mask,
-//          0.3 the PHOTO layer (the Gaussian splats: premultiplied colour + coverage, sRGB-encoded);
-//          push: params (tonemap, bloom strength, bloom on, outline width px), the outline colour
+//          0.3 the PHOTO layer (the Gaussian splats: premultiplied color + coverage, sRGB-encoded);
+//          push: params (tonemap, bloom strength, bloom on, outline width px), the outline color
 //          (+ the sRGB-encode flag in .w), the UV crop (scale.xy, offset.xy).
 // Outputs: location 0 -> the swapchain image (the sRGB store gamma-encodes, unless outline.w).
 
 #extension GL_GOOGLE_include_directive : enable
-#include "colour.glsl" // tonemapACES
+#include "color.glsl" // tonemapACES
 
 layout(set = 0, binding = 0) uniform sampler2D uHdr;
 layout(set = 0, binding = 1) uniform sampler2D uBloom;
@@ -38,12 +38,13 @@ layout(set = 0, binding = 3) uniform sampler2D uPhoto;
 layout(push_constant) uniform PC {
     vec4 params;  // x = tonemap (0/1), y = bloom strength, z = bloom on (0/1),
                   // w = selection-outline width in pixels (0 = no outline this frame)
-    vec4 outline; // rgb = the outline colour, LINEAR (the swapchain's sRGB store encodes it);
+    vec4 outline; // rgb = the outline color, LINEAR (the swapchain's sRGB store encodes it);
                   // w = encode sRGB here (0/1) — for a target whose format cannot
     vec4 uvRect;  // xy = UV scale, zw = UV offset (1,1,0,0 = the whole source)
     vec4 photo;   // xy = the share of the photo layer drawn at its current scale (1,1 = all of it);
                   // z = 1 when the outline mask holds a SPLAT SCENE's accumulated opacity, which
-                  // the outline reads through its 50% contour (a mesh's mask is coverage as is)
+                  // the outline reads through its 50% contour (a mesh's mask is coverage as is);
+                  // w = the outline's opacity (1 = the color itself over the frame)
 } pc;
 
 layout(location = 0) in vec2 vUv;
@@ -103,8 +104,8 @@ vec2 photoUvOf(vec2 uv) {
 
 // Catmull-Rom over the layer at its drawn scale: the 4x4 kernel as nine bilinear taps (the
 // middle two weights of each axis merged into one tap between them), every tap held inside
-// the drawn rectangle. Premultiplied colour + coverage interpolate as one; the kernel's slight
-// overshoot is clamped so no colour exceeds its coverage.
+// the drawn rectangle. Premultiplied color + coverage interpolate as one; the kernel's slight
+// overshoot is clamped so no color exceeds its coverage.
 vec4 samplePhotoCatmullRom(vec2 uv) {
     const vec2 size = vec2(textureSize(uPhoto, 0));
     const vec2 lo = vec2(0.5) / size;
@@ -135,9 +136,9 @@ void main() {
     vec3 color = texture(uHdr, uv).rgb;
     color += texture(uBloom, uv).rgb * pc.params.y * pc.params.z;
     color = pc.params.x > 0.5 ? tonemapACES(color) : clamp(color, vec3(0.0), vec3(1.0));
-    // THE PHOTO LAYER: the Gaussian splats, accumulated in the HDR pass as premultiplied colour +
+    // THE PHOTO LAYER: the Gaussian splats, accumulated in the HDR pass as premultiplied color +
     // coverage in the trainers' own display-referred space, laid OVER the tonemapped scene in
-    // that space — so a capture's photographed colours come out as they went into training,
+    // that space — so a capture's photographed colors come out as they went into training,
     // whatever the lighting dials, and a figure inside it is covered exactly as the splats
     // cover her.
     // The layer is drawn into the sub-rectangle its scale picks (hdrtarget.h): sampled at
@@ -151,7 +152,7 @@ void main() {
         color = decodeSrgb(photo.rgb + (1.0 - photo.a) * encodeSrgb(clamp(color, vec3(0.0), vec3(1.0))));
     }
     if (pc.params.w > 0.0) {
-        color = mix(color, pc.outline.rgb, outlineWeight(uv, pc.params.w));
+        color = mix(color, pc.outline.rgb, outlineWeight(uv, pc.params.w) * pc.photo.w);
     }
     if (pc.outline.w > 0.5) {
         color = encodeSrgb(clamp(color, vec3(0.0), vec3(1.0)));
