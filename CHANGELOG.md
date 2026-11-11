@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scripted test runs (`POSESTUDIO_IK_SCRIPT`) are isolated from the stored preferences — they write none and start the selection colors at their defaults (`POSESTUDIO_IK_SCRIPT_PREFS=1` reads and writes as a normal run) — and show no splash screen, which swallowed the first mouse press a script sent to a widget. New script commands: `outlinestyle` / `jointstyle`, `prefs <tab>` (the Preferences dialog, driven with `ui` and pictured by `uishot`), `ui scrub` (a drag across a value field, with or without Shift); new check `check_selection_style.txt`.
 - The overlay compositor's guard `overlay-check` joins the test suite (the blend modes and adjustments on known colors, the crop of an overlay image, whole composites, an overlay moved, turned and scaled, an opacity map, a color with no picture, the metal, the names), with `tools/ikscripts/materials/overlays.txt` driving the section in the app; `tools/materials/make_test_assets.py` writes its four pattern images.
 
+### Fixed
+- **FBX characters that imported invisible.** Many exporters write a fully opaque material as a transparency factor of 1 with a black transparent color — the color carries the transparency — and the reader took the factor alone, so every surface of such a character was drawn at zero opacity and only its selection outline showed. A factor of exactly 1 is now read through the transparent color (black = opaque, white = clear); a factor of 0 stays opaque and a factor in between keeps its meaning. (#41 — thanks @DmitryAkDev)
+- **glTF / GLB files imported stretched on systems whose locale writes decimals with a comma** (Linux and macOS desktops set to German, French, Russian and many others): numbers such as `-4.37e-08` were read as `-4`, so a model's rotations became scales — one static scene came in ten times too tall and paper-thin. Number parsing is independent of the system locale now; the interface is unaffected. (#40 — thanks @DmitryAkDev)
+- **The Linux (GCC) build**, which stopped at the post-processing header since VR Mode was added: GCC does not accept a nested struct with default member values as a default argument of its own class. (#39 — thanks @DmitryAkDev)
+
 ## [0.4.4] - 2026-11-10
 
 ### Added
