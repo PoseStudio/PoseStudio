@@ -56,6 +56,22 @@ public:
     bool pickSurface(const Armature& armature, const Ray& ray, float& tOut, glm::vec3& hitWorld,
                      int& bone, int* meshOut = nullptr) const;
 
+    /// The first point of the CURRENT pose's surface along @p ray counting EVERY mesh — the
+    /// pickable skin and the see-through meshes pickSurface leaves out (hair cards, lashes, the
+    /// eye's shells, glass) — for the question "is the cursor on this MODEL" (Model::pickExact):
+    /// a click on a character's hair is a click on her, whatever stands behind it. @p tOut is
+    /// the distance along the ray's direction (normalized) to the first triangle of either
+    /// kind; @p tOpaqueOut to the first OPAQUE one — the first of the model that hides what is
+    /// behind it — or the largest float where the ray meets see-through triangles alone. False
+    /// without samples or triangles, or when the ray misses them all. (A card's clear texels
+    /// count as the card: the cast knows triangles, not textures.)
+    /// @p seeThrough says, per mesh of the model (the index add() was given), whether that mesh
+    /// is see-through AS ITS MATERIAL STANDS — a zone made translucent on the Materials tab
+    /// since the import counts as it is now; a mesh beyond the vector's end counts as it was
+    /// imported.
+    bool pickAnySurface(const Armature& armature, const Ray& ray, const std::vector<char>& seeThrough, float& tOut,
+                        float& tOpaqueOut) const;
+
     /// The world height of the CURRENT pose's lowest point: positive = hovering that far above
     /// the floor, negative = sunk into it. With samples, CPU-skins every sample with
     /// @p armature's live pose; without (a static model), uses the bind AABB (@p boundsMin /
@@ -76,6 +92,23 @@ private:
         int      mesh;    // the model's mesh (material zone) the triangle belongs to
     };
     std::vector<PickTriangle> m_triangles; ///< The pickable surface (pickSurface).
+    std::vector<PickTriangle> m_softTriangles; ///< The see-through meshes' triangles (pickAnySurface alone).
+
+    /// Every sample as the current pose (or, for a static model, the transform alone) has it, in
+    /// world space. False — @p world unspecified — when @p dir from @p origin misses their box:
+    /// most of a click's rays miss the model altogether.
+    bool posedSamples(const Armature& armature, const glm::vec3& origin, const glm::vec3& dir,
+                      std::vector<glm::vec3>& world) const;
+    /// The nearest triangle of @p triangles along the ray (Moller-Trumbore, two-sided), nearer
+    /// than @p best on entry: @p best, @p bestTri (an index into @p triangles) and the hit's
+    /// barycentric @p bestU / @p bestV are updated on a nearer hit, else left as they were.
+    /// With @p seeThrough (pickAnySurface's per-mesh flags) only the triangles of meshes that
+    /// are — @p wantSeeThrough — or are not see-through are cast; @p listIsSoft is what a mesh
+    /// beyond the flags' end counts as (the list it was imported into).
+    static void nearestTriangle(const std::vector<PickTriangle>& triangles, const std::vector<glm::vec3>& world,
+                                const glm::vec3& origin, const glm::vec3& dir, float& best, int& bestTri,
+                                float& bestU, float& bestV, const std::vector<char>* seeThrough = nullptr,
+                                bool listIsSoft = false, bool wantSeeThrough = false);
 };
 
 } // namespace pose

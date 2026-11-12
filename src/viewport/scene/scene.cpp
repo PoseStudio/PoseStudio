@@ -26,6 +26,7 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -111,6 +112,7 @@ bool Scene::showSkeleton() const { return m_lineOverlay->showSkeleton(); }
 void Scene::setVrPointerLines(std::vector<PointerLine> lines) { m_lineOverlay->setPointerLines(std::move(lines)); }
 
 void Scene::addModel(const ModelData& data) {
+    ++m_modelsRevision;
     m_models.push_back(std::make_unique<Model>(m_context, data, m_pipelines->materialSetLayout(),
                                                m_pipelines->poseSetLayout(),
                                                m_pipelines->fallbackDiffuse(),
@@ -122,6 +124,7 @@ void Scene::addModel(const ModelData& data) {
 }
 
 void Scene::addSplatModel(const SplatData& data, const glm::mat4& transform) {
+    ++m_modelsRevision;
     m_models.push_back(std::make_unique<Model>(m_context, data, m_pipelines->splatSetLayout()));
     m_models.back()->setTransform(transform);
     // Not selected either (above).
@@ -150,7 +153,49 @@ bool Scene::hasSplats() const {
     return false;
 }
 
-void Scene::recordSplats(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex, bool asyncSort) {
+void Scene::buildSplatOccluderPipeline(VkRenderPass renderPass, const std::vector<char>& vertSpirv,
+                                       const std::vector<char>& fragSpirv) {
+    m_pipelines->buildDepthCutout(m_context, renderPass, vertSpirv, fragSpirv);
+}
+
+void Scene::writeCameraUbo(const Camera& camera, uint32_t frameIndex) {
+    CameraUbo ubo{};
+    fillCameraUbo(ubo, camera, m_lighting, shadeModeSpec(), m_environmentSH, m_shadowPass->lightViewProj(), m_keyLightDir,
+                  m_selectionStyle);
+    fillCameraUboLights(ubo, m_lights);
+    std::memcpy(m_pipelines->cameraUboData(frameIndex), &ubo, sizeof(ubo));
+}
+
+void Scene::recordSplatOccluders(VkCommandBuffer cmd, uint32_t frameIndex, bool opaque, bool fine) {
+    if (m_models.empty()) {
+        return;
+    }
+    const VulkanPipeline& hiddenLine = m_pipelines->hiddenLine();
+    const VkDescriptorSet cameraSet = m_pipelines->cameraSet(frameIndex);
+    const VkDescriptorSet iblSet = m_pipelines->iblSet();
+    // (Every mesh pipeline shares one layout: the camera set and the scene-wide set are bound
+    // once, as Scene::record binds them.)
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, hiddenLine.layout(), 0, 1, &cameraSet, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, hiddenLine.layout(), 3, 1, &iblSet, 0, nullptr);
+    if (opaque) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, hiddenLine.handle());
+        for (const std::unique_ptr<Model>& model : m_models) {
+            model->recordDepthFill(cmd, hiddenLine.layout(), frameIndex);
+        }
+    }
+    // POSESTUDIO_SPLAT_NO_CUTOUT=1: the see-through meshes write no depth, as before 2026-11-12
+    // (the A/B: a capture behind a head of hair cards is then drawn over the hair).
+    static const bool kNoCutout = std::getenv("POSESTUDIO_SPLAT_NO_CUTOUT") != nullptr;
+    if (const VulkanPipeline* cutout = kNoCutout ? nullptr : m_pipelines->depthCutout()) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cutout->handle());
+        for (const std::unique_ptr<Model>& model : m_models) {
+            model->recordDepthCutout(cmd, cutout->layout(), frameIndex, fine);
+        }
+    }
+}
+
+void Scene::recordSplats(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex, bool asyncSort,
+                         const glm::vec4& cut) {
     if (!hasSplats()) {
         return;
     }
@@ -169,7 +214,7 @@ void Scene::recordSplats(VkCommandBuffer cmd, const Camera& camera, uint32_t fra
         // so the order is copied once a frame, not once an eye.
         const uint32_t orderSlot = splatOrderSlot(frameIndex, asyncSort);
         cloud->prepareFrame(camera, model->transform(), orderSlot, asyncSort);
-        cloud->record(cmd, pipeline.layout(), orderSlot, camera, model->transform());
+        cloud->record(cmd, pipeline.layout(), orderSlot, camera, model->transform(), cut);
     }
 }
 
@@ -179,9 +224,81 @@ int Scene::selectedModelIndex() const {
                : -1;
 }
 
+void Scene::setLights(std::vector<SceneLight> lights) {
+    m_lights = std::move(lights);
+    ++m_lightsRevision;
+    if (m_selectedLight >= static_cast<int>(m_lights.size())) {
+        m_selectedLight = -1;
+    }
+}
+
+int Scene::selectedLight() const {
+    return (m_selectedLight >= 0 && static_cast<std::size_t>(m_selectedLight) < m_lights.size()) ? m_selectedLight : -1;
+}
+
+void Scene::setSelectedLight(int index) {
+    if (index < 0 || static_cast<std::size_t>(index) >= m_lights.size()) {
+        index = -1;
+    }
+    if (index >= 0) {
+        setSelectedModel(-1); // a light and a model are never selected together
+    }
+    if (index != m_selectedLight) {
+        m_selectedLight = index;
+        ++m_lightsRevision; // (the Lights tab shows the selection)
+    }
+}
+
+bool Scene::subjectBounds(glm::vec3& outMin, glm::vec3& outMax) const {
+    const int figure = activeFigureIndex();
+    if (figure >= 0 && m_models[static_cast<std::size_t>(figure)]->worldBounds(outMin, outMax)) {
+        return true;
+    }
+    bool any = false;
+    outMin = glm::vec3(std::numeric_limits<float>::max());
+    outMax = glm::vec3(std::numeric_limits<float>::lowest());
+    for (const std::unique_ptr<Model>& model : m_models) {
+        glm::vec3 a;
+        glm::vec3 b;
+        if (model->worldBounds(a, b)) {
+            outMin = glm::min(outMin, a);
+            outMax = glm::max(outMax, b);
+            any = true;
+        }
+    }
+    return any;
+}
+
+int Scene::pickLight(const Camera& camera, float x, float y, float width, float height) const {
+    // A light is picked by its MARKER: the point it stands at, within a finger's width on screen.
+    constexpr float kPickRadiusPx = 18.0f;
+    const glm::mat4 viewProj = camera.viewProjection();
+    int             best = -1;
+    float           bestDepth = std::numeric_limits<float>::max();
+    for (std::size_t i = 0; i < m_lights.size(); ++i) {
+        const glm::vec4 clip = viewProj * glm::vec4(m_lights[i].position, 1.0f);
+        if (clip.w <= 1.0e-5f) {
+            continue; // behind the camera
+        }
+        const float px = (clip.x / clip.w * 0.5f + 0.5f) * width;
+        const float py = (clip.y / clip.w * 0.5f + 0.5f) * height;
+        const float dx = px - x;
+        const float dy = py - y;
+        if (dx * dx + dy * dy <= kPickRadiusPx * kPickRadiusPx && clip.w < bestDepth) {
+            bestDepth = clip.w;
+            best = static_cast<int>(i);
+        }
+    }
+    return best;
+}
+
 void Scene::setSelectedModel(int index) {
     if (index < 0 || static_cast<std::size_t>(index) >= m_models.size()) {
         index = -1;
+    }
+    if (index >= 0 && m_selectedLight >= 0) {
+        m_selectedLight = -1; // a light and a model are never selected together
+        ++m_lightsRevision;
     }
     const int previous = selectedModelIndex();
     if (index == previous) {
@@ -200,8 +317,41 @@ void Scene::setSelectedModel(int index) {
 }
 
 int Scene::pickModel(const Ray& ray) const {
-    int best = -1;
+    static const bool kTrace = std::getenv("POSESTUDIO_PICK_TRACE") != nullptr;
+    static const bool kBoxOnly = std::getenv("POSESTUDIO_PICK_MODEL_BOX") != nullptr; // A/B: the box alone, as before 2026-11-12
+    // What the cursor is ON: the nearest surface; a capture fainter than a half there only when
+    // no surface is under the cursor.
+    int   best = -1;
+    int   faint = -1;
     float bestT = std::numeric_limits<float>::max();
+    float faintT = std::numeric_limits<float>::max();
+    for (std::size_t i = 0; i < m_models.size() && !kBoxOnly; ++i) {
+        const auto      began = std::chrono::steady_clock::now();
+        Model::ModelHit hit;
+        const bool      on = m_models[i]->pickExact(ray, hit);
+        if (kTrace) {
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+            std::fprintf(stderr, "[pick-model] model %zu: %s (cast in %.2f ms)\n", i,
+                         !on ? "not under the cursor" : hit.faint ? "faintly under it" : "its surface under it", ms);
+        }
+        if (!on) {
+            continue;
+        }
+        if (!hit.faint && hit.t < bestT) {
+            bestT = hit.t;
+            best = static_cast<int>(i);
+        } else if (hit.faint && hit.t < faintT) {
+            faintT = hit.t;
+            faint = static_cast<int>(i);
+        }
+    }
+    if (best < 0) {
+        best = faint;
+    }
+    if (best >= 0) {
+        return best;
+    }
+    // On no surface: the nearest model whose box the ray enters.
     for (std::size_t i = 0; i < m_models.size(); ++i) {
         float t = 0.0f;
         if (m_models[i]->intersectRay(ray, t) && t < bestT) {
@@ -209,7 +359,24 @@ int Scene::pickModel(const Ray& ray) const {
             best = static_cast<int>(i);
         }
     }
+    if (kTrace) {
+        std::fprintf(stderr, "[pick-model] on no surface: by its box, model %d\n", best);
+    }
     return best;
+}
+
+bool Scene::otherSurfaceAt(const Ray& ray, float& tOut) const {
+    bool  found = false;
+    float nearest = std::numeric_limits<float>::max();
+    for (const std::unique_ptr<Model>& model : m_models) {
+        Model::ModelHit hit;
+        if (!model->hasSkeleton() && model->pickExact(ray, hit) && hit.tSolid < nearest) {
+            nearest = hit.tSolid;
+            found = true;
+        }
+    }
+    tOut = nearest;
+    return found;
 }
 
 bool Scene::framingBounds(glm::vec3& outMin, glm::vec3& outMax) const {
@@ -234,6 +401,7 @@ bool Scene::framingBounds(glm::vec3& outMin, glm::vec3& outMax) const {
 
 void Scene::removeModel(std::size_t index) {
     if (index < m_models.size()) {
+        ++m_modelsRevision;
         m_models.erase(m_models.begin() + static_cast<std::ptrdiff_t>(index));
         // Keep the active figure pointing at the same model (indices above shift down); the
         // deleted figure itself falls back to the first remaining one. The selection likewise
@@ -253,6 +421,7 @@ void Scene::removeModel(std::size_t index) {
 }
 
 void Scene::clearModels() {
+    ++m_modelsRevision;
     m_models.clear();     // destructors free buffers/descriptors, as the last removeModel would
     m_selectedZone = -1;
     m_selectedModel = -1; // the selection with them — DIRECTLY: setSelectedModel(-1) reads the
@@ -294,6 +463,18 @@ bool Scene::recordOutlinePass(VkCommandBuffer cmd, const Camera& camera, uint32_
                                  m_pipelines->cameraSet(frameIndex), orderSlot, asyncSort);
 }
 
+void Scene::recordOverlays(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex) {
+    CameraUbo ubo{};
+    fillCameraUbo(ubo, camera, m_lighting, shadeModeSpec(), m_environmentSH, m_shadowPass->lightViewProj(), m_keyLightDir,
+                  m_selectionStyle);
+    fillCameraUboLights(ubo, m_lights);
+    std::memcpy(m_pipelines->cameraUboData(frameIndex), &ubo, sizeof(ubo));
+    const int overlayFigure = activeFigureIndex();
+    m_lineOverlay->record(cmd, camera, m_pipelines->cameraSet(frameIndex), m_models,
+                          overlayFigure >= 0 ? m_models[static_cast<std::size_t>(overlayFigure)].get() : nullptr, m_lights,
+                          selectedLight(), frameIndex);
+}
+
 void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex) {
     const VulkanPipeline* wire = m_pipelines->wire();
 
@@ -313,6 +494,7 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
     CameraUbo ubo{};
     fillCameraUbo(ubo, camera, m_lighting, spec, m_environmentSH, m_shadowPass->lightViewProj(),
                   m_keyLightDir, m_selectionStyle);
+    fillCameraUboLights(ubo, m_lights);
     std::memcpy(m_pipelines->cameraUboData(frameIndex), &ubo, sizeof(ubo));
     const VkDescriptorSet cameraSet = m_pipelines->cameraSet(frameIndex);
     const VkDescriptorSet iblSet = m_pipelines->iblSet();
@@ -426,7 +608,7 @@ void Scene::record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameInde
     m_lineOverlay->record(cmd, camera, cameraSet, m_models,
                           overlayFigure >= 0 ? m_models[static_cast<std::size_t>(overlayFigure)].get()
                                              : nullptr,
-                          frameIndex);
+                          m_lights, selectedLight(), frameIndex);
 }
 
 const Model* Scene::figureModel() const {
@@ -515,8 +697,8 @@ bool Scene::pickBoneAt(float px, float py, float vpW, float vpH, const Camera& c
     glm::vec3 grab(0.0f);
     static const bool kPick2DEnv = std::getenv("POSESTUDIO_PICK_2D") != nullptr; // A/B probe: the 2D pick alone, as before 2026-09-26
     const bool kPick2D = kPick2DEnv || m_pick2D;
+    float hitT = std::numeric_limits<float>::max();
     {
-        float hitT = std::numeric_limits<float>::max();
         m_pickedZone = -1;
         for (std::size_t m = 0; m < m_models.size() && !kPick2D; ++m) {
             const Model* fig = m_models[m].get();
@@ -531,6 +713,22 @@ bool Scene::pickBoneAt(float px, float py, float vpW, float vpH, const Camera& c
                 grab = point;
                 m_pickedZone = zone; // (the material zone under the click, for the Materials tab)
             }
+        }
+    }
+    // WHAT ELSE THE CURSOR IS ON (2026-11-12): a prop's opaque surface or a Gaussian splat scene
+    // that covers the pixel. A click there is a click on THAT — it takes no joint: not the skin it
+    // hides (a capture standing in front of the figure), and not, through the 2D fallback below,
+    // a joint that merely projects within its radius of the click (a capture standing close
+    // behind her: the user clicked the capture beside her arm and grabbed the arm, and the
+    // capture could not be selected at all). The caller's click then selects the model the
+    // cursor is on (pickModel). Not in the 2D-only mode (the per-frame hover probe's, and the
+    // A/B's): this casts every prop and capture.
+    {
+        static const bool kNoGate = std::getenv("POSESTUDIO_PICK_THROUGH") != nullptr; // A/B: as before 2026-11-12
+        float otherT = 0.0f;
+        if (!kPick2D && !kNoGate && otherSurfaceAt(ray, otherT) && (pickedBone < 0 || otherT < hitT)) {
+            m_pickedZone = -1;
+            return false;
         }
     }
     // WHAT the hit bone is to the posing UI (Armature::boneClass, 2026-09-28). A bone of the FACE RIG

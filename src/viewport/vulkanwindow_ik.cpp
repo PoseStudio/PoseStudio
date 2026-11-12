@@ -233,21 +233,48 @@ void VulkanWindow::groundFigure() {
     }
     finishIkSettle(); // ground the LANDED pose, not a transient mid-settle frame
     float lowestY = 0.0f;
-    if (!scene().figureGroundGap(lowestY) || std::abs(lowestY) < 1e-4f) {
-        return; // nothing to ground, or already resting on the floor
+    if (!scene().figureGroundGap(lowestY)) {
+        return; // nothing to ground
     }
     const int figure = scene().activeFigureIndex(); // the figure figureGroundGap measured
+    // THE HANGING FEET COME DOWN FLAT (Armature::beginHangFeetLanding): a figure lifted off the
+    // floor and let go of in the air hangs her feet — rolled onto their balls, pointed — and
+    // dropped as she hangs she landed standing on the tips of her toes. Feet still as the lift left
+    // them go flat through the fall; so the drop is measured to where she will STAND: on her soles.
+    const bool hangFeet = scene().beginHangFeetLanding(figure);
+    PoseSnapshot hangingPose;
+    if (hangFeet) {
+        hangingPose = scene().capturePose();
+        scene().poseHangFeet(figure, 0.0f);
+        scene().figureGroundGap(lowestY);
+    }
+    if (std::abs(lowestY) < 1e-4f) {
+        if (hangFeet) {
+            // (Her soles are on the floor already — set down on her toes by a Ctrl carry: the feet
+            // go flat where she is, one pose edit.)
+            scene().endHangFeetLanding(figure);
+            m_preEditPose = hangingPose;
+            scene().finalizePose();
+            commitPoseUndo();
+            requestUpdate();
+        }
+        return; // already resting on the floor
+    }
     // The drop goes into her POSE (the root's pose translation: Armature::shiftPoseY), so grounding
     // is a pose edit: one undo step, committed when she has landed (and her landing's bounce is
     // over) — or at once, below.
-    m_preEditPose = scene().capturePose();
+    m_preEditPose = hangFeet ? hangingPose : scene().capturePose();
     if (lowestY < 0.0f) {
         // Sunk into the floor: nothing falls upward — lift it out in one step.
+        scene().endHangFeetLanding(figure);
         scene().translateModelY(figure, -lowestY);
         scene().finalizePose();
         commitPoseUndo();
         requestUpdate();
         return;
+    }
+    if (hangFeet) {
+        scene().poseHangFeet(figure, 1.0f); // (as they hang again: the fall brings them flat, onFallTick)
     }
     // Hovering: FALL. The timer applies the free-fall curve's increments (onFallTick) to THIS
     // figure — undo can switch the active figure mid-fall, and the drop must still land on
@@ -256,6 +283,7 @@ void VulkanWindow::groundFigure() {
     m_fall.height = lowestY;
     m_fall.dropped = 0.0f;
     m_fall.lastT = 0.0f;
+    m_fall.hangFeet = hangFeet;
     m_fall.clock.start();
     m_fall.timer->start();
 }
@@ -311,6 +339,10 @@ void VulkanWindow::onFallTick() {
     const float dy = dropped - m_fall.dropped;
     if (dy > 0.0f) {
         scene().translateModelY(m_fall.figure, -dy);
+        if (m_fall.hangFeet) {
+            // (THE HANGING FEET: flat over the last of the fall, never through the floor.)
+            scene().poseHangFeetForFall(m_fall.figure, m_fall.height - dropped, m_fall.height);
+        }
         m_fall.dropped = dropped;
         scene().tickSoftBody(m_fall.figure, dt); // (THE SOFT BREASTS: weightless on the way down)
         requestUpdate();
@@ -321,6 +353,11 @@ void VulkanWindow::onFallTick() {
         const float height = m_fall.height;
         m_fall.height = 0.0f;
         m_fall.dropped = 0.0f;
+        if (m_fall.hangFeet) {
+            scene().poseHangFeet(m_fall.figure, 0.0f); // (landed: on her soles, exactly)
+            scene().endHangFeetLanding(m_fall.figure);
+            m_fall.hangFeet = false;
+        }
         if (scene().beginLandingBounce(m_fall.figure, std::sqrt(2.0f * kGravity * height))) {
             m_fall.bouncing = true;
             m_fall.landedAt = std::sqrt(2.0f * height / kGravity);
@@ -352,6 +389,12 @@ void VulkanWindow::finishGroundFall() {
         return;
     }
     m_fall.timer->stop();
+    if (m_renderer && m_fall.hangFeet) {
+        // (Cut short in the air: the feet land flat all the same — the drop was measured to her soles.)
+        scene().poseHangFeet(m_fall.figure, 0.0f);
+        scene().endHangFeetLanding(m_fall.figure);
+    }
+    m_fall.hangFeet = false;
     if (m_renderer && m_fall.bouncing) {
         scene().endLandingBounce(m_fall.figure); // (the pose she landed in: the bounce changes nothing)
         requestUpdate();

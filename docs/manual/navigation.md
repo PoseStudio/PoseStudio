@@ -38,7 +38,7 @@ The keys work whichever panel has focus, except while you are typing in a text f
 
 ## Selecting objects
 
-A **click** (press and release without dragging) selects the model under the cursor and outlines it in blue; a click on empty space — or `Esc` — clears the selection. Selecting works on the model's bounding box, so a click just outside the mesh but within its extent still selects it. An orbit drag, however short, never changes the selection.
+A **click** (press and release without dragging) selects the model under the cursor and outlines it in blue; a click on empty space — or `Esc` — clears the selection. The click takes **what is under the cursor**: a figure's or a prop's surface, or a Gaussian splat scene wherever its splats cover that spot — so with two objects close together, or one in front of the other, the one you see under the cursor is the one selected. Where the cursor is on nothing at all, the nearest object whose extent it falls within is taken, so a click just beside a lone model still selects it. An orbit drag, however short, never changes the selection.
 
 The selection matters for:
 
@@ -46,7 +46,9 @@ The selection matters for:
 - **Delete** — `Delete` or `Backspace` while the viewport has focus, **Edit → Delete Selected Object**, or the context menu's *Delete*. Deleting a model clears the undo history.
 - **Posing** — clicking a joint selects that joint and makes its figure the active one; clearing the selection also drops the joint selection.
 
-Each import selects the new object. To give the viewport keyboard focus (for `Delete`, `P` and the `X`/`Y`/`Z` keys), click in it once.
+A **light** is selected by a click on its marker, and a light and a model are never selected together: `Delete` then removes the light, and `Esc` or a click on empty space deselects it. See [Lights](lights.md#lights-in-the-viewport).
+
+An imported object arrives unselected; the selection stays as it was. To give the viewport keyboard focus (for `Delete` and `P`), click in it once.
 
 ## The floor and the grid
 

@@ -29,6 +29,7 @@
 #include <vulkan/vulkan.h>
 
 #include <array>
+#include <limits>
 #include <memory>
 #include <cstddef>
 #include <cstdint>
@@ -95,6 +96,10 @@ public:
     /// behind it — the grid, the far side's wires — while showing the viewport's clear color.
     /// Transparent meshes are left out so an eye's iris wires stay visible through its shells.
     void recordDepthFill(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t frameIndex);
+    /// Records the SEE-THROUGH meshes — cards, shells, panes — as occluders of the Gaussian
+    /// splat layer (the caller has bound ScenePipelines::depthCutout): depth where each has
+    /// enough coverage, from a half or, @p fine, from a twelfth (depthcutout.frag says why).
+    void recordDepthCutout(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t frameIndex, bool fine);
 
     /// Records the model's opaque meshes into the depth-only shadow pass (the caller has bound the
     /// shadow pipeline and begun its render pass). Transparent meshes (clear eye shells, cutout
@@ -233,6 +238,11 @@ public:
     // --- The landing bounce (see Armature): the Ground button's fall, landed on her feet ---
     bool beginLandingBounce(float impactSpeed) { return m_armature.beginLandingBounce(impactSpeed); }
     bool landingBounceTick(float seconds) { return m_armature.landingBounceTick(seconds); }
+    // THE HANGING FEET COME DOWN FLAT (Armature::beginHangFeetLanding): the Ground button's fall.
+    bool beginHangFeetLanding() { return m_armature.beginHangFeetLanding(); }
+    bool poseHangFeet(float hang) { return m_armature.poseHangFeet(hang, -1.0e9f); } // (no floor: the window measures the drop itself)
+    bool poseHangFeetForFall(float remaining, float total) { return m_armature.poseHangFeetForFall(remaining, total); }
+    void endHangFeetLanding() { m_armature.endHangFeetLanding(); }
     // THE SOFT BREASTS (Armature::tickSoftBody): the fall's and the settings' hooks.
     bool  tickSoftBody(float dt) { return m_armature.tickSoftBody(dt); }
     void  settleSoftBody() { m_armature.settleSoftBody(); }
@@ -308,6 +318,27 @@ public:
     /// surface is cast through its transform (its samples are kept up to a triangle cap). False
     /// for a ray that misses or a model without samples.
     bool pickSurface(const Ray& ray, float& tOut, glm::vec3& hitWorld, int& bone, int* mesh = nullptr) const;
+    /// What a click's ray meets of a model (pickExact). Distances are the world's, along the
+    /// ray's unit direction: comparable across models.
+    struct ModelHit {
+        /// The first of the model's surface along the ray: a triangle of any kind (a see-through
+        /// one included: hair cards, lashes, glass), or where a splat scene's opacity gathers.
+        float t = std::numeric_limits<float>::max();
+        /// The first of it that HIDES what is behind it — an opaque triangle; a splat scene where
+        /// its opacity along the ray reaches a half — or the largest float: nothing of it does.
+        float tSolid = std::numeric_limits<float>::max();
+        /// A splat scene fainter than a half under the cursor: on it, but only just — any other
+        /// surface under the cursor is what the click means.
+        bool faint = false;
+    };
+    /// WHETHER THE CURSOR IS ON THIS MODEL ITSELF — its surface, not its box — and where along
+    /// @p ray (world): a figure's or a prop's triangles (GroundSampler::pickAnySurface), a
+    /// Gaussian splat scene's opacity under the cursor (SplatCloud::pick). False for a ray that
+    /// misses the surface, for a splat scene the eye stands INSIDE (an environment is not what
+    /// a click in it means: intersectRay's rule), and for a model that keeps no surface to cast
+    /// against (a static mesh past the triangle cap): that one is picked by its box alone, as
+    /// ever (Scene::pickModel).
+    bool pickExact(const Ray& ray, ModelHit& hit) const;
 
     /// One mesh of the model AS POSED, in world space — what the vertex stage makes of it
     /// (mesh.vert: the pose correctives and soft-body fields blended into the bind mesh, then the

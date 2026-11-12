@@ -140,6 +140,31 @@ ProjectDocument makeDoc() {
     doc.environment.settings.tonemap = false;
     doc.environment.settings.shadowsEnabled = true;
 
+    // Three light objects: a spotlight with every field off its default, an area light switched
+    // off that casts no shadow, and one left as it is made.
+    pose::SceneLight spot;
+    spot.name = "Key, camera left";
+    spot.kind = pose::LightKind::Spot;
+    spot.position = glm::vec3(-1.25f, 2.5f, 1.75f);
+    spot.turnDeg = -37.5f;
+    spot.tiltDeg = 22.25f;
+    spot.color = glm::vec3(1.0f, 0.5f, 0.125f);
+    spot.intensity = 12.5f;
+    spot.radius = 0.125f;
+    spot.coneDeg = 35.0f;
+    spot.blend = 0.375f;
+    pose::SceneLight soft;
+    soft.name = "Softbox";
+    soft.kind = pose::LightKind::Area;
+    soft.enabled = false;
+    soft.castShadow = false;
+    soft.width = 1.5f;
+    soft.height = 0.625f;
+    pose::SceneLight sun;
+    sun.kind = pose::LightKind::Sun;
+    sun.sunAngleDeg = 0.5f;
+    doc.lights = {spot, soft, sun, pose::SceneLight()};
+
     doc.camera.target = glm::vec3(0.1f, 1.2f, -0.3f);
     doc.camera.yaw = 0.61f;
     doc.camera.pitch = -0.22f;
@@ -212,6 +237,17 @@ void checkRoundTrip() {
     const pose::LightingSettings& ls = out.environment.settings;
     check(ls.exposure == 0.9f && ls.keyIntensity == 1.4f && !ls.tonemap && ls.shadowsEnabled,
           "environment settings (incl. the bool dials)");
+
+    check(out.lights.size() == 4 && out.lights == in.lights && out.lights[0].kind == pose::LightKind::Spot &&
+              out.lights[0].name == "Key, camera left" && out.lights[0].position == glm::vec3(-1.25f, 2.5f, 1.75f) &&
+              out.lights[0].turnDeg == -37.5f && out.lights[0].tiltDeg == 22.25f &&
+              out.lights[0].color == glm::vec3(1.0f, 0.5f, 0.125f) && out.lights[0].intensity == 12.5f &&
+              out.lights[0].radius == 0.125f && out.lights[0].coneDeg == 35.0f && out.lights[0].blend == 0.375f &&
+              out.lights[1].kind == pose::LightKind::Area && !out.lights[1].enabled && !out.lights[1].castShadow &&
+              out.lights[1].width == 1.5f && out.lights[1].height == 0.625f &&
+              out.lights[2].kind == pose::LightKind::Sun && out.lights[2].sunAngleDeg == 0.5f &&
+              out.lights[3] == pose::SceneLight(),
+          "lights (a spotlight's every field, an area light switched off, a sun, a default one, in order)");
 
     const ProjectCamera& cam = out.camera;
     check(vec3Equal(cam.target, glm::vec3(0.1f, 1.2f, -0.3f)) && cam.yaw == 0.61f &&
@@ -290,6 +326,25 @@ void checkForwardCompatibility() {
               R"({"format":"posestudio.project","version":1,"figures":[{"source":"/x.duf",
                   "materials":[{"zone":"Face","overlays":[{"color":"lips.png","opacity":"half"}]}]}]})");
     check(!pose::readProjectFile(path("badoverlay.json"), d, error), "a malformed overlay rejects the file");
+
+    // Lights: absent = none (a project from before them); a kind this build does not know and an
+    // unknown key are read past, every absent field is the default; a malformed one rejects the file.
+    d = ProjectDocument();
+    check(pose::readProjectFile(path("bare.json"), d, error) && d.lights.empty(), "a project without lights has none");
+    writeText(path("lights.json"),
+              R"({"format":"posestudio.project","version":1,
+                  "lights":[{"kind":"laser","intensity":9.0,"gobo":"leaves.png"},{"kind":"sun","tiltDeg":60.0}]})");
+    d = ProjectDocument();
+    check(pose::readProjectFile(path("lights.json"), d, error) && d.lights.size() == 2 &&
+              d.lights[0].kind == pose::LightKind::Point && d.lights[0].intensity == 9.0f && d.lights[0].enabled &&
+              d.lights[0].coneDeg == pose::SceneLight().coneDeg && d.lights[0].position == pose::SceneLight().position &&
+              d.lights[1].kind == pose::LightKind::Sun && d.lights[1].tiltDeg == 60.0f,
+          "lights read with defaults (an unknown kind and key ignored)");
+    writeText(path("badlight.json"),
+              R"({"format":"posestudio.project","version":1,"lights":[{"kind":"spot","intensity":"bright"}]})");
+    check(!pose::readProjectFile(path("badlight.json"), d, error), "a malformed light rejects the file");
+    writeText(path("badlights.json"), R"({"format":"posestudio.project","version":1,"lights":{"kind":"spot"}})");
+    check(!pose::readProjectFile(path("badlights.json"), d, error), "lights that are no list reject the file");
 }
 
 } // namespace

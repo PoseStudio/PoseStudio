@@ -1,0 +1,124 @@
+# GAUSSIAN SPLATS IN A RENDER (render/splatcomposite.h; VulkanRenderer::renderSplatLayers): a render
+# engine cannot trace against a capture — it is a recorded picture — so a render takes the capture
+# as the viewport draws it, at the render's own size, and composites: the capture is the plate the
+# figure stands on (her edges antialiased against it, her shadow darkening its floor) and what of
+# it stands in front of her is laid back over her. And the Rendered viewport mode lays the capture
+# over its traced picture as the PBR mode lays it over its own.
+#
+# NOT run by run_all.sh (the subfolder): it needs a render engine and the test scene —
+#   python tools/splat/make_test_scene.py <assets>/test_scene.ply
+#   POSESTUDIO_TEST_FIGURE=<figure> tools/ikscripts/run.sh tools/ikscripts/render/splats.txt <out> \
+#       POSESTUDIO_IK_SCRIPT_ASSETS=<assets>
+# The scene: a checkered floor, a red sphere at the origin, a blue-grey wall, five soft balls at
+# head height. `import` brings it in beside the figure; it is turned so the wall stands BEHIND her
+# and one ball in FRONT of her face, and she is moved beside the sphere. `probe <x> <y> <z>` names
+# a world point and `render.probe.<r|g|b|a|lum>` reads the last render where it is seen (renders
+# of the viewport's own size: the same framing); `render.splats` is 1 when the capture was
+# composited. The shots and the renders (render/*.png) are what to LOOK at, side by side.
+import test_scene.ply
+wait 20
+expect figures == 2
+select 1
+turn 180
+select 0
+move 80 0 30
+select -1
+view home
+lookat 0.3 0.95 0.2 1.7
+light key 2.5
+shot 01_pbr_home
+
+# Shadows off first: the capture is in the picture — its floor, its sphere — and so is she.
+light shadows 0
+render a_no_shadows
+expect render.ok == 1
+expect render.splats == 1
+# a light cell of the capture's floor, far from her (the backdrop's grey would read 64)
+probe -1.0 0 1.0
+expect render.probe.lum > 150
+# the sphere, red
+probe 0 0.5 0
+expect render.probe.r > 40
+expect render.probe.g < 30
+# her chest: skin, path traced
+probe 0.8 1.25 0.3
+expect render.probe.r > 190
+expect render.probe.b < 180
+# the floor between and beside her feet, unshadowed
+probe 0.8 0 0.0
+expect render.probe.lum > 93
+probe 0.367 0 0.05
+expect render.probe.lum > 172
+
+# Shadows on: her shadow falls on the CAPTURE's floor — the same two points are darker — and
+# nothing else of the capture changes.
+light shadows 1
+render b_shadows
+expect render.ok == 1
+probe 0.8 0 0.0
+expect render.probe.lum < 89
+probe 0.367 0 0.05
+expect render.probe.lum < 166
+probe -1.0 0 1.0
+expect render.probe.lum > 150
+probe 0 0.5 0
+expect render.probe.r > 40
+
+# From the front (orthographic): a ball of the capture stands in FRONT of her face and tints it;
+# her chest, below it, is her own.
+view front
+lookat 0.3 0.95 0.2 1.7
+shot 02_pbr_front
+render c_front
+expect render.splats == 1
+probe 0.8 1.6 0.3
+expect render.probe.g < 160
+probe 0.8 1.25 0.3
+expect render.probe.g > 170
+expect render.probe.r > 190
+
+# From behind: the capture's wall stands between the camera and her — where her chest would be
+# the wall shows.
+view back
+lookat 0.3 0.95 0.2 1.7
+shot 03_pbr_back
+render d_back
+probe 0.8 1.25 0.3
+expect render.probe.b > 140
+expect render.probe.r < 135
+
+# A TRANSPARENT render keeps its coverage: clear where neither she nor the capture is, opaque on
+# both.
+view home
+lookat 0.3 0.95 0.2 1.7
+render e_transparent transparent
+expect render.ok == 1
+expect render.splats == 1
+probe 0.8 1.25 0.3
+expect render.probe.a > 250
+probe -1.0 0 1.0
+expect render.probe.a > 200
+probe 2.4 2.3 0.3
+expect render.probe.a < 5
+
+# An ENVIRONMENT backdrop stands behind the capture as it stands behind a scene without one.
+light backdrop 1
+wait 20
+shot 04_pbr_backdrop
+render f_backdrop
+expect render.ok == 1
+expect render.splats == 1
+probe 0.8 1.25 0.3
+expect render.probe.r > 190
+light backdrop 0
+
+# THE RENDERED VIEWPORT MODE: the capture laid over the traced picture, in front of her and behind.
+shade 1
+tracedwait
+expect traced.done == 1
+shot 05_rendered_home
+view front
+lookat 0.3 0.95 0.2 1.7
+tracedwait
+shot 06_rendered_front
+shade 0

@@ -488,6 +488,20 @@ constexpr double kDangleStiffness = 20.0;
 constexpr float  kDangleThighForwardDeg = 5.0f;
 constexpr float  kDangleKneeDeg = 10.0f;
 constexpr float  kDangleFootDeg = 25.0f;
+/// THE HANGING FEET COME DOWN FLAT (armaturehangfeet.cpp, 2026-11-12; the user: "when a character is
+/// lifted off the ground, her feet go into a hanging tip toe position; dropping back to the ground
+/// should also make their feet go back to flat"). A lift leaves the feet rolled onto their balls
+/// (the lift-off's tiptoe) and pointed (the dangle), and a figure let go of in the air keeps them:
+/// dropped by the Ground button she landed standing on the tips of her toes; lowered by the hips in
+/// another drag, on the balls of her feet with her heels up. Feet still as the lift left them now
+/// come flat as they come down — pressed flat by the floor, as it were: under a drag a foot is no
+/// more hanging than keeps its lowest part kHangFeetSkim over the floor (figure-scaled; over the
+/// rig's 1cm contact band, so what lands is a flat sole and the standing foot's model takes it from
+/// there); under the Ground button's fall they flatten over its last kHangFeetFallSpan metres
+/// (figure-scaled), eased — a fall is quick, and rolled over the last toe's length alone the foot
+/// would snap in two ticks.
+constexpr float  kHangFeetSkim = 0.02f;
+constexpr float  kHangFeetFallSpan = 0.35f;
 /// ... and the hold of the FINGERTIP's height on the floor, per m^2: the contact's own, faded as
 /// the contact is. (Softened to 2000 for a day so that a figure taken back up off all fours in the
 /// same drag would let go of the floor - which was the contact's UNLOAD being read over the height

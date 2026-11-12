@@ -367,6 +367,30 @@ void Scene::endLandingBounce(int index) {
     }
 }
 
+bool Scene::beginHangFeetLanding(int index) {
+    return index >= 0 && static_cast<std::size_t>(index) < m_models.size() &&
+           m_models[static_cast<std::size_t>(index)]->hasSkeleton() &&
+           m_models[static_cast<std::size_t>(index)]->beginHangFeetLanding();
+}
+
+void Scene::poseHangFeet(int index, float hang) {
+    if (index >= 0 && static_cast<std::size_t>(index) < m_models.size()) {
+        m_models[static_cast<std::size_t>(index)]->poseHangFeet(hang);
+    }
+}
+
+void Scene::poseHangFeetForFall(int index, float remaining, float total) {
+    if (index >= 0 && static_cast<std::size_t>(index) < m_models.size()) {
+        m_models[static_cast<std::size_t>(index)]->poseHangFeetForFall(remaining, total);
+    }
+}
+
+void Scene::endHangFeetLanding(int index) {
+    if (index >= 0 && static_cast<std::size_t>(index) < m_models.size()) {
+        m_models[static_cast<std::size_t>(index)]->endHangFeetLanding();
+    }
+}
+
 bool Scene::togglePinSelectedBone() {
     Model* fig = figureModel();
     return fig && fig->togglePinSelectedBone();

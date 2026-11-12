@@ -12,7 +12,8 @@
  * reads the names, the Scene reads the rest).
  *
  * The rows fall into four groups, by what the user is trying to see: LIT shading of the real
- * materials (PBR through Cartoon), UNTEXTURED form studies (Matcap through Silhouette), the
+ * materials (PBR through Cartoon — with RENDERED, the render engine's path-traced picture of the
+ * same scene, second), UNTEXTURED form studies (Matcap through Silhouette), the
  * WIREFRAMES, and the DATA / diagnostic views (Albedo through UV Checker).
  */
 
@@ -36,6 +37,10 @@ struct ShadeMode {
     bool        wireframe;      ///< Draw every mesh's triangle edges (over the surface, if any).
     float       wireLevel;      ///< Linear grey of the wire lines (rides in UBO params4.w).
     bool        separatorAfter; ///< The picker draws a separator under this row.
+    /// THE RENDERED MODE: the viewport shows the scene PATH TRACED by the render engine
+    /// (VulkanWindow's traced view; rendering/tracedview.h) — and, while a pose is being changed
+    /// or the engine has not caught up, the row's own rasterized shading (its fragMode).
+    bool        pathTraced = false;
 };
 
 // mesh.frag's mode numbers (its `cam.params.x` switch). The skin and metal matcaps (3, 4) still
@@ -70,6 +75,10 @@ inline constexpr float kWireOnFill = 0.02f;
 inline constexpr ShadeMode kShadeModes[] = {
     // Lit shading of the real materials.
     {"PBR Shaded",               kFragModePbr,        FillKind::Shaded,     false, 0.0f,        false},
+    // The same scene path traced by the render engine: true shadows from every light, bounced
+    // light, reflections of the scene itself, glass that bends what is behind it. The PBR
+    // shading stands in while a pose is being changed.
+    {"Rendered",                 kFragModePbr,        FillKind::Shaded,     false, 0.0f,        false, true},
     {"Texture Shaded",           kFragModeTextured,   FillKind::Shaded,     false, 0.0f,        false},
     {"Flat Texture Shaded",      kFragModeFlat,       FillKind::Shaded,     false, 0.0f,        false},
     {"Cartoon Shaded",           kFragModeToon,       FillKind::Shaded,     false, 0.0f,        true},

@@ -1,0 +1,15 @@
+# THE STRIP'S RENDER BUTTON (2026-11-12): left of the shading picker, it does what F12 does —
+# the Render window opens and a render starts. Needs a build with the render engine.
+#   POSESTUDIO_TEST_FIGURE=<figure> tools/ikscripts/run.sh tools/ikscripts/render/button.txt <out>
+wait 20
+expect uicount.viewport.render == 1
+expect uienabled.viewport.render.0 == 1
+expect uicount.render.start == 0
+uishot 01_strip
+ui click viewport.render 0
+wait 10
+# The window is open and rendering: Stop is live.
+expect uicount.render.start == 1
+expect uienabled.render.stop.0 == 1
+wait 60
+uishot 02_rendering

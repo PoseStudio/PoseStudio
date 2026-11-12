@@ -1,0 +1,47 @@
+# THE SILHOUETTE IN FRONT OF A CAPTURE (composite.frag, THE EDGE; photoresolve.frag): the scene is
+# drawn multisampled and resolved, so a pixel a figure half covers is half her color and half the
+# BACKDROP's; and the Gaussian splats, tested against the nearest of the pixel's depth samples,
+# are kept out of that whole pixel. Laid together as they stood, a dark stair-stepped line of the
+# viewport's grey ran around her wherever a capture stood behind her (a blocky fringe several
+# pixels wide with the splat layer scaled down, as VR Mode scales it). The composite now puts
+# such a pixel together from her own color and the capture behind her.
+#
+# NOT run by run_all.sh (the subfolder): it needs the test scene —
+#   python tools/splat/make_test_scene.py <assets>/test_scene.ply
+#   POSESTUDIO_TEST_FIGURE=<figure> tools/ikscripts/run.sh tools/ikscripts/splats/edge.txt <out> \
+#       POSESTUDIO_IK_SCRIPT_ASSETS=<assets>
+# and again with POSESTUDIO_SPLAT_SCALE=0.5 (the layer at half size: the scaled path, which is
+# what a headset on a slower graphics card shows). No render engine is needed.
+#
+# THE CHECK: the top of her upper arm from the front, lit, with the capture's blue-grey wall behind
+# it — everything in the frame is bright, skin or wall, so the darkest pixel of the shot says
+# whether a line of the backdrop runs along her outline. Measured on the base figure: 126-134
+# with the blend in the four modes below; 75-99 without it (POSESTUDIO_SPLAT_NO_EDGE=1), 61-64
+# without it at half scale. The gate is 115.
+import test_scene.ply
+wait 20
+expect figures == 2
+select 1
+turn 180
+select -1
+view front
+lookat 0.47 1.32 0 0.07
+shot 01_arm_pbr
+expect shot.darkest > 115
+expect shot.below.110 == 0
+shade 2
+shot 02_arm_texture
+expect shot.darkest > 115
+shade 6
+shot 03_arm_clay
+expect shot.darkest > 115
+shade 4
+shot 04_arm_cartoon
+expect shot.darkest > 115
+shade 0
+
+# To LOOK at: her shoulder and arm against the wall, and her whole outline.
+lookat 0.3 1.35 0 0.22
+shot 05_shoulder
+lookat 0 1.0 0 1.1
+shot 06_whole

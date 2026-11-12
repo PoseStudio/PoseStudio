@@ -1,7 +1,8 @@
 /**
  * @file lineoverlay.h
- * @brief The viewport's line overlays: the posing skeleton, the joint-pin markers, and the
- *        orthographic side views' floor line — one host-mapped line buffer, one draw.
+ * @brief The viewport's line overlays: the posing skeleton, the joint-pin markers, the light
+ *        objects' markers, and the orthographic side views' floor line — one host-mapped line
+ *        buffer, one draw.
  *
  * Everything drawn as lines over the scene goes through here, at the end of the main pass, so
  * the Scene records exactly one overlay draw per frame whatever is showing. The skeleton is
@@ -31,6 +32,7 @@ namespace pose {
 
 class Camera;
 class Model;
+struct SceneLight;
 class VulkanContext;
 class VulkanPipeline;
 
@@ -73,11 +75,13 @@ public:
     /// Emits this frame's lines into frame slot @p frameIndex's buffer and draws them (nothing
     /// is recorded when there are none). @p cameraSet is this frame's set-0 descriptor;
     /// @p activeFigure the posing target whose skeleton and contact pins are drawn (null =
-    /// none); user pins are drawn on EVERY figure in @p models. The caller has begun the main
+    /// none); user pins are drawn on EVERY figure in @p models; every light of @p lights gets
+    /// its marker (@p selectedLight's in the selection color, with what its numbers say — a
+    /// spot's cone, an area light's rectangle — drawn out). The caller has begun the main
     /// render pass.
     void record(VkCommandBuffer cmd, const Camera& camera, VkDescriptorSet cameraSet,
                 const std::vector<std::unique_ptr<Model>>& models, const Model* activeFigure,
-                uint32_t frameIndex);
+                const std::vector<SceneLight>& lights, int selectedLight, uint32_t frameIndex);
 
 private:
     std::unique_ptr<VulkanPipeline> m_pipeline;

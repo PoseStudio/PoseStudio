@@ -5,6 +5,8 @@
 
 #include "rendersession.h"
 
+#include "splatcomposite.h"
+
 #include "parallelfor.h"
 #include "renderenginelibrary.h"
 
@@ -34,6 +36,9 @@ EngineSlot& engineSlot() {
     static EngineSlot slot;
     return slot;
 }
+
+/// The count of running final renders, announced (RenderSession::activity).
+int g_activeRenders = 0;
 
 /// The viewport's last step for one channel: the ACES fit (color.glsl) when @p tonemap, then the
 /// sRGB curve — as 8 bits.
@@ -88,6 +93,22 @@ renderapi::Engine* RenderSession::engine(QString* error) {
         *error = slot.error;
     }
     return slot.library ? slot.library->engine() : nullptr;
+}
+
+std::unique_ptr<RenderEngineInstance> RenderSession::createEngine(QString* error) {
+    if (engine(error) == nullptr) {
+        return nullptr;
+    }
+    return engineSlot().library->createEngine();
+}
+
+int RenderSession::activeRenders() {
+    return g_activeRenders;
+}
+
+RenderActivity* RenderSession::activity() {
+    static RenderActivity notifier;
+    return &notifier;
 }
 
 QString RenderSession::engineName() {
@@ -156,6 +177,26 @@ bool RenderSession::start(std::shared_ptr<RenderSceneHolder> scene, const Render
     settings.exposure = view.exposure;
     settings.transparentBackground = m_options.transparent ? 1 : 0;
 
+    // GAUSSIAN SPLATS: the engine cannot draw them, so the scene is rendered over nothing — its
+    // floor's shadows kept as coverage — and composited into the capture's own layers, which the
+    // viewport draws now at this render's size (splatcomposite.h).
+    m_composite.reset();
+    if (std::shared_ptr<RenderSplatLayers> layers = m_scene->splatLayers(m_options.width, m_options.height)) {
+        if (layers->width == m_options.width && layers->height == m_options.height) {
+            SplatComposite::View compositeView;
+            compositeView.tonemap = m_tonemap;
+            compositeView.exposure = view.exposure;
+            compositeView.transparent = m_options.transparent;
+            const renderapi::Environment& environment = m_scene->scene().environment;
+            for (int c = 0; c < 3; ++c) {
+                compositeView.backdropColor[c] = environment.backdropColor[c];
+            }
+            m_composite = std::make_unique<SplatComposite>(std::move(*layers), compositeView);
+            settings.transparentBackground = 1;
+            settings.shadowAlpha = 1;
+        }
+    }
+
     m_linear.assign(static_cast<std::size_t>(m_options.width) * static_cast<std::size_t>(m_options.height) * 4u, 0.0f);
     m_image = QImage();
     m_shownVersion = 0;
@@ -168,6 +209,8 @@ bool RenderSession::start(std::shared_ptr<RenderSceneHolder> scene, const Render
         return false;
     }
     m_running = true;
+    ++g_activeRenders;
+    emit activity()->changed(g_activeRenders);
     e->status(m_status);
     m_timer.start();
     emit statusChanged();
@@ -189,6 +232,8 @@ void RenderSession::stop() {
 void RenderSession::finishRun() {
     m_timer.stop();
     m_running = false;
+    g_activeRenders = std::max(g_activeRenders - 1, 0);
+    emit activity()->changed(g_activeRenders);
     m_scene.reset(); // the engine is done with it
     emit statusChanged();
     emit ended();
@@ -223,6 +268,13 @@ void RenderSession::refreshImage() {
     m_shownVersion = m_status.imageVersion;
     if (m_image.width() != w || m_image.height() != h) {
         m_image = QImage(w, h, QImage::Format_RGBA8888);
+    }
+    if (m_composite) {
+        // The scene laid into its Gaussian splats: the display picture, and the same picture in
+        // linear light in place of the engine's (what an OpenEXR file is saved from).
+        m_composite->compose(m_linear.data(), m_image.bits(), static_cast<std::size_t>(m_image.bytesPerLine()), m_linear.data());
+        emit imageChanged();
+        return;
     }
     const DisplayCurve curve(m_tonemap);
     const bool         keepAlpha = m_options.transparent;

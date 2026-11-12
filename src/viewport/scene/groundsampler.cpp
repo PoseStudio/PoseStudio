@@ -26,32 +26,19 @@ void GroundSampler::add(const std::vector<Vertex>& vertices, const std::vector<u
     for (const Vertex& v : vertices) {
         m_samples.push_back({v.pos, v.joints, v.weights});
     }
-    if (!pickable) {
-        return;
-    }
+    // (A see-through mesh's triangles are kept apart: no click picks a JOINT through them, but
+    // they are part of the model a click is on — pickAnySurface.)
+    std::vector<PickTriangle>& into = pickable ? m_triangles : m_softTriangles;
     for (std::size_t i = 0; i + 2 < indices.size(); i += 3) {
         if (indices[i] < vertices.size() && indices[i + 1] < vertices.size() && indices[i + 2] < vertices.size()) {
-            m_triangles.push_back({base + indices[i], base + indices[i + 1], base + indices[i + 2], mesh});
+            into.push_back({base + indices[i], base + indices[i + 1], base + indices[i + 2], mesh});
         }
     }
 }
 
-bool GroundSampler::pickSurface(const Armature& armature, const Ray& ray, float& tOut, glm::vec3& hitWorld,
-                                int& bone, int* meshOut) const {
+bool GroundSampler::posedSamples(const Armature& armature, const glm::vec3& origin, const glm::vec3& dir,
+                                 std::vector<glm::vec3>& world) const {
     static const bool kTrace = std::getenv("POSESTUDIO_PICK_TRACE") != nullptr;
-    if (kTrace) {
-        std::fprintf(stderr, "[pick] skeleton=%d samples=%zu triangles=%zu origin(%.3f %.3f %.3f) dir(%.3f %.3f %.3f)\n",
-                     armature.hasSkeleton() ? 1 : 0, m_samples.size(), m_triangles.size(), ray.origin.x, ray.origin.y, ray.origin.z,
-                     ray.direction.x, ray.direction.y, ray.direction.z);
-    }
-    if (m_samples.empty() || m_triangles.empty()) {
-        return false;
-    }
-    const float dirLen = glm::length(ray.direction);
-    if (dirLen < 1.0e-9f) {
-        return false;
-    }
-    const glm::vec3 dir = ray.direction / dirLen;
     // The skin as it stands: every sample CPU-skinned with the current pose (as lowestY: linear
     // blending, which agrees with the GPU's dual quaternions to millimetres — a pick's tolerance).
     // (A STATIC model — an OBJ, a prop — has no skeleton: its samples go through the transform
@@ -62,7 +49,7 @@ bool GroundSampler::pickSurface(const Armature& armature, const Ray& ray, float&
     for (std::size_t i = 0; i < boneCount; ++i) {
         skin[i] = armature.transform() * armature.poseGlobal(i) * armature.inverseBind(i);
     }
-    std::vector<glm::vec3> world(m_samples.size());
+    world.resize(m_samples.size());
     glm::vec3 lo(std::numeric_limits<float>::max());
     glm::vec3 hi(std::numeric_limits<float>::lowest());
     for (std::size_t i = 0; i < m_samples.size(); ++i) {
@@ -83,38 +70,48 @@ bool GroundSampler::pickSurface(const Armature& armature, const Ray& ray, float&
         hi = glm::max(hi, posed);
     }
     // The posed box first: most of a click's rays miss the figure altogether.
-    {
-        float tMin = 0.0f;
-        float tMax = std::numeric_limits<float>::max();
-        for (int axis = 0; axis < 3; ++axis) {
-            if (std::abs(dir[axis]) < 1.0e-8f) {
-                if (ray.origin[axis] < lo[axis] || ray.origin[axis] > hi[axis]) {
-                    return false;
-                }
-                continue;
-            }
-            float t1 = (lo[axis] - ray.origin[axis]) / dir[axis];
-            float t2 = (hi[axis] - ray.origin[axis]) / dir[axis];
-            if (t1 > t2) {
-                std::swap(t1, t2);
-            }
-            tMin = std::max(tMin, t1);
-            tMax = std::min(tMax, t2);
-            if (tMin > tMax) {
-                if (kTrace) {
-                    std::fprintf(stderr, "[pick] box miss: lo(%.3f %.3f %.3f) hi(%.3f %.3f %.3f)\n", lo.x, lo.y, lo.z, hi.x, hi.y, hi.z);
-                }
+    float tMin = 0.0f;
+    float tMax = std::numeric_limits<float>::max();
+    for (int axis = 0; axis < 3; ++axis) {
+        if (std::abs(dir[axis]) < 1.0e-8f) {
+            if (origin[axis] < lo[axis] || origin[axis] > hi[axis]) {
                 return false;
             }
+            continue;
+        }
+        float t1 = (lo[axis] - origin[axis]) / dir[axis];
+        float t2 = (hi[axis] - origin[axis]) / dir[axis];
+        if (t1 > t2) {
+            std::swap(t1, t2);
+        }
+        tMin = std::max(tMin, t1);
+        tMax = std::min(tMax, t2);
+        if (tMin > tMax) {
+            if (kTrace) {
+                std::fprintf(stderr, "[pick] box miss: lo(%.3f %.3f %.3f) hi(%.3f %.3f %.3f)\n", lo.x, lo.y, lo.z, hi.x, hi.y, hi.z);
+            }
+            return false;
         }
     }
-    // The nearest triangle along the ray (Moller-Trumbore, two-sided: the mesh is drawn without
-    // back-face culling, and a click on a surface seen from inside is still a click on it).
-    float best = std::numeric_limits<float>::max();
-    int   bestTri = -1;
-    float bestU = 0.0f, bestV = 0.0f;
-    for (std::size_t k = 0; k < m_triangles.size(); ++k) {
-        const PickTriangle& tri = m_triangles[k];
+    return true;
+}
+
+void GroundSampler::nearestTriangle(const std::vector<PickTriangle>& triangles, const std::vector<glm::vec3>& world,
+                                    const glm::vec3& origin, const glm::vec3& dir, float& best, int& bestTri,
+                                    float& bestU, float& bestV, const std::vector<char>* seeThrough,
+                                    bool listIsSoft, bool wantSeeThrough) {
+    // Moller-Trumbore, two-sided: the mesh is drawn without back-face culling, and a click on a
+    // surface seen from inside is still a click on it.
+    for (std::size_t k = 0; k < triangles.size(); ++k) {
+        const PickTriangle& tri = triangles[k];
+        if (seeThrough != nullptr) {
+            const bool soft = tri.mesh >= 0 && static_cast<std::size_t>(tri.mesh) < seeThrough->size()
+                                  ? (*seeThrough)[static_cast<std::size_t>(tri.mesh)] != 0
+                                  : listIsSoft;
+            if (soft != wantSeeThrough) {
+                continue;
+            }
+        }
         const glm::vec3& a = world[tri.a];
         const glm::vec3 e1 = world[tri.b] - a;
         const glm::vec3 e2 = world[tri.c] - a;
@@ -124,7 +121,7 @@ bool GroundSampler::pickSurface(const Armature& armature, const Ray& ray, float&
             continue;
         }
         const float inv = 1.0f / det;
-        const glm::vec3 s = ray.origin - a;
+        const glm::vec3 s = origin - a;
         const float u = glm::dot(s, p) * inv;
         if (u < 0.0f || u > 1.0f) {
             continue;
@@ -143,6 +140,67 @@ bool GroundSampler::pickSurface(const Armature& armature, const Ray& ray, float&
         bestU = u;
         bestV = v;
     }
+}
+
+bool GroundSampler::pickAnySurface(const Armature& armature, const Ray& ray, const std::vector<char>& seeThrough,
+                                   float& tOut, float& tOpaqueOut) const {
+    tOpaqueOut = std::numeric_limits<float>::max();
+    if (m_samples.empty() || (m_triangles.empty() && m_softTriangles.empty())) {
+        return false;
+    }
+    const float dirLen = glm::length(ray.direction);
+    if (dirLen < 1.0e-9f) {
+        return false;
+    }
+    const glm::vec3        dir = ray.direction / dirLen;
+    std::vector<glm::vec3> world;
+    if (!posedSamples(armature, ray.origin, dir, world)) {
+        return false;
+    }
+    float opaque = std::numeric_limits<float>::max();
+    float soft = std::numeric_limits<float>::max();
+    int   tri = -1;
+    float u = 0.0f, v = 0.0f;
+    // (Each list twice, half of it skipped each time: by the meshes' materials as they stand.)
+    nearestTriangle(m_triangles, world, ray.origin, dir, opaque, tri, u, v, &seeThrough, false, false);
+    nearestTriangle(m_softTriangles, world, ray.origin, dir, opaque, tri, u, v, &seeThrough, true, false);
+    nearestTriangle(m_triangles, world, ray.origin, dir, soft, tri, u, v, &seeThrough, false, true);
+    nearestTriangle(m_softTriangles, world, ray.origin, dir, soft, tri, u, v, &seeThrough, true, true);
+    if (tri < 0) {
+        return false;
+    }
+    tOut = std::min(opaque, soft);
+    tOpaqueOut = opaque;
+    return true;
+}
+
+bool GroundSampler::pickSurface(const Armature& armature, const Ray& ray, float& tOut, glm::vec3& hitWorld,
+                                int& bone, int* meshOut) const {
+    static const bool kTrace = std::getenv("POSESTUDIO_PICK_TRACE") != nullptr;
+    if (kTrace) {
+        std::fprintf(stderr, "[pick] skeleton=%d samples=%zu triangles=%zu origin(%.3f %.3f %.3f) dir(%.3f %.3f %.3f)\n",
+                     armature.hasSkeleton() ? 1 : 0, m_samples.size(), m_triangles.size(), ray.origin.x, ray.origin.y, ray.origin.z,
+                     ray.direction.x, ray.direction.y, ray.direction.z);
+    }
+    if (m_samples.empty() || m_triangles.empty()) {
+        return false;
+    }
+    const float dirLen = glm::length(ray.direction);
+    if (dirLen < 1.0e-9f) {
+        return false;
+    }
+    const glm::vec3 dir = ray.direction / dirLen;
+    const bool        skinned = armature.hasSkeleton() && armature.boneCount() > 0;
+    const std::size_t boneCount = skinned ? armature.boneCount() : 0;
+    std::vector<glm::vec3> world;
+    if (!posedSamples(armature, ray.origin, dir, world)) {
+        return false;
+    }
+    // The nearest triangle of the pickable skin along the ray.
+    float best = std::numeric_limits<float>::max();
+    int   bestTri = -1;
+    float bestU = 0.0f, bestV = 0.0f;
+    nearestTriangle(m_triangles, world, ray.origin, dir, best, bestTri, bestU, bestV);
     if (kTrace) {
         std::fprintf(stderr, "[pick] best t %.4f tri %d\n", best, bestTri);
     }

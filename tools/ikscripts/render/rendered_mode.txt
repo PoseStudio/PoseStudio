@@ -1,0 +1,133 @@
+# THE RENDERED VIEWPORT MODE (the shading picker's "Rendered": vulkanwindow_traced.cpp): the scene
+# path traced by the render engine IN the viewport, kept in step with the camera, the lighting and
+# the scene. NOT run by run_all.sh (the subfolder): it needs a render engine —
+#   POSESTUDIO_TEST_FIGURE=<figure> tools/ikscripts/run.sh tools/ikscripts/render/rendered_mode.txt <out>
+# (POSESTUDIO_CYCLES_DIR=<folder> for an engine that is not next to the executable;
+# POSESTUDIO_TRACED_DEVICE=cpu|cuda|optix picks the device, POSESTUDIO_TRACED_SAMPLES the samples).
+# `shade 1` is the picker's second row; `tracedwait` waits for the finished picture; `traced.on`,
+# `.shown`, `.done`, `.sample`, `.samples`, `.updates` (update calls sent), `.scenes` (scene
+# descriptions the engine has been handed) and `.held` (descriptions still held for it) read the
+# mode. The shots are the viewport's own frames: what to LOOK at, PBR beside Rendered.
+view home
+expect traced.on == 0
+shot 01_pbr_home
+
+# The mode on: the PBR shading shows until the first picture is in, then the path-traced one.
+shade 1
+expect traced.on == 1
+tracedwait
+expect traced.done == 1
+expect traced.shown == 1
+expect traced.scenes == 1
+shot 02_rendered_home
+
+# THE CAMERA: an orbit is a camera update — no new scene — and the picture follows.
+orbit 40 10
+tracedwait
+expect traced.done == 1
+expect traced.scenes == 1
+expect traced.updates >= 1
+shot 03_rendered_orbited
+view front
+tracedwait
+expect traced.done == 1
+expect traced.scenes == 1
+shot 04_rendered_front
+view home
+tracedwait
+
+# THE LIGHTING: a light object added is a lighting update — the geometry stays on the device —
+# and its shadow is in the picture (the PBR mode draws none for light objects).
+lamp add spot
+lamp 0 intensity 30
+lamp 0 color 1 0.55 0.2
+tracedwait
+expect traced.done == 1
+expect traced.scenes == 1
+shot 05_rendered_spot
+# … moved by a drag of its marker, as the mouse does it: path traced where it lands.
+lamp 0 x -150
+lamp 0 y 220
+lamp 0 z 120
+lamp aim 0
+tracedwait
+expect traced.done == 1
+expect traced.scenes == 1
+shot 06_rendered_spot_moved
+# An Environment dial is lighting too.
+light key 0
+tracedwait
+expect traced.done == 1
+expect traced.scenes == 1
+shot 07_rendered_no_key
+light key 1.25
+
+# THE SCENE: a pose is a new scene. While the drag runs the PBR shading shows; a moment after the
+# pose rests the path-traced picture is back.
+press lHand
+drag -120 -260 30 10
+expect traced.shown == 0
+shot 08_pbr_while_posing
+release
+tracedwait
+expect traced.done == 1
+expect traced.shown == 1
+expect traced.scenes == 2
+shot 09_rendered_posed
+# The engine holds the scene it renders and the lighting it renders — nothing older.
+expect traced.held <= 2
+
+# A material edit is a new scene as well.
+click chest
+material roughness 15
+tracedwait
+expect traced.done == 1
+expect traced.scenes == 3
+shot 10_rendered_glossy_skin
+undo
+tracedwait
+
+# A FINAL RENDER beside it: the viewport's render pauses for it and comes back.
+render beside 640 480 16
+expect render.ok == 1
+tracedwait
+expect traced.done == 1
+expect traced.shown == 1
+
+# The mode off: the PBR shading again, the engine's render ended.
+shade 0
+expect traced.on == 0
+expect traced.shown == 0
+shot 11_pbr_again
+
+# And on again (a second engine start in one session).
+shade 1
+tracedwait
+expect traced.done == 1
+shot 12_rendered_again
+
+# THE WINDOW RESIZED: the picture is traced again at the new size (a camera update — no new scene),
+# the PBR shading standing in until it arrives; and back.
+windowsize 1500 950
+wait 30
+tracedwait
+expect traced.done == 1
+expect traced.shown == 1
+expect traced.width > 600
+shot 13_rendered_resized
+windowsize 1200 800
+wait 30
+tracedwait
+expect traced.done == 1
+expect traced.shown == 1
+shot 14_rendered_resized_back
+
+# The last model deleted with the mode on: an empty scene is a picture too (the backdrop).
+select 0
+delete
+expect figures == 0
+tracedwait
+expect traced.on == 1
+expect traced.done == 1
+shot 15_rendered_empty
+shade 0

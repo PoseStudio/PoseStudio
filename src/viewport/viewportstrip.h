@@ -31,6 +31,9 @@ namespace pose {
 
 class JointModeBadge;
 class MenuPickerButton;
+} // namespace pose
+class QLabel;
+namespace pose {
 
 /**
  * @class ViewportStrip
@@ -57,6 +60,9 @@ public slots:
     /// Shows the joint-mode badge for @p kind (0/1/2 = Bend / Side-Side / Twist: the dial the
     /// mouse is turning) or hides it (-1), re-anchoring the strip as its row appears/disappears.
     void setJointModeBadge(int kind);
+    /// The Rendered mode's status ("Rendered: 48 / 128 samples"), shown under the strip's left
+    /// end; "" hides it.
+    void setRenderStatus(const QString& text);
     /// Whether VR Mode is on: the VR button lights up and the view picker's VR Mode entry is
     /// checked. The real state, from the viewport — the controls only ASK (vrModeToggled).
     void setVrActive(bool on);
@@ -76,6 +82,8 @@ signals:
     void vrModeToggled(bool on);
     /// The Selection button: the user wants the selection settings (Preferences → Selection).
     void selectionSettingsClicked();
+    /// The Render button: Render -> Render Image (F12) — the Render window, rendering.
+    void renderClicked();
 
 private:
     MenuPickerButton* m_shaderPicker = nullptr;  // "#ShaderModeButton"
@@ -83,7 +91,9 @@ private:
     QPushButton*      m_homeButton = nullptr;    // resets the camera to default framing
     QPushButton*      m_groundButton = nullptr;  // drops the figure onto the floor plane
     QPushButton*      m_skeletonButton = nullptr; // toggles the skeleton overlay (checkable)
+    QPushButton*      m_renderButton = nullptr;    // Render -> Render Image (F12), left of the shader picker
     QPushButton*      m_selectionButton = nullptr; // opens Preferences → Selection (the outline's and the highlight's look)
+    QLabel*           m_renderStatus = nullptr;  // what the Rendered mode is doing, under the Render button
     JointModeBadge*   m_modeBadge = nullptr;     // "the mouse is turning Bend / Side-Side / Twist", under the buttons
     QPushButton*      m_vrButton = nullptr;      // "VR", right of the view picker: enters / leaves VR Mode, lit while on
     QAction*          m_vrMenuAction = nullptr;  // "VR Mode" at the bottom of the view picker's menu

@@ -533,6 +533,28 @@ public:
     bool landingBounceActive() const { return m_landing.active; }
     /// The dip the bounce in flight was given (m; 0 without one): the harness and the scripts.
     float landingBounceDip() const { return m_landing.active ? m_landing.dip : 0.0f; }
+    // --- THE HANGING FEET COME DOWN FLAT (armaturehangfeet.cpp) ---
+    // A figure lifted off the floor hangs her feet (the lift-off's roll onto the balls, the dangle's
+    // point), and let go of in the air she keeps them — rightly, while she hangs. Coming back DOWN
+    // they go flat again: under the Ground button's fall, a hips drag that lowers her, a Ctrl carry.
+    // Only feet still AS THE LIFT LEFT THEM (remembered when a drag ends suspended: recordHangFeet);
+    // a foot the user posed since — or pointed themselves — is theirs and lands as it is.
+    /// Begins a landing of the hanging feet: finds the feet that still hang as a lift left them,
+    /// under a leg that still points down. False — and nothing kept — when there is none (she
+    /// stands, the feet are flat already, or they are the user's). The pose is not changed.
+    bool beginHangFeetLanding();
+    /// Poses the landing's feet @p hang of the way from FLAT (0: the soles level under the shins
+    /// as they stand, the toes straight) to as the landing FOUND them (1) — and no more hanging
+    /// than keeps each foot's lowest part @p floorMargin over the floor (metres; pass a large
+    /// negative margin for no floor). True when a joint turned.
+    bool poseHangFeet(float hang, float floorMargin);
+    /// ... for the Ground button's FALL, with @p remaining metres of @p total still to drop: flat
+    /// over the fall's last kHangFeetFallSpan (figure-scaled; the whole of a shorter fall), eased,
+    /// and never through the floor.
+    bool poseHangFeetForFall(float remaining, float total);
+    /// Ends the landing; the feet stay as last posed.
+    void endHangFeetLanding() { m_hangFeet.clear(); }
+    bool hangFeetLandingActive() const { return !m_hangFeet.empty(); }
     /// True for a joint whose floor clearance stands down because its foot LIES on its top behind a
     /// planted knee (the ankle and the mid-foot: their clearances are the standing foot's bind
     /// heights, and a lying ankle sits at the shin's radius) — the harness's penetration measure
@@ -1151,6 +1173,44 @@ private:
         bool                   tail = false;       ///< The dip is over; the breasts still settle (the pose is home).
     };
     LandingBounce                 m_landing;
+    // --- THE HANGING FEET COME DOWN FLAT (armaturehangfeet.cpp) ---
+    /// One foot of a landing in flight: its ankle; the bones the landing turns — the ankle first,
+    /// then the bones below it that the lift had turned, parents first — each one's rotation as
+    /// the landing found it and flat (the ankle's flat value is re-read under its shin whenever it
+    /// is posed); and every bone of the foot with its parent's slot (-1: the shin), for the floor.
+    struct HangFoot {
+        int                    ankle = -1;
+        std::vector<int>       bones;
+        std::vector<glm::vec3> found;
+        std::vector<glm::vec3> flat;
+        std::vector<int>       subtree;
+        std::vector<int>       parentSlot;
+        std::vector<int>       boneSlot; ///< per subtree entry: its index in `bones`, or -1 (it keeps its pose)
+    };
+    std::vector<HangFoot>         m_hangFeet;       ///< the landing in flight (empty: none)
+    /// WHAT THE LAST LIFT LEFT (recordHangFeet, when a drag ends suspended), per bone: 1 an ankle,
+    /// 2 a bone below one that the lift turned, 0 nothing; its rotation as it hung, and flat (the
+    /// ankle's as it would have stood level under its shin then; a lower bone's as it was before
+    /// the lift, where the foot stood flat). A foot is still the lift's while its channels lie on
+    /// the line between the two — whatever came between: an undo, a pose of another limb.
+    std::vector<unsigned char>    m_hangFootKind;
+    std::vector<glm::vec3>        m_hangFootEuler;
+    std::vector<glm::vec3>        m_hangFootFlat;
+    std::vector<glm::vec3>        m_hangHomeEuler;  ///< every bone's rotation when the drag in flight began (never re-based: what the lift turned is read against it)
+    void recordHangFeet();
+    /// The feet that still hang as the last lift left them, under a leg that points down (see
+    /// beginHangFeetLanding); @p flags, when given, marks every bone of each (the rig's planting).
+    void findHangFeet(std::vector<HangFoot>& out, std::vector<char>* flags) const;
+    /// The ankle's rotation that stands the foot LEVEL under its shin as it is now, the heading
+    /// kept, within its limits; false where the foot has no heading (its lateral axis vertical).
+    bool levelFootEuler(int ankle, glm::vec3& euler) const;
+    /// The bones' rotations for @p foot posed @p hang of the way from flat to as found.
+    void hangFootEulers(const HangFoot& foot, float hang, std::vector<glm::vec3>& out) const;
+    /// ... and how far its lowest part would then stand over the floor (model space, the rig's
+    /// clearances: a flat foot reads its sole's height on every joint).
+    float hangFootFloorGap(const HangFoot& foot, float hang) const;
+    /// The drag tick's post-step: a floating figure's hanging feet come flat as the floor nears.
+    bool landHangFeetByFloor();
     // --- SOFT BREASTS (armaturebreasts.cpp): the pectoral bones hung by gravity, by their size ---
     struct Breast {
         int       bone = -1;         ///< The pectoral that carries the breast; -1 for a BONELESS breast (`field`).

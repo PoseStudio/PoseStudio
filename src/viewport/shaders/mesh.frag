@@ -722,6 +722,61 @@ void shade() {
             }
         }
 
+        // THE SCENE'S LIGHT OBJECTS (cam.lights: point, spot, area and sun lights the user placed —
+        // scenelight.h). Each lights the surface by the irradiance it puts there: its intensity
+        // (the irradiance a metre away, on its axis) over the distance squared, inside a spot's
+        // cone, by the cosine off an area light's face; a sun's as it is. The same wrapped
+        // diffuse the key light has and the base specular lobes — and NO SHADOW: the viewport
+        // shadows the key light alone (a render, and the Rendered mode, trace every light's).
+        int lightCount = int(cam.lightInfo.x);
+        for (int li = 0; li < lightCount; ++li) {
+            vec4  lp = cam.lights[li].position;
+            vec4  ld = cam.lights[li].direction;
+            vec4  lc = cam.lights[li].color;
+            int   lightKind = int(lp.w + 0.5);
+            vec3  ll;
+            float falloff = 1.0;
+            if (lightKind == 3) {
+                ll = -ld.xyz;
+            } else {
+                vec3 toLight = lp.xyz - vWorldPos;
+                ll = normalize(toLight);
+                falloff = 1.0 / max(dot(toLight, toLight), ld.w);
+                float along = dot(-ll, ld.xyz); // the cosine off the light's own axis
+                if (lightKind == 1) {
+                    falloff *= smoothstep(0.0, 1.0, (along - lc.w) * cam.lights[li].params.x);
+                } else if (lightKind == 2) {
+                    falloff *= max(along, 0.0);
+                }
+            }
+            if (falloff <= 0.0) {
+                continue;
+            }
+            vec3  lightIrradiance = lc.rgb * falloff;
+            float lNdl = dot(n, ll);
+            vec3  lWrapW = vec3(0.40, 0.16, 0.08) * sssLocal;
+            vec3  lOnePlus = vec3(1.0) + lWrapW;
+            vec3  lWrapped = clamp((vec3(lNdl) + lWrapW) / (lOnePlus * lOnePlus), 0.0, 1.0);
+            color += kD * diffuseAlbedo * (1.0 / PI) * lWrapped * lightIrradiance;
+            if (lNdl > 0.0) {
+                vec3  lh = normalize(ll + v);
+                float lNdh = max(dot(n, lh), 0.0);
+                float lVdh = max(dot(v, lh), 0.0);
+                float lD;
+                float lG;
+                if (dualLobe) {
+                    float a1 = rough1 * rough1;
+                    float a2 = rough2 * rough2;
+                    lD = mix(distGGX(lNdh, a2), distGGX(lNdh, a1), lobeRatio);
+                    lG = mix(geomSmith(ndv, lNdl, a2), geomSmith(ndv, lNdl, a1), lobeRatio);
+                } else {
+                    lD = distGGX(lNdh, a);
+                    lG = geomSmith(ndv, lNdl, a);
+                }
+                specSum += (lD * lG) * fresnelSchlick(lVdh, f0) / max(4.0 * ndv * lNdl, 1e-4) * lightIrradiance * lNdl;
+            }
+        }
+
         // Baked ambient occlusion gates the ENVIRONMENT terms only (the key light has real shadow
         // mapping): cavities — eye sockets, nostrils, under the chin, between fingers — stop
         // receiving full sky light. Specular occlusion uses the tighter ao² curve (reflections die

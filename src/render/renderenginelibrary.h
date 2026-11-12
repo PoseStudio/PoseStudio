@@ -14,11 +14,32 @@
 
 #include "renderengineapi.h"
 
+#include <QByteArray>
 #include <QString>
 
 #include <memory>
 
 namespace pose {
+
+/// One more engine of a loaded library (RenderEngineLibrary::createEngine), destroyed with this
+/// object. The library's first engine renders the final images; the viewport's interactive
+/// render has one of these, so the two never wait for each other's device or scene.
+class RenderEngineInstance {
+public:
+    explicit RenderEngineInstance(renderapi::Engine* engine) : m_engine(engine) {}
+    ~RenderEngineInstance() {
+        if (m_engine != nullptr) {
+            m_engine->destroy();
+        }
+    }
+    RenderEngineInstance(const RenderEngineInstance&) = delete;
+    RenderEngineInstance& operator=(const RenderEngineInstance&) = delete;
+
+    renderapi::Engine* get() const { return m_engine; }
+
+private:
+    renderapi::Engine* m_engine = nullptr;
+};
 
 class RenderEngineLibrary {
 public:
@@ -39,13 +60,18 @@ public:
     RenderEngineLibrary& operator=(const RenderEngineLibrary&) = delete;
 
     renderapi::Engine* engine() const { return m_engine; }
+    /// Another engine of this library, the caller's own (null if the library refuses).
+    std::unique_ptr<RenderEngineInstance> createEngine() const;
     const QString&     directory() const { return m_directory; }
 
 private:
     RenderEngineLibrary() = default;
 
-    renderapi::Engine* m_engine = nullptr;
-    QString            m_directory;
+    renderapi::Engine*        m_engine = nullptr;
+    renderapi::CreateEngineFn m_create = nullptr; // the library's entry (createEngine)
+    QByteArray                m_resourceDir;      // … and what it is called with
+    QByteArray                m_userDir;
+    QString                   m_directory;
 };
 
 } // namespace pose

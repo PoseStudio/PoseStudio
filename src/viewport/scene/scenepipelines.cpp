@@ -230,6 +230,20 @@ ScenePipelines::ScenePipelines(VulkanContext& context, VkRenderPass renderPass, 
     }
 }
 
+void ScenePipelines::buildDepthCutout(VulkanContext& context, VkRenderPass renderPass, const std::vector<char>& vertSpirv,
+                                      const std::vector<char>& fragSpirv) {
+    // The hidden-line fill's fixed-function state — depth test and write, every color write
+    // masked — over the mesh pipelines' own layout, with the cutout's fragment stage.
+    const std::vector<VkDescriptorSetLayout> layouts = {
+        m_cameraSetLayout.get(), m_materialSetLayout.get(), m_poseSetLayout.get(), m_iblSetLayout.get()};
+    const VkVertexInputBindingDescription binding = Vertex::bindingDescription();
+    const auto                            attrs = Vertex::attributeDescriptions();
+    PipelineConfig                        config = meshBaseConfig(layouts, binding, attrs);
+    config.colorWriteRgb = false;
+    config.colorWriteAlpha = false;
+    m_depthCutout = std::make_unique<VulkanPipeline>(context, renderPass, vertSpirv, fragSpirv, config);
+}
+
 ScenePipelines::~ScenePipelines() = default;
 
 void ScenePipelines::writeShadowMap(const ShadowMap& shadowMap) {

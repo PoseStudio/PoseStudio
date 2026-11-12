@@ -1,0 +1,247 @@
+# THE HANGING FEET COME DOWN FLAT (2026-11-12; the user: "when a character is lifted off the ground,
+# her feet go into a hanging tip toe position; dropping back to the ground should also make their
+# feet go back to flat on the ground position"). A lift leaves the feet rolled onto their balls (the
+# lift-off's tiptoe) and pointed (the dangle), and let go of in the air she keeps them — rightly,
+# while she hangs. Coming back DOWN they go flat again, however she comes down: the Ground button's
+# fall, a hips drag that lowers her, a Ctrl carry. `tilt.<foot>` is the foot's tilt from level.
+
+# 1. Lifted by the hips and let go of: the feet hang. The Ground button: she lands on flat feet.
+view right
+press hip
+dragv 0 0.30 30 60
+release
+expect lowest > 100
+expect tilt.lFoot > 20
+view right
+closeup lFoot 0.30
+shot 701_hanging_feet
+ground
+wait 8
+shot 702_falling_feet
+wait 100
+expect tilt.lFoot < 2
+expect tilt.rFoot < 2
+expect tilt.lToe < 2
+expect meshlow > -2
+expect meshlow < 2
+view right
+closeup lFoot 0.30
+shot 703_grounded_feet
+view home
+shot 704_grounded
+
+# ... and it is ONE pose edit: Undo puts her back in the air with her feet hanging, and dropped
+# again she lands flat again (the hang is recognised by the pose itself, whatever came between).
+undo
+expect meshlow > 150
+expect tilt.lFoot > 20
+ground
+wait 110
+expect tilt.lFoot < 2
+expect meshlow > -2
+expect meshlow < 2
+reset
+
+# 2. Lifted, let go of, then LOWERED BY THE HIPS in another drag. Half way down the feet still
+# hang; as the floor nears it presses them flat, and what lands is a flat sole.
+view right
+press hip
+dragv 0 0.30 30 60
+release
+press hip
+dragv 0 -0.15 20 10
+release
+expect tilt.lFoot > 20
+view right
+closeup lFoot 0.30
+shot 705_lowered_half_way_feet
+# (The view is put back before the next press: a camera moved under a drag in flight moves its
+# target — the cursor is a pixel — and reads as a pop.)
+view home
+view right
+press hip
+dragv 0 -0.15 20 60
+release
+expect tilt.lFoot < 4
+expect tilt.rFoot < 4
+expect meshlow > -3
+expect meshlow < 3
+expect jump < 60
+view right
+closeup lFoot 0.30
+shot 706_lowered_by_the_hips_feet
+view home
+shot 707_lowered_by_the_hips
+reset
+
+# ... and lowered only to JUST OVER the floor and let go of there — inside the few centimetres in
+# which a hovering figure is settled onto the floor by her next drag: that drag, of a hand, sets
+# her down on flat feet (the rig's own settling would have left her heels up).
+view right
+press hip
+dragv 0 0.30 30 60
+release
+press hip
+dragv 0 -0.255 30 20
+release
+expect meshlow > 10
+press lHand
+dragv -0.10 0.05 20 30
+release
+expect tilt.lFoot < 2
+expect tilt.rFoot < 2
+expect meshlow > -2
+expect meshlow < 2
+reset
+
+# 3. Lifted by a HAND (she hangs from it), let go of, dropped.
+view right
+press lHand
+dragw 0 1.6 0 60 60
+release
+expect lowest > 200
+expect tilt.lFoot > 20
+ground
+wait 110
+expect tilt.lFoot < 2
+expect tilt.rFoot < 2
+expect meshlow > -2
+expect meshlow < 2
+view home
+shot 708_hand_lift_dropped
+reset
+
+# 4. Lifted, let go of, CARRIED DOWN with Ctrl (the figure move): set down on her soles.
+view right
+press hip
+dragv 0 0.30 30 60
+release
+cpress hip
+dragv 0 -0.50 40 30
+release
+expect tilt.lFoot < 2
+expect tilt.rFoot < 2
+expect meshlow > -3
+expect meshlow < 3
+view right
+closeup lFoot 0.30
+shot 709_ctrl_carried_down_feet
+reset
+
+# 5. The SMALLEST lift that lets go (the hips 17cm up: her toes hang a hand over the floor). A
+# floating figure's next drag of a HAND leaves her floating, feet hanging — they are no contacts,
+# however low the toes — and dropped afterwards she still lands flat.
+view home
+view right
+press hip
+dragv 0 0.17 30 60
+release
+expect lowest > 50
+press lHand
+dragv -0.10 0.05 20 10
+release
+expect lowest > 50
+expect tilt.lFoot > 20
+ground
+wait 110
+expect tilt.lFoot < 2
+expect meshlow > -2
+expect meshlow < 2
+reset
+
+# 6. A foot the USER pointed is theirs: lifted as posed and dropped, she lands on it as posed.
+view right
+fk lFoot 30 0 0
+fk rFoot 30 0 0
+lift 0.3
+ground
+wait 100
+expect euler.lFoot.x > 29
+expect tilt.lFoot > 25
+view right
+closeup lFoot 0.30
+shot 710_user_pointed_feet
+reset
+
+# ... and so is a hanging foot the user has turned since the lift: the other one lands flat.
+view home
+view right
+press hip
+dragv 0 0.30 30 60
+release
+fk lFoot 0 12 0
+ground
+wait 110
+expect tilt.rFoot < 2
+expect tilt.lFoot > 20
+reset
+
+# 7. Lifted out of a floor SIT by the hips (she stands up through it, then lets go of the floor),
+# let go of, dropped: she lands STANDING, on flat feet — where she hangs, not back in the sit.
+view home
+view right
+press hip
+dragv 0.30 -0.60 60 30
+release
+press hip
+dragv -0.25 1.05 80 60
+release
+expect lowest > 200
+expect tilt.lFoot > 20
+view home
+shot 711_lifted_out_of_a_sit
+ground
+wait 120
+expect tilt.lFoot < 3
+expect tilt.rFoot < 3
+expect meshlow > -2
+expect meshlow < 2
+view home
+shot 712_dropped_standing
+reset
+
+# 8. A figure TURNED a quarter turn (the Transform tab's Turn: she faces +x) lands facing the way
+# she faces, by every route: dropped, lowered by the hips, and lowered within the lifting drag —
+# where the rig's own landing held her soles to +z, the way she faced as imported, and wrenched
+# both legs round (49 degrees of thigh twist, a foot rolled 35).
+turn 90
+view home
+view front
+press hip
+dragv 0 0.30 30 60
+release
+ground
+wait 110
+expect tilt.lFoot < 2
+expect tilt.rFoot < 2
+expect meshlow > -2
+expect meshlow < 2
+view home
+shot 713_turned_dropped
+reset
+turn 90
+view front
+press hip
+dragv 0 0.30 30 60
+release
+press hip
+dragv 0 -0.30 30 60
+release
+expect tilt.lFoot < 4
+expect tilt.rFoot < 4
+expect euler.lFoot.y > -15
+expect euler.rFoot.z < 20
+reset
+turn 90
+view front
+press hip
+dragv 0 0.30 30 60
+dragv 0 -0.30 30 60
+release
+expect tilt.lFoot < 4
+expect tilt.rFoot < 4
+expect euler.lFoot.y > -15
+expect euler.rFoot.z < 20
+view home
+shot 714_turned_lowered_in_the_drag
+quit

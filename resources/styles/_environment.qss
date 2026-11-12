@@ -1,8 +1,8 @@
 /**
  * @file _environment.qss
  * @brief The properties tabs: Environment (src/properties/environmentpanel.* and hdriselector.*),
- *        Transform (src/properties/transformpanel.*), Materials (materialpanel.*) and Soft Body
- *        Physics (softbodypanel.*).
+ *        Transform (src/properties/transformpanel.*), Materials (materialpanel.*), Soft Body
+ *        Physics (softbodypanel.*) and Lights (lightspanel.*).
  *
  * Concatenated after global.qss (shell/apptheme.cpp), so these rules override the base.
  * Everything is scoped under #EnvironmentPanel / #TransformPanel / #SoftBodyPanel or the tabs' own object names so
@@ -19,14 +19,17 @@
 #MaterialPanel,
 #MaterialContent,
 #SoftBodyPanel,
-#SoftBodyContent {
+#SoftBodyContent,
+#LightsPanel,
+#LightsContent {
     background-color: #252627; /* same as the QTabWidget::pane the tab sits in */
 }
 
 #EnvironmentPanel QScrollArea,
 #TransformPanel QScrollArea,
 #MaterialPanel QScrollArea,
-#SoftBodyPanel QScrollArea {
+#SoftBodyPanel QScrollArea,
+#LightsPanel QScrollArea {
     background: transparent;
     border: none;
 }
@@ -35,7 +38,8 @@
 #EnvironmentPanel QLabel,
 #TransformPanel QLabel,
 #MaterialPanel QLabel,
-#SoftBodyPanel QLabel {
+#SoftBodyPanel QLabel,
+#LightsPanel QLabel {
     color: #c7c8cb;
     font-size: 12px;
     padding: 0;
@@ -44,6 +48,7 @@
 #TransformPanel QLabel:disabled { color: #6f7073; }
 #MaterialPanel QLabel:disabled { color: #6f7073; }
 #SoftBodyPanel QLabel:disabled { color: #6f7073; }
+#LightsPanel QLabel:disabled { color: #6f7073; }
 
 /* The Materials tab's heading (the selected object's name) and its hint lines (the zone note, the
  * maps list, the how-to while nothing is selected). The Base Color swatch's look is set in code:
@@ -144,6 +149,19 @@
 }
 #TransformPanel #TransformHint { color: #8b9096; }
 #SoftBodyPanel #SoftBodyHint { color: #8b9096; }
+#LightsPanel #TransformHint { color: #8b9096; }
+/* The Lights tab's name field: the app's input look. */
+#LightsPanel #LightNameEdit {
+    background-color: #2a2b2d;
+    color: #e0e0e0;
+    border: 1px solid #4a4b4d;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 12px;
+    selection-background-color: #314D7A;
+}
+#LightsPanel #LightNameEdit:focus { border-color: #5b87cc; }
+#LightsPanel #LightNameEdit:disabled { color: #6f7073; border-color: #3a3b3d; }
 
 /* Section frames. */
 #PropertyGroup {
@@ -247,13 +265,15 @@
 /* The toggles (tonemap, shadows): the label matches the row labels; the indicator itself is the
  * app-wide QCheckBox::indicator rule in global.qss. */
 #EnvironmentPanel QCheckBox,
-#SoftBodyPanel QCheckBox {
+#SoftBodyPanel QCheckBox,
+#LightsPanel QCheckBox {
     color: #c7c8cb;
     font-size: 12px;
     spacing: 6px;
 }
 /* The Soft Body Physics tab's part switches dim with the master switch off. */
 #SoftBodyPanel QCheckBox:disabled { color: #6f7073; }
+#LightsPanel QCheckBox:disabled { color: #6f7073; }
 
 /* Reset button: quiet, secondary. */
 #PropertyResetButton {

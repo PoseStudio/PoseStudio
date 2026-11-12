@@ -345,6 +345,18 @@ public:
     /// themselves in an earlier drag — no supports of hers, and props if they are held. Set by
     /// the Armature before beginDrag.
     void setIncidentalContacts(const std::vector<char>& nodes) { m_incidentalContact = nodes; }
+    /// THE HANGING FEET (2026-11-12; Armature::findHangFeet): the bones of feet a lift left hanging
+    /// — rolled onto their balls, pointed — on a figure let go of in the air. They are no contacts
+    /// at a drag's start (plantContacts): their toes hang a hand lower than their soles would
+    /// stand, and read by the toes a figure whose soles float 10cm up counted as STANDING on them — planted
+    /// and healed onto the floor on the tips of her toes by her next drag of anything. She floats;
+    /// the Armature brings the feet flat as the floor nears, and what lands is a flat foot. Set by
+    /// the Armature before beginDrag (empty: none).
+    void setHangingFeet(const std::vector<char>& nodes) { m_hangingFoot = nodes; }
+    /// The height (metres, figure-scaled) a figure's feet stand over the floor from which she is IN
+    /// THE AIR at a drag's start and nothing is planted (kAirborneHeight); under it she hovers by
+    /// residue and is healed onto the floor.
+    float airborneHeight() const;
     /// A TWIST HELPER IS NO CONTACT (2026-10-28; IK_HELPER_CONTACTS is the A/B): a bone that splits
     /// a rigid segment — the main family's mid-thigh and mid-forearm twist bones — has no joint a
     /// body rests on; the segment's far joint (the knee, the hand) is the contact. The contact rules
@@ -498,6 +510,7 @@ private:
     std::vector<std::vector<glm::vec3>> m_fleshPoints;
     std::vector<char>                   m_fleshBorrowed; ///< Per bone: its flesh points are a neighbour's (see fleshPoints()).
     std::vector<char>                   m_incidentalContact; ///< Per bone: see setIncidentalContacts().
+    std::vector<char>                   m_hangingFoot;       ///< Per bone: see setHangingFeet().
     std::vector<char>                   m_riseUnloaded;      ///< Per bone: see setRiseUnloadedContacts().
     std::vector<char>                   m_liftOffDeferred;   ///< Per bone: see setLiftOffDeferred().
     std::vector<char>                   m_fleshRows;         ///< Per bone: see fleshPoints().

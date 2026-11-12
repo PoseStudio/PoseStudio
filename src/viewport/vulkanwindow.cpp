@@ -160,6 +160,7 @@ void VulkanWindow::DeferredSceneState::applyTo(VulkanRenderer& renderer) const {
     scene.setShadeMode(shadeMode);       // a mode chosen before first expose
     scene.setShowSkeleton(showSkeleton); // a skeleton toggle chosen before first expose
     scene.setLightingSettings(lighting); // any dials set before first expose
+    scene.setLights(lights);             // … and any light objects
 }
 
 void VulkanWindow::initializeVulkan() {
@@ -201,6 +202,7 @@ void VulkanWindow::initializeVulkan() {
         m_renderer = std::make_unique<VulkanRenderer>(*m_context, toExtent(pixelExtent()),
                                                       m_shaderDir.toStdString());
         m_deferred.applyTo(*m_renderer);
+        syncTracedMode(); // (a Rendered mode chosen before the renderer existed)
         m_renderer->setSelectionStyle(m_selectionStyle); // Preferences → Selection, as handed over so far
         m_renderer->setUiScale(static_cast<float>(devicePixelRatio())); // outline width in logical px
         noteView(ViewPreset::Home); // a fresh camera starts at its default framing (a rebuilt
@@ -281,6 +283,7 @@ void VulkanWindow::failDevice(const char* stage, const VulkanError& error) {
 }
 
 void VulkanWindow::releaseVulkan() {
+    stopTraced(QString()); // the Rendered mode's engine reads the scene's images: ended before they go
     // VR Mode first: its session holds swapchain images on the device, and its wait thread
     // must be gone before the renderer it renders through.
     stopVr(QString());
@@ -387,6 +390,7 @@ void VulkanWindow::setShadeMode(int mode) {
     withRenderer([mode](VulkanRenderer& r) { r.scene().setShadeMode(mode); });
     m_announcedShadeMode = mode;
     emit shadeModeChanged(mode);
+    syncTracedMode(); // the Rendered row starts the render engine's viewport render; any other ends it
 }
 
 void VulkanWindow::setSelectionOutline(const QColor& color, float opacity) {
@@ -468,8 +472,10 @@ void VulkanWindow::renderFrame() {
     // idle, keeping the GPU busy and (with FIFO/vsync present) throttling the whole GUI thread.
     // drawFrame() returns true only when the swapchain was just rebuilt (or the frame skipped
     // mid-rebuild) and one follow-up frame is needed to reflect the new size.
+    tracedTick();           // the Rendered mode: what changed goes to the engine; its picture or the PBR shading shows
     notifyJointTransform(); // the Transform tab follows whatever this frame is about to show
     notifyMaterialView();   // ... and the Materials tab (the selection, the zone, a material edit)
+    notifyLights();         // ... and the Lights tab (the list, the selected light)
     try {
         const bool perfFrame = m_diag && (m_ik.dragging || m_ik.settling);
         const qint64 f0 = perfFrame ? m_diag->frameBegin() : 0;

@@ -13,6 +13,7 @@
 #include "menumanager.h"
 #include "materialpanel.h"
 #include "softbodypanel.h"
+#include "lightspanel.h"
 #include "splashoverlay.h"
 #include "whatsnewdialog.h"
 #include "helpwindow.h"
@@ -179,6 +180,8 @@ int main(int argc, char *argv[]) {
     // The Environment tab: live image-based-lighting controls for the viewport (see EnvironmentPanel).
     pose::EnvironmentPanel *environmentTab = new pose::EnvironmentPanel(viewport);
     sidePanel->addTab(environmentTab, QObject::tr("Environment"));
+    // The Lights tab: the scene's light objects — point, spot, area and sun lights (see LightsPanel).
+    sidePanel->addTab(new pose::LightsPanel(viewport), QObject::tr("Lights"));
     // Developer lever: POSESTUDIO_TAB=<title> starts on that side tab (the scripted test's
     // `uishot` then pictures it — tools/ikscripts/README.md).
     if (const QString startTab = qEnvironmentVariable("POSESTUDIO_TAB"); !startTab.isEmpty()) {

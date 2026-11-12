@@ -38,9 +38,19 @@
  *             catcher too. Left unflagged, a light can only ADD light to the floor and its
  *             shadows never show (a sun-lit scene had none at all). The sun and the environment
  *             light are the scene's own lights: both are flagged.
- *   LIGHT     The key light is a sun whose strength IS the viewport's (irradiance on a facing
- *             surface); the environment's strength is one number for every bounce (see
- *             renderapi::Environment), and only CAMERA rays see the backdrop instead.
+ *   LIGHT     A light's strength is an IRRADIANCE (renderapi::Light): a sun's is Cycles's own
+ *             number; a point or spot light's — the irradiance a metre away, a radiant intensity
+ *             — is 1/4π of the flux Cycles asks for, and an area light's on-axis intensity 1/π
+ *             of its flux (a Lambertian face). Every light shines along its object's -Z; an area
+ *             light's width is its object's X, held level (lightFrame). The environment's
+ *             strength is one number for every bounce (see renderapi::Environment), and only
+ *             CAMERA rays see the backdrop instead.
+ *   UPDATES   An interactive render's scene is REBUILT IN PLACE (SceneBuilder::build called
+ *             again): the objects and their geometry — the lights are geometry — are deleted and
+ *             made anew, but Cycles never deletes a SHADER, so the materials' shaders are a pool
+ *             that is given new graphs (a shader left over is given an empty one, which lets go
+ *             of its images). An image that both the old and the new graphs sample is found by
+ *             its loader's identity and is not loaded twice.
  */
 
 #include "scenebuilder.h"
@@ -61,6 +71,7 @@
 #include "scene/shader_nodes.h"
 
 #include "util/colorspace.h"
+#include "util/set.h"
 #include "util/transform.h"
 
 #include <algorithm>
@@ -501,12 +512,20 @@ std::unique_ptr<ccl::ShaderGraph> MaterialGraph::build() {
     return std::move(m_graph);
 }
 
-ccl::Shader* buildMaterial(ccl::Scene* scene, ImageSet& images, const Material& material) {
-    ccl::Shader* shader = scene->create_node<ccl::Shader>();
+/// @p material's graph into @p shader (a new shader, or one of the pool given another material).
+void buildMaterial(ccl::Scene* scene, ImageSet& images, const Material& material, ccl::Shader* shader) {
     shader->name = ccl::ustring(material.name != nullptr ? material.name : "material");
     shader->set_graph(MaterialGraph(images, material).build());
     shader->tag_update(scene);
-    return shader;
+}
+
+/// A graph that shades nothing and samples nothing: what a pooled shader no mesh uses is left with.
+void buildIdleShader(ccl::Scene* scene, ccl::Shader* shader) {
+    auto  graph = std::make_unique<ccl::ShaderGraph>();
+    auto* diffuse = graph->create_node<ccl::DiffuseBsdfNode>();
+    graph->connect(diffuse->output("BSDF"), graph->output()->input("Surface"));
+    shader->set_graph(std::move(graph));
+    shader->tag_update(scene);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -611,7 +630,7 @@ void buildMesh(ccl::Scene* scene, const Mesh& in, ccl::Shader* shader) {
 }
 
 /// The floor: one large quad at @p height that shows only the shadows cast on it.
-void buildShadowFloor(ccl::Scene* scene, float height) {
+ccl::Shader* buildFloorShader(ccl::Scene* scene) {
     ccl::Shader* shader = scene->create_node<ccl::Shader>();
     shader->name = ccl::ustring("floor");
     auto  graph = std::make_unique<ccl::ShaderGraph>();
@@ -620,6 +639,10 @@ void buildShadowFloor(ccl::Scene* scene, float height) {
     graph->connect(diffuse->output("BSDF"), graph->output()->input("Surface"));
     shader->set_graph(std::move(graph));
     shader->tag_update(scene);
+    return shader;
+}
+
+void buildShadowFloor(ccl::Scene* scene, float height, ccl::Shader* shader) {
 
     const float kHalf = 200.0f; // metres: well past any shadow the key light throws
     ccl::Mesh*  mesh = scene->create_node<ccl::Mesh>();
@@ -672,27 +695,76 @@ ccl::Shader* buildLightShader(ccl::Scene* scene) {
     return shader;
 }
 
-void buildSun(ccl::Scene* scene, const SunLight& in, ccl::Shader* lightShader) {
-    const ccl::float3 toLight = ccl::safe_normalize(toFloat3(in.direction));
-    if (ccl::len(toLight) < 0.5f || in.strength <= 0.0f) {
+/// A light object's frame as Cycles's object transform: it shines along its -Z (the third
+/// COLUMN points back at where the light comes from — ccl::make_transform_frame puts the axes
+/// in the ROWS: the inverse), and its X is level — an area light's width — wherever the light
+/// does not shine straight up or down (the application draws its lights by the same rule:
+/// scenelight.h's lightFrame).
+ccl::Transform lightFrame(const ccl::float3& shines, const ccl::float3& position) {
+    const ccl::float3 z = -shines;
+    const ccl::float3 x = std::abs(z.y) < 0.999f ? ccl::normalize(ccl::cross(ccl::make_float3(0.0f, 1.0f, 0.0f), z))
+                                                 : ccl::make_float3(1.0f, 0.0f, 0.0f);
+    const ccl::float3 y = ccl::cross(z, x);
+    return ccl::make_transform(x.x, y.x, z.x, position.x, x.y, y.y, z.y, position.y, x.z, y.z, z.z, position.z);
+}
+
+void buildLight(ccl::Scene* scene, const Light& in, ccl::Shader* lightShader) {
+    if (in.strength <= 0.0f) {
         return;
     }
-    ccl::SunLight* light = scene->create_node<ccl::SunLight>();
-    light->set_strength(toFloat3(in.color) * in.strength);
-    light->set_angle(std::max(in.angle, 0.0f));
-    light->set_cast_shadow(true);
+    ccl::float3 shines = ccl::safe_normalize(toFloat3(in.direction));
+    if (ccl::len(shines) < 0.5f) {
+        shines = ccl::make_float3(0.0f, -1.0f, 0.0f);
+    }
+    const float kPi = 3.14159265f;
+
+    // The strength: an irradiance — a sun's as it is; a point or spot light's a metre away (its
+    // radiant intensity: a 4π-th of the flux Cycles asks for); an area light's a metre away on
+    // its axis (a Lambertian face's intensity there: a π-th of its flux). See renderapi::Light.
+    ccl::Light* light = nullptr;
+    float       flux = in.strength;
+    switch (in.type) {
+    case LightType::Point: {
+        ccl::PointLight* point = scene->create_node<ccl::PointLight>();
+        point->set_radius(std::max(in.radius, 0.0f));
+        flux *= 4.0f * kPi;
+        light = point;
+        break;
+    }
+    case LightType::Spot: {
+        ccl::SpotLight* spot = scene->create_node<ccl::SpotLight>();
+        spot->set_radius(std::max(in.radius, 0.0f));
+        spot->set_angle(std::clamp(in.angle, 0.0175f, 3.1241f)); // 1 .. 179 degrees
+        spot->set_smooth(std::clamp(in.blend, 0.0f, 1.0f));
+        flux *= 4.0f * kPi;
+        light = spot;
+        break;
+    }
+    case LightType::Area: {
+        ccl::AreaLight* area = scene->create_node<ccl::AreaLight>();
+        area->set_sizeu(std::max(in.sizeU, 1.0e-3f));
+        area->set_sizev(std::max(in.sizeV, 1.0e-3f));
+        area->set_ellipse(false);
+        flux *= kPi;
+        light = area;
+        break;
+    }
+    default: {
+        ccl::SunLight* sun = scene->create_node<ccl::SunLight>();
+        sun->set_angle(std::max(in.angle, 0.0f));
+        light = sun;
+        break;
+    }
+    }
+    light->set_strength(toFloat3(in.color) * flux);
+    light->set_cast_shadow(in.castShadow != 0);
     light->set_use_mis(true);
     ccl::array<ccl::Node*> usedShaders;
     usedShaders.push_back_slow(lightShader);
     light->set_used_shaders(usedShaders);
 
-    // A sun shines along its object's -Z: the object's Z axis — the matrix's third COLUMN —
-    // points TO the light. (ccl::make_transform_frame puts the axes in the ROWS: the inverse.)
-    const ccl::float3 seed = std::abs(toLight.y) < 0.9f ? ccl::make_float3(0.0f, 1.0f, 0.0f) : ccl::make_float3(1.0f, 0.0f, 0.0f);
-    const ccl::float3 x = ccl::normalize(ccl::cross(seed, toLight));
-    const ccl::float3 y = ccl::cross(toLight, x);
     ccl::Object* object = scene->create_node<ccl::Object>();
-    object->set_tfm(ccl::make_transform(x.x, y.x, toLight.x, 0.0f, x.y, y.y, toLight.y, 0.0f, x.z, y.z, toLight.z, 0.0f));
+    object->set_tfm(lightFrame(shines, toFloat3(in.position)));
     object->set_visibility(ccl::PATH_RAY_VISIBILITY_ALL & ~ccl::PATH_RAY_VISIBILITY_CAMERA);
     object->set_is_shadow_catcher(true); // (see FLOOR in the file comment)
     object->set_geometry(light);
@@ -796,7 +868,9 @@ void buildWorld(ccl::Scene* scene, ImageSet& images, const Environment& env, con
     if (radiance != nullptr) {
         ccl::BackgroundLight* light = scene->create_node<ccl::BackgroundLight>();
         light->set_use_mis(true);
-        light->set_map_resolution(0); // (0 = the panorama's own resolution)
+        // (0 = the panorama's own resolution. An interactive render rebuilds the map whenever the
+        // lighting changes — a light dragged, a dial turned: bounded there.)
+        light->set_map_resolution(settings.interactive != 0 ? 1024 : 0);
         ccl::array<ccl::Node*> usedShaders;
         usedShaders.push_back_slow(scene->default_background);
         light->set_used_shaders(usedShaders);
@@ -839,45 +913,128 @@ void buildCamera(ccl::Scene* scene, const Camera& in, const Settings& settings) 
     camera->set_nearclip(std::max(in.nearClip, 1.0e-4f));
     camera->set_farclip(std::max(in.farClip, in.nearClip + 1.0f));
     camera->need_flags_update = true;
-    camera->update(scene);
+    // (The camera is left MODIFIED: Cycles's own scene update computes it and sends it to the
+    // device. Updated here, it is no longer "modified" — and a camera that is all that changed,
+    // an interactive render's orbit, was then no reason for the scene to update at all: the
+    // picture stayed where it was.)
+    (void)scene;
 }
 
 } // namespace
 
-bool buildScene(ccl::Scene* scene, const Scene& in, const Settings& settings, std::string& error) {
+SceneBuilder::SceneBuilder(ccl::Scene* scene) : m_scene(scene) {}
+
+void SceneBuilder::clear() {
+    // Every object, and every geometry — the meshes and the lights — it had. (The shaders stay:
+    // see UPDATES in the file comment.)
+    ccl::set<ccl::Object*> objects;
+    for (std::size_t i = 0; i < m_scene->objects.size(); ++i) {
+        objects.insert(m_scene->objects[i]);
+    }
+    if (!objects.empty()) {
+        m_scene->delete_nodes(objects);
+    }
+    ccl::set<ccl::Geometry*> geometry;
+    for (std::size_t i = 0; i < m_scene->geometry.size(); ++i) {
+        geometry.insert(m_scene->geometry[i]);
+    }
+    if (!geometry.empty()) {
+        m_scene->delete_nodes(geometry);
+    }
+    m_lightingObjects.clear();
+    m_lightingGeometry.clear();
+}
+
+void SceneBuilder::clearLighting() {
+    if (!m_lightingObjects.empty()) {
+        m_scene->delete_nodes(ccl::set<ccl::Object*>(m_lightingObjects.begin(), m_lightingObjects.end()));
+    }
+    if (!m_lightingGeometry.empty()) {
+        m_scene->delete_nodes(ccl::set<ccl::Geometry*>(m_lightingGeometry.begin(), m_lightingGeometry.end()));
+    }
+    m_lightingObjects.clear();
+    m_lightingGeometry.clear();
+}
+
+void SceneBuilder::buildLighting(const Scene& in, const Settings& settings) {
+    ccl::Scene* scene = m_scene;
+    // (Nothing is deleted between here and the end: what this makes is what is appended.)
+    const std::size_t objectsBefore = scene->objects.size();
+    const std::size_t geometryBefore = scene->geometry.size();
+
+    ImageSet images(scene, in);
+    if (in.floorShadows != 0) {
+        if (m_floorShader == nullptr) {
+            m_floorShader = buildFloorShader(scene);
+        }
+        buildShadowFloor(scene, in.floorHeight, m_floorShader);
+    }
+    if (in.lightCount > 0 && m_lightShader == nullptr) {
+        m_lightShader = buildLightShader(scene);
+    }
+    for (uint32_t i = 0; i < in.lightCount; ++i) {
+        buildLight(scene, in.lights[i], m_lightShader);
+    }
+    buildWorld(scene, images, in.environment, settings);
+
+    for (std::size_t i = objectsBefore; i < scene->objects.size(); ++i) {
+        m_lightingObjects.push_back(scene->objects[i]);
+    }
+    for (std::size_t i = geometryBefore; i < scene->geometry.size(); ++i) {
+        m_lightingGeometry.push_back(scene->geometry[i]);
+    }
+}
+
+void SceneBuilder::lighting(const Scene& in, const Settings& settings) {
+    clearLighting();
+    buildLighting(in, settings);
+}
+
+void SceneBuilder::camera(const Camera& in, const Settings& settings) {
+    buildCamera(m_scene, in, settings);
+}
+
+bool SceneBuilder::build(const Scene& in, const Settings& settings, std::string& error) {
     if (settings.width <= 0 || settings.height <= 0) {
         error = "The image size is not valid.";
         return false;
     }
+    ccl::Scene* scene = m_scene;
+    clear();
 
     ImageSet images(scene, in);
 
-    // Materials (a mesh that names none, or one out of range, takes Cycles's default surface).
-    std::vector<ccl::Shader*> shaders(in.materialCount, nullptr);
-    for (uint32_t i = 0; i < in.materialCount; ++i) {
-        shaders[i] = buildMaterial(scene, images, in.materials[i]);
+    // Materials, each into a shader of the pool — the new graphs BEFORE anything of the old is
+    // let go of, so an image both sample stays loaded. (A mesh that names none, or one out of
+    // range, takes Cycles's default surface.)
+    while (m_materialShaders.size() < in.materialCount) {
+        m_materialShaders.push_back(scene->create_node<ccl::Shader>());
     }
+    for (uint32_t i = 0; i < in.materialCount; ++i) {
+        buildMaterial(scene, images, in.materials[i], m_materialShaders[i]);
+    }
+    for (std::size_t i = in.materialCount; i < std::min(m_idleFrom, m_materialShaders.size()); ++i) {
+        buildIdleShader(scene, m_materialShaders[i]); // (in use by the build before: let go of its images)
+    }
+    m_idleFrom = in.materialCount;
+
     for (uint32_t i = 0; i < in.meshCount; ++i) {
         const Mesh&  mesh = in.meshes[i];
         ccl::Shader* shader = (mesh.material >= 0 && static_cast<uint32_t>(mesh.material) < in.materialCount)
-                                  ? shaders[static_cast<std::size_t>(mesh.material)]
+                                  ? m_materialShaders[static_cast<std::size_t>(mesh.material)]
                                   : scene->default_surface;
         buildMesh(scene, mesh, shader);
     }
-    if (in.floorShadows != 0) {
-        buildShadowFloor(scene, in.floorHeight);
-    }
-    ccl::Shader* lightShader = in.sunCount > 0 ? buildLightShader(scene) : nullptr;
-    for (uint32_t i = 0; i < in.sunCount; ++i) {
-        buildSun(scene, in.suns[i], lightShader);
-    }
-    buildWorld(scene, images, in.environment, settings);
+    buildLighting(in, settings); // the floor, the lights, the world
     buildCamera(scene, in.camera, settings);
 
-    // The film: a floor that catches shadows over an opaque backdrop. (The exposure is the output
-    // driver's: see FrameOutputDriver.)
+    // The film: a floor that catches shadows over an opaque backdrop. (The exposure is applied
+    // to the finished pixels: see FrameOutputDriver.)
     scene->film->set_exposure(1.0f);
-    scene->film->set_use_approximate_shadow_catcher(settings.transparentBackground == 0);
+    // (Under a transparent film the floor leaves no trace — alpha is the scene's coverage — unless
+    // the caller composites the picture over a plate of its own and asks for the shadows as
+    // coverage: Cycles's approximate catcher then puts 1 - the shadow's ratio into the alpha.)
+    scene->film->set_use_approximate_shadow_catcher(settings.transparentBackground == 0 || settings.shadowAlpha != 0);
 
     // The integrator. Caustics through glass are left out (see GLASS in the file comment).
     ccl::Integrator* integrator = scene->integrator;

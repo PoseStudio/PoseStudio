@@ -299,6 +299,8 @@ add_executable(
     src/properties/propertyrows.h
     src/properties/softbodypanel.cpp     # the Soft Body Physics tab: the breasts' and the buttocks' switches and dials
     src/properties/softbodypanel.h
+    src/properties/lightspanel.cpp       # the Lights tab: the scene's light objects (point / spot / area / sun)
+    src/properties/lightspanel.h
 
     # --- Production rendering (the Render window; the engine itself is a plugin: engines/cycles) ---
     src/render/renderengineapi.h          # THE ENGINE INTERFACE: the plain-data contract with an engine library
@@ -307,6 +309,8 @@ add_executable(
     src/render/renderenginelibrary.h
     src/render/rendersession.cpp          # one render: start, poll, the image, save
     src/render/rendersession.h
+    src/render/splatcomposite.cpp         # a render with Gaussian splats in it: the scene laid into the capture's layers
+    src/render/splatcomposite.h
     src/render/renderwindow.cpp           # Render -> Render Image (F12): the window
     src/render/renderwindow.h
 
@@ -331,6 +335,8 @@ add_executable(
     src/viewport/vulkanwindow_pose.cpp    # pose utilities, pins, pose files, delete, undo/redo
     src/viewport/vulkanwindow_materials.cpp # the Materials tab's side: the view, the edit bracket, the texture slots (decode + bake + upload)
     src/viewport/vulkanwindow_render.cpp  # the scene captured for a render engine (captureRenderScene)
+    src/viewport/vulkanwindow_lights.cpp  # the light objects: the list as an undoable edit, a marker's drag
+    src/viewport/vulkanwindow_traced.cpp  # the Rendered mode: the render engine's picture kept in step with the scene
     src/viewport/rendersnapshot.h         # that capture: the description and the storage behind it
     src/viewport/vulkanwindow_bench.cpp   # POSESTUDIO_IK_PERF / _BENCH diagnostics
     src/viewport/vulkanwindow_vr.cpp      # VR Mode: the OpenXR session's lifecycle, wait thread, stereo frame
@@ -397,6 +403,8 @@ add_executable(
     src/viewport/rendering/outlinemask.cpp # selection-outline coverage mask (the selected model's silhouette)
     src/viewport/rendering/outlinemask.h
     src/viewport/rendering/postprocess.cpp # bloom chain + the tonemapping composite (+ the selection outline)
+    src/viewport/rendering/tracedview.cpp   # the Rendered mode's path-traced picture as a texture + its draw
+    src/viewport/rendering/tracedview.h
     src/viewport/rendering/postprocess.h
     src/viewport/rendering/selectionstyle.h # the selection outline's and the joint highlight's color + opacity (Preferences → Selection)
     src/viewport/rendering/vulkancommands.cpp
@@ -494,6 +502,7 @@ add_executable(
     src/viewport/scene/model.cpp         # one imported model: meshes + armature + per-frame pose data
     src/viewport/scene/model.h
     src/viewport/scene/modelbake.cpp     # Model::bakePosedMesh: the vertex stage on the CPU, for a render engine
+    src/viewport/scene/scenelight.h      # a light object (point / spot / area / sun) and its shared rules
     src/viewport/scene/renderexport.cpp  # material / camera / lighting translated for a render engine
     src/viewport/scene/renderexport.h
     src/viewport/scene/bonepicker.cpp    # screen-space joint / bone-body picking across figures
@@ -514,6 +523,7 @@ add_executable(
     src/viewport/scene/armatureikpost.cpp   # the drag tick's post-steps: the idle arms' hang, the head's righting
     src/viewport/scene/armatureikdigit.cpp  # the bone classes (body / face rig / digit) and the digit drag
     src/viewport/scene/armaturelanding.cpp  # the landing bounce: a figure dropped onto her feet absorbs the landing
+    src/viewport/scene/armaturehangfeet.cpp # the hanging feet come down flat: a lifted figure's feet, back on the floor
     src/viewport/scene/armaturebreasts.cpp     # THE SOFT BREASTS: the pectorals hung by gravity, by their size; their bounce
     src/viewport/scene/armaturebreastfield.cpp # THE BONELESS BREAST: on a rig with no breast bone, the chest's own skin moved as a delta field
     src/viewport/scene/armaturebuttocks.cpp    # THE SOFT BUTTOCKS: the glutes' skin as a delta field the GPU blends, jiggling with the hips' movement
@@ -785,6 +795,7 @@ add_executable(PoseStudioIkHarness
     src/viewport/scene/armatureikpost.cpp
     src/viewport/scene/armatureikdigit.cpp
     src/viewport/scene/armaturelanding.cpp
+    src/viewport/scene/armaturehangfeet.cpp
     src/viewport/scene/armaturebreasts.cpp
     src/viewport/scene/armaturebreastfield.cpp
     src/viewport/scene/armaturebuttocks.cpp
@@ -854,6 +865,21 @@ target_compile_definitions(PoseStudioOverlayCheck PRIVATE
 )
 target_link_libraries(PoseStudioOverlayCheck PRIVATE Vulkan::Headers)
 add_test(NAME overlay-check COMMAND PoseStudioOverlayCheck)
+
+# The guard of a render's Gaussian splat composite (tools/splatcomposite): the display transform
+# and its inverse, the capture coming out of a render as it went in, the backdrop behind it, the
+# scene laid over it in linear light (a figure's edge, the floor's shadow), the front of the
+# capture over the scene, a transparent picture, the linear picture an OpenEXR file is saved
+# from. render/splatcomposite.cpp alone — no Qt, no engine, no device.
+add_executable(PoseStudioSplatCompositeCheck
+    tools/splatcomposite/check_composite.cpp
+    src/render/splatcomposite.cpp
+)
+target_include_directories(PoseStudioSplatCompositeCheck PRIVATE
+    src/render
+    src/viewport/util
+)
+add_test(NAME splat-composite-check COMMAND PoseStudioSplatCompositeCheck)
 
 # The script-link reader's guard (tools/scriptlink): writes synthetic content-library scripts —
 # folder links, file loaders, web links, chains, programs, an encrypted one — and checks where
@@ -1095,9 +1121,12 @@ set(SHADER_SOURCES
     sssblur.frag
     outlinemask.frag
     depthresolve.frag
+    photoresolve.frag
     splat.vert
     splat.frag
     splatmask.frag
+    traced.frag
+    depthcutout.frag
 )
 
 set(COMPILED_SPV_FILES "")

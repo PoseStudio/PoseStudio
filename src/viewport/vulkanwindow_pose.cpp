@@ -65,6 +65,7 @@ void VulkanWindow::closeSettlingEdits() {
     finishGroundFall();
     endJointTransformEdit(); // (the joint mouse mode's too: what it made is kept)
     endMaterialEdit();       // (a material scrub's bracket: what it set is kept)
+    endLightEdit();          // (a light scrub's too)
 }
 
 void VulkanWindow::closeOpenPoseEdits() {
@@ -454,9 +455,14 @@ void VulkanWindow::unpinAllJoints() {
 }
 
 void VulkanWindow::deleteSelectedObject() {
-    if (m_renderer) {
-        deleteModel(scene().selectedModelIndex());
+    if (!m_renderer) {
+        return;
     }
+    if (scene().selectedLight() >= 0) {
+        removeLight(scene().selectedLight()); // the selection is a light: it goes (one undo entry)
+        return;
+    }
+    deleteModel(scene().selectedModelIndex());
 }
 
 void VulkanWindow::deleteModel(int index) {
@@ -498,6 +504,13 @@ void VulkanWindow::resetToEmptyScene() {
     beginEnvironmentBake(defaultEnvironmentPath(), /*autoAimKey=*/false);
     // 6. Push the deferred defaults into the scene's UBOs (shade mode / skeleton / lighting).
     m_deferred.applyTo(*m_renderer);
+    //    … and say so where the shade mode was another (the strip's picker mirrors the signal;
+    //    the Rendered mode's engine stops with its row).
+    if (m_announcedShadeMode != m_deferred.shadeMode) {
+        m_announcedShadeMode = m_deferred.shadeMode;
+        emit shadeModeChanged(m_deferred.shadeMode);
+    }
+    syncTracedMode();
     // 7. History cleared LAST — nothing inside New registers an entry (the pre-edit bracket is
     //    closed at step 1), and Ctrl+Z must not undo a New.
     m_undoStack.clear();
@@ -593,6 +606,7 @@ bool VulkanWindow::captureProjectDocument(ProjectDocument& out) const {
 
     out.environment.hdri = m_deferred.environmentPath.toStdString();
     out.environment.settings = m_deferred.lighting;
+    out.lights = m_deferred.lights;
 
     const Camera& cam = m_renderer->camera();
     out.camera.target = cam.target();
@@ -734,6 +748,7 @@ int VulkanWindow::loadProjectFile(const QString& path,
         qWarning() << "[project] the saved panorama is missing, keeping the default:" << savedHdri;
     }
     m_deferred.applyTo(*m_renderer);
+    applyLights(doc.lights); // the light objects (the frame's notify tells the Lights tab)
     emit lightingRestored(m_deferred.lighting);
     emit environmentRestored(m_deferred.environmentPath.isEmpty() ? defaultEnvironmentPath()
                                                                    : m_deferred.environmentPath);
@@ -793,6 +808,10 @@ void VulkanWindow::swapUndoEntry(std::vector<UndoEntry>& from, std::vector<UndoE
         scene().applyMaterials(entry.figure, entry.materials);
         syncOverlayMetal(entry.figure); // (the values just applied: an overlay's metal is baked for the zone's Metallic)
         scene().setSelectedModel(entry.figure);
+    } else if (entry.kind == UndoEntry::Kind::Lights) {
+        // The light objects back to the snapshot (the frame's notify tells the Lights tab).
+        counter.lights = m_deferred.lights;
+        applyLights(entry.lights);
     } else {
         counter.lighting = m_deferred.lighting; // the current dials
         setLightingSettings(entry.lighting);

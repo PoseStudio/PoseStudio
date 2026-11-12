@@ -20,6 +20,7 @@ namespace pose {
 class Camera;
 struct LightingSettings;
 struct MaterialParams;
+struct SceneLight;
 
 /// What of a model's import says how its materials are to be read (see renderMaterial).
 struct RenderMaterialContext {
@@ -44,7 +45,12 @@ renderapi::Camera renderCamera(const Camera& camera);
 
 /// The key light as a sun: the direction the viewport's PBR mode lights from (it follows the
 /// environment's rotation), at the viewport's own irradiance. Strength 0 with the key dialed out.
-renderapi::SunLight renderKeyLight(const LightingSettings& lighting);
+renderapi::Light renderKeyLight(const LightingSettings& lighting);
+
+/// A light object (scenelight.h) as a renderer's light: its kind, where it stands and shines,
+/// its color, and its intensity AS IT IS — the interface's strength is the same irradiance (a
+/// sun's anywhere; the others' a metre away on their axis).
+renderapi::Light renderLight(const SceneLight& light);
 
 /// The lighting dials of @p environment that are not the panorama itself: its strength (the
 /// Diffuse dial × @p luminanceScale, the factor the viewport normalized the panorama by — 1 for

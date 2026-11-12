@@ -1,6 +1,6 @@
 # The Interface
 
-PoseStudio has one main window: a menu bar, the 3D viewport with its floating control strip, and a side panel with five tabs. Everything else — Preferences, the manual, the import progress dialogs — opens on top of it.
+PoseStudio has one main window: a menu bar, the 3D viewport with its floating control strip, and a side panel with six tabs. Everything else — Preferences, the manual, the import progress dialogs — opens on top of it.
 
 ## The main window
 
@@ -26,7 +26,8 @@ The viewport sits on the left and the side panel on the right, separated by a dr
 | Entry | What it does |
 | --- | --- |
 | Undo (`Ctrl+Z`) / Redo (`Ctrl+Y`) | One history for pose edits and lighting edits alike. See [Posing](posing.md#undo-and-redo). |
-| Delete Selected Object | Removes the outlined model from the scene. The `Delete` key does the same while the viewport has focus. Deleting an object also clears the undo history. |
+| Delete Selected Object | Removes the outlined model from the scene — or the selected light. The `Delete` key does the same while the viewport has focus. Deleting a model also clears the undo history; deleting a light is an undo step. |
+| Add Light → Point Light / Spot Light / Area Light / Sun | Adds a light to the scene, two metres from the figure and aimed at it. See [Lights](lights.md). |
 | Turn Joint with Mouse → Bend (`B`) / Side-Side (`S`) / Twist (`T`) | Turns the selected joint by moving the mouse; see [Posing](posing.md#turning-a-joint-with-the-mouse-b-s-t). |
 | Reset Selected Joint / Reset Limb / Reset Pose | Return the selected joint, the joint and everything below it, or the whole figure to the rest pose. |
 | Mirror Pose / Mirror Limb to Other Side | Swap the pose's sides, or copy the selected limb's pose to the other side. |
@@ -44,7 +45,8 @@ A row of controls floats in the viewport's top-right corner:
 
 | Control | What it does |
 | --- | --- |
-| **Shading picker** (reads *PBR Shaded* by default) | Chooses how the scene is drawn. See [Shading and Display](shading.md). |
+| **Render** (left of the shading picker) | Renders the scene: opens the Render window and starts the render, as **Render → Render Image** and `F12` do. See [Rendering](rendering.md). |
+| **Shading picker** (reads *PBR Shaded* by default) | Chooses how the scene is drawn — its second entry, **Rendered**, path traces the scene in the viewport. See [Shading and Display](shading.md). |
 | **View picker** (reads *Home View* by default) | Snaps the camera to a named view; reads *Perspective View* once you orbit away from one. |
 | **Home** | Returns the camera to the default framing (also `5`). |
 | **Ground** | Drops the active figure so its lowest point rests on the floor; landing on her feet, she absorbs the drop with her knees. See [Posing](posing.md#the-ground-button). |
@@ -52,17 +54,18 @@ A row of controls floats in the viewport's top-right corner:
 | **Selection** | Opens [Preferences → Selection](preferences.md#selection): the selection outline and the joint highlight, each switched on or off and given its color and opacity. |
 | **VR** (right of the view picker) | Enter or leave VR Mode — see [VR Mode](vr.md); lit in blue while the headset has the scene. The view picker's last entry, VR Mode, does the same, and `Esc` leaves. |
 
-While the mouse is turning a joint (`B`, `S` or `T` with a joint selected: see [Posing](posing.md#turning-a-joint-with-the-mouse-b-s-t)), a small badge under the strip names the motion: Bend, Side-Side or Twist.
+While the mouse is turning a joint (`B`, `S` or `T` with a joint selected: see [Posing](posing.md#turning-a-joint-with-the-mouse-b-s-t)), a small badge under the strip names the motion: Bend, Side-Side or Twist. In the **Rendered** shading mode a line there says how far the traced picture is: *Rendered: 37 / 128 samples*, then *Rendered*.
 
 ## The side panel
 
-The five tabs sit on the panel's left edge.
+The six tabs sit on the panel's left edge.
 
 - **Asset Manager** — a tree of your asset libraries, Favorites and Collections above a thumbnail grid, with a search field at the top. Double-clicking an asset imports it. See [The Asset Manager](asset-manager.md).
 - **Transform** — the selected joint's rotation as three dials: Bend, Side-Side and Twist. See [The Transform tab](posing.md#the-transform-tab).
 - **Materials** — the selected object's material zones as sliders: color, roughness, metallic, specular, opacity, the skin layers — and the overlays layered over the skin: tattoos, marks, makeup. See [Materials](materials.md).
 - **Soft Body Physics** — the switches and dials for the breasts' and the buttocks' motion: on and off, their softness, the breasts' bounce. See [The Soft Body Physics tab](posing.md#the-soft-body-physics-tab).
 - **Environment** — the lighting controls: the HDRI picker, the backdrop, exposure and tone, image-based lighting, the key light, shadows, and skin and rim accents. See [Lighting and Environment](environment.md).
+- **Lights** — the scene's light objects: point, spot, area and sun lights, added, placed and set. See [Lights](lights.md).
 
 Drag the divider between the tree and the grid inside the Asset Manager to give either more room.
 

@@ -33,8 +33,13 @@ PoseStudio renders with Vulkan, which needs a graphics driver that provides it. 
 - **The render fails to start on the graphics card**: update the card's driver — the engine's graphics-card programs need a current one — or choose the processor under **Device** in the Render window. The processor always works.
 - **The first render on a graphics card takes a while to begin**: the card's programs are prepared the first time and kept; later renders start at once.
 - **The picture is grainy**: turn **Denoise** on, or raise **Samples**.
-- **The picture is not what the viewport shows**: the viewport must be in **PBR Shaded** to be the preview of a render, and a few of its dials have no counterpart in one — see [Where a render differs from the viewport](rendering.md#where-a-render-differs-from-the-viewport).
-- **A Gaussian splat scene is missing from the render**: splat scenes are shown by the viewport alone.
+- **The picture is not what the viewport shows**: the viewport must be in **PBR Shaded** to be the preview of a render, and a few of its dials have no counterpart in one — see [Where a render differs from the viewport](rendering.md#where-a-render-differs-from-the-viewport). The **Rendered** shading mode shows exactly what a render will.
+- **My lights cast no shadows in the viewport**: the PBR Shaded mode draws shadows for the Environment tab's key light only. Switch the shading picker to **Rendered**, or render, to see every light's shadow — see [Lights](lights.md#what-the-viewport-shows-and-what-a-render-adds).
+- **The Rendered mode keeps showing the PBR picture**: it does while you are posing, while a final render is running in the Render window, and in VR Mode; the line under the viewport's control strip says which. If it never changes, look at that line: *Rendered: starting…* on a graphics card's first use takes a few seconds.
+- **The Rendered mode is slow to clear up**: it is running on the processor, or on a small graphics card. Choose a faster **Device** in the Render window, then pick Rendered again.
+- **A Gaussian splat scene is missing from the render**: the status line then says it could not be drawn at that size — the graphics card had no room for it. Render at a smaller size, or close other programs that use the card. See [Gaussian splat scenes in a render](rendering.md#gaussian-splat-scenes-in-a-render).
+- **My figure's shadow does not show on a capture's floor**: the capture's floor has to lie on the grid's plane, within a few centimetres. Select the capture and move it up or down with the Transform tab's **Up-Down** until its ground meets the grid; and check that **Shadows** is on in the Environment tab.
+- **Hair in front of a capture looks thinner in the viewport than in a render**: the viewport keeps the solid part of each strand in front of the capture and lets its soft fringe go; a render blends every strand against the capture.
 
 ## Posing does not do what I expect
 

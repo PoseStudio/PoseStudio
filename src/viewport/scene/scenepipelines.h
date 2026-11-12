@@ -89,6 +89,12 @@ public:
     const VulkanPipeline& transmitAdd() const { return *m_transmitAdd; }
     const VulkanPipeline* wire() const { return m_wire.get(); }          // triangle EDGES; null: device can't
     const VulkanPipeline& hiddenLine() const { return *m_hiddenLine; }   // depth-only surface fill
+    /// The SEE-THROUGH meshes as occluders of the splat layer (depthcutout.frag): depth where a
+    /// hair card, a lash or a pane has enough coverage. Null until buildDepthCutout.
+    const VulkanPipeline* depthCutout() const { return m_depthCutout.get(); }
+    /// Builds it against the scene pass (the mesh pipelines' layout, every color write masked).
+    void buildDepthCutout(VulkanContext& context, VkRenderPass renderPass, const std::vector<char>& vertSpirv,
+                          const std::vector<char>& fragSpirv);
     const VulkanPipeline& background() const { return *m_background; }   // HDRI backdrop (PBR mode)
     const VulkanPipeline& splat() const { return *m_splat; }             // Gaussian splats, far-first alpha-blended (splatcloud.h)
 
@@ -133,6 +139,7 @@ private:
     std::unique_ptr<VulkanPipeline> m_transmitAdd;
     std::unique_ptr<VulkanPipeline> m_wire;
     std::unique_ptr<VulkanPipeline> m_hiddenLine;
+    std::unique_ptr<VulkanPipeline> m_depthCutout;
     std::unique_ptr<VulkanPipeline> m_splat;
     std::unique_ptr<VulkanPipeline> m_background;
 };

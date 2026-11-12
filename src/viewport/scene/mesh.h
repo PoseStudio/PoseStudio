@@ -106,7 +106,16 @@ static_assert(sizeof(MaterialGpu) == 16 * sizeof(glm::vec4), "MaterialGpu must m
 /// TRANSMISSION pair — a transmissive zone's two draws in the transparent pass (the frame
 /// behind it multiplied by what it lets through, then its own light added; see
 /// ScenePipelines::transmitMultiply / transmitAdd).
-enum class MeshDrawKind { Opaque = 0, Transparent = 1, Wire = 2, DepthOnly = 3, TransmitMultiply = 4, TransmitAdd = 5 };
+enum class MeshDrawKind {
+    Opaque = 0,
+    Transparent = 1,
+    Wire = 2,
+    DepthOnly = 3,
+    TransmitMultiply = 4,
+    TransmitAdd = 5,
+    DepthCutout = 6,     ///< a see-through mesh as an occluder of the splat layer, from half coverage (depthcutout.frag)
+    DepthCutoutFine = 7, ///< … from a twelfth (a render's front layer)
+};
 
 /// Push-constant block for the position-only projected passes — the depth-only shadow pass and
 /// the selection-outline mask pass, which share shadow.vert. Must stay byte-identical to that

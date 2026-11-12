@@ -2010,6 +2010,216 @@ void RealPhases::liftPhases() {
                               std::max(r.phases.empty() ? 0.0 : r.phases[0].maxJump,
                                        r.phases.size() > 1 ? r.phases[1].maxJump : 0.0) * 1000.0, 80.0)}, r);
     }
+
+    // --- THE HANGING FEET COME DOWN FLAT (2026-11-12; the user: "when a character is lifted off the
+    // ground, her feet go into a hanging tip toe position; dropping back to the ground should also
+    // make their feet go back to flat"). A lift leaves the feet rolled onto their balls (the
+    // lift-off's tiptoe) and pointed (the dangle); let go of in the air she keeps them, and coming
+    // back down they go flat again (armaturehangfeet.cpp).
+    if (report.wants("hang-feet")) {
+        // 1. Lifted by the hips and LET GO OF in the air, then lowered by the hips in another drag,
+        //    back to where they stood: she lands on flat feet. (Before: her toes touched first and
+        //    the standing foot's model held the heels over the balls as found — 6-9cm up.)
+        {
+            Scenario sc;
+            sc.grab = "hip";
+            sc.before.push_back({"hip", glm::vec3(0.0f, 0.40f, 0.0f), 60, 60});
+            sc.path = pullPath(glm::vec3(0.0f, -0.40f, 0.0f), 80, 60);
+            const RunResult r = run(sc);
+            // The foot's own shape, read off two of its joints: the ankle over the joint the toes
+            // hang from, against the same at rest — 0 for a level sole, the heel's lift otherwise.
+            const auto heelOverBall = [&](const char* ankle, const char* ball) {
+                const int a = indexOf(ankle), b = indexOf(ball);
+                if (a < 0 || b < 0 || static_cast<std::size_t>(std::max(a, b)) >= r.endPos.size() ||
+                    static_cast<std::size_t>(std::max(a, b)) >= r.restPos.size()) {
+                    return 0.0;
+                }
+                const std::size_t ua = static_cast<std::size_t>(a), ub = static_cast<std::size_t>(b);
+                return static_cast<double>((r.endPos[ua].y - r.endPos[ub].y) - (r.restPos[ua].y - r.restPos[ub].y)) * 1000.0;
+            };
+            const auto atStart = [&](const char* ankle, const char* ball) {
+                const int a = indexOf(ankle), b = indexOf(ball);
+                if (a < 0 || b < 0 || static_cast<std::size_t>(std::max(a, b)) >= r.startPos.size() ||
+                    static_cast<std::size_t>(std::max(a, b)) >= r.restPos.size()) {
+                    return 0.0;
+                }
+                const std::size_t ua = static_cast<std::size_t>(a), ub = static_cast<std::size_t>(b);
+                return static_cast<double>((r.startPos[ua].y - r.startPos[ub].y) - (r.restPos[ua].y - r.restPos[ub].y)) * 1000.0;
+            };
+            phaseLegs("[real] lifted by the hips and let go of, then lowered by the hips: she lands on flat feet",
+                         {info("as she hung: the left heel over its ball, against standing (mm)", atStart("lFoot", "lToe")),
+                          gateMin("pins at mouse-up (feet planted)", r.pinsAtRelease, 2.0),
+                          gateMax("the left heel over its ball at the end, against standing (mm)", std::abs(heelOverBall("lFoot", "lToe")), 10.0),
+                          gateMax("the right heel over its ball at the end, against standing (mm)", std::abs(heelOverBall("rFoot", "rToe")), 10.0),
+                          gateMax("the lower ankle over its standing height at the end (mm)", (r.feetMinY - r.feetBindMinY) * 1000.0, 10.0),
+                          gateMax("hip-to-cursor at rest (mm)", r.restingMiss * 1000.0, 20.0),
+                          gateMax("floor penetration, any joint (mm)", r.penetrationMax * 1000.0, 30.0),
+                          gateMax("worst single-tick jump (mm)",
+                                  std::max(r.phases.empty() ? 0.0 : r.phases[0].maxJump,
+                                           r.phases.size() > 1 ? r.phases[1].maxJump : 0.0) * 1000.0, 80.0)}, r);
+        }
+        // 2. The Ground button's landing, driven as the window drives it: the feet found, posed
+        //    flat, and nothing else touched; a foot the user has posed since is theirs.
+        {
+            struct Landing {
+                bool   lifted = false;     // the lift ended with her in the air
+                bool   found = false;      // beginHangFeetLanding found hanging feet
+                double hungHeel = 0.0;     // the heel over its ball as she hung, against standing (mm)
+                double flatHeel = 0.0;     // ... and posed flat
+                double halfHeel = 0.0;     // ... and posed half way
+                double toesBack = 0.0;     // the bones below the ankles, from their rest rotation (deg, worst channel)
+                double others = 0.0;       // every bone outside the feet, moved by the landing (deg)
+                double theirs = 0.0;       // a posed foot's ankle, moved by the landing (deg)
+                double theirsOther = 0.0;  // ... and the other foot's heel then (mm): still landed
+            };
+            const auto landing = [&](bool poseOneFoot) {
+                Landing  out;
+                Armature arm;
+                arm.build(bones);
+                applyBodyMesh(arm, 1.0f);
+                for (const auto& [bone, euler] : restPose) {
+                    arm.setBoneRotation(resolveBoneName(arm, bone), euler);
+                }
+                const std::size_t n = arm.boneCount();
+                const int hip = resolveBone(arm, "hip");
+                const int lFoot = resolveBone(arm, "lFoot"), rFoot = resolveBone(arm, "rFoot");
+                const int lToe = resolveBone(arm, "lToe"), rToe = resolveBone(arm, "rToe");
+                if (hip < 0 || lFoot < 0 || rFoot < 0 || lToe < 0 || rToe < 0) {
+                    return out;
+                }
+                const auto under = [&](std::size_t node, int ancestor) {
+                    for (int cur = static_cast<int>(node); cur >= 0; cur = arm.boneParent(static_cast<std::size_t>(cur))) {
+                        if (cur == ancestor) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                std::vector<glm::vec3> restEuler(n);
+                for (std::size_t i = 0; i < n; ++i) {
+                    restEuler[i] = arm.boneEuler(i);
+                }
+                const auto heel = [&](int ankle, int ball) { // the ankle over the ball, mm
+                    return static_cast<double>(arm.boneWorldPosition(static_cast<std::size_t>(ankle)).y -
+                                               arm.boneWorldPosition(static_cast<std::size_t>(ball)).y) * 1000.0;
+                };
+                const double restHeel = heel(lFoot, lToe), restHeelR = heel(rFoot, rToe);
+                // The lift: the hips 40cm up over a second, held a second, let go of.
+                arm.setSelectedBone(hip);
+                if (!arm.beginIkDrag()) {
+                    return out;
+                }
+                const glm::vec3 from = arm.boneWorldPosition(static_cast<std::size_t>(hip));
+                for (int k = 1; k <= 120; ++k) {
+                    arm.dragIkTo(from + glm::vec3(0.0f, 0.40f, 0.0f) * std::min(1.0f, static_cast<float>(k) / 60.0f));
+                }
+                for (int k = 0; k < 600 && arm.settleIkTick(); ++k) {
+                }
+                arm.endIkDrag();
+                out.lifted = arm.boneWorldPosition(static_cast<std::size_t>(lToe)).y > 0.10f;
+                out.hungHeel = heel(lFoot, lToe) - restHeel;
+                glm::vec3 posedAnkle(0.0f);
+                if (poseOneFoot) {
+                    // (The user turns the left ankle 12 degrees further: that foot is theirs.)
+                    posedAnkle = arm.boneEuler(static_cast<std::size_t>(lFoot)) + glm::vec3(12.0f, 0.0f, 0.0f);
+                    arm.setBoneRotation(arm.boneName(static_cast<std::size_t>(lFoot)), posedAnkle);
+                    posedAnkle = arm.boneEuler(static_cast<std::size_t>(lFoot)); // (as the limits left it)
+                }
+                std::vector<glm::vec3> hung(n);
+                for (std::size_t i = 0; i < n; ++i) {
+                    hung[i] = arm.boneEuler(i);
+                }
+                out.found = arm.beginHangFeetLanding();
+                arm.poseHangFeet(0.5f, -1.0e9f);
+                out.halfHeel = heel(rFoot, rToe) - restHeelR;
+                arm.poseHangFeet(0.0f, -1.0e9f);
+                arm.endHangFeetLanding();
+                out.flatHeel = std::max(poseOneFoot ? 0.0 : std::abs(heel(lFoot, lToe) - restHeel), std::abs(heel(rFoot, rToe) - restHeelR));
+                out.theirsOther = std::abs(heel(rFoot, rToe) - restHeelR);
+                for (std::size_t i = 0; i < n; ++i) {
+                    const bool inLeft = under(i, lFoot), inRight = under(i, rFoot);
+                    const glm::vec3 e = arm.boneEuler(i);
+                    for (int a = 0; a < 3; ++a) {
+                        if (!inLeft && !inRight) {
+                            out.others = std::max(out.others, static_cast<double>(std::abs(e[a] - hung[i][a])));
+                        } else if (static_cast<int>(i) != lFoot && static_cast<int>(i) != rFoot && !(poseOneFoot && inLeft)) {
+                            out.toesBack = std::max(out.toesBack, static_cast<double>(std::abs(e[a] - restEuler[i][a])));
+                        }
+                    }
+                }
+                if (poseOneFoot) {
+                    const glm::vec3 e = arm.boneEuler(static_cast<std::size_t>(lFoot));
+                    out.theirs = static_cast<double>(std::max({std::abs(e.x - posedAnkle.x), std::abs(e.y - posedAnkle.y), std::abs(e.z - posedAnkle.z)}));
+                }
+                return out;
+            };
+            const Landing both = landing(false);
+            const Landing one = landing(true);
+            report.phase("[real] the hanging feet come down flat: the Ground button's landing after a lift",
+                         {gateMin("the lift left her in the air", both.lifted ? 1.0 : 0.0, 1.0),
+                          gateMin("as she hung: the heel over its ball, against standing (mm)", both.hungHeel, 20.0),
+                          gateMin("hanging feet found", both.found ? 1.0 : 0.0, 1.0),
+                          info("posed half way: the heel over its ball, against standing (mm)", both.halfHeel),
+                          gateMax("posed flat: the heel over its ball, against standing (mm)", both.flatHeel, 3.0),
+                          gateMax("... the bones below the ankles, from their rest rotation (deg)", both.toesBack, 0.05),
+                          gateMax("... and every bone outside the feet, moved (deg)", both.others, 0.0),
+                          gateMax("a foot the user posed since: its ankle moved by the landing (deg)", one.theirs, 0.0),
+                          gateMax("... the other foot landed all the same: its heel over its ball (mm)", one.theirsOther, 3.0)});
+        }
+        // 3. A figure TURNED a quarter turn (the Transform tab's Turn: she faces +x), lifted by the
+        //    hips and lowered again within the drag: the rig's own landing holds her soles to the
+        //    REST orientation — which must face the way SHE faces. It was the bare identity, facing
+        //    +z: both legs were wrenched round at the thighs' twist (49 degrees of it in the app)
+        //    and the ankles, the feet left pointing where she no longer faced.
+        {
+            Scenario sc;
+            sc.grab = "hip";
+            sc.prePose.push_back({"hip", glm::vec3(0.0f, 90.0f, 0.0f)});
+            const glm::vec3 up(0.0f, 0.40f, 0.0f);
+            sc.path = {{0, glm::vec3(0.0f), "start"}, {60, up, "lift"}, {120, up, "hang"},
+                       {200, glm::vec3(0.0f), "lower"}, {260, glm::vec3(0.0f), "hold-down"}};
+            sc.asymmetryGateMm = -1.0; // (the symmetry measure reads the plane x = 0, which a turned figure does not stand astride)
+            const RunResult r = run(sc);
+            // Where a foot points along the floor (ankle to the joint its toes hang from), against
+            // where it pointed when the drag began — she stood facing +x then.
+            const auto headingOff = [&](const char* ankle, const char* ball) {
+                const int a = indexOf(ankle), b = indexOf(ball);
+                if (a < 0 || b < 0 || static_cast<std::size_t>(std::max(a, b)) >= r.endPos.size() ||
+                    static_cast<std::size_t>(std::max(a, b)) >= r.startPos.size()) {
+                    return 0.0;
+                }
+                const std::size_t ua = static_cast<std::size_t>(a), ub = static_cast<std::size_t>(b);
+                glm::vec3 was = r.startPos[ub] - r.startPos[ua], now = r.endPos[ub] - r.endPos[ua];
+                was.y = 0.0f;
+                now.y = 0.0f;
+                if (glm::length(was) < 1.0e-4f || glm::length(now) < 1.0e-4f) {
+                    return 0.0;
+                }
+                return static_cast<double>(glm::degrees(std::acos(glm::clamp(glm::dot(glm::normalize(was), glm::normalize(now)), -1.0f, 1.0f))));
+            };
+            const auto lowerAnkleRise = [&](const char* left, const char* right) {
+                const int a = indexOf(left), b = indexOf(right);
+                if (a < 0 || b < 0 || static_cast<std::size_t>(std::max(a, b)) >= r.endPos.size() ||
+                    static_cast<std::size_t>(std::max(a, b)) >= r.startPos.size()) {
+                    return 0.0;
+                }
+                const std::size_t ua = static_cast<std::size_t>(a), ub = static_cast<std::size_t>(b);
+                return static_cast<double>(std::min(r.endPos[ua].y, r.endPos[ub].y) - std::min(r.startPos[ua].y, r.startPos[ub].y)) * 1000.0;
+            };
+            phaseLegs("[real] turned a quarter turn, lifted by the hips and lowered again: she lands facing the way she faces",
+                         {gateMin("suspended", r.suspended ? 1.0 : 0.0, 1.0),
+                          gateMin("pins at mouse-up (feet re-planted)", r.pinsAtRelease, 2.0),
+                          gateMax("the left foot's heading, from where it pointed at the press (deg)", headingOff("lFoot", "lToe"), 20.0),
+                          gateMax("the right foot's heading, from where it pointed at the press (deg)", headingOff("rFoot", "rToe"), 20.0),
+                          gateMax("knee twist at the end (deg)", r.kneeTwistEndDeg, 10.0),
+                          // (Against where the ankles stood at the PRESS, not their bind heights: the
+                          // quarter turn is made on the hip's second channel, which on a body whose hip
+                          // frame is not the world's leans her a little as it turns her.)
+                          gateMax("the lower ankle at the end, over where it stood at the press (mm)", lowerAnkleRise("lFoot", "rFoot"), 10.0),
+                          gateMax("hip off its start height at the end (mm)", std::abs(r.hipDispY) * 1000.0, 20.0),
+                          gateMax("floor penetration, any joint (mm)", r.penetrationMax * 1000.0, 30.0)}, r);
+        }
+    }
 }
 
 /// Crouches by the chest and the hip, and standing back up out of one.

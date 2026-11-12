@@ -98,6 +98,26 @@ bool Armature::beginFigureMove() {
             m_moveLimbs.push_back(static_cast<int>(b)); // (parents first: the bone order)
         }
     }
+    // THE HANGING FEET COME DOWN FLAT (armaturehangfeet.cpp; beginIkDrag found them): carried down,
+    // feet a lift left hanging go flat as the floor nears (dragFigureTo) — so what stops her is
+    // where their SOLES will stand: the ankle at its clearance, the joints below it out of the
+    // bound. Not a foot of a pinned limb: that one goes where its pin holds it.
+    for (std::size_t f = m_hangFeet.size(); f-- > 0;) {
+        const HangFoot& foot = m_hangFeet[f];
+        bool            pinned = limb[static_cast<std::size_t>(foot.ankle)] != 0;
+        for (const int b : foot.subtree) {
+            pinned = pinned || (static_cast<std::size_t>(b) < m_bonePinned.size() && m_bonePinned[static_cast<std::size_t>(b)]);
+        }
+        if (pinned) {
+            m_hangFeet.erase(m_hangFeet.begin() + static_cast<std::ptrdiff_t>(f));
+            continue;
+        }
+        for (const int b : foot.subtree) {
+            if (b != foot.ankle) {
+                m_moveFloor[static_cast<std::size_t>(b)] = -1.0e9f;
+            }
+        }
+    }
     syncRigRotations();
     m_ikInvTransform = glm::inverse(m_transform); // fixed for the drag (see armature.h)
     m_ikGrabOffset = glm::vec3(0.0f);
@@ -212,6 +232,8 @@ bool Armature::dragFigureTo(const glm::vec3& targetWorld) {
     // once the figure stops (settleIkTick). Until this day the move never ticked them: a figure
     // carried by Ctrl rode dead still. Off, tickSoftBody returns at once.
     m_jsSoftBodyMoving = tickSoftBody(1.0f / 60.0f);
+    // (THE HANGING FEET: no more hanging than the floor allows — flat as she is set down.)
+    const bool feetMoved = poseHangFeet(1.0f, 0.0f);
     static const bool kTrace = std::getenv("POSESTUDIO_IK_TRACE") != nullptr;
     if (kTrace) {
         const glm::vec3 point(m_poseGlobal[static_cast<std::size_t>(m_moveBone)] * glm::vec4(m_moveLocal, 1.0f));
@@ -219,7 +241,7 @@ bool Armature::dragFigureTo(const glm::vec3& targetWorld) {
                      result.iterations, result.converged ? 1 : 0, result.cost, glm::length(point - target) * 1000.0f,
                      room < 1.0e8f ? room * 1000.0f : -1.0f, changed);
     }
-    return moved || following || m_jsSoftBodyMoving; // (a bounce under a still cursor is a frame to draw)
+    return moved || following || feetMoved || m_jsSoftBodyMoving; // (a bounce under a still cursor is a frame to draw)
 }
 
 } // namespace pose

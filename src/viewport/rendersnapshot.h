@@ -21,6 +21,7 @@
 #include <glm/glm.hpp>
 
 #include <deque>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -32,6 +33,9 @@ public:
     const renderapi::Scene& scene() const override { return description; }
     View                    view() const override { return viewSettings; }
     int                     skippedSplatScenes() const override { return splatScenes; }
+    std::shared_ptr<RenderSplatLayers> splatLayers(int width, int height) override {
+        return splatSource ? splatSource(width, height) : nullptr;
+    }
 
     /// Points `description` at the vectors below. Call once, after the last one is filled (a
     /// vector that grows afterwards moves, and the description would point at freed memory).
@@ -53,24 +57,30 @@ public:
         description.materialCount = static_cast<uint32_t>(materials.size());
         description.meshes = meshes.data();
         description.meshCount = static_cast<uint32_t>(meshes.size());
-        description.suns = suns.data();
-        description.sunCount = static_cast<uint32_t>(suns.size());
+        description.lights = lights.data();
+        description.lightCount = static_cast<uint32_t>(lights.size());
     }
 
     // --- The storage (filled by the window; the description points into it after link()) ---
     std::deque<Model::PosedMesh>                     geometry;    // one per mesh (a deque: elements never move)
     std::deque<std::string>                          names;       // the C strings the description names things by
     std::vector<std::shared_ptr<const DecodedImage>> imageOwners; // the scene's own images, kept alive
-    std::vector<glm::vec3>                           environmentPixels; // the procedural studio, when no panorama is loaded
+    /// The procedural studio's pixels, when no panorama is loaded — SHARED with the window, which
+    /// makes them once: an interactive render is handed many descriptions, and pixels at one
+    /// address are one image to the engine (loaded once).
+    std::shared_ptr<const std::vector<glm::vec3>>    environmentPixels;
     std::string                                      environmentFile;   // … or the panorama's path
 
     std::vector<renderapi::Image>    images;
     std::vector<renderapi::Material> materials;
     std::vector<renderapi::Mesh>     meshes;
-    std::vector<renderapi::SunLight> suns;
+    std::vector<renderapi::Light>    lights; // the key light (a sun), then the scene's light objects
     renderapi::Scene                 description;
     View                             viewSettings;
     int                              splatScenes = 0;
+    /// Draws the scene's splats as a render's layers (the window's: captureSplatLayers) — set
+    /// when the scene has a splat scene.
+    std::function<std::shared_ptr<RenderSplatLayers>(int, int)> splatSource;
 };
 
 } // namespace pose

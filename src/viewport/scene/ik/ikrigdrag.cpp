@@ -277,6 +277,10 @@ bool IkRig::beginDrag(int effectorNode, const std::vector<glm::vec3>& positions,
     return true;
 }
 
+float IkRig::airborneHeight() const {
+    return kAirborneHeight * m_sizeScale;
+}
+
 void IkRig::plantContacts(const std::vector<int>& contactNodes,
                           const std::vector<glm::vec3>& positions,
                           const std::vector<int>* userPins, bool dragStart) {
@@ -302,11 +306,18 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
     // LIVE contacts over them (unilateral: they lift off when the body rises). A drag now
     // starts in the state the last one ended in — seedPoseContacts, below.
     std::vector<int> planted;
+    bool hangingFeet = false; // (a foot a lift left hanging was among the low joints: she floats)
     for (const int c : contactNodes) {
         if (c >= 0 && c < n && !isEffector(c) && m_bodyNode[static_cast<std::size_t>(c)] &&
             descendsFromPelvis(c) &&
             isFootClass(c) && !helperNode(c) && // (a helper by the rig standard is no foot)
             !liftedByDrag(c)) {
+            // (A foot a lift left HANGING is no contact at a drag's start — setHangingFeet: she
+            // floats, however low its toes hang. A landing plants it, flat by then.)
+            if (dragStart && static_cast<std::size_t>(c) < m_hangingFoot.size() && m_hangingFoot[static_cast<std::size_t>(c)]) {
+                hangingFeet = true;
+                continue;
+            }
             planted.push_back(c);
         }
     }
@@ -319,7 +330,7 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
     // while another foot of the figure STANDS; with no foot standing the whole figure hovers,
     // and healing it is the point. At a drag's start only: a landing out of a lift plants what
     // comes down.
-    bool airborne = false; // (the floating rule below cleared the planted feet)
+    bool airborne = hangingFeet && planted.empty(); // (the floating rule below cleared the planted feet — or they hang: setHangingFeet)
     if (dragStart && !planted.empty()) {
         const auto footOf = [&](int node) {
             int top = node;
@@ -457,8 +468,8 @@ void IkRig::plantContacts(const std::vector<int>& contactNodes,
             }
             target = positions[static_cast<std::size_t>(pinNode)];
             const float ankleFloorY = m_bindPos[static_cast<std::size_t>(pinNode)].y + m_groundOffsetY;
-            if (std::abs(target.y - ankleFloorY) < kGroundHealBand * m_sizeScale) {
-                target.y = ankleFloorY; // (no part of the hover statistics: a pitched foot is not a hover)
+            if (std::abs(target.y - ankleFloorY) < (dragStart ? kGroundHealBand : kLandingHealBand) * m_sizeScale) {
+                target.y = ankleFloorY; // (no part of the hover statistics: a pitched foot is not a hover; a landing heals from further up — kLandingHealBand)
             }
         }
         IkEffector pin{pinNode, target, 1.0f, -1.0f};

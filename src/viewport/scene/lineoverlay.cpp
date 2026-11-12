@@ -7,9 +7,11 @@
 
 #include "camera.h"
 #include "model.h"
+#include "scenelight.h"
 #include "vulkancommon.h" // kMaxFramesInFlight
 #include "vulkanpipeline.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -74,7 +76,8 @@ LineOverlay::~LineOverlay() = default;
 
 void LineOverlay::record(VkCommandBuffer cmd, const Camera& camera, VkDescriptorSet cameraSet,
                          const std::vector<std::unique_ptr<Model>>& models,
-                         const Model* activeFigure, uint32_t frameIndex) {
+                         const Model* activeFigure, const std::vector<SceneLight>& lights,
+                         int selectedLight, uint32_t frameIndex) {
     VulkanBuffer& lineBuffer = m_vertexBuffers[frameIndex];
     auto* verts = static_cast<LineVertex*>(lineBuffer.mappedData());
     uint32_t count = 0;
@@ -174,6 +177,88 @@ void LineOverlay::record(VkCommandBuffer cmd, const Camera& camera, VkDescriptor
         verts[count++] = {pointer.to, pointer.color};
         if (pointer.marker) {
             emitPinMarker(pointer.to, 0.25f * markerRadius(pointer.to, cameraPos), pointer.color);
+        }
+    }
+
+    // THE LIGHT OBJECTS' MARKERS (scenelight.h): each light where it stands, drawn as what it
+    // is — a point light a small sphere of three rings; a spot the cone it lights; an area light
+    // its rectangle with the face it shines from; a sun a disc with its rays — a light's own
+    // warm yellow, the selected one's in the pin orange, a switched-off one's grey. The marker's
+    // body keeps a screen-constant size (it is a handle); a cone's opening and a rectangle's size
+    // are the light's real numbers, in metres.
+    const auto line = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& col) {
+        if (count + 2 <= kMaxSkeletonVerts) {
+            verts[count++] = {a, col};
+            verts[count++] = {b, col};
+        }
+    };
+    const auto ring = [&](const glm::vec3& c, const glm::vec3& u, const glm::vec3& w, float r, const glm::vec3& col,
+                          int segments = 20) {
+        glm::vec3 previous = c + u * r;
+        for (int i = 1; i <= segments; ++i) {
+            const float     a = 6.2831853f * static_cast<float>(i) / static_cast<float>(segments);
+            const glm::vec3 next = c + (u * std::cos(a) + w * std::sin(a)) * r;
+            line(previous, next, col);
+            previous = next;
+        }
+    };
+    for (std::size_t i = 0; i < lights.size(); ++i) {
+        const SceneLight& light = lights[i];
+        const bool        selected = static_cast<int>(i) == selectedLight;
+        const glm::vec3   col = selected ? userPinColor : (light.enabled ? glm::vec3(1.0f, 0.86f, 0.35f) : glm::vec3(0.45f));
+        const glm::vec3   c = light.position;
+        const float       r = 0.3f * markerRadius(c, cameraPos);
+        const glm::vec3   shines = lightDirection(light);
+        const LightFrame  frame = lightFrame(shines);
+        switch (light.kind) {
+        case LightKind::Point: {
+            ring(c, glm::vec3(1, 0, 0), glm::vec3(0, 1, 0), r, col);
+            ring(c, glm::vec3(0, 1, 0), glm::vec3(0, 0, 1), r, col);
+            ring(c, glm::vec3(1, 0, 0), glm::vec3(0, 0, 1), r, col);
+            break;
+        }
+        case LightKind::Spot: {
+            // The cone: its rim a marker's reach down the beam (three for the selected light, so
+            // where it points reads from across the scene), four spokes from the light.
+            const float half = glm::radians(std::clamp(light.coneDeg, 1.0f, 179.0f)) * 0.5f;
+            const float reach = (selected ? 6.0f : 2.5f) * r;
+            const float rim = std::min(reach * std::tan(std::min(half, 1.4f)), reach * 3.0f);
+            const glm::vec3 base = c + shines * reach;
+            ring(base, frame.across, frame.up, rim, col, 28);
+            for (int k = 0; k < 4; ++k) {
+                const float a = 1.5707963f * static_cast<float>(k);
+                line(c, base + (frame.across * std::cos(a) + frame.up * std::sin(a)) * rim, col);
+            }
+            ring(c, frame.across, frame.up, 0.35f * r, col, 12);
+            break;
+        }
+        case LightKind::Area: {
+            const glm::vec3 hu = frame.across * (0.5f * std::max(light.width, 0.01f));
+            const glm::vec3 hv = frame.up * (0.5f * std::max(light.height, 0.01f));
+            line(c - hu - hv, c + hu - hv, col);
+            line(c + hu - hv, c + hu + hv, col);
+            line(c + hu + hv, c - hu + hv, col);
+            line(c - hu + hv, c - hu - hv, col);
+            line(c - hu - hv, c + hu + hv, col * 0.6f); // (the face: its diagonals, dimmer)
+            line(c + hu - hv, c - hu + hv, col * 0.6f);
+            line(c, c + shines * ((selected ? 5.0f : 2.0f) * r), col); // the side it shines from
+            break;
+        }
+        default: { // a sun: a disc and its parallel rays
+            ring(c, frame.across, frame.up, r, col);
+            const float length = (selected ? 6.0f : 3.0f) * r;
+            line(c, c + shines * length, col);
+            for (int k = 0; k < 4; ++k) {
+                const float     a = 0.7853982f + 1.5707963f * static_cast<float>(k);
+                const glm::vec3 from = c + (frame.across * std::cos(a) + frame.up * std::sin(a)) * r;
+                line(from, from + shines * (0.6f * length), col);
+            }
+            break;
+        }
+        }
+        if (selected) {
+            // The selected light's handle, so the light under the cursor is the one that reads.
+            emitPinMarker(c, 0.5f * r, col);
         }
     }
 

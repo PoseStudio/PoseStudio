@@ -49,6 +49,7 @@
 #include "scene/ik/cursorfilter.h"  // IkCursorFilter (the drag target low-pass)
 #include "scene/jointtransform.h"   // JointTransform (the Transform tab's view of the selected joint)
 #include "scene/lightingsettings.h" // stored by value; applied to the renderer once it exists
+#include "scene/scenelight.h"       // SceneLight (the light objects: the Lights tab)
 #include "scene/materialparams.h"  // MaterialView / MaterialParams (the Materials tab's view of the selected object)
 #include "scene/projectfile.h"      // ProjectDocument (the .pss save/load state)
 #include "scene/shademode.h"        // kDefaultShadeMode
@@ -78,6 +79,11 @@ namespace pose {
 
 class OpenXrSystem;
 class RenderSceneHolder;     // a scene frozen for a render engine (render/renderscene.h)
+class RenderSnapshot;        // … and the viewport's own kind of one (rendersnapshot.h)
+struct RenderSplatLayers;    // a scene's Gaussian splats as layers of a render (render/renderscene.h)
+namespace renderapi {
+struct Environment;
+}
 struct VrInput;
 struct DecodedImage;
 struct OverlayImage;         // a decoded overlay image, cropped (scene/overlaycompositor.h)
@@ -241,12 +247,40 @@ public:
     /// reads), for the tab's thumbnails; null without one.
     std::shared_ptr<const DecodedImage> materialSlotImage(MaterialMap map, int* channel = nullptr) const;
 
+    /// THE LIGHT OBJECTS (scene/scenelight.h; vulkanwindow_lights.cpp; the Lights tab): the
+    /// scene's point, spot, area and sun lights. lights() is the list as it stands and
+    /// selectedLight() the one selected (-1 = none: a light and a model are never selected
+    /// together); lightsChanged says when to re-read either.
+    std::vector<SceneLight> lights() const;
+    int                     selectedLight() const;
+    void                    selectLight(int index);
+    /// Adds a light of @p kind — placed two metres from the subject on the viewer's side, above
+    /// it and aimed at it, each new one a step further round — selects it and returns its index.
+    /// One undo entry.
+    int addLight(LightKind kind);
+    /// Removes light @p index. One undo entry.
+    void removeLight(int index);
+    /// A light edit, as ONE undoable edit however many values it passes through (a scrub of a
+    /// dial, a drag of the marker): begin (refused while a drag owns the pose), any number of
+    /// setLight, end — a no-op when nothing changed. A set without a begin opens the bracket
+    /// itself; every other edit closes an open one (closeSettlingEdits).
+    bool beginLightEdit();
+    void setLight(int index, const SceneLight& light);
+    void endLightEdit();
+    /// Turns light @p index to shine at the subject (the active figure, else the whole scene)
+    /// from where it stands. One undo entry (or the open bracket's).
+    void aimLightAtSubject(int index);
+
     /// A PRODUCTION RENDER's scene (vulkanwindow_render.cpp): what the viewport shows — every
     /// mesh as posed, its materials and maps with the overlays painted in, the camera as framed,
     /// the key light and the environment — frozen for a render engine and kept alive by the
     /// object returned (render/renderscene.h). Null before the renderer exists. The live scene
     /// is not touched afterwards: posing goes on while a render runs.
     std::shared_ptr<RenderSceneHolder> captureRenderScene();
+    /// The LIGHTING half of that alone — the environment, the key light, the light objects, the
+    /// floor's shadows (and the camera) — with no geometry: what an interactive render is handed
+    /// when only the lighting changed (renderapi::kUpdateLighting).
+    std::shared_ptr<RenderSceneHolder> captureRenderLightingOnly();
     /// THE OVERLAYS (materialoverlay.h; vulkanwindow_materials.cpp; the tab's Overlays section):
     /// the selected zone's overlay stack replaced by @p overlays — an overlay added, removed,
     /// moved, or one of its controls set — on EVERY zone painted on the zone's color map
@@ -274,6 +308,11 @@ public:
     int jointModal() const { return m_modalKind; }
     /// A scripted test owns the input (POSESTUDIO_IK_SCRIPT): real input is ignored meanwhile.
     bool scriptRunning() const { return m_script != nullptr; }
+
+    /// THE RENDERED MODE (vulkanwindow_traced.cpp; the shade-mode table's `pathTraced` row): whether
+    /// the viewport is showing the render engine's path-traced picture right now (false while a
+    /// pose is being changed, while the engine catches up, and in every other shade mode).
+    bool tracedShown() const;
 
     /// Toggles the skeleton overlay (the joint→parent bone lines drawn over the figure). Off by
     /// default — joints are grabbed directly on the figure — but they stay grabbable either way.
@@ -376,6 +415,15 @@ signals:
     /// or the selected joint's pose moved by ANY means: a drag, the mouse mode, undo, a pose load,
     /// a reset, a dial. The Transform tab re-reads on it.
     void jointTransformChanged();
+    /// The Rendered mode could not start, or its render engine failed: @p message says why (the
+    /// shade mode is already back at PBR Shaded). The viewport's facade shows it.
+    void tracedModeFailed(const QString& message);
+    /// What the Rendered mode is doing, for the strip's status line ("Rendered: 48 / 128
+    /// samples"); "" when the mode is off.
+    void tracedStatusChanged(const QString& text);
+    /// Emitted when lights() or selectedLight() has changed by ANY means — the Lights tab, a drag
+    /// of a marker, undo, a project opened, File → New (notifyLights, from the rendered frame).
+    void lightsChanged();
     /// Emitted when what materialView() shows has changed — another object (or none) selected,
     /// another zone picked, or a zone's material edited by ANY means: a slider, undo, a project
     /// opened. The Materials tab re-reads on it (notifyMaterialView, from the rendered frame).
@@ -383,6 +431,10 @@ signals:
     /// The scripted test's `uishot`: a picture of the application's WIDGETS (the side tabs — the
     /// native viewport is not in it) is wanted at @p path. ViewportWidget takes it.
     void uiShotRequested(const QString& path);
+    /// The scripted test's `windowsize`: the application's main window is asked to take this
+    /// size (logical pixels) — a resize as the user makes one, so a script reaches the paths a
+    /// resize runs (the swapchain's rebuild, the Rendered mode's new picture size).
+    void scriptWindowSizeRequested(int width, int height);
     /// The scripted test's `app`: input as it arrives at the APPLICATION with the viewport not
     /// focused — @p what is b / s / t (the Edit menu's action with that shortcut), esc / enter
     /// (a key to the main window), click / rclick (a press and release there) or move (@p delta
@@ -472,6 +524,9 @@ private:
     /// Ends a material edit's bracket: pushes the pre-edit zone materials as one undo entry if
     /// anything changed (and marks the document dirty).
     void commitMaterialUndo();
+    /// Emits lightsChanged if the scene's light list or light selection moved since it was last
+    /// announced. Called where notifyJointTransform is: every rendered frame.
+    void notifyLights();
     /// One edit's derived images by what they were made from, so the zones of one map (and the
     /// partner slots of one binding) are handed the SAME image — which the model then uploads
     /// once (SlotUploads). Lives for one call: the images are released with it, the textures
@@ -535,6 +590,7 @@ private:
         int              shadeMode = kDefaultShadeMode; // picker-table index
         bool             showSkeleton = false;
         LightingSettings lighting;        // the live dials (also what undo restores from)
+        std::vector<SceneLight> lights;   // the light objects (scene/scenelight.h)
         QString          environmentPath; // chosen HDRI (empty = the default at init)
         std::vector<PendingImport> imports; // in request order
         QString          pendingPose;     // pose file to apply once the queued figure is loaded
@@ -586,6 +642,18 @@ private:
     // must light by the same amount (captureRenderSnapshot).
     QString m_appliedEnvironmentPath;
     float   m_appliedEnvironmentScale = 1.0f;
+    /// Fills @p snapshot's lighting half (captureRenderScene and captureRenderLightingOnly share it).
+    void captureRenderLighting(RenderSnapshot& snapshot) const;
+    /// The scene's Gaussian splats as a render's layers, drawn now at @p width × @p height
+    /// (RenderSceneHolder::splatLayers; vulkanwindow_render.cpp). @p environment is the render's
+    /// own description of the backdrop, @p floorShadows whether its floor catches shadows.
+    std::shared_ptr<RenderSplatLayers> captureSplatLayers(int width, int height, const renderapi::Environment& environment,
+                                                          bool floorShadows);
+    // The procedural studio's pixels as a render engine is handed them, made on first need
+    // (RenderSnapshot::environmentPixels says why they are shared).
+    mutable std::shared_ptr<const std::vector<glm::vec3>> m_studioEnvironment;
+    mutable int                                           m_studioEnvironmentWidth = 0;
+    mutable int                                           m_studioEnvironmentHeight = 0;
 
     // =========================================================================================
     // Input (vulkanwindow_input.cpp) — the handlers ROUTE; the gestures live in the sections
@@ -605,6 +673,40 @@ private:
     /// A left CLICK (press + release without dragging) at @p localPos: selects the model under
     /// the cursor — the one the viewport outlines — or clears the selection on empty space.
     void selectModelAtClick(const QPointF& localPos);
+
+    // --- The light objects' side of the mouse (vulkanwindow_lights.cpp) ---
+    /// The light whose marker is under @p localPos, or -1.
+    int lightAt(const QPointF& localPos) const;
+    /// A left press on a light's marker: selects the light and begins a drag of it in the
+    /// camera-parallel plane through where it stands. False when no marker is under the cursor.
+    bool beginLightGesture(const QPointF& localPos);
+    /// The cursor moved with a light's drag in flight: the light follows (the first move opens
+    /// the edit's bracket). The wheel moves the drag's plane along the view (lightDragDepth).
+    void lightDragMove(const QPointF& localPos);
+    void lightDragDepth(float notches, const QPointF& cursorPos);
+    /// The button is up: the drag's one undo entry (none for a press that never moved).
+    void endLightGesture();
+    /// The cursor's ray through the light drag's plane. False when it misses.
+    bool lightPlaneHit(const QPointF& localPos, glm::vec3& outWorld) const;
+    /// Sets the list in both places it lives: remembered (m_deferred) and the Scene's.
+    void applyLights(std::vector<SceneLight> lights);
+    /// Pushes @p before — the list as an edit found it — as one undo entry; marks the document dirty.
+    void pushLightUndo(const std::vector<SceneLight>& before);
+    /// What a light is aimed at: the subject's upper middle (see lightAimPoint's definition).
+    glm::vec3 lightAimPoint() const;
+
+    struct LightDrag {
+        bool      active = false; // a left press on a light's marker is held
+        bool      moved = false;  // … and has moved the light (its edit is open)
+        int       index = -1;
+        glm::vec3 planePoint{0.0f}; // a point of the camera-parallel plane the light is dragged in
+        glm::vec3 grabOffset{0.0f}; // the light's position less the cursor's point on that plane
+        bool      tracks = false;   // it was aimed at the subject at the press: it stays aimed through the drag
+    };
+    LightDrag               m_lightDrag;
+    bool                    m_lightEdit = false; // beginLightEdit .. endLightEdit is open
+    std::vector<SceneLight> m_preEditLights;     // the list as the open edit found it
+    std::uint64_t           m_announcedLightsRevision = 0; // see notifyLights
 
     QPointF m_lastMousePos;
     // Buttons whose drag actually began with a press in this window. We gate camera moves on
@@ -760,6 +862,7 @@ private:
         float         landedAt = 0.0f;   ///< When it landed, seconds on the clock.
         bool          softTail = false;  ///< Landed with no bounce; the soft body (the breasts) still settles on this timer.
         float         lastT = 0.0f;      ///< The previous tick's time (the soft body's dt).
+        bool          hangFeet = false;  ///< Feet a lift left hanging come flat through this fall (Scene::beginHangFeetLanding).
     };
     GroundFall m_fall;
 
@@ -767,6 +870,7 @@ private:
     // Pose edits and undo (vulkanwindow_pose.cpp)
     // =========================================================================================
 
+    /// (A light's drag is NOT one of these: it touches no pose.)
     /// A mouse-button-held pose gesture owns the pose right now (an IK drag, or a Ctrl FK drag):
     /// every other pose edit — undo/redo, utilities, pins, a pose load, the view/delete keys —
     /// is REFUSED until its release. An IK drag in particular solves against pins captured at
@@ -809,12 +913,13 @@ private:
     // edits too: the snapshot carries the pins ("@pin:" rows), so undoing a pin or a drag
     // restores the pins of that moment.
     struct UndoEntry {
-        enum class Kind { Pose, Lighting, Material };
+        enum class Kind { Pose, Lighting, Material, Lights };
         Kind             kind = Kind::Pose;
         PoseSnapshot     pose;        // the pre-edit pose  (kind == Pose)
         int              figure = -1; // which model the pose / materials belong to (kind == Pose / Material)
         LightingSettings lighting;    // the pre-edit dials (kind == Lighting)
         std::vector<MaterialParams> materials; // the pre-edit zone materials, in mesh order (kind == Material)
+        std::vector<SceneLight>     lights;    // the pre-edit light objects (kind == Lights)
     };
     /// The one undo/redo body: pops @p from, re-applies it, and pushes the state it replaced
     /// onto @p to. undo() and redo() are mirror images of each other through it.
@@ -916,6 +1021,8 @@ private:
     void scriptFrameRendered();  ///< A frame was presented after `shot`: save the capture, resume.
     void scriptReport(const char* label); ///< `report`: what a user would see, as numbers.
     void scriptRender(const QStringList& words); ///< `render`: a production render, to its end, saved (vulkanwindow_render.cpp).
+    void scriptLamp(const QStringList& words);   ///< `lamp`: the light objects, driven as the Lights tab and the mouse drive them (vulkanwindow_lights.cpp).
+    bool scriptLampMetric(const QString& name, double& value) const; ///< `lamps`, `lampselected`, `lamp.<n>.<field>`.
     bool scriptMetric(const QString& name, double& value); ///< A number `expect` can assert on.
     std::unique_ptr<IkScript> m_script;
 
@@ -955,6 +1062,32 @@ private:
     void adaptVrSplatScale(VrState& vr, int64_t period, int64_t displayTime);
     /// Ends a controller-driven IK drag (as the mouse's release would), if one is in flight.
     void endVrDrag();
+
+    // =========================================================================================
+    // The Rendered viewport mode (vulkanwindow_traced.cpp)
+    // =========================================================================================
+
+    /// Whether the shade mode chosen is the path-traced one.
+    bool tracedModeWanted() const;
+    /// Starts or stops the mode's engine to match the shade mode (after every change of it, and
+    /// once the renderer exists).
+    void syncTracedMode();
+    void startTraced();
+    /// Ends the mode's render and frees its engine; with a non-empty @p error the shade mode
+    /// goes back to PBR Shaded and tracedModeFailed says why.
+    void stopTraced(const QString& error);
+    /// Once per rendered frame and thirty times a second: tells the engine what changed (the
+    /// camera, the lighting, or the whole scene), takes its picture, and decides whether the
+    /// viewport shows it or the rasterized shading. See the file comment.
+    void tracedTick();
+    /// A final render started or ended (RenderSession::activity): this mode's render pauses.
+    void onRenderActivity(int running);
+    bool scriptTracedMetric(const QString& name, double& value) const; ///< `traced.<on|shown|done|sample|samples|updates|scenes|lightings|held>`.
+    struct TracedState; // complete only in vulkanwindow_traced.cpp
+    struct TracedStateDeleter {
+        void operator()(TracedState* state) const;
+    };
+    std::unique_ptr<TracedState, TracedStateDeleter> m_traced; // null = the mode is off
 
     // VrState is complete only in vulkanwindow_vr.cpp (it holds the OpenXR session and the wait
     // thread); the deleter is defined there too, so the other TUs of this class can hold the

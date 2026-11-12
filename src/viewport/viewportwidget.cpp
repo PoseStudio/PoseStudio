@@ -5,6 +5,8 @@
 
 #include "viewportwidget.h"
 
+#include <QMessageBox>
+
 #include "jointmodalinput.h"
 #include "openxrsystem.h" // the headset's Vulkan requirements, negotiated before the instance (vr/)
 #include "scene/jointtransform.h"
@@ -155,9 +157,19 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
     connect(m_window, &VulkanWindow::jointTransformChanged, this, &ViewportWidget::jointTransformChanged);
     // ... and the Materials tab's view of the selected object changing.
     connect(m_window, &VulkanWindow::materialViewChanged, this, &ViewportWidget::materialViewChanged);
+    // ... and the Lights tab's: the light objects, the selected light.
+    connect(m_window, &VulkanWindow::lightsChanged, this, &ViewportWidget::lightsChanged);
     // The scripted test's `uishot`: the main window's widgets as a picture (the panels beside the
     // viewport; the native viewport itself is not in a widget grab — `shot` reads that off the GPU),
     // and the floating strip, a window of its own, beside it as <name>_strip.png (its badge).
+    connect(m_window, &VulkanWindow::scriptWindowSizeRequested, this, [this](int width, int height) {
+        if (QWidget* top = window()) {
+            if (top->isMaximized() || top->isFullScreen()) {
+                top->showNormal();
+            }
+            top->resize(width, height);
+        }
+    });
     connect(m_window, &VulkanWindow::uiShotRequested, this, [this](const QString& path) {
         // The picture of the widgets AS LAID OUT: a tab that has just rebuilt or unfolded part of
         // itself (a section opening for the zone clicked a line earlier, an overlay's card) has
@@ -468,6 +480,44 @@ void ViewportWidget::mirrorSelectedLimb() {
     withWindow([](VulkanWindow& w) { w.mirrorSelectedLimb(); });
 }
 
+std::vector<SceneLight> ViewportWidget::lights() const {
+    return m_window ? m_window->lights() : std::vector<SceneLight>();
+}
+
+int ViewportWidget::selectedLight() const {
+    return m_window ? m_window->selectedLight() : -1;
+}
+
+void ViewportWidget::selectLight(int index) {
+    withWindow([index](VulkanWindow& w) { w.selectLight(index); });
+}
+
+int ViewportWidget::addLight(LightKind kind) {
+    return m_window ? m_window->addLight(kind) : -1;
+}
+
+void ViewportWidget::removeLight(int index) {
+    withWindow([index](VulkanWindow& w) { w.removeLight(index); });
+}
+
+bool ViewportWidget::beginLightEdit() {
+    return m_window && m_window->beginLightEdit();
+}
+
+void ViewportWidget::setLight(int index, const SceneLight& light) {
+    if (m_window) {
+        m_window->setLight(index, light);
+    }
+}
+
+void ViewportWidget::endLightEdit() {
+    withWindow([](VulkanWindow& w) { w.endLightEdit(); });
+}
+
+void ViewportWidget::aimLightAtSubject(int index) {
+    withWindow([index](VulkanWindow& w) { w.aimLightAtSubject(index); });
+}
+
 JointTransform ViewportWidget::jointTransform() const {
     return m_window ? m_window->jointTransform() : JointTransform{};
 }
@@ -664,11 +714,22 @@ void ViewportWidget::createStrip() {
     connect(m_window, &VulkanWindow::viewPresetChanged, m_strip, &ViewportStrip::setViewPreset);
     connect(m_window, &VulkanWindow::shadeModeChanged, m_strip, &ViewportStrip::setShadeMode);
     connect(m_window, &VulkanWindow::jointModalChanged, m_strip, &ViewportStrip::setJointModeBadge);
+    // The Rendered mode: what it is doing under the strip's Render button; why it could not start.
+    connect(m_window, &VulkanWindow::tracedStatusChanged, m_strip, &ViewportStrip::setRenderStatus);
+    connect(m_window, &VulkanWindow::tracedModeFailed, this, [this](const QString& message) {
+        if (m_window && m_window->scriptRunning()) {
+            qInfo().noquote() << "[traced] the Rendered mode is not available:" << message;
+            return; // (a scripted run waits for no dialog)
+        }
+        QMessageBox::information(window(), tr("Rendered Mode"), message);
+    });
     connect(m_window, &VulkanWindow::vrModeChanged, m_strip, &ViewportStrip::setVrActive);
     connect(m_strip, &ViewportStrip::vrModeToggled, this, &ViewportWidget::vrModeRequested);
     // The strip's Selection button: the Preferences dialog on its Selection page (the shell opens it).
     connect(m_strip, &ViewportStrip::selectionSettingsClicked, this,
             [this]() { emit preferencesRequested(tr("Selection")); });
+    // The strip's Render button: Render -> Render Image, as F12 (the shell opens the window).
+    connect(m_strip, &ViewportStrip::renderClicked, this, [this]() { emit renderWindowRequested(/*start=*/true); });
     m_strip->setVrActive(m_window->vrModeActive());
     connect(this, &ViewportWidget::skeletonVisibilityChanged, m_strip,
             &ViewportStrip::setSkeletonChecked);

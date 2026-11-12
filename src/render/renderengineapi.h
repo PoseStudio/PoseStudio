@@ -38,7 +38,7 @@
 
 #include <cstdint>
 
-#define POSESTUDIO_RENDER_API_VERSION 1
+#define POSESTUDIO_RENDER_API_VERSION 2
 
 /// The one symbol an engine library exports (resolved by name): see CreateEngineFn below.
 #define POSESTUDIO_RENDER_ENGINE_ENTRY "posestudio_create_render_engine"
@@ -199,12 +199,30 @@ struct Camera {
     float farClip = 1000.0f;
 };
 
-/// A distant light (the viewport's key light).
-struct SunLight {
-    float direction[3] = {0.0f, 1.0f, 0.0f}; ///< unit vector TO the light
-    float color[3] = {1.0f, 1.0f, 1.0f};
-    float strength = 1.0f; ///< irradiance on a surface facing it, in the scene's radiance units
-    float angle = 0.01f;   ///< angular diameter: the shadow's softness
+enum class LightType : int32_t {
+    Sun = 0, ///< a distant light: the viewport's key light, and a light object of that kind
+    Point,   ///< shines every way from a point (a bulb)
+    Spot,    ///< a point light held to a cone
+    Area,    ///< a rectangle that shines from one face (a softbox, a window)
+};
+
+/// One light. ITS STRENGTH is the irradiance it puts on a surface facing it, in the scene's
+/// radiance units: a Sun's wherever the surface is; a Point's, a Spot's and an Area light's ONE
+/// METRE from it (on its axis) — twice as far, a quarter — so the same number means the same
+/// brightness on a subject a metre away whatever the kind, and an Area light's size changes how
+/// soft its shadows are, not how bright the subject is.
+struct Light {
+    LightType type = LightType::Sun;
+    float     position[3] = {0.0f, 0.0f, 0.0f};   ///< where it is, metres (not a Sun's)
+    float     direction[3] = {0.0f, -1.0f, 0.0f}; ///< the way it SHINES, unit (not a Point's)
+    float     color[3] = {1.0f, 1.0f, 1.0f};
+    float     strength = 1.0f;
+    float     radius = 0.0f;  ///< Point / Spot: the source's radius, metres (its shadows' softness)
+    float     angle = 0.01f;  ///< Sun: its angular diameter (the shadows' softness). Spot: the cone's full angle.
+    float     blend = 0.15f;  ///< Spot: the share of the cone its edge fades over (0 = a hard edge)
+    float     sizeU = 1.0f;   ///< Area: its width, metres (across `direction`, level where it can be)
+    float     sizeV = 1.0f;   ///< Area: its height, metres
+    int32_t   castShadow = 1;
 };
 
 /// The lighting environment and what the camera sees behind the scene.
@@ -231,8 +249,8 @@ struct Scene {
     uint32_t        materialCount = 0;
     const Mesh*     meshes = nullptr;
     uint32_t        meshCount = 0;
-    const SunLight* suns = nullptr;
-    uint32_t        sunCount = 0;
+    const Light*    lights = nullptr;
+    uint32_t        lightCount = 0;
     Camera          camera;
     Environment     environment;
     /// A shadow-catching floor at y = floorHeight (the viewport's grid plane): invisible but for
@@ -263,6 +281,27 @@ struct Settings {
     float       exposure = 1.0f; ///< a multiplier on the image (the viewport's Exposure dial)
     int32_t     transparentBackground = 0; ///< the backdrop left out: alpha = coverage
     int32_t     threads = 0; ///< CPU threads; 0 = all
+    /// A VIEWPORT render: progressive — coarse at first, refined for as long as nothing changes
+    /// — and KEPT ALIVE when its samples are done, so that Engine::update can change what it
+    /// renders without paying for the device and the scene again. Ended by cancel() alone.
+    int32_t     interactive = 0;
+    /// With transparentBackground: the floor's SHADOWS ARE KEPT, as coverage. The picture's alpha
+    /// is then the scene's coverage laid over the shadow's darkness — black, as opaque as the
+    /// floor is shadowed — so the picture laid OVER a backdrop of the caller's (rgb + (1 - a) ·
+    /// backdrop, in linear values) darkens it where a shadow falls: the form a composite over a
+    /// plate needs (the application's Gaussian splat layers: RenderSession). 0 = the floor leaves
+    /// no trace and alpha is the scene's coverage alone.
+    int32_t     shadowAlpha = 0;
+};
+
+/// What Engine::update replaces in an interactive render.
+enum UpdateFlags : uint32_t {
+    kUpdateCamera = 1u << 0, ///< Scene::camera and Settings::width / height (nothing else is read)
+    kUpdateScene = 1u << 1,  ///< everything: the scene is rebuilt from the description
+    /// The LIGHTING alone: Scene::lights, ::environment (with the images it names), ::floorShadows
+    /// / ::floorHeight and Settings::exposure — the geometry and the materials stay as the last
+    /// kUpdateScene (or start()) left them. What a light being moved needs, many times a second.
+    kUpdateLighting = 1u << 2,
 };
 
 enum class State : int32_t { Idle = 0, Starting, Rendering, Finished, Cancelled, Failed };
@@ -274,12 +313,25 @@ struct Status {
     int32_t  samples = 0;     ///< of
     double   seconds = 0.0;   ///< render time so far
     uint64_t imageVersion = 0; ///< bumped whenever copyImage() would return other pixels
+    int32_t  imageWidth = 0;   ///< the size of the image copyImage() hands over now …
+    int32_t  imageHeight = 0;  ///< … (an interactive render's follows its updates)
+    /// An interactive render: the number of the last description the engine has taken in
+    /// (start()'s is 1, each update(kUpdateScene) and update(kUpdateLighting) the next). See
+    /// Engine::update for what it says about the descriptions' memory.
+    uint64_t sceneVersion = 0;
+    /// An interactive render: how many update() calls (of either kind, counted from 1 after each
+    /// start()) have been taken in AND shown — the image holds a picture made after the n-th
+    /// call once this reaches n. (A caller that waits for it between camera updates lets every
+    /// step of a navigation be seen.)
+    uint64_t updatesShown = 0;
     char     text[256] = {0};  ///< what the engine is doing ("Loading images", "Sample 12/256")
     char     error[512] = {0}; ///< State::Failed: why
 };
 
 /// A render engine instance. One render at a time: start() begins it on the engine's own
-/// threads and returns; poll status() and copyImage() from the calling thread.
+/// threads and returns; poll status() and copyImage() from the calling thread. (A second
+/// instance — the entry function called again — renders beside the first: the viewport's
+/// interactive render and a final render each have their own.)
 class Engine {
 public:
     /// The engine's name and version, for the interface ("Cycles", "5.3.0").
@@ -300,6 +352,25 @@ public:
     /// = top, the exposure applied, alpha = coverage — into @p rgba. False before the first
     /// pixels exist or if the size is not the render's.
     virtual bool copyImage(float* rgba, int32_t width, int32_t height) = 0;
+
+    /// AN INTERACTIVE RENDER (Settings::interactive) is changed while it runs. Returns at once:
+    /// the engine takes the change in on its own thread and starts over from the first sample.
+    ///   kUpdateCamera — @p scene's camera and @p settings' size; nothing is borrowed.
+    ///   kUpdateScene  — the whole of @p scene (and the camera). ITS POINTERS ARE BORROWED like
+    ///                   start()'s, and the PREVIOUS scene description's stay borrowed until
+    ///                   Status::sceneVersion has reached the number this call returns (the
+    ///                   engine lets go of the old scene as it takes the new one in); a
+    ///                   description superseded before it was taken in is never read.
+    ///   kUpdateLighting — @p scene's lights, environment and floor. Its pointers (the lights,
+    ///                   the images) are borrowed the same way, and the previous LIGHTING
+    ///                   description's — or the lighting half of the scene description before
+    ///                   it — until the version this call returns is in. The scene description
+    ///                   stays borrowed throughout: its geometry and materials are still rendered.
+    /// Returns the version that will hold once the change is in (the current one for a camera
+    /// update), or 0 when no interactive render is running.
+    virtual uint64_t update(const Scene& scene, const Settings& settings, uint32_t what) = 0;
+    /// Pauses / resumes an interactive render (its device is left to another render meanwhile).
+    virtual void setPaused(int32_t paused) = 0;
 
     /// Ends any render and frees the engine.
     virtual void destroy() = 0;

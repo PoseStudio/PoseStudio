@@ -23,6 +23,8 @@
 #include "scene/ik/ikrig.h"
 #include "scene/scene.h"
 
+#include "importformats.h" // the scripted `import`'s route by extension
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -567,6 +569,42 @@ void VulkanWindow::scriptStep() {
             // with `start`, as Render → Render Image does (from the event loop: `wait` before
             // driving it with `ui`; `uienabled.render.stop.0` reads 1 while its render runs).
             emit renderWindowRequested(w.size() > 1 && w[1].compare(QLatin1String("start"), Qt::CaseInsensitive) == 0);
+        } else if (cmd == QLatin1String("probe") && w.size() > 3) {
+            // probe <x> <y> <z>: a WORLD point (metres) — `render.probe.<r|g|b|a|lum>` then reads the
+            // last render's picture where that point is seen (through the viewport's camera as
+            // it stands: a render of the viewport's own size frames what the viewport frames).
+            s.probeSet = true;
+            s.probe[0] = w[1].toFloat();
+            s.probe[1] = w[2].toFloat();
+            s.probe[2] = w[3].toFloat();
+        } else if (cmd == QLatin1String("import") && w.size() > 1) {
+            // import <file>: File → Import, without its dialogs — a model, a figure or a Gaussian
+            // splat scene by its extension, added to the scene as it stands (a relative path
+            // resolves like `texture`'s: POSESTUDIO_IK_SCRIPT_ASSETS, else the output folder).
+            QString file = line.section(QLatin1Char(' '), 1).trimmed();
+            if (QFileInfo(file).isRelative()) {
+                const QString assets = qEnvironmentVariable("POSESTUDIO_IK_SCRIPT_ASSETS");
+                file = QDir(assets.isEmpty() ? s.outDir : assets).filePath(file);
+            }
+            PendingImport import;
+            import.path = file;
+            import.kind = ImportFormats::isSplatFile(file)   ? PendingImport::Kind::Splat
+                          : ImportFormats::isModelFile(file) ? PendingImport::Kind::Obj
+                                                             : PendingImport::Kind::Figure;
+            closeSettlingEdits();
+            if (!runImport(import, /*showProgress=*/false)) {
+                say("[ikscript]   %s was NOT imported\n", qPrintable(file));
+            }
+            requestUpdate();
+        } else if (cmd == QLatin1String("delete")) {
+            // delete: the Delete key — the selected light goes (one undo entry), else the selected
+            // model (which clears the undo history).
+            deleteSelectedObject();
+            requestUpdate();
+        } else if (cmd == QLatin1String("windowsize") && w.size() > 2) {
+            // windowsize <width> <height>: the main window resized, as the user resizes it (logical
+            // pixels). The viewport follows through its own resize events: `wait` a few ticks.
+            emit scriptWindowSizeRequested(std::max(400, w[1].toInt()), std::max(300, w[2].toInt()));
         } else if (cmd == QLatin1String("uishot") && w.size() > 1) {
             // uishot <name>: ui/<name>.png of the application's widgets — the side tabs (start on
             // one with POSESTUDIO_TAB=<title>); in a folder of its own, beside the viewport's shots
@@ -574,6 +612,7 @@ void VulkanWindow::scriptStep() {
             // follows the rendered frame, and the script does not wait for one here.
             notifyJointTransform();
             notifyMaterialView();
+            notifyLights();
             QDir(s.outDir).mkpath(QStringLiteral("ui"));
             emit uiShotRequested(QDir(s.outDir).filePath(QStringLiteral("ui/") + w[1] + QStringLiteral(".png")));
         } else if (cmd == QLatin1String("pin") && w.size() > 1) {
@@ -631,6 +670,32 @@ void VulkanWindow::scriptStep() {
             unpinAllJoints();
         } else if (cmd == QLatin1String("pick2d") && w.size() > 1) {
             scene().setPick2D(w[1] == QLatin1String("on")); // (the A/B probe: the 2D pick alone, as before 2026-09-26)
+        } else if ((cmd == QLatin1String("clickat") && w.size() > 3) ||
+                   (cmd == QLatin1String("clickpx") && w.size() > 2)) {
+            // clickat <x> <y> <z>: a real LEFT CLICK — a press and its release, no move between —
+            // at the pixel a WORLD point (metres) is seen at, through the window's own handlers:
+            // exactly what a user's click there does (a joint taken and let go, the model under
+            // the cursor selected, or the selection cleared). `selection` then reads the model.
+            // clickpx <x%> <y%>: the same at a point of the VIEW, in percent of its width and
+            // height from the top left (so a script does not depend on the window's size).
+            QPointF    at;
+            const bool byPixel = cmd == QLatin1String("clickpx");
+            if (byPixel) {
+                at = QPointF(num(1) * 0.01 * width(), num(2) * 0.01 * height());
+            }
+            if (m_renderer && (byPixel || projectToScreen(glm::vec3(num(1), num(2), num(3)), at))) {
+                QMouseEvent down(QEvent::MouseButtonPress, at, mapToGlobal(at), Qt::LeftButton, Qt::LeftButton,
+                                 Qt::NoModifier);
+                mousePressEvent(&down);
+                QMouseEvent up(QEvent::MouseButtonRelease, at, mapToGlobal(at), Qt::LeftButton, Qt::NoButton,
+                               Qt::NoModifier);
+                mouseReleaseEvent(&up);
+                say("[ikscript]   click at px(%.0f %.0f): model %d is selected\n", at.x(), at.y(),
+                    scene().selectedModelIndex());
+            } else {
+                say("[ikscript]   clickat: the point is not in view\n");
+            }
+            requestUpdate();
         } else if (cmd == QLatin1String("click") && w.size() > 1) {
             // click <bone>[@share] [dxPx dyPx]: the pick at the bone's pixel — moved by that many
             // pixels where given (+y down): the tip of a toe lies beyond its last joint's pixel.
@@ -769,6 +834,16 @@ void VulkanWindow::scriptStep() {
             s.waitTicks = std::max(1, static_cast<int>(num(1)));
             QTimer::singleShot(16, this, &VulkanWindow::scriptWaitTick);
             return;
+        } else if (cmd == QLatin1String("tracedwait")) {
+            // tracedwait [<max ticks>]: waits until the Rendered mode shows its FINISHED picture —
+            // every sample of the scene, the lighting and the camera as they stand — or the tick
+            // budget runs out (900, a quarter of a minute, by default: the first render on a
+            // device loads its kernels). `expect traced.done == 1` says which.
+            s.waitTicks = w.size() > 1 ? std::max(1, static_cast<int>(num(1))) : 900;
+            s.waitForTraced = true;
+            s.waitedTicks = 0;
+            QTimer::singleShot(16, this, &VulkanWindow::scriptWaitTick);
+            return;
         } else if (cmd == QLatin1String("expect") && w.size() >= 4) {
             // expect <metric> <op> <value>: the script as a TEST. (Metrics: scriptMetric.)
             double      value = 0.0;
@@ -831,6 +906,11 @@ void VulkanWindow::scriptStep() {
                 say("[ikscript]   unknown light dial '%s'\n", qPrintable(w[1]));
             }
             setLightingSettings(lighting);
+        } else if (cmd == QLatin1String("lamp") && w.size() > 1) {
+            // lamp add <kind> | remove <n> | select <n> | aim <n> | click <n> | drag <n> <dx%> <dy%> |
+            // <n> <field> <value>: the LIGHT OBJECTS (the Lights tab), each as its control or the
+            // mouse does it — see scriptLamp.
+            scriptLamp(w);
         } else if (cmd == QLatin1String("environment") && w.size() > 1) {
             // environment <file.hdr|.exr>: the Environment tab's panorama pick (a relative path
             // resolves like `texture`'s). The bake runs off-thread: `wait` for it.
@@ -873,10 +953,24 @@ void VulkanWindow::scriptWaitTick() {
     if (m_fall.timer != nullptr && m_fall.timer->isActive()) {
         onFallTick(); // (the timer's own timeouts are ignored under a script: see onFallTick)
     }
+    if (m_script->waitForTraced) {
+        // `tracedwait`: over as soon as the Rendered mode's picture is the finished one.
+        ++m_script->waitedTicks;
+        double done = 0.0;
+        if (scriptTracedMetric(QStringLiteral("traced.done"), done) && done > 0.5) {
+            std::fprintf(stderr, "[ikscript]   tracedwait: the picture was finished after %d ticks\n", m_script->waitedTicks);
+            std::fflush(stderr);
+            m_script->waitTicks = 0;
+        } else if (m_script->waitTicks <= 1) {
+            std::fprintf(stderr, "[ikscript]   tracedwait: NOT finished after %d ticks\n", m_script->waitedTicks);
+            std::fflush(stderr);
+        }
+    }
     if (--m_script->waitTicks > 0) {
         QTimer::singleShot(16, this, &VulkanWindow::scriptWaitTick);
         return;
     }
+    m_script->waitForTraced = false;
     scriptStep();
 }
 
@@ -995,6 +1089,7 @@ void VulkanWindow::scriptFrameRendered() {
                  static_cast<int>(frame.width) * 4,
                  frame.bgra ? QImage::Format_ARGB32 : QImage::Format_RGBA8888);
     image = image.convertToFormat(QImage::Format_RGB888); // (drops the alpha the composite leaves)
+    s.shotImage = image; // (its own pixels: the conversion copied them — `shot.darkest`, `shot.below.<n>`)
     const bool saved = image.save(s.shotPath);
     say("[ikscript]   shot %s (%ux%u)%s\n", qPrintable(s.shotPath), frame.width, frame.height,
         saved ? "" : " — NOT SAVED");
@@ -1031,8 +1126,45 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         value = isProjectDirty() ? 1.0 : 0.0;
         return true;
     }
+    // THE RENDERED MODE: traced.on / .shown / .done / .sample / .samples / .updates / .scenes / .held.
+    if (name.startsWith(QLatin1String("traced."), Qt::CaseInsensitive)) {
+        return scriptTracedMetric(name, value);
+    }
+    // THE LIGHT OBJECTS: lamps, lampselected, lamp.<n>.<field> (scriptLampMetric).
+    if (name.startsWith(QLatin1String("lamp"), Qt::CaseInsensitive)) {
+        return scriptLampMetric(name, value);
+    }
     // THE LAST `render`: render.ok (1 = it finished), render.seconds, render.mean (the picture's
     // mean display value, 0-255), render.covered (percent of pixels that are not the backdrop).
+    // THE LAST SHOT's picture, read as numbers: `shot.darkest` — its darkest pixel's brightness
+    // (the three channels' mean, 0-255) — and `shot.below.<n>` — how many of its pixels are
+    // darker than n. For a view framed so that everything in it is bright, they catch a dark
+    // line that should not be there (a silhouette blended with the backdrop instead of with
+    // the Gaussian splats behind it: tools/ikscripts/splats/edge.txt). -1 before any shot.
+    if (name.startsWith(QLatin1String("shot."), Qt::CaseInsensitive)) {
+        const QString what = name.mid(5).toLower();
+        const bool    darkest = what == QLatin1String("darkest");
+        bool          numbered = false;
+        const double  limit = what.startsWith(QLatin1String("below.")) ? what.mid(6).toDouble(&numbered) : 0.0;
+        if (!darkest && !numbered) {
+            return false;
+        }
+        value = -1.0;
+        if (!s.shotImage.isNull()) {
+            double least = 255.0;
+            double below = 0.0;
+            for (int y = 0; y < s.shotImage.height(); ++y) {
+                const uchar* row = s.shotImage.constScanLine(y); // (RGB888: three bytes a pixel)
+                for (int x = 0; x < s.shotImage.width(); ++x) {
+                    const double brightness = (row[3 * x] + row[3 * x + 1] + row[3 * x + 2]) / 3.0;
+                    least = std::min(least, brightness);
+                    below += brightness < limit ? 1.0 : 0.0;
+                }
+            }
+            value = darkest ? least : below;
+        }
+        return true;
+    }
     if (name.startsWith(QLatin1String("render."), Qt::CaseInsensitive)) {
         const QString what = name.mid(7).toLower();
         if (what == QLatin1String("ok")) {
@@ -1043,6 +1175,36 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
             value = s.renderMean;
         } else if (what == QLatin1String("covered")) {
             value = s.renderCovered;
+        } else if (what == QLatin1String("splats")) {
+            value = s.renderSplats;
+        } else if (what.startsWith(QLatin1String("probe."))) {
+            // The last render where the probe's world point is seen: the mean of a 5 x 5 block,
+            // as 8-bit display values (lum: the three channels' mean). -1 off the picture.
+            value = -1.0;
+            QPointF at;
+            if (s.probeSet && !s.renderImage.isNull() && m_renderer && width() > 0 && height() > 0 &&
+                projectToScreen(glm::vec3(s.probe[0], s.probe[1], s.probe[2]), at)) {
+                const int cx = static_cast<int>(at.x() / width() * s.renderImage.width());
+                const int cy = static_cast<int>(at.y() / height() * s.renderImage.height());
+                if (cx >= 2 && cy >= 2 && cx < s.renderImage.width() - 2 && cy < s.renderImage.height() - 2) {
+                    double r = 0.0, g = 0.0, b = 0.0, a = 0.0;
+                    for (int y = cy - 2; y <= cy + 2; ++y) {
+                        for (int x = cx - 2; x <= cx + 2; ++x) {
+                            const QRgb pixel = s.renderImage.pixel(x, y);
+                            r += qRed(pixel);
+                            g += qGreen(pixel);
+                            b += qBlue(pixel);
+                            a += qAlpha(pixel);
+                        }
+                    }
+                    const QString channel = what.mid(6);
+                    value = channel == QLatin1String("r")   ? r / 25.0
+                            : channel == QLatin1String("g") ? g / 25.0
+                            : channel == QLatin1String("b") ? b / 25.0
+                            : channel == QLatin1String("a") ? a / 25.0 // (a transparent render's coverage)
+                                                            : (r + g + b) / 75.0;
+                }
+            }
         } else {
             return false;
         }

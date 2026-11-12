@@ -802,9 +802,44 @@ bool Armature::beginIkDrag(IkScope scope) {
     // balanced, and no other bone is an unknown.
     m_digitDrag = false;
     m_figureMove = false;
+    m_hangFeet.clear();
     if (boneClass(m_selectedBone) == BoneClass::Digit) {
+        m_ikRig->setHangingFeet({});
         return beginDigitDrag();
     }
+    // THE HANGING FEET COME DOWN FLAT (armaturehangfeet.cpp): feet a lift left hanging — rolled onto
+    // their balls, pointed — on a figure let go of in the air are no contacts of this drag (the rig
+    // is told below: she floats, however low the toes hang), and the drag brings them flat as the
+    // floor nears (landHangFeetByFloor; dragFigureTo). Unless her SOLES already stand inside the
+    // rig's own heal band — a descent let go of just over the floor: there she is SET DOWN at the
+    // press, the feet flat and the figure lowered the last centimetres onto them, and planted like
+    // any standing figure. (Left to the rig's ground healing, which pulls a hovering foot's pin
+    // down to the floor, her soft-kneed legs straightened and her heels lifted to reach it with
+    // the hips where they were: 4 degrees of foot, on tiptoe again.) Not under Ctrl: the figure
+    // move takes her as she is, and lands the feet itself.
+    std::vector<char> hangingFeet;
+    findHangFeet(m_hangFeet, &hangingFeet);
+    if (!m_hangFeet.empty() && scope != IkScope::Part) {
+        float lowestSole = 1.0e9f;
+        for (const HangFoot& foot : m_hangFeet) {
+            lowestSole = std::min(lowestSole, m_boneWorldPos[static_cast<std::size_t>(foot.ankle)].y - m_ikRig->floorClearance(foot.ankle));
+        }
+        if (lowestSole < m_ikRig->airborneHeight()) {
+            poseHangFeet(0.0f, -1.0e9f);
+            m_hangFeet.clear();
+            hangingFeet.assign(m_bones.size(), 0);
+            float over = 1.0e9f; // how far her lowest foot joint now stands over its floor height
+            for (std::size_t b = 0; b < m_bones.size(); ++b) {
+                if (m_ikRig->isFootClass(static_cast<int>(b)) && m_ikRig->legOf(static_cast<int>(b)) >= 0) {
+                    over = std::min(over, m_boneWorldPos[b].y - m_ikRig->floorClearance(static_cast<int>(b)));
+                }
+            }
+            if (over > 0.0f && over < m_ikRig->airborneHeight()) {
+                shiftPoseY(-over);
+            }
+        }
+    }
+    m_hangHomeEuler = m_boneEuler; // (what THIS drag turns is read against it: recordHangFeet)
     // IkScope::Part (the app's Ctrl+drag) is resolved by what the rig's drag turns out to have hold
     // of, below: the HIPS — the solve root, which a grab of the pelvis girdle is promoted to — ->
     // the figure is moved as she is posed (Figure); anything else, a spine joint included since
@@ -940,9 +975,11 @@ bool Armature::beginIkDrag(IkScope scope) {
     // below the grabbed joint HOLD — IkRig::beginDrag's pin rule — where a plain trunk drag leaves
     // them out. A failed begin, and the figure move's endDrag, clear it.)
     m_ikRig->setScoped(scope == IkScope::Chain); // (no intent, no suspension, no step under a scoped drag)
+    m_ikRig->setHangingFeet(hangingFeet);        // (THE HANGING FEET, above: no contacts at the press)
     if (!m_ikRig->beginDrag(grabNode, positions, contacts, groundOffsetY, &userPins,
                             secondaries.empty() ? nullptr : &secondaries)) {
         m_ikRig->setScoped(false);
+        m_hangFeet.clear();
         return false;
     }
     static const bool kNoFigureMove = std::getenv("POSESTUDIO_NO_FIGURE_MOVE") != nullptr; // A/B probe: the scoped chain, as before 2026-09-28
@@ -960,6 +997,17 @@ bool Armature::beginIkDrag(IkScope scope) {
         return beginFigureMove();
     }
     m_ikScope = scope;
+    if (!m_hangFeet.empty()) {
+        // (The hanging feet are this drag's to land only while she FLOATS — no foot or leg of hers
+        // planted or pinned — and under a whole-body drag: a scoped chain moves nothing else.)
+        bool floats = scope == IkScope::Body;
+        for (const IkEffector& pin : m_ikRig->pins()) {
+            floats = floats && !(pin.node >= 0 && (m_ikRig->isFootClass(pin.node) || m_ikRig->legOf(pin.node) >= 0));
+        }
+        if (!floats) {
+            m_hangFeet.clear();
+        }
+    }
     {
         // THE GROUP's drag state (updateGroupTargets): where each secondary effector stood at the
         // press, and the primary's grab point — the cursor's displacement is measured from it.
@@ -1215,8 +1263,15 @@ void Armature::syncRigRotations() {
 void Armature::endIkDrag() {
     settleSoftBody(); // (the breasts' spring ends with the drag: the resting swing from here)
     if (m_ikRig) {
+        // THE HANGING FEET (armaturehangfeet.cpp): a drag that ends with her SUSPENDED leaves her
+        // feet hanging — the lift-off's tiptoe, the dangle's point. Remembered, so that coming back
+        // down they go flat again.
+        if (m_ikRig->dragActive() && m_ikRig->suspended() && !m_landing.active) {
+            recordHangFeet();
+        }
         m_ikRig->endDrag();
     }
+    m_hangFeet.clear();
     m_ikScope = IkScope::Body;
     m_digitDrag = false;
     m_figureMove = false;
@@ -1267,6 +1322,31 @@ void Armature::captureFlatHold(bool restOrientation) {
     if (!m_ikRig) {
         return;
     }
+    // THE REST ORIENTATION FACES THE WAY SHE FACES (2026-11-12): the solve root's world rotation
+    // reduced to its heading (read off whichever of its lateral and fore axes lies flatter, as
+    // captureDragStart reads it). It was the bare identity — flat, and facing +z — and a figure
+    // TURNED with the Transform tab's Turn (90 degrees: facing +x), lifted off the floor and
+    // lowered again, had her landing soles held to +z at the hold's full weight: both legs
+    // wrenched round at the thighs' twist (49 degrees of it in the app) and the ankles, the
+    // feet at 35 degrees of roll. An unturned figure's root has no heading and the rotation is
+    // the identity to the last bit.
+    glm::mat3 restFacing(1.0f);
+    static const bool kRestIdentity = std::getenv("IK_LANDING_REST_IDENTITY") != nullptr; // A/B probe: the bare identity, as before
+    if (restOrientation && !kRestIdentity) {
+        const int root = m_ikRig->rootNode();
+        if (root >= 0 && static_cast<std::size_t>(root) < m_poseGlobal.size()) {
+            const glm::mat3 world(m_poseGlobal[static_cast<std::size_t>(root)]);
+            glm::vec3       lateral = world * glm::vec3(1.0f, 0.0f, 0.0f);
+            glm::vec3       fore = world * glm::vec3(0.0f, 0.0f, 1.0f);
+            lateral.y = 0.0f;
+            fore.y = 0.0f;
+            const float yaw = glm::length(lateral) >= glm::length(fore) ? std::atan2(-lateral.z, lateral.x)
+                                                                         : std::atan2(fore.x, fore.z);
+            if (yaw != 0.0f) {
+                restFacing = glm::mat3(glm::mat4_cast(glm::angleAxis(yaw, glm::vec3(0.0f, 1.0f, 0.0f))));
+            }
+        }
+    }
     const std::vector<IkEffector>& pins = m_ikRig->pins();
     for (std::size_t p = 0; p < pins.size(); ++p) {
         const int node = pins[p].node;
@@ -1279,9 +1359,11 @@ void Armature::captureFlatHold(bool restOrientation) {
         }
         const bool user = m_ikRig->pinIsUser(p);
         // The rest pose's world rotation is the identity: a bone's bind is translation-only
-        // (its orientation cancels at rest), so "flat on the floor" is the identity frame.
+        // (its orientation cancels at rest), so "flat on the floor" is the identity frame —
+        // TURNED TO THE WAY SHE FACES (restFacing, below): the identity itself is flat and facing
+        // +z, where a figure faces as imported.
         const auto rotOf = [&](int b) {
-            return (restOrientation && !user) ? glm::mat3(1.0f)
+            return (restOrientation && !user) ? restFacing
                                               : glm::mat3(m_poseGlobal[static_cast<std::size_t>(b)]);
         };
         m_ikFlatNodes.push_back(node);

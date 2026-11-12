@@ -29,6 +29,7 @@ inline constexpr const char* kShaderNames[] = {
     "background.vert",  "background.frag", "fullscreen.vert", "bloombright.frag",
     "bloomblur.frag",   "composite.frag",  "sssblur.frag",    "outlinemask.frag",
     "depthresolve.frag", "splat.vert",      "splat.frag",      "splatmask.frag",
+    "traced.frag",       "depthcutout.frag", "photoresolve.frag",
 };
 
 /**

@@ -8,6 +8,7 @@
 #include "camera.h"
 #include "environment.h"
 #include "lightingsettings.h"
+#include "scenelight.h"
 #include "selectionstyle.h"
 #include "shademode.h"
 
@@ -67,6 +68,30 @@ void fillCameraUbo(CameraUbo& ubo, const Camera& camera, const LightingSettings&
     for (int i = 0; i < 9; ++i) {
         ubo.sh[i] = glm::vec4(sh.c[i], 0.0f);
     }
+}
+
+void fillCameraUboLights(CameraUbo& ubo, const std::vector<SceneLight>& lights) {
+    static_assert(kCameraUboLights == kMaxViewportLights, "the camera block carries the viewport's light objects");
+    int count = 0;
+    for (const SceneLight& light : lights) {
+        if (count >= kCameraUboLights) {
+            break;
+        }
+        if (!light.enabled || light.intensity <= 0.0f) {
+            continue;
+        }
+        LightUbo&       out = ubo.lights[count++];
+        const float     radius = light.kind == LightKind::Point || light.kind == LightKind::Spot ? std::max(light.radius, 0.0f) : 0.0f;
+        const float     cosHalf = std::cos(glm::radians(std::clamp(light.coneDeg, 1.0f, 179.0f)) * 0.5f);
+        const float     blend = std::clamp(light.blend, 1.0e-3f, 1.0f);
+        out.position = glm::vec4(light.position, static_cast<float>(static_cast<int>(light.kind)));
+        // (The least squared distance: a centimetre at least — a surface AT a point light would
+        // otherwise be divided by nothing.)
+        out.direction = glm::vec4(lightDirection(light), std::max(radius * radius, 1.0e-4f));
+        out.color = glm::vec4(light.color * light.intensity, cosHalf);
+        out.params = glm::vec4(1.0f / ((1.0f - cosHalf) * blend), 0.0f, 0.0f, 0.0f);
+    }
+    ubo.lightInfo = glm::vec4(static_cast<float>(count), 0.0f, 0.0f, 0.0f);
 }
 
 } // namespace pose

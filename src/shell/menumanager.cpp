@@ -179,6 +179,25 @@ void MenuManager::setupMenus() {
     QObject::connect(deleteAction, &QAction::triggered, mainWindow, [this]() {
         if (viewportWidget) viewportWidget->deleteSelectedObject();
     });
+    // The LIGHT OBJECTS (the Lights tab lists and edits them): a new light stands two metres
+    // from the figure, above it and aimed at it, and is selected.
+    QMenu *addLightMenu = editMenu->addMenu(tr("Add Light"));
+    const struct {
+        pose::LightKind kind;
+        QString         label;
+    } kLightKinds[] = {
+        {pose::LightKind::Point, tr("Point Light")},
+        {pose::LightKind::Spot, tr("Spot Light")},
+        {pose::LightKind::Area, tr("Area Light")},
+        {pose::LightKind::Sun, tr("Sun")},
+    };
+    for (const auto& entry : kLightKinds) {
+        QAction *action = addLightMenu->addAction(entry.label);
+        const pose::LightKind kind = entry.kind;
+        QObject::connect(action, &QAction::triggered, mainWindow, [this, kind]() {
+            if (viewportWidget) viewportWidget->addLight(kind);
+        });
+    }
     editMenu->addSeparator();
 
     // Pose utilities, on the ACTIVE figure (the one whose joint was last clicked). "Limb" = the

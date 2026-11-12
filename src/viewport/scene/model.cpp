@@ -450,6 +450,18 @@ void Model::recordDepthFill(VkCommandBuffer cmd, VkPipelineLayout layout, uint32
     recordShaded(cmd, layout, frameIndex, MeshDrawKind::DepthOnly, MeshFilter::Opaque);
 }
 
+void Model::recordDepthCutout(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t frameIndex, bool fine) {
+    if (m_transparentMeshes.empty()) {
+        return;
+    }
+    bindPose(cmd, layout, 2, frameIndex);
+    const glm::mat4& transform = m_armature.transform();
+    const MeshDrawKind kind = fine ? MeshDrawKind::DepthCutoutFine : MeshDrawKind::DepthCutout;
+    for (const Mesh* mesh : m_transparentMeshes) {
+        mesh->record(cmd, layout, transform, kind, -1, -1); // (no joint highlight in a depth draw)
+    }
+}
+
 void Model::recordShadow(VkCommandBuffer cmd, VkPipelineLayout layout,
                          const glm::mat4& lightViewProj, uint32_t frameIndex) {
     // No alpha in this pass — cards/shells would cast solid shadows, so only the opaque meshes.
@@ -604,6 +616,43 @@ bool Model::groundGap(float& lowestY) const {
 
 bool Model::pickSurface(const Ray& ray, float& tOut, glm::vec3& hitWorld, int& bone, int* mesh) const {
     return m_ground.pickSurface(m_armature, ray, tOut, hitWorld, bone, mesh);
+}
+
+bool Model::pickExact(const Ray& ray, ModelHit& hit) const {
+    hit = ModelHit{};
+    const float length = glm::length(ray.direction);
+    if (length < 1.0e-9f) {
+        return false;
+    }
+    if (m_splats) {
+        // (From inside its box a splat scene is the place the user stands in: see intersectRay.)
+        glm::vec3 lo, hi;
+        if (worldBounds(lo, hi) && glm::all(glm::greaterThanEqual(ray.origin, lo)) &&
+            glm::all(glm::lessThanEqual(ray.origin, hi))) {
+            return false;
+        }
+        // The ray in the cloud's own frame; the unit world direction is taken through the inverse
+        // transform as it is, so the parameter stays the world's distance.
+        const glm::mat4 inverse = glm::inverse(m_armature.transform());
+        const glm::vec3 origin = glm::vec3(inverse * glm::vec4(ray.origin, 1.0f));
+        const glm::vec3 direction = glm::vec3(inverse * glm::vec4(ray.direction / length, 0.0f));
+        float           opacity = 0.0f;
+        if (!m_splats->pick(origin, direction, hit.t, opacity)) {
+            return false;
+        }
+        hit.faint = opacity < 0.5f;
+        if (!hit.faint) {
+            hit.tSolid = hit.t; // (where the opacity reaches a half: the capture is what is seen from there on)
+        }
+        return true;
+    }
+    // Which meshes are see-through as their materials stand NOW (a zone made translucent on the
+    // Materials tab hides nothing behind it, whatever it was at import).
+    std::vector<char> seeThrough(m_meshes.size(), 0);
+    for (std::size_t i = 0; i < m_meshes.size(); ++i) {
+        seeThrough[i] = m_meshes[i].isTransparent() ? 1 : 0;
+    }
+    return m_ground.pickAnySurface(m_armature, ray, seeThrough, hit.t, hit.tSolid);
 }
 
 // --- THE MATERIALS TAB: the zones' editable materials ---------------------------------------------

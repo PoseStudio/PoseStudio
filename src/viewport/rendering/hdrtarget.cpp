@@ -22,6 +22,9 @@ namespace {
 // D32 is mandatory optimal-tiling depth-attachment support in every Vulkan implementation, so
 // no format probing is needed for an offscreen depth target.
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
+// The scene's coverage per texel (photoresolve.frag): quarters at 4x MSAA. R8 is a mandatory
+// color-attachment + sampled format.
+constexpr VkFormat kCoverageFormat = VK_FORMAT_R8_UNORM;
 
 constexpr VkPipelineStageFlags kDepthStages =
     VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
@@ -41,23 +44,26 @@ VkSubpassDependency depthWrittenBeforeRead() {
 }
 
 /// The resolve pass's pair: (0) the previous frame's photo-pass reads and resolve writes of the
-/// photo depth are done before this pass clears and writes it; (1) this pass's writes are
-/// visible to the photo pass's depth test. (Its SAMPLED reads of the scene's MSAA depth are
-/// ordered by the scene pass's own outgoing dependency, as the depth layer's resolve relies on.)
+/// photo depth — and the composite's sampled reads of the coverage — are done before this pass
+/// clears and writes them; (1) this pass's writes are visible to the photo pass's depth test
+/// and to the composite's reads of the coverage. (Its SAMPLED reads of the scene's MSAA depth
+/// are ordered by the scene pass's own outgoing dependency, as the depth layer's resolve
+/// relies on.)
 std::array<VkSubpassDependency, 2> resolveDependencies() {
     std::array<VkSubpassDependency, 2> deps{};
     deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
     deps[0].dstSubpass = 0;
-    deps[0].srcStageMask = kDepthStages;
-    deps[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    deps[0].dstStageMask = kDepthStages;
-    deps[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    deps[0].srcStageMask = kDepthStages | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+                            VK_ACCESS_SHADER_READ_BIT;
+    deps[0].dstStageMask = kDepthStages | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     deps[1].srcSubpass = 0;
     deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
-    deps[1].srcStageMask = kDepthStages;
-    deps[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    deps[1].dstStageMask = kDepthStages;
-    deps[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+    deps[1].srcStageMask = kDepthStages | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].dstStageMask = kDepthStages | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
     return deps;
 }
 
@@ -73,7 +79,7 @@ void setViewport(VkCommandBuffer cmd, VkExtent2D extent) {
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 }
 
-/// depthresolve.frag's push block: x = the sample count, y = the scene texels per photo texel
+/// photoresolve.frag's push block: x = the sample count, y = the scene texels per photo texel
 /// (the layer at a reduced scale takes the nearest sample over the block that maps to it).
 struct ResolvePush {
     float samples;
@@ -91,7 +97,7 @@ VkExtent2D scaledExtent(VkExtent2D extent, float scale) {
 } // namespace
 
 HdrTarget::HdrTarget(VulkanContext& context, VkExtent2D extent, const std::vector<char>& fullscreenVertSpirv,
-                     const std::vector<char>& depthResolveFragSpirv, float photoScale)
+                     const std::vector<char>& photoResolveFragSpirv, float photoScale)
     : m_context(context), m_extent(extent), m_photoScale(std::clamp(photoScale, 0.25f, 1.0f)) {
     const VkSampleCountFlagBits samples = m_context.sampleCount();
     const bool msaa = samples != VK_SAMPLE_COUNT_1_BIT;
@@ -147,11 +153,14 @@ HdrTarget::HdrTarget(VulkanContext& context, VkExtent2D extent, const std::vecto
     m_photoPass = photo.build(m_context.device());
 
     if (msaa) {
-        // The resolve: a depth-only single-sample pass over the photo depth, cleared to 1.0, in
-        // which the fullscreen triangle writes the nearest of the scene depth's samples per
-        // texel (depth test LESS + write: a far-plane fragment leaves the clear, every nearer
-        // one lands) — the depth layer's resolve, built against this pass.
+        // The resolve: a single-sample pass over the coverage (cleared to 0, left sampleable for
+        // the composite) and the photo depth (cleared to 1.0), in which the fullscreen triangle
+        // writes, per texel, the share of the scene depth's samples the scene covers and the
+        // nearest of them (depth test LESS + write: a far-plane fragment leaves the clear,
+        // every nearer one lands). Attachment order: coverage(0) / depth(1).
         RenderPassBuilder resolve;
+        resolve.color(kCoverageFormat, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         resolve.depth(kDepthFormat, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
                       VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
         resolve.dependencies(resolveDependencies());
@@ -170,10 +179,23 @@ HdrTarget::HdrTarget(VulkanContext& context, VkExtent2D extent, const std::vecto
         config.depthWriteEnable = true;
         config.blendEnable = false;
         config.singleSample = true;
-        config.hasColorAttachment = false;
         config.descriptorSetLayouts = {m_resolveSetLayout.get()};
         m_resolvePipeline = std::make_unique<VulkanPipeline>(m_context, m_resolvePass.get(), fullscreenVertSpirv,
-                                                             depthResolveFragSpirv, config);
+                                                             photoResolveFragSpirv, config);
+
+        // The coverage-only pass, for a layer at a reduced scale: the same shader over the
+        // scene's own extent, block of one — the scene's coverage pixel for pixel, which the
+        // resolve above then holds only per block. No depth attachment (the shader's depth
+        // output is dropped), no test.
+        m_coveragePass = RenderPassBuilder()
+                             .color(kCoverageFormat, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                    VK_ATTACHMENT_STORE_OP_STORE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+                             .dependencies(sampledTargetDependencies(/*withDepth=*/false))
+                             .build(device);
+        config.depthTestEnable = false;
+        config.depthWriteEnable = false;
+        m_coveragePipeline = std::make_unique<VulkanPipeline>(m_context, m_coveragePass.get(), fullscreenVertSpirv,
+                                                              photoResolveFragSpirv, config);
     }
     createImages();
 }
@@ -231,7 +253,8 @@ void HdrTarget::createImages() {
     // layer must read as nothing over the scene).
     m_photoExtent = scaledExtent(m_extent, m_photoScale);
     m_photo = AttachmentImage(m_context, kColorFormat, m_extent, VK_SAMPLE_COUNT_1_BIT,
-                              kResolveUsage | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+                              kResolveUsage | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                              VK_IMAGE_ASPECT_COLOR_BIT); // (TRANSFER_SRC: a render reads the layer back)
     initialiseToShaderReadCleared(m_context, {m_photo.image()});
     m_photoDrawn = false;
     if (msaa) {
@@ -240,8 +263,17 @@ void HdrTarget::createImages() {
         m_photoDepth = AttachmentImage(m_context, kDepthFormat, m_extent, VK_SAMPLE_COUNT_1_BIT,
                                        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
         initialiseDepthReadOnly(m_context, m_photoDepth.image());
-        const VkImageView resolveView = m_photoDepth.view();
-        m_resolveFramebuffer = createFramebuffer(device, m_resolvePass.get(), &resolveView, 1, m_extent);
+        // The coverage: sampled by the composite's set from the first frame on, whether or not
+        // a resolve has run — so it starts cleared (open everywhere) in the read layout.
+        m_coverage = AttachmentImage(m_context, kCoverageFormat, m_extent, VK_SAMPLE_COUNT_1_BIT,
+                                     kResolveUsage | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+        m_coverageFull = AttachmentImage(m_context, kCoverageFormat, m_extent, VK_SAMPLE_COUNT_1_BIT,
+                                         kResolveUsage | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+        initialiseToShaderReadCleared(m_context, {m_coverage.image(), m_coverageFull.image()});
+        const VkImageView resolveViews[2] = {m_coverage.view(), m_photoDepth.view()};
+        m_resolveFramebuffer = createFramebuffer(device, m_resolvePass.get(), resolveViews, 2, m_extent);
+        const VkImageView coverageView = m_coverageFull.view();
+        m_coverageFramebuffer = createFramebuffer(device, m_coveragePass.get(), &coverageView, 1, m_extent);
         const VkDescriptorImageInfo sceneDepth = depthInfo();
         writeCombinedImageSamplers(device, m_resolveSet, 0, &sceneDepth, 1);
     }
@@ -264,7 +296,10 @@ void HdrTarget::photoUvScale(float out[2]) const {
 
 void HdrTarget::destroyImages() {
     m_photoFramebuffer.reset();
+    m_coverageFramebuffer.reset();
     m_resolveFramebuffer.reset();
+    m_coverageFull.reset();
+    m_coverage.reset();
     m_photoDepth.reset();
     m_photo.reset();
     m_framebuffer.reset();
@@ -280,15 +315,16 @@ void HdrTarget::recordPhotoPass(VkCommandBuffer cmd, const std::function<void()>
         return; // nothing to draw and nothing to clear
     }
     if (draw && m_resolvePipeline) {
-        VkClearValue clear{};
-        clear.depthStencil = {1.0f, 0};
+        std::array<VkClearValue, 2> resolveClears{}; // coverage 0 (open), depth 1.0 (the far plane)
+        resolveClears[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+        resolveClears[1].depthStencil = {1.0f, 0};
         VkRenderPassBeginInfo rp{};
         rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rp.renderPass = m_resolvePass.get();
         rp.framebuffer = m_resolveFramebuffer.get();
         rp.renderArea.extent = m_photoExtent;
-        rp.clearValueCount = 1;
-        rp.pClearValues = &clear;
+        rp.clearValueCount = static_cast<uint32_t>(resolveClears.size());
+        rp.pClearValues = resolveClears.data();
         vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
         setViewport(cmd, m_photoExtent);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_resolvePipeline->handle());
@@ -300,6 +336,30 @@ void HdrTarget::recordPhotoPass(VkCommandBuffer cmd, const std::function<void()>
         vkCmdPushConstants(cmd, m_resolvePipeline->layout(), VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
         vkCmdDraw(cmd, 3, 1, 0, 0);
         vkCmdEndRenderPass(cmd);
+
+        // A scaled layer: the resolve's coverage is per block. The scene's own, pixel for
+        // pixel, in a pass of its own at the scene's extent (see coverageMode()).
+        if (m_photoExtent.width != m_extent.width || m_photoExtent.height != m_extent.height) {
+            VkClearValue open{};
+            open.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+            VkRenderPassBeginInfo cp{};
+            cp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            cp.renderPass = m_coveragePass.get();
+            cp.framebuffer = m_coverageFramebuffer.get();
+            cp.renderArea.extent = m_extent;
+            cp.clearValueCount = 1;
+            cp.pClearValues = &open;
+            vkCmdBeginRenderPass(cmd, &cp, VK_SUBPASS_CONTENTS_INLINE);
+            setViewport(cmd, m_extent);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_coveragePipeline->handle());
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_coveragePipeline->layout(), 0, 1,
+                                    &m_resolveSet, 0, nullptr);
+            const ResolvePush whole{static_cast<float>(m_context.sampleCount()), 1.0f, 0.0f, 0.0f};
+            vkCmdPushConstants(cmd, m_coveragePipeline->layout(), VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(whole),
+                               &whole);
+            vkCmdDraw(cmd, 3, 1, 0, 0);
+            vkCmdEndRenderPass(cmd);
+        }
     }
 
     // The pass: the layer cleared to coverage 0 (the depth's clear value is owed by the array,
@@ -350,6 +410,29 @@ VkDescriptorImageInfo HdrTarget::photoInfo() const {
     info.imageView = m_photo.view();
     info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     return info;
+}
+
+VkDescriptorImageInfo HdrTarget::coverageInfo() const {
+    VkDescriptorImageInfo info{};
+    info.sampler = m_sampler;
+    info.imageView = m_coverage ? m_coverage.view() : m_photo.view(); // (single-sample: valid, never read)
+    info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    return info;
+}
+
+VkDescriptorImageInfo HdrTarget::coverageFullInfo() const {
+    VkDescriptorImageInfo info{};
+    info.sampler = m_sampler;
+    info.imageView = m_coverageFull ? m_coverageFull.view() : m_photo.view(); // (single-sample: valid, never read)
+    info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    return info;
+}
+
+int HdrTarget::coverageMode() const {
+    if (!m_photoDrawn || !m_resolvePipeline || !m_coverage) {
+        return 0;
+    }
+    return (m_photoExtent.width == m_extent.width && m_photoExtent.height == m_extent.height) ? 1 : 2;
 }
 
 VkDescriptorImageInfo HdrTarget::specResolveInfo() const {

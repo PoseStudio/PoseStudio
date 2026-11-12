@@ -20,6 +20,7 @@
 #include "posefile.h"          // PoseRows (the figure's pose snapshot rows)
 #include "lightingsettings.h"  // LightingSettings (the environment dials)
 #include "materialparams.h"    // MaterialParams (the Materials tab's per-zone values)
+#include "scenelight.h"        // SceneLight (the light objects)
 
 #include <glm/glm.hpp>
 
@@ -73,10 +74,12 @@ struct ProjectCamera {
     bool      ortho = false;            ///< Orthographic projection (an axis view) or perspective.
 };
 
-/// The whole `.pss` document: every figure in scene order, the environment, the camera.
+/// The whole `.pss` document: every figure in scene order, the environment, the light objects,
+/// the camera.
 struct ProjectDocument {
     std::vector<ProjectFigure>  figures; ///< In scene order — the Nth entry becomes the Nth figure.
     ProjectEnvironment          environment;
+    std::vector<SceneLight>     lights;  ///< The light objects (scenelight.h), in the order they were added.
     ProjectCamera               camera;
 };
 

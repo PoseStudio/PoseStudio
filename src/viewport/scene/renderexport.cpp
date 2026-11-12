@@ -5,6 +5,8 @@
 
 #include "renderexport.h"
 
+#include "scenelight.h"
+
 #include "camera.h"
 #include "cameraubo.h" // keyLightDirection
 #include "lightingsettings.h"
@@ -161,15 +163,39 @@ renderapi::Camera renderCamera(const Camera& camera) {
     return out;
 }
 
-renderapi::SunLight renderKeyLight(const LightingSettings& lighting) {
-    renderapi::SunLight sun;
-    set3(sun.direction, glm::normalize(keyLightDirection(lighting, /*pbrFollowsRotation=*/true)));
+renderapi::Light renderKeyLight(const LightingSettings& lighting) {
+    renderapi::Light sun;
+    sun.type = renderapi::LightType::Sun;
+    // (A light's direction is the way it SHINES: from the light, the opposite of the dial's.)
+    set3(sun.direction, -glm::normalize(keyLightDirection(lighting, /*pbrFollowsRotation=*/true)));
     set3(sun.color, kKeyColor);
     sun.strength = std::max(lighting.keyIntensity, 0.0f);
     // The Softness dial is the light's size: a crisp sun at 0 (one degree), a broad softbox's
     // eleven at 1.
     sun.angle = glm::radians(1.0f + 10.0f * std::clamp(lighting.shadowSoftness, 0.0f, 1.0f));
     return sun;
+}
+
+renderapi::Light renderLight(const SceneLight& light) {
+    renderapi::Light out;
+    switch (light.kind) {
+    case LightKind::Spot: out.type = renderapi::LightType::Spot; break;
+    case LightKind::Area: out.type = renderapi::LightType::Area; break;
+    case LightKind::Sun: out.type = renderapi::LightType::Sun; break;
+    default: out.type = renderapi::LightType::Point; break;
+    }
+    set3(out.position, light.position);
+    set3(out.direction, lightDirection(light));
+    set3(out.color, glm::max(light.color, glm::vec3(0.0f)));
+    out.strength = std::max(light.intensity, 0.0f);
+    out.radius = std::max(light.radius, 0.0f);
+    out.angle = light.kind == LightKind::Sun ? glm::radians(std::clamp(light.sunAngleDeg, 0.0f, 90.0f))
+                                             : glm::radians(std::clamp(light.coneDeg, 1.0f, 179.0f));
+    out.blend = std::clamp(light.blend, 0.0f, 1.0f);
+    out.sizeU = std::max(light.width, 1.0e-3f);
+    out.sizeV = std::max(light.height, 1.0e-3f);
+    out.castShadow = light.castShadow ? 1 : 0;
+    return out;
 }
 
 void renderEnvironment(const LightingSettings& lighting, float luminanceScale, renderapi::Environment& environment) {

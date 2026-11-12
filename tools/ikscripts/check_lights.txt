@@ -1,0 +1,175 @@
+# THE LIGHT OBJECTS (scene/scenelight.h; the Lights tab): point, spot, area and sun lights added,
+# set, selected by a click on their marker, moved by a drag of it, switched off, removed — each
+# one undoable edit — and carried by a project file. `lamp ...` drives them as the tab and the
+# mouse do (`light <dial>` is the ENVIRONMENT tab's dials); `lamps`, `lampselected` and
+# `lamp.<n>.<field>` read them (fields in the tab's units: x / y / z, radius, width, height in
+# centimetres, turn / tilt / cone / sunangle in degrees, blend in percent; kind 0 point, 1 spot,
+# 2 area, 3 sun). The shots are what to LOOK at: the PBR mode shades with the lights (no shadows
+# of their own), and each light's marker shows where it stands and shines.
+# Run with POSESTUDIO_TAB=Lights for the `uishot`s of the tab.
+view home
+expect lamps == 0
+expect lampselected == -1
+shot 01_no_lights
+
+# A spot light: two metres from her, above, aimed at her — selected, and the document dirty.
+lamp add spot
+expect lamps == 1
+expect lampselected == 0
+expect lamp.0.kind == 1
+expect lamp.0.intensity == 4
+expect lamp.0.enabled == 1
+expect lamp.0.y > 150
+expect lamp.0.tilt > 5
+expect dirty == 1
+shot 02_spot_added
+uishot 02_spot_added
+
+# Its numbers, each one undo entry.
+lamp 0 intensity 14
+lamp 0 color 1 0.2 0.08
+expect lamp.0.intensity == 14
+expect lamp.0.g < 0.21
+shot 03_spot_red_bright
+undo
+expect lamp.0.g == 1
+expect lamp.0.intensity == 14
+undo
+expect lamp.0.intensity == 4
+redo
+redo
+expect lamp.0.intensity == 14
+expect lamp.0.g < 0.21
+lamp 0 cone 25
+lamp 0 blend 60
+expect lamp.0.cone == 25
+shot 04_spot_narrow_soft
+
+# A point light, blue, from the other side; an area light; a sun. Each new one a step round.
+lamp add point
+expect lamps == 2
+expect lampselected == 1
+lamp 1 intensity 10
+lamp 1 color 0.15 0.35 1
+lamp add area
+lamp 2 intensity 6
+lamp add sun
+expect lamps == 4
+expect lamp.2.kind == 2
+expect lamp.3.kind == 3
+expect lamp.3.intensity == 1
+shot 05_four_lights
+view front
+shot 06_four_lights_front
+view home
+
+# The mouse: a click on a light's marker selects it; a click on the figure selects her instead.
+lamp select -1
+expect lampselected == -1
+lamp click 1
+expect lampselected == 1
+expect selection == -1
+click chest
+expect lampselected == -1
+expect selection == 0
+
+# A drag of the marker moves the light in the view's plane: one undo entry.
+lamp 1 x 120
+lamp 1 y 160
+lamp 1 z 80
+lamp drag 1 -12 -10
+expect lampselected == 1
+expect lamp.1.y > 165
+shot 07_point_dragged
+undo
+expect lamp.1.y > 159
+expect lamp.1.y < 161
+expect lamp.1.x > 119
+expect lamp.1.x < 121
+
+# Aim at Subject: the light turned to shine at her from where it stands.
+lamp 0 x 200
+lamp 0 y 60
+lamp 0 z 0
+lamp 0 turn 0
+lamp 0 tilt 0
+lamp aim 0
+expect lamp.0.turn > 80
+expect lamp.0.turn < 100
+expect lamp.0.tilt < 0
+shot 08_spot_from_her_left_low
+
+# A light aimed at her STAYS aimed while its marker is dragged (carried up the view it tilts down
+# to go on lighting her); one turned elsewhere keeps its angles.
+lamp drag 0 0 -20
+expect lamp.0.y > 80
+expect lamp.0.tilt > -14
+expect lamp.0.turn > 80
+expect lamp.0.turn < 100
+shot 08b_spot_dragged_still_aimed
+undo
+expect lamp.0.tilt < -15
+lamp 0 turn 30
+lamp drag 0 0 -20
+expect lamp.0.y > 80
+expect lamp.0.turn > 29
+expect lamp.0.turn < 31
+expect lamp.0.tilt < -15
+undo
+undo
+expect lamp.0.turn > 80
+
+# Switched off it lights nothing and stays where it is; removed it is gone; undo brings it back.
+lamp 1 enabled 0
+expect lamp.1.enabled == 0
+shot 09_point_off
+lamp remove 1
+expect lamps == 3
+expect lamp.1.kind == 2
+undo
+expect lamps == 4
+expect lamp.1.kind == 0
+expect lamp.1.enabled == 0
+lamp 1 enabled 1
+# The Delete key deletes the SELECTED LIGHT — not the figure — and that is an undo step too.
+lamp select 2
+delete
+expect lamps == 3
+expect figures == 1
+expect lampselected == -1
+undo
+expect lamps == 4
+expect lamp.2.kind == 2
+
+# The Lights tab, with the area light selected (its Width / Height rows).
+lamp select 2
+uishot 10_area_selected
+lamp select 3
+uishot 11_sun_selected
+
+# Through a project file: New empties the list, Open brings the four back as they were.
+saveproject lights.pss
+expect dirty == 0
+new
+expect lamps == 0
+expect lampselected == -1
+openproject lights.pss
+expect figures == 1
+expect lamps == 4
+expect lamp.0.kind == 1
+expect lamp.0.cone == 25
+expect lamp.0.blend > 59
+expect lamp.0.blend < 61
+expect lamp.0.intensity == 14
+expect lamp.0.turn > 80
+expect lamp.1.kind == 0
+expect lamp.1.b == 1
+expect lamp.1.x > 119
+expect lamp.2.kind == 2
+expect lamp.3.kind == 3
+expect dirty == 0
+shot 12_project_reopened
+
+# File -> New: no lights.
+new
+expect lamps == 0

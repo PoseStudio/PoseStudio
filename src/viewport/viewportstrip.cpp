@@ -19,6 +19,7 @@
 #include <QCoreApplication>
 #include <QAction>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QIcon>
 #include <QList>
 #include <QMenu>
@@ -110,8 +111,9 @@ constexpr int kViewEntryCount = static_cast<int>(sizeof(kViewEntries) / sizeof(k
 // present in a generated .ts catalog - without them an lupdate run would report the 25
 // names as vanished and lrelease would drop their translations.
 static const char* const kPickerNoops[] = {
-    // Shade-mode picker names (scene/shademode.h's kShadeModes, 18 entries):
+    // Shade-mode picker names (scene/shademode.h's kShadeModes, every row):
     QT_TRANSLATE_NOOP("ViewportStrip", "PBR Shaded"),
+    QT_TRANSLATE_NOOP("ViewportStrip", "Rendered"),
     QT_TRANSLATE_NOOP("ViewportStrip", "Texture Shaded"),
     QT_TRANSLATE_NOOP("ViewportStrip", "Flat Texture Shaded"),
     QT_TRANSLATE_NOOP("ViewportStrip", "Cartoon Shaded"),
@@ -238,6 +240,16 @@ ViewportStrip::ViewportStrip(QWidget* owner)
     // joints are grabbed directly on the figure and stay clickable either way.
     const int fieldHeight = m_shaderPicker->sizeHint().height();
 
+    // The Render button, FIRST in the row (left of the shader picker): Render -> Render Image,
+    // F12 — the Render window opens and the render starts. Inserted at the row's front here,
+    // once the pickers' height (which squares every icon button) is known.
+    m_renderButton = makeIconButton(this, QStringLiteral("ViewportRenderButton"),
+                                    QStringLiteral(":/resources/icons/render.png"),
+                                    tr("Render the scene (F12)"), fieldHeight, false);
+    m_renderButton->setProperty("testId", QStringLiteral("viewport.render")); // (the scripted test's `ui click`)
+    connect(m_renderButton, &QPushButton::clicked, this, &ViewportStrip::renderClicked);
+    row->insertWidget(0, m_renderButton);
+
     // The VR button, right of the view picker: enters / leaves VR Mode and is LIT while it is
     // on (the checkable icon-button look the Skeleton button has). Like the picker's entry it
     // only asks; the lit state is the viewport's (setVrActive).
@@ -283,8 +295,18 @@ ViewportStrip::ViewportStrip(QWidget* owner)
     // only while the joint mouse mode is on (B / S / T with a joint selected: setJointModeBadge).
     m_modeBadge = new JointModeBadge(this, fieldHeight);
     m_modeBadge->hide();
+    // The Rendered mode's status line, under the strip's left end (below the Render button and
+    // the shading picker that turns the mode on): visible only while the mode is.
+    m_renderStatus = new QLabel(this);
+    m_renderStatus->setObjectName(QStringLiteral("ViewportRenderStatus"));
+    m_renderStatus->setStyleSheet(QStringLiteral("QLabel#ViewportRenderStatus { background-color: #252627; color: #c7c8cb; "
+                                                 "border: 1px solid #3a3b3d; border-radius: 4px; padding: 3px 8px; "
+                                                 "font-size: 12px; }"));
+    m_renderStatus->setProperty("testId", QStringLiteral("viewport.renderstatus"));
+    m_renderStatus->hide();
     auto* badgeRow = new QHBoxLayout();
     badgeRow->setContentsMargins(0, 0, 0, 0);
+    badgeRow->addWidget(m_renderStatus);
     badgeRow->addStretch(1);
     badgeRow->addWidget(m_modeBadge);
     column->addLayout(badgeRow);
@@ -332,6 +354,17 @@ void ViewportStrip::setJointModeBadge(int kind) {
     m_modeBadge->setVisible(kind >= 0);
     if (was != (kind >= 0)) {
         anchorTo(m_anchor); // the strip grew or shrank by a row
+    }
+}
+
+void ViewportStrip::setRenderStatus(const QString& text) {
+    const bool was = m_renderStatus->isVisibleTo(this);
+    m_renderStatus->setText(text);
+    m_renderStatus->setVisible(!text.isEmpty());
+    if (was != !text.isEmpty()) {
+        anchorTo(m_anchor); // the strip grew or shrank by a row
+    } else if (!text.isEmpty()) {
+        adjustSize(); // (the text's width changed)
     }
 }
 

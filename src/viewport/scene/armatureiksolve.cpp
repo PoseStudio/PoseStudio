@@ -846,7 +846,10 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
     if (m_ikScope != IkScope::Chain) { // (a SCOPED drag moves the chain alone: no arm hangs, no head is righted)
         const bool hangMoved = hangIdleArms();  // (see IDLE ARMS HANG above: before the contacts read the pose)
         const bool headMoved = rightIdleHead(); // (see THE HEAD STAYS UP)
-        moved = hangMoved || headMoved || moved;
+        // (THE HANGING FEET COME DOWN FLAT, armaturehangfeet.cpp: a floating figure's, as the floor
+        // nears — a function of the pose, so nothing the settle has to wait for.)
+        const bool feetMoved = landHangFeetByFloor();
+        moved = hangMoved || headMoved || feetMoved || moved;
         m_jsPostStepMoving = hangMoved || headMoved; // (the settle waits for them: settleIkSolveTick)
     }
     m_jsSoftBodyMoving = false;

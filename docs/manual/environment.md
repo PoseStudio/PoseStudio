@@ -2,6 +2,8 @@
 
 The **Environment** tab on the side panel lights the scene. In the PBR shading mode the figure is lit by an HDR panorama — the environment surrounds it, reflects in it and casts its soft light from every direction — plus one adjustable key light for the direct sun or lamp and its shadow. The simpler shading modes use just the key light and a fixed studio rig.
 
+For lamps, spotlights and softboxes of your own, placed in the scene, see [Lights](lights.md): they add to everything on this page.
+
 Every dial is a **scrub field**: drag left or right across it to change the value, or click it once to type a number. Hold **Shift** while you drag for fine control — a tenth of the step, at a tenth of the speed (see [Fine control](interface.md#value-fields-and-fine-control)). Each row has a small **restore** button that returns that one setting to its default, and **Restore All Defaults** at the bottom resets everything. Changes show immediately, and each one is an undo step (`Ctrl+Z`) like a pose edit — except choosing an HDRI, which is not undoable.
 
 ## Choosing an HDRI
@@ -49,7 +51,7 @@ What is drawn *behind* the figure in the PBR mode. Lighting is unaffected by the
 
 ## Key light
 
-The one direct light — the sun, a window, a lamp. Its diffuse light wraps around skin the way light does, driven by the **Subsurface** dial below.
+The one direct light — the sun, a window, a lamp. Its diffuse light wraps around skin the way light does, driven by the **Subsurface** dial below. It is the one light whose shadow the PBR Shaded mode draws; set its Intensity to 0 to light the scene with the environment and your own [lights](lights.md) alone.
 
 | Setting | Range | Default | What it does |
 | --- | --- | --- | --- |

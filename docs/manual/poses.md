@@ -41,6 +41,7 @@ Distances assume a standard-size adult figure; a small character needs proportio
 ## Lifting her off the floor
 
 - Pull a hand up steadily, beyond the arm's reach. After a quarter of a second she lifts off and hangs from the hand; keep pulling and the whole body rises. Lower the hand and she lands on her feet and stands back up where she came down. Pinned joints stay pinned through a lift.
+- Let go of her in the air and she stays there, her feet hanging. To put her back down, press the **Ground** button, or drag the hips down: either way her feet go flat as the floor nears and she lands standing on her soles.
 
 ## Fixing a pose
 

@@ -60,8 +60,9 @@ struct SplatPushConstants {
     glm::vec4 focal;  ///< x = fx, y = fy (pixels), z = viewport width, w = height
     glm::vec4 params; ///< x = SH degree, y = harmonics uints per splat, z = the tiny-quad probe (POSESTUDIO_SPLAT_TINY, 0/1), w = orthographic (0/1)
     glm::vec4 camPos; ///< xyz = the eye in the splat's own (model) frame; w = 1 for the opacity compensation (every scene; 0 = the A/B off)
+    glm::vec4 cut;    ///< THE FLOOR CUT: x = a world height, y = +1 / -1 (the eye above / below that plane: splats beyond it are left out) or 0 = none
 };
-static_assert(sizeof(SplatPushConstants) == 112, "must match splat.vert's push block");
+static_assert(sizeof(SplatPushConstants) == 128, "must match splat.vert's push block");
 
 class SplatCloud {
 public:
@@ -90,8 +91,24 @@ public:
     /// pipeline and the camera set at 0), pushes the constants (the focal lengths off the
     /// camera's projection and viewport, the eye in the splat frame) and draws six vertices a
     /// splat (into the pass's photo layer: the colors as trained, the composite lays them over).
+    /// @p cut is the push block's floor cut (SplatPushConstants::cut): zero draws every splat.
     void record(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t frameIndex, const Camera& camera,
-                const glm::mat4& model) const;
+                const glm::mat4& model, const glm::vec4& cut = glm::vec4(0.0f)) const;
+
+    /// WHAT A CLICK IS ON: the cloud's opacity along a ray, as the pixel under the cursor shows
+    /// it. The ray is given in the cloud's OWN frame (@p origin, and @p direction the world's
+    /// unit direction taken through the inverse model matrix, NOT re-normalized — the parameter
+    /// along it is then the world's distance, comparable with a mesh's hit). Each splat the ray
+    /// passes within its 3-sigma footprint weighs in with its opacity times its Gaussian at the
+    /// ray's closest approach — the value the splat shader gives that pixel — and they are
+    /// accumulated near to far as the "over" blend accumulates them. @p opacityOut is the total
+    /// (what the outline's mask holds there: its half contour is the selection outline);
+    /// @p tOut is where the accumulated opacity reaches a half — where the capture is what the
+    /// eye sees along this ray — or, for a fainter total, where half of it has gathered. False
+    /// under kPickFaintOpacity in all: the cursor is on nothing of this cloud.
+    bool pick(const glm::vec3& origin, const glm::vec3& direction, float& tOut, float& opacityOut) const;
+    /// Under this much accumulated opacity a ray is on nothing of the cloud (a stray floater).
+    static constexpr float kPickFaintOpacity = 0.10f;
 
 private:
     /// Sorts the cloud far-first along @p viewDir at @p model into @p out, over @p chunks
@@ -105,6 +122,16 @@ private:
     uint32_t       m_shStride = 2; ///< Harmonics uints per splat.
     glm::vec3      m_boundsMin{0.0f};
     glm::vec3      m_boundsMax{0.0f};
+
+    // The CPU side of a click (pick): per splat the covariance (xx xy xz yy yz zz, as the GPU has
+    // it), the opacity and the footprint's reach (three of its largest standard deviation) —
+    // 32 bytes a splat; the centres are m_positions below.
+    struct PickSplat {
+        float cov[6];
+        float opacity;
+        float reach;
+    };
+    std::vector<PickSplat> m_pick;
 
     // The CPU side of the sort.
     std::vector<glm::vec3> m_positions; ///< Local centres.

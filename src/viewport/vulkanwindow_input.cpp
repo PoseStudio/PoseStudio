@@ -87,6 +87,13 @@ void VulkanWindow::mousePressEvent(QMouseEvent* event) {
             abortIkDrag();
         }
         m_ik.groupClickBone = -1;
+        // A LIGHT's marker comes first: it is a small handle drawn over everything, and a press
+        // on it selects the light and drags it (vulkanwindow_lights.cpp).
+        endLightGesture(); // (a stale one, whose release never reached this window)
+        if (beginLightGesture(event->position())) {
+            requestUpdate();
+            return;
+        }
         // (Shift: THE GROUP — the press extends the selection and drags the whole group; see
         // beginGroupGesture.)
         const bool began = event->modifiers().testFlag(Qt::ShiftModifier)
@@ -101,11 +108,20 @@ void VulkanWindow::mousePressEvent(QMouseEvent* event) {
 }
 
 bool VulkanWindow::hasSelection() const {
-    return m_renderer && m_renderer->scene().selectedModelIndex() >= 0;
+    return m_renderer && (m_renderer->scene().selectedModelIndex() >= 0 || m_renderer->scene().selectedLight() >= 0);
 }
 
 void VulkanWindow::clearSelection() {
-    if (!m_renderer || m_ik.dragging || scene().selectedModelIndex() < 0) {
+    if (!m_renderer || m_ik.dragging || m_lightDrag.active) {
+        return;
+    }
+    if (scene().selectedLight() >= 0) {
+        closeSettlingEdits();
+        scene().setSelectedLight(-1); // the selection was a light
+        requestUpdate();
+        return;
+    }
+    if (scene().selectedModelIndex() < 0) {
         return;
     }
     // (A release settle, the landing bounce, an open dial edit: landed and committed first, as a
@@ -117,11 +133,16 @@ void VulkanWindow::clearSelection() {
 }
 
 void VulkanWindow::selectModelAtClick(const QPointF& localPos) {
-    // Box-level pick (Model::intersectRay): the nearest model whose bounds the cursor's ray
-    // enters, else -1 = clear the selection. Selecting a figure also makes it the posing target;
+    // The model the cursor is ON (Scene::pickModel: the nearest surface under it — a figure's or
+    // a prop's mesh, a Gaussian splat scene's splats — and, on no surface, the nearest model
+    // whose bounds the cursor's ray enters), else -1 = clear the selection. Selecting a figure also makes it the posing target;
     // deselecting drops its joint selection with it (Scene::setSelectedModel).
     const Ray ray = cursorRay(localPos);
     const int picked = scene().pickModel(ray);
+    if (scene().selectedLight() >= 0) {
+        scene().setSelectedLight(-1); // a click off the lights' markers: the light is deselected
+        requestUpdate();
+    }
     if (picked != scene().selectedModelIndex()) {
         scene().setSelectedModel(picked);
         requestUpdate(); // the outline moved / went away
@@ -139,6 +160,12 @@ void VulkanWindow::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
     m_activeDragButtons &= ~event->button();
+    if (event->button() == Qt::LeftButton && m_lightDrag.active) {
+        endLightGesture(); // a light's drag: its one undo entry (a press that never moved: none)
+        m_leftClickCandidate = false;
+        requestUpdate();
+        return;
+    }
     if (event->button() == Qt::LeftButton) {
         if (dragInFlight() && m_renderer) {
             if (m_ik.dragging && !m_ik.poseChanged) {
@@ -188,6 +215,30 @@ void VulkanWindow::showObjectContextMenu(const QPointF& localPos, const QPoint& 
     // A joint under the cursor gets the pin actions (selecting it, so the skeleton overlay —
     // when shown — highlights which joint the menu acts on); the model under the cursor gets
     // Delete. Both can apply. Not while a pose edit owns the joints (a right-click mid-drag).
+    // A light's marker under the cursor: the light's own menu.
+    if (const int light = lightAt(localPos); light >= 0 && !poseEditInFlight()) {
+        selectLight(light);
+        requestUpdate();
+        QMenu    lightMenu;
+        QAction* aim = lightMenu.addAction(tr("Aim at Subject"));
+        QAction* toggle = lightMenu.addAction(m_deferred.lights[static_cast<std::size_t>(light)].enabled ? tr("Switch Off")
+                                                                                                          : tr("Switch On"));
+        lightMenu.addSeparator();
+        QAction* remove = lightMenu.addAction(tr("Delete Light"));
+        QAction* picked = lightMenu.exec(globalPos);
+        if (picked != nullptr && picked == aim) {
+            aimLightAtSubject(light);
+        } else if (picked != nullptr && picked == toggle) {
+            SceneLight changed = m_deferred.lights[static_cast<std::size_t>(light)];
+            changed.enabled = !changed.enabled;
+            setLight(light, changed);
+            endLightEdit();
+        } else if (picked != nullptr && picked == remove) {
+            removeLight(light);
+        }
+        requestUpdate();
+        return;
+    }
     const int joint = poseEditInFlight() ? -1 : boneAt(localPos);
     const int picked = scene().pickModel(cursorRay(localPos));
     if (joint < 0 && picked < 0) {
@@ -253,7 +304,9 @@ void VulkanWindow::mouseMoveEvent(QMouseEvent* event) {
     const Qt::MouseButtons active = m_activeDragButtons & event->buttons();
 
     Camera& camera = m_renderer->camera();
-    if ((active & Qt::LeftButton) && m_ik.dragging) {
+    if ((active & Qt::LeftButton) && m_lightDrag.active) {
+        lightDragMove(event->position()); // a light follows the cursor in its drag plane
+    } else if ((active & Qt::LeftButton) && m_ik.dragging) {
         // Full-body IK: the grabbed joint tracks the cursor within the camera-parallel plane
         // through its grab point. The plane's depth changes ONLY by explicit wheel steps
         // (wheelEvent), never from the solve, so it can't feed back.
@@ -294,6 +347,13 @@ void VulkanWindow::wheelEvent(QWheelEvent* event) {
         return;
     }
     const float steps = static_cast<float>(event->angleDelta().y()) / 120.0f;
+    if (m_lightDrag.active && (m_activeDragButtons & event->buttons() & Qt::LeftButton)) {
+        // DEPTH during a light's drag, as during a joint's: each notch moves the drag's plane
+        // along the view, the light staying under the pointer.
+        lightDragDepth(steps, event->position());
+        requestUpdate();
+        return;
+    }
     if (m_ik.dragging && (m_activeDragButtons & event->buttons() & Qt::LeftButton)) {
         // DEPTH during a full-body-IK drag. The cursor only ever places the grabbed joint within
         // the camera-parallel drag plane, so without this every "bring the hand forward" needed a

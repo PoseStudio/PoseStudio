@@ -37,6 +37,8 @@ struct IkScript {
     int         retries = 0;
     bool        materialLinked = true; ///< The Materials tab's "Edit matching zones together" for `material` (matlink on|off).
     int         waitTicks = 0;         ///< The ticks a `wait` has left (scriptWaitTick: each one also advances a fall in flight).
+    bool        waitForTraced = false; ///< `tracedwait`: the wait also ends once the Rendered mode's picture is finished.
+    int         waitedTicks = 0;       ///< … and how many ticks it took (the log's).
     // The last `render` (a production render through the engine): whether it finished, how long
     // it took, the picture's mean display value (0-255), and its covered share (percent of pixels
     // that differ from the top-left corner's — the backdrop).
@@ -44,6 +46,11 @@ struct IkScript {
     double      renderSeconds = 0.0;
     double      renderMean = 0.0;
     double      renderCovered = 0.0;
+    double      renderSplats = 0.0;  ///< 1 if the last render had the scene's Gaussian splats composited into it
+    QImage      renderImage;         ///< The last render's picture (the `probe`'s reading)
+    QImage      shotImage;           ///< The last `shot`'s picture (`shot.darkest`, `shot.below.<n>`)
+    bool        probeSet = false;    ///< `probe <x> <y> <z>`: a WORLD point …
+    float       probe[3] = {0.0f, 0.0f, 0.0f}; ///< … whose pixel `render.probe.<r|g|b|lum>` reads off the last render
 
     // --- A drag in flight ------------------------------------------------------------------
     bool      dragging = false;   ///< Between `press` and `release`.

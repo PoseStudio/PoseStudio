@@ -46,6 +46,7 @@ class HdrTarget;
 class OutlineMask;
 class PostProcess;
 class ShaderLibrary;
+class TracedView;
 struct SplatData;
 class Grid;
 class Scene;
@@ -91,6 +92,26 @@ public:
     /// asked for, the swapchain is not readable, or the frame was skipped by a rebuild).
     void requestCapture() { m_captureRequested = true; }
     bool takeCapture(CapturedFrame& out);
+
+    /// THE GAUSSIAN SPLATS AS LAYERS OF A RENDER. A path tracer cannot trace against a splat
+    /// scene — it is a recorded picture — so a render takes the capture as the viewport draws
+    /// it, at the render's own size, and composites (RenderSession): tightly packed RGBA floats,
+    /// top row first, PREMULTIPLIED color with the coverage in alpha, DISPLAY-referred (the
+    /// colors as the capture was trained, never touched by the scene's lighting).
+    struct SplatLayers {
+        uint32_t           width = 0;
+        uint32_t           height = 0;
+        std::vector<float> all;   ///< every splat, nothing in front of them: the PLATE the render stands on
+        std::vector<float> front; ///< only the splats in FRONT of the scene's surfaces (and of the floor): laid back over the render
+    };
+    /// Draws them, offscreen, through the viewport camera as a picture of @p width × @p height
+    /// frames it (the camera's height kept, as a render keeps it) and reads them back; blocks
+    /// until the GPU has. The FRONT layer is depth-tested against every mesh as posed — the
+    /// see-through ones from a twelfth of coverage — and, with @p cutAtFloor, holds nothing
+    /// beyond the level plane at @p floorHeight: what lies under that plane is the floor the
+    /// render's shadows fall on, and belongs to the plate. False without a splat scene. Throws
+    /// VulkanError when the device cannot hold targets of that size.
+    bool renderSplatLayers(uint32_t width, uint32_t height, bool cutAtFloor, float floorHeight, SplatLayers& out);
 
     /// Records the new physical-pixel size; the actual swapchain rebuild is deferred to
     /// the next drawFrame() so a burst of resize events coalesces into one rebuild.
@@ -141,6 +162,19 @@ public:
     /// swaps it in. The bake is done off the render thread by the Qt layer — keeping both the CPU work
     /// and the image codec out of this core. No-op if the scene doesn't exist yet.
     void applyBakedEnvironment(const BakedEnvironment& baked);
+
+    // --- THE RENDERED MODE (rendering/tracedview.h) ---------------------------------------------
+    /// The path-traced picture of the scene from now on: @p width × @p height linear RGBA floats,
+    /// row 0 = top, the exposure applied (a render engine's image, as its interface hands it
+    /// over). Copied; drawn from the next frame while setTracedShown(true).
+    void setTracedImage(const float* rgba, uint32_t width, uint32_t height);
+    /// Whether the frame shows the path-traced picture in place of the rasterized scene (it
+    /// does only once there is one: until then, and whenever this is off, the scene is drawn as
+    /// its shade mode says). The line overlays and the selection outline are drawn either way.
+    void setTracedShown(bool shown) { m_tracedShown = shown; }
+    bool tracedShown() const { return m_tracedShown; }
+    /// Forgets the picture (leaving the mode, or a picture of a scene that is gone).
+    void clearTracedImage();
 
     // --- VR Mode (the OpenXR session lives in src/viewport/vr/; this core sees only Vulkan) -----
     /// Enters VR: builds a second set of scene targets at the headset's per-eye size (@p eyeExtent)
@@ -200,6 +234,11 @@ private:
     bool recordScenePasses(VkCommandBuffer cmd, const Camera& camera, uint32_t frameSlot, HdrTarget& hdr,
                            OutlineMask& outline, PostProcess& post, VkExtent2D extent,
                            bool postEffects = true, bool asyncSplatSort = false);
+    /// THE RENDERED MODE's half of the frame graph, in place of recordScenePasses: the outline
+    /// mask, then the HDR scene pass holding the path-traced picture and the line overlays over
+    /// it (no shadow map, no meshes, no grid, no subsurface blur, no bloom — the picture has its
+    /// own light). Returns whether the outline mask was drawn.
+    bool recordTracedPasses(VkCommandBuffer cmd, const Camera& camera, uint32_t frameSlot, VkExtent2D extent);
 
     VulkanContext& m_context;
 
@@ -216,6 +255,8 @@ private:
     std::unique_ptr<Scene>           m_scene; // every scene pass: shadow map, outline mask, the HDR
                                               // scene (backdrop, meshes, overlays) — see scene.h
     std::unique_ptr<Grid>            m_grid;  // floor grid overlay (drawn into the HDR pass after the scene)
+    std::unique_ptr<TracedView>      m_traced; // the Rendered mode's picture (tracedview.h)
+    bool                             m_tracedShown = false; // see setTracedShown
     float                            m_uiScale = 1.0f; // see setUiScale
     SelectionStyle                   m_selectionStyle;  // see setSelectionStyle
 

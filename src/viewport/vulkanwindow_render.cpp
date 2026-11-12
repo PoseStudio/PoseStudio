@@ -20,6 +20,7 @@
 #include "vulkanwindow.h"
 
 #include "environment.h"
+#include "environmentsource.h" // loadEnvironmentImage (a render's backdrop behind a splat scene)
 #include "importformats.h"
 #include "lightingsettings.h"
 #include "materialparams.h"
@@ -32,19 +33,169 @@
 #include "scene.h"
 #include "vulkanrenderer.h"
 
+#include "parallelfor.h"
+
 #include <QDir>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QImage>
+#include <QPointer>
 #include <QStringList>
 
 #include <cstdint>
 #include <cstdio>
+#include <cmath>
+#include <exception>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 
 namespace pose {
+
+void VulkanWindow::captureRenderLighting(RenderSnapshot& snapshotRef) const {
+    using renderapi::ColorSpace;
+    RenderSnapshot* const   snapshot = &snapshotRef;
+    const Scene&            live = scene();
+    const LightingSettings& lighting = live.lightingSettings();
+
+    // --- The environment: the panorama that lights the scene now, or the procedural studio ---
+    renderapi::Environment& environment = snapshot->description.environment;
+    float                   luminanceScale = 1.0f;
+    if (!m_appliedEnvironmentPath.isEmpty() && QFileInfo::exists(m_appliedEnvironmentPath)) {
+        snapshot->environmentFile = QFileInfo(m_appliedEnvironmentPath).absoluteFilePath().toStdString();
+        environment.file = snapshot->environmentFile.c_str();
+        luminanceScale = m_appliedEnvironmentScale;
+    } else {
+        // (Made once: see RenderSnapshot::environmentPixels.)
+        if (!m_studioEnvironment) {
+            EnvironmentImage studio = generateStudioEnvironment();
+            normalizeEnvironmentLuminance(studio, kEnvironmentAverageLuminance); // (the pixels carry the factor)
+            m_studioEnvironmentWidth = studio.width;
+            m_studioEnvironmentHeight = studio.height;
+            m_studioEnvironment = std::make_shared<const std::vector<glm::vec3>>(std::move(studio.pixels));
+        }
+        snapshot->environmentPixels = m_studioEnvironment;
+        renderapi::Image image;
+        image.id = 1; // (no DecodedImage has this address)
+        image.pixels = snapshot->environmentPixels->data();
+        image.width = m_studioEnvironmentWidth;
+        image.height = m_studioEnvironmentHeight;
+        image.channels = 3;
+        image.format = renderapi::PixelFormat::Float32;
+        image.colorSpace = ColorSpace::Linear;
+        image.name = "studio environment";
+        environment.image = static_cast<int32_t>(snapshot->images.size());
+        snapshot->images.push_back(image);
+    }
+    renderEnvironment(lighting, luminanceScale, environment);
+
+    // --- The key light, the floor's shadows, the camera ---
+    const renderapi::Light key = renderKeyLight(lighting);
+    if (key.strength > 0.0f) {
+        snapshot->lights.push_back(key);
+    }
+    // … and the light objects, every enabled one (the viewport shades with the first few; a
+    // render traces them all, shadows included).
+    for (const SceneLight& light : live.lights()) {
+        if (light.enabled && light.intensity > 0.0f) {
+            snapshot->lights.push_back(renderLight(light));
+        }
+    }
+    snapshot->description.floorShadows = lighting.shadowsEnabled ? 1 : 0;
+    snapshot->description.floorHeight = 0.0f;
+}
+
+std::shared_ptr<RenderSplatLayers> VulkanWindow::captureSplatLayers(int width, int height,
+                                                                    const renderapi::Environment& environment, bool floorShadows) {
+    if (!m_renderer || width < 1 || height < 1 || !scene().hasSplats()) {
+        return nullptr;
+    }
+    // What lies within this of the floor's plane is the capture's FLOOR: it stays in the plate,
+    // where the render's shadows fall on it, and out of the layer laid back over the picture.
+    // (A reconstruction's floor is a few centimetres thick; a shoe on it is not the floor.)
+    constexpr float kSplatFloorDepth = 0.04f;
+    VulkanRenderer::SplatLayers drawn;
+    try {
+        if (!m_renderer->renderSplatLayers(static_cast<uint32_t>(width), static_cast<uint32_t>(height), floorShadows,
+                                           kSplatFloorDepth, drawn)) {
+            return nullptr;
+        }
+    } catch (const std::exception& e) {
+        // (Targets of the render's size did not fit on the device, most likely: the render goes
+        // without the capture, and says so.)
+        qWarning("[render] the Gaussian splat layers could not be drawn at %dx%d: %s", width, height, e.what());
+        return nullptr;
+    }
+    auto layers = std::make_shared<RenderSplatLayers>();
+    layers->width = width;
+    layers->height = height;
+    layers->all = std::move(drawn.all);
+    layers->front = std::move(drawn.front);
+
+    // An ENVIRONMENT backdrop: the panorama as a render draws it behind the scene — along each
+    // pixel's own ray, turned as the lighting is, at the backdrop's brightness — so that the
+    // capture stands in front of the same backdrop a render without one shows.
+    if (environment.backdrop != 0) {
+        EnvironmentImage panorama;
+        if (environment.file != nullptr && environment.file[0] != '\0') {
+            if (std::optional<EnvironmentImage> loaded = loadEnvironmentImage(environment.file)) {
+                panorama = std::move(*loaded);
+            }
+        } else if (m_studioEnvironment && m_studioEnvironmentWidth > 0 && m_studioEnvironmentHeight > 0) {
+            panorama.width = m_studioEnvironmentWidth;
+            panorama.height = m_studioEnvironmentHeight;
+            panorama.pixels = *m_studioEnvironment;
+        }
+        if (panorama.width > 0 && panorama.height > 0) {
+            Camera camera = m_renderer->camera();
+            camera.setViewportSize(static_cast<float>(width), static_cast<float>(height));
+            const float gain = environment.strength * environment.backdropStrength;
+            const float c = std::cos(environment.rotation);
+            const float s = std::sin(environment.rotation);
+            layers->backdrop.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3u);
+            parallelFor(height, [&](int y) {
+                float* out = &layers->backdrop[static_cast<std::size_t>(y) * static_cast<std::size_t>(width) * 3u];
+                for (int x = 0; x < width; ++x, out += 3) {
+                    // (Four rays a pixel: a panorama's fine detail — a softbox's grid — is
+                    // filtered as a render's many samples filter it, not point-sampled.)
+                    glm::vec3 radiance(0.0f);
+                    for (int sub = 0; sub < 4; ++sub) {
+                        const Ray ray = camera.screenPointToRay(static_cast<float>(x) + (sub & 1 ? 0.75f : 0.25f),
+                                                                static_cast<float>(y) + (sub & 2 ? 0.75f : 0.25f),
+                                                                static_cast<float>(width), static_cast<float>(height));
+                        // (camera_ubo.glsl's rotateY: the direction the viewport samples its environment along.)
+                        const glm::vec3 d(c * ray.direction.x + s * ray.direction.z, ray.direction.y,
+                                          -s * ray.direction.x + c * ray.direction.z);
+                        radiance += panorama.sample(d);
+                    }
+                    radiance *= 0.25f * gain;
+                    out[0] = radiance.x;
+                    out[1] = radiance.y;
+                    out[2] = radiance.z;
+                }
+            });
+        }
+    }
+    return layers;
+}
+
+std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderLightingOnly() {
+    if (!m_renderer) {
+        return nullptr;
+    }
+    auto snapshot = std::make_shared<RenderSnapshot>();
+    captureRenderLighting(*snapshot);
+    const LightingSettings& lighting = scene().lightingSettings();
+    const QSize             pixels = pixelExtent();
+    snapshot->viewSettings.exposure = lighting.exposure;
+    snapshot->viewSettings.tonemap = lighting.tonemap;
+    snapshot->viewSettings.width = pixels.width();
+    snapshot->viewSettings.height = pixels.height();
+    snapshot->description.camera = renderCamera(m_renderer->camera());
+    snapshot->link();
+    return snapshot;
+}
 
 std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
     if (!m_renderer) {
@@ -196,38 +347,7 @@ std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
         }
     }
 
-    // --- The environment: the panorama that lights the scene now, or the procedural studio ---
-    renderapi::Environment& environment = snapshot->description.environment;
-    float                   luminanceScale = 1.0f;
-    if (!m_appliedEnvironmentPath.isEmpty() && QFileInfo::exists(m_appliedEnvironmentPath)) {
-        snapshot->environmentFile = QFileInfo(m_appliedEnvironmentPath).absoluteFilePath().toStdString();
-        environment.file = snapshot->environmentFile.c_str();
-        luminanceScale = m_appliedEnvironmentScale;
-    } else {
-        EnvironmentImage studio = generateStudioEnvironment();
-        normalizeEnvironmentLuminance(studio, kEnvironmentAverageLuminance); // (the pixels carry the factor)
-        snapshot->environmentPixels = std::move(studio.pixels);
-        renderapi::Image image;
-        image.id = 1; // (no DecodedImage has this address)
-        image.pixels = snapshot->environmentPixels.data();
-        image.width = studio.width;
-        image.height = studio.height;
-        image.channels = 3;
-        image.format = renderapi::PixelFormat::Float32;
-        image.colorSpace = ColorSpace::Linear;
-        image.name = "studio environment";
-        environment.image = static_cast<int32_t>(snapshot->images.size());
-        snapshot->images.push_back(image);
-    }
-    renderEnvironment(lighting, luminanceScale, environment);
-
-    // --- The key light, the floor's shadows, the camera ---
-    const renderapi::SunLight key = renderKeyLight(lighting);
-    if (key.strength > 0.0f) {
-        snapshot->suns.push_back(key);
-    }
-    snapshot->description.floorShadows = lighting.shadowsEnabled ? 1 : 0;
-    snapshot->description.floorHeight = 0.0f;
+    captureRenderLighting(*snapshot); // the environment, the key light, the light objects, the floor
     snapshot->description.camera = renderCamera(m_renderer->camera());
 
     const QSize pixels = pixelExtent();
@@ -238,11 +358,23 @@ std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
 
     snapshot->link();
 
+    // The scene's Gaussian splats: a render composites them from layers this window draws when
+    // the render's size is known (captureSplatLayers).
+    if (snapshot->splatScenes > 0) {
+        const QPointer<VulkanWindow>  self(this);
+        const renderapi::Environment  environment = snapshot->description.environment; // (file: the snapshot's string, which the session holds)
+        const bool                    floorShadows = snapshot->description.floorShadows != 0;
+        snapshot->splatSource = [self, environment, floorShadows](int width, int height) -> std::shared_ptr<RenderSplatLayers> {
+            return self ? self->captureSplatLayers(width, height, environment, floorShadows) : nullptr;
+        };
+    }
+
     // POSESTUDIO_RENDER_TRACE=1: what a render engine is handed — every zone's material in the
     // interface's own terms, the lights, the environment. The first thing to read when a render
     // and the viewport disagree about a surface.
     static const bool trace = qEnvironmentVariableIsSet("POSESTUDIO_RENDER_TRACE");
     if (trace) {
+        const renderapi::Environment& environment = snapshot->description.environment;
         const auto map = [](const renderapi::Material& m, MapSlot slot) {
             return m.maps[static_cast<int>(slot)].image >= 0 ? '+' : '-';
         };
@@ -264,10 +396,14 @@ std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
                          map(m, MapSlot::Roughness), map(m, MapSlot::Metallic), map(m, MapSlot::Specular),
                          map(m, MapSlot::Normal), map(m, MapSlot::Bump), map(m, MapSlot::Subsurface));
         }
-        for (const renderapi::SunLight& sun : snapshot->suns) {
-            std::fprintf(stderr, "[render] sun toward %.2f %.2f %.2f  color %.2f %.2f %.2f  strength %.2f  angle %.1f deg\n",
-                         sun.direction[0], sun.direction[1], sun.direction[2], sun.color[0], sun.color[1], sun.color[2],
-                         sun.strength, sun.angle * 57.29578f);
+        for (const renderapi::Light& light : snapshot->lights) {
+            static const char* const kKinds[] = {"sun", "point", "spot", "area"};
+            std::fprintf(stderr,
+                         "[render] %s light at %.2f %.2f %.2f  shining %.2f %.2f %.2f  color %.2f %.2f %.2f  strength %.2f  "
+                         "angle %.1f deg  radius %.3f  size %.2f x %.2f\n",
+                         kKinds[static_cast<int>(light.type) & 3], light.position[0], light.position[1], light.position[2],
+                         light.direction[0], light.direction[1], light.direction[2], light.color[0], light.color[1],
+                         light.color[2], light.strength, light.angle * 57.29578f, light.radius, light.sizeU, light.sizeV);
         }
         std::fprintf(stderr,
                      "[render] environment %s  strength %.3f  ambient %.3f  rotation %.1f deg  backdrop %d (%.3f %.3f %.3f x %.2f)  "
@@ -292,6 +428,8 @@ void VulkanWindow::scriptRender(const QStringList& words) {
     s.renderSeconds = 0.0;
     s.renderMean = 0.0;
     s.renderCovered = 0.0;
+    s.renderSplats = 0.0;
+    s.renderImage = QImage();
     const auto note = [](const QString& text) {
         std::fprintf(stderr, "[ikscript]   render: %s\n", qPrintable(text));
         std::fflush(stderr);
@@ -384,6 +522,8 @@ void VulkanWindow::scriptRender(const QStringList& words) {
     s.renderOk = 1.0;
     s.renderMean = sum / pixels;
     s.renderCovered = 100.0 * static_cast<double>(covered) / pixels;
+    s.renderSplats = session.compositesSplats() ? 1.0 : 0.0;
+    s.renderImage = image.copy();
     note(QStringLiteral("%1 x %2, %3 samples on %4: %5 s, mean %6, covered %7 % -> %8")
              .arg(options.width)
              .arg(options.height)

@@ -22,9 +22,12 @@
 #include "armature.h" // IkScope
 #include "jointtransform.h"
 #include "lineoverlay.h" // PointerLine (setVrPointerLines)
+#include "scenelight.h"
 #include "materialparams.h" // MaterialView / MaterialParams (the Materials tab)
 
 #include <glm/glm.hpp>
+
+#include <cstdint>
 #include <vulkan/vulkan.h>
 
 #include <memory>
@@ -108,8 +111,44 @@ public:
     void                   setLightingSettings(const LightingSettings& settings) { m_lighting = settings; }
     const LightingSettings& lightingSettings() const { return m_lighting; }
 
-    /// Returns the index of the nearest model whose bounding box @p ray hits, or -1 if none.
+    // --- The LIGHT OBJECTS (scenelight.h): point, spot, area and sun lights the user places ---
+    /// The scene's light objects, in the order they were added. The PBR mode shades with the
+    /// first kMaxViewportLights enabled ones; a render engine is handed them all.
+    const std::vector<SceneLight>& lights() const { return m_lights; }
+    /// Replaces the whole list (an edit, an undo, a project opened). The selected light is kept
+    /// where it still exists.
+    void setLights(std::vector<SceneLight> lights);
+    /// Bumped whenever the list changes in any way (the Lights tab and the Rendered viewport
+    /// mode re-read on it).
+    std::uint64_t lightsRevision() const { return m_lightsRevision; }
+    /// The selected light's index, or -1. A light and a model are never selected together:
+    /// selecting one clears the other.
+    int  selectedLight() const;
+    void setSelectedLight(int index);
+    /// The light whose marker is under pixel (@p x, @p y) of a @p width × @p height view through
+    /// @p camera (window coordinates, as the joint pick's), nearest the camera first; -1 on a miss.
+    int pickLight(const Camera& camera, float x, float y, float width, float height) const;
+    /// The world AABB of what a light is aimed AT: the active figure's, else the union of every
+    /// model's. False with nothing in the scene.
+    bool subjectBounds(glm::vec3& outMin, glm::vec3& outMax) const;
+
+    /// THE MODEL A CLICK IS ON (@p ray: the cursor's, world space), -1 for none. What the
+    /// cursor is on comes first: the nearest SURFACE along the ray — a figure's or a prop's
+    /// triangles (a see-through one included: a click on her hair is a click on her), a
+    /// Gaussian splat scene where it covers the pixel by a half or more (Model::pickExact) —
+    /// then a splat scene that is fainter there, and only when the cursor is on no surface at
+    /// all the nearest model whose BOX the ray enters (a click just off a lone figure still
+    /// selects it). Until 2026-11-12 it was the box alone: a figure's box is
+    /// her posed joints plus a flesh margin, as wide as her arms, and with a capture close
+    /// behind her every click on the capture entered her box first and selected her.
     int pickModel(const Ray& ray) const;
+    /// The nearest surface of a model that is NO figure along @p ray that HIDES what is behind
+    /// it — a prop's opaque mesh, a splat scene where it covers the pixel (Model::ModelHit::
+    /// tSolid) — in @p tOut; false with none. What the joint pick asks before it takes a joint:
+    /// a click on a capture or a prop is not a click on the figure behind it, nor on a joint
+    /// that merely projects nearby. (A see-through surface does not count: a figure behind a
+    /// pane of glass is still posed by clicking her.)
+    bool otherSurfaceAt(const Ray& ray, float& tOut) const;
 
     /// The world AABB to frame for "frame selected": the selected model's, else the union of
     /// every model's (a posed figure's bounds follow its joints — see Model::worldBounds).
@@ -127,6 +166,9 @@ public:
 
     /// The number of imported models, in scene order (the Nth import is index N-1).
     std::size_t modelCount() const;
+    /// Bumped whenever a model is added or removed: with it, a model's address says which model
+    /// it is (the Rendered viewport mode's scene signature).
+    std::uint64_t modelsRevision() const { return m_modelsRevision; }
 
     /// Model @p index in scene order — the .pss document addresses its figures by this position
     /// (out of range: nullptr).
@@ -156,11 +198,31 @@ public:
     /// (skeleton / pins / the orthographic floor line — always, even with no models). The caller
     /// has begun the render pass and set the dynamic viewport/scissor.
     void record(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex);
+    /// THE RENDERED MODE's scene pass: this frame's camera block and the LINE OVERLAYS alone (the
+    /// light objects' markers, the pins, the skeleton, the floor line) — the meshes and the
+    /// backdrop are in the path-traced picture the renderer has drawn first (tracedview.h).
+    void recordOverlays(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex);
     /// The GAUSSIAN SPLAT pass (splatcloud.h): every splat model's cloud, sorted far-first for
     /// this view and alpha-blended, depth-tested against the opaque geometry. Recorded by the
     /// renderer AFTER the grid, so the floor's lines lie under a capture's floor instead of
     /// drawing across its legs (a splat writes no depth). No-op without a splat model.
-    void recordSplats(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex, bool asyncSort = false);
+    /// @p cut is the splat shader's floor cut (SplatPushConstants::cut; zero = every splat).
+    void recordSplats(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex, bool asyncSort = false,
+                      const glm::vec4& cut = glm::vec4(0.0f));
+    /// Writes frame slot @p frameIndex's camera block for @p camera — what record() and
+    /// recordOverlays() do on their way, for a pass sequence that runs neither (the offscreen
+    /// splat layers of a render: VulkanRenderer::renderSplatLayers).
+    void writeCameraUbo(const Camera& camera, uint32_t frameIndex);
+    /// THE SPLAT LAYER'S OCCLUDERS, depth only, inside the scene pass (the camera block of
+    /// @p frameIndex written): with @p opaque the opaque meshes (the hidden-line fill: for a pass
+    /// that drew no surface of its own — the Rendered mode's, a render's front layer), and always
+    /// the SEE-THROUGH ones where they have enough coverage (depthcutout.frag; @p fine: from a
+    /// twelfth, else from a half) — without which a capture behind a head of hair cards was
+    /// drawn over the hair.
+    void recordSplatOccluders(VkCommandBuffer cmd, uint32_t frameIndex, bool opaque, bool fine);
+    /// The occluder pipeline's shaders (the renderer hands them over once the scene exists).
+    void buildSplatOccluderPipeline(VkRenderPass renderPass, const std::vector<char>& vertSpirv,
+                                    const std::vector<char>& fragSpirv);
     /// The ORDER buffer's slot of a splat scene for this frame: the desktop frames alternate theirs
     /// with the frame in flight; VR Mode's two eyes (one VR frame in flight, waited for before the
     /// next records, the same far-first order for both) share slot 0, so the order is copied once a
@@ -322,6 +384,15 @@ public:
     bool beginLandingBounce(int index, float impactSpeed);
     bool landingBounceTick(int index, float seconds);
     void endLandingBounce(int index);
+    /// THE HANGING FEET COME DOWN FLAT (Armature::beginHangFeetLanding) on model @p index: feet a
+    /// lift left hanging — the lift-off's tiptoe, the dangle's point — go flat again under the
+    /// Ground button's fall. begin: true when she has such feet (the pose is not changed); pose:
+    /// @p hang of the way from flat (0) to as found (1); poseForFall: by what is left of the drop;
+    /// end: the landing is over, the feet stay as posed.
+    bool beginHangFeetLanding(int index);
+    void poseHangFeet(int index, float hang);
+    void poseHangFeetForFall(int index, float remaining, float total);
+    void endHangFeetLanding(int index);
     /// THE SOFT BREASTS (Armature::tickSoftBody) on model @p index: the fall's tick, its tail's
     /// test and rest; the settings applied to every figure; the active figure's swing (scripts).
     bool  tickSoftBody(int index, float dt);
@@ -431,6 +502,7 @@ private:
     std::unique_ptr<IblMaps>        m_iblMaps;
 
     std::vector<std::unique_ptr<Model>> m_models;
+    std::uint64_t m_modelsRevision = 0; ///< See modelsRevision().
     int m_activeFigure = -1;
     bool m_pick2D = false; ///< See setPick2D(). ///< See activeFigureIndex(): the posing target among the figures.
     int m_selectedModel = -1; ///< See selectedModelIndex(): the outlined model (-1 = none).
@@ -449,6 +521,9 @@ private:
     EnvironmentSH    m_environmentSH;
     BrdfLut          m_brdfLut;
     LightingSettings m_lighting; // live exposure/diffuse/specular/fill/key/rotation/tonemap dials (Environment panel)
+    std::vector<SceneLight> m_lights;          // the light objects (see lights())
+    std::uint64_t           m_lightsRevision = 1;
+    int                     m_selectedLight = -1;
     SelectionStyle   m_selectionStyle; // the selected-joint highlight's color + opacity (Preferences -> Selection)
 
     // The transparent pass's per-frame sort list (every model's transparent meshes together,

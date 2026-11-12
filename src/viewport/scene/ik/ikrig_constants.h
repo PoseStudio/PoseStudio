@@ -100,6 +100,14 @@ constexpr float kBalanceSmoothing = 0.25f;
 /// (figure-scaled) is pinned AT that height — a hovering figure is pulled back onto the floor;
 /// one further off it (a kneeling knee, a deliberately airborne pose) keeps its height.
 constexpr float kGroundHealBand = 0.12f;
+/// ... and at a LANDING out of a lift (plantContacts with dragStart false) the ANKLE of a foot that
+/// has come down is healed from further up: a hanging foot touches down toes first, and its ankle
+/// then stands a pointed foot's reach over its standing height — inside the band above on the eight
+/// reference figures (their reports are byte-identical with this one), 12.06cm on a long-footed
+/// heavy character: 0.6mm outside it, so her ankle's pin stayed where the ankle was and she "landed"
+/// standing on tiptoe 12cm up (2026-11-12; the turned landing's harness phase found it on the
+/// character sweep). A foot's length covers a pointed foot.
+constexpr float kLandingHealBand = 0.20f;
 constexpr float kStepNeedThreshold = 0.025f;
 constexpr float kStepStanceThreshold = 0.12f; ///< Explicit-anchor drags: stance error that steps.
 constexpr int   kStepConfirmTicks = 12;

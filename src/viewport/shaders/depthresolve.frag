@@ -1,10 +1,10 @@
 #version 450
 
 // The DEPTH RESOLVE: the multisampled scene depth into a single-sample depth image — VR Mode's
-// per-eye depth for the headset's reprojection (XR_KHR_composition_layer_depth), and the photo
-// pass's depth, which the Gaussian splats are tested against (hdrtarget.h). The NEAREST sample
-// wins — at a silhouette the closer surface is what a reprojection should move with, and what
-// a splat behind the figure's edge must not show through.
+// per-eye depth for the headset's reprojection (XR_KHR_composition_layer_depth). The NEAREST
+// sample wins: at a silhouette the closer surface is what a reprojection should move with.
+// (The photo pass's depth, which the Gaussian splats are tested against, is resolved the same
+// way by photoresolve.frag, which writes the scene's coverage beside it.)
 //
 // Pass:    a depth-only single-sample pass over the destination (cleared to 1.0, depth test
 //          LESS + write: a far-plane fragment leaves the clear's 1.0, every nearer one lands).

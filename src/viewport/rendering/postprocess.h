@@ -4,7 +4,7 @@
  *        scattering, bloom, and the fullscreen composite that tonemaps into the swapchain.
  *
  * Six fullscreen passes share one fullscreen-triangle vertex shader (fullscreen.vert) and one
- * three-sampler descriptor layout: the SSS blur (two full-resolution masked passes, H into a
+ * six-sampler descriptor layout: the SSS blur (two full-resolution masked passes, H into a
  * scratch target and V back INTO the HDR resolve, so everything downstream sees diffused skin —
  * the V pass adds the scene's separately-rendered specular back over the blur), the classic
  * three-pass half-resolution bloom (bright-extract with a soft threshold, then a separable
@@ -52,6 +52,12 @@ struct PostProcessCompositeOptions {
     /// The outline mask holds a splat scene's accumulated opacity (Scene::selectedIsSplat):
     /// the outline follows its 50% contour rather than reading it as coverage.
     bool  outlineFromSplats = false;
+    /// THE EDGE BLEND (HdrTarget::coverageMode, 0 = off): the chain's coverage images hold
+    /// this frame's scene coverage, so the composite blends the scene's antialiased silhouette
+    /// against the Gaussian splats behind it instead of against the backdrop it was resolved
+    /// with (composite.frag) — 1 with the photo layer at the scene's size, 2 with it scaled
+    /// down. Never with fromMirror: the mirror samples between texels.
+    int   edgeMode = 0;
 };
 
 class PostProcess {
@@ -65,12 +71,18 @@ public:
     /// @param hdrPhotoResolve     The HDR target's resolved PHOTO LAYER — the Gaussian splats,
     ///                            premultiplied color + coverage in the trainers' own color
     ///                            space, which the composite lays over the tonemapped scene.
+    /// @param hdrCoverage, hdrCoverageFull  The HDR target's scene COVERAGE per texel of the
+    ///                            photo layer and per pixel (HdrTarget::coverageInfo /
+    ///                            coverageFullInfo), read by the composite's edge blend
+    ///                            (CompositeOptions::edgeMode).
     /// @param outlineMask         The selection-outline coverage mask (OutlineMask) the composite
     ///                            dilates into the outline (re-fed on resize).
     PostProcess(VulkanContext& context, VkRenderPass swapchainRenderPass,
                 const VkDescriptorImageInfo& hdrResolve,
                 const VkDescriptorImageInfo& hdrSpecResolve,
                 const VkDescriptorImageInfo& hdrPhotoResolve,
+                const VkDescriptorImageInfo& hdrCoverage,
+                const VkDescriptorImageInfo& hdrCoverageFull,
                 const VkDescriptorImageInfo& outlineMask, VkExtent2D extent,
                 const std::vector<char>& fullscreenVertSpirv,
                 const std::vector<char>& brightFragSpirv, const std::vector<char>& blurFragSpirv,
@@ -86,6 +98,8 @@ public:
     void resize(VkExtent2D extent, const VkDescriptorImageInfo& hdrResolve,
                 const VkDescriptorImageInfo& hdrSpecResolve,
                 const VkDescriptorImageInfo& hdrPhotoResolve,
+                const VkDescriptorImageInfo& hdrCoverage,
+                const VkDescriptorImageInfo& hdrCoverageFull,
                 const VkDescriptorImageInfo& outlineMask);
 
     /// The selection outline's color (LINEAR rgb) and opacity (0 = no outline, 1 = the color
@@ -115,11 +129,12 @@ public:
                          const CompositeOptions& options = {});
 
     /// Points the MIRROR composite (CompositeOptions::fromMirror) at another chain's outputs: its
-    /// HDR resolve, its bloom target (bloomInfo()), its outline mask and its photo layer — the
-    /// desktop viewport's window onto what the headset sees. Kept across resize();
-    /// clearMirrorSource() drops it (call before those images are destroyed).
+    /// HDR resolve, its bloom target (bloomInfo()), its outline mask, its photo layer and its
+    /// two coverage images — the desktop viewport's window onto what the headset sees. Kept
+    /// across resize(); clearMirrorSource() drops it (call before those images are destroyed).
     void setMirrorSource(const VkDescriptorImageInfo& hdrResolve, const VkDescriptorImageInfo& bloom,
-                         const VkDescriptorImageInfo& outlineMask, const VkDescriptorImageInfo& photo);
+                         const VkDescriptorImageInfo& outlineMask, const VkDescriptorImageInfo& photo,
+                         const VkDescriptorImageInfo& coverage, const VkDescriptorImageInfo& coverageFull);
     void clearMirrorSource();
     /// The final bloom target (sampled, SHADER_READ_ONLY after recordBloom) — a mirror source.
     VkDescriptorImageInfo bloomInfo() const;
@@ -146,7 +161,9 @@ private:
     void destroyTargets();
     void updateDescriptors(const VkDescriptorImageInfo& hdrResolve,
                            const VkDescriptorImageInfo& hdrSpecResolve,
-                   const VkDescriptorImageInfo& hdrPhotoResolve,
+                           const VkDescriptorImageInfo& hdrPhotoResolve,
+                           const VkDescriptorImageInfo& hdrCoverage,
+                           const VkDescriptorImageInfo& hdrCoverageFull,
                            const VkDescriptorImageInfo& outlineMask);
     void runFullscreenPass(VkCommandBuffer cmd, VkFramebuffer framebuffer, VkExtent2D extent,
                            const VulkanPipeline& pipeline, VkDescriptorSet set,
@@ -170,19 +187,22 @@ private:
     Target            m_sssScratch;   // full resolution
     UniqueFramebuffer m_sssResolveFb; // targets the HDR resolve view
 
-    // One three-sampler set layout serves every pass (a pass's unused bindings = its binding-0
+    // One six-sampler set layout serves every pass (a pass's unused bindings = its binding-0
     // image again, so every declared binding is valid).
     UniqueDescriptorSetLayout m_setLayout;
     UniqueDescriptorPool      m_pool;
     VkDescriptorSet           m_brightSet = VK_NULL_HANDLE;    // 0 = HDR resolve
     VkDescriptorSet           m_blurHSet = VK_NULL_HANDLE;     // 0 = bloom A
     VkDescriptorSet           m_blurVSet = VK_NULL_HANDLE;     // 0 = bloom B
-    VkDescriptorSet           m_compositeSet = VK_NULL_HANDLE; // 0 = HDR resolve, 1 = bloom A, 2 = outline mask
+    VkDescriptorSet           m_compositeSet = VK_NULL_HANDLE; // 0 = HDR resolve, 1 = bloom A, 2 = outline mask,
+                                                               // 3 = photo layer, 4 = scene coverage per layer
+                                                               // texel, 5 = scene coverage per pixel
     VkDescriptorSet           m_sssHSet = VK_NULL_HANDLE;      // 0 = HDR resolve
     VkDescriptorSet           m_sssVSet = VK_NULL_HANDLE;      // 0 = SSS scratch, 1 = spec resolve
     VkDescriptorSet           m_mirrorSet = VK_NULL_HANDLE;    // the composite over setMirrorSource's images
     bool                      m_hasMirror = false;
-    VkDescriptorImageInfo     m_mirrorInfos[4]{};              // hdr, bloom, outline, photo (re-written on resize)
+    VkDescriptorImageInfo     m_mirrorInfos[6]{};              // hdr, bloom, outline, photo, the two coverages
+                                                               // (re-written on resize)
     VkDescriptorSet           m_depthResolveSet = VK_NULL_HANDLE; // 0 = the MSAA depth (enableDepthResolve)
     VkRenderPass              m_depthResolvePass = VK_NULL_HANDLE; // borrowed (the session's)
     uint32_t                  m_depthSamples = 1;

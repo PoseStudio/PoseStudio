@@ -21,9 +21,15 @@
  * splats cost four blends for an edge the soft Gaussian never has: the splats were the whole of
  * a frame's GPU time, and a headset frame, two eyes of several megapixels each, could not be
  * had at all. The pass depth-tests the splats against the scene's depth, resolved first — the
- * nearest sample, through the depth layer's own resolve shader — into a single-sample depth
- * image of the layer's size; on a single-sample device the scene's depth image is the
- * attachment itself and nothing is resolved. The layer may be SMALLER than the scene
+ * nearest sample (photoresolve.frag) — into a single-sample depth image of the layer's size; on
+ * a single-sample device the scene's depth image is the attachment itself and nothing is
+ * resolved. The same resolve writes the scene's COVERAGE of each texel (coverageInfo): at a
+ * silhouette the resolved scene is part figure, part backdrop, and the nearest-sample test
+ * keeps every splat behind her out of the whole texel — the composite needs the coverage to
+ * put the capture, not the backdrop, behind her antialiased edge (composite.frag, THE EDGE).
+ * With the layer at a reduced scale that coverage is per BLOCK (which texels of the layer the
+ * scene touched), and a second, coverage-only pass writes the scene's own, pixel for pixel
+ * (coverageFullInfo): the composite needs both there — see coverageMode(). The layer may be SMALLER than the scene
  * (photoScale, VR Mode's lever: the fill is what a headset frame cannot afford, and a capture
  * upsampled a little is softer where a dropped frame is worse); the composite samples it
  * bilinearly whatever its size. Without a splat in the scene the pass is skipped and the layer
@@ -51,14 +57,15 @@ class VulkanPipeline;
 
 class HdrTarget {
 public:
-    /// @param fullscreenVertSpirv, depthResolveFragSpirv  The photo pass's depth resolve — the
-    ///        depth layer's shader (depthresolve.frag: the nearest of the scene depth's samples),
-    ///        built here against the resolve pass; unused on a single-sample device.
+    /// @param fullscreenVertSpirv, photoResolveFragSpirv  The photo pass's resolve
+    ///        (photoresolve.frag: the nearest of the scene depth's samples, and the share of them
+    ///        the scene covers), built here against the resolve pass; unused on a single-sample
+    ///        device.
     /// @param photoScale  The photo layer's size as a share of the scene's, 0.25 .. 1 (1 on a
     ///        single-sample device, whose scene depth image is the photo pass's own attachment
     ///        and so must be its size) — the initial value of setPhotoScale.
     HdrTarget(VulkanContext& context, VkExtent2D extent, const std::vector<char>& fullscreenVertSpirv,
-              const std::vector<char>& depthResolveFragSpirv, float photoScale = 1.0f);
+              const std::vector<char>& photoResolveFragSpirv, float photoScale = 1.0f);
     ~HdrTarget(); // out of line: VulkanPipeline is incomplete here
 
     HdrTarget(const HdrTarget&) = delete;
@@ -113,6 +120,27 @@ public:
     /// The photo layer — premultiplied color + coverage — in SHADER_READ_ONLY layout whenever
     /// no pass is writing it (from creation on: it is cleared and moved there before any frame).
     VkDescriptorImageInfo photoInfo() const;
+    /// The photo layer's image itself (in SHADER_READ_ONLY_OPTIMAL after its pass) — for a
+    /// readback of the layer (VulkanRenderer::renderSplatLayers).
+    VkImage photoImage() const { return m_photo.image(); }
+    /// THE SCENE'S COVERAGE of each texel of the LAYER (R8), written by the photo pass's resolve
+    /// beside its depth. With the layer at the scene's size: the share of the texel's depth
+    /// samples a depth-writing surface covers (0 open .. 1 covered, fractional only along
+    /// silhouettes). With the layer scaled down: 1 where ANY sample of the texel's block is
+    /// covered — the texels the scene touched, which hold no splat from behind it. In
+    /// SHADER_READ_ONLY layout whenever no pass is writing it. A single-sample device has no
+    /// resolve and no fractional coverage: the descriptor then names the photo layer (valid,
+    /// never read — coverageMode() is 0).
+    VkDescriptorImageInfo coverageInfo() const;
+    /// The scene's coverage PIXEL FOR PIXEL (the share, as above) — written only while the
+    /// layer is scaled down (coverageMode() 2), by a coverage-only pass after the resolve.
+    VkDescriptorImageInfo coverageFullInfo() const;
+    /// What the coverage images hold for the frame being recorded: 0 = nothing to go by (no
+    /// splats drawn this frame, or a single-sample device); 1 = coverageInfo() is the scene's
+    /// coverage, texel for texel (the layer at the scene's size); 2 = the layer is scaled:
+    /// coverageInfo() says which of its texels the scene touched, coverageFullInfo() is the
+    /// scene's coverage. The composite's edge blend follows it (CompositeOptions::edgeMode).
+    int coverageMode() const;
 
     static constexpr VkFormat kColorFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
@@ -146,13 +174,18 @@ private:
     bool                            m_photoDrawn = false; // the layer holds a drawing: a clear is owed once the splats go
     UniqueRenderPass                m_photoPass;
     UniqueRenderPass                m_resolvePass;
+    UniqueRenderPass                m_coveragePass; // the coverage-only pass (a scaled layer's full-size coverage)
     UniqueDescriptorSetLayout       m_resolveSetLayout;
     UniqueDescriptorPool            m_resolvePool;
     VkDescriptorSet                 m_resolveSet = VK_NULL_HANDLE; // freed with the pool
     std::unique_ptr<VulkanPipeline> m_resolvePipeline;
+    std::unique_ptr<VulkanPipeline> m_coveragePipeline; // the resolve's shader against the coverage-only pass
     AttachmentImage                 m_photo;      // single-sample RGBA16F, sampled by the composite
     AttachmentImage                 m_photoDepth; // single-sample D32 (multisampled devices only)
+    AttachmentImage                 m_coverage;   // single-sample R8, the scene's coverage (likewise)
+    AttachmentImage                 m_coverageFull; // single-sample R8, the same at the scene's size (a scaled layer)
     UniqueFramebuffer               m_resolveFramebuffer;
+    UniqueFramebuffer               m_coverageFramebuffer;
     UniqueFramebuffer               m_photoFramebuffer;
 };
 

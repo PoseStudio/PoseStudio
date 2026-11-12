@@ -1,0 +1,71 @@
+# A CLICK PICKS WHAT THE CURSOR IS ON — between a figure and a Gaussian splat scene (Scene::pickModel,
+# Model::pickExact, SplatCloud::pick; the joint pick's gate in Scene::pickBoneAt). Until 2026-11-12
+# a click chose a model by its BOX — a figure's is her posed joints plus a flesh margin, as wide as
+# her arms — so with a capture close behind her every click on the capture entered her box first
+# and selected HER; a click on the capture near her outline took the joint that projects nearby;
+# and a click on a capture standing in FRONT of her took her joint through it. Now the capture's
+# own splats are cast: where they cover the pixel under the cursor, the click is on the capture.
+#
+# NOT run by run_all.sh (the subfolder): it needs the test scene —
+#   python tools/splat/make_test_scene.py <assets>/test_scene.ply
+#   POSESTUDIO_TEST_FIGURE=<figure> tools/ikscripts/run.sh tools/ikscripts/splats/pick.txt <out> \
+#       POSESTUDIO_IK_SCRIPT_ASSETS=<assets>
+# The scene is scaled to 40 % and set behind her, so that its wall — then 1.6 m wide and 0.8 m
+# tall — stands 40 cm behind her legs, and the whole capture lies behind her box as a captured
+# person standing behind her would. `clickat <x> <y> <z>` is a real left click at the pixel a
+# world point is seen at; `selection` is the selected model (0 the figure, 1 the capture, -1
+# none). With POSESTUDIO_PICK_MODEL_BOX=1 and POSESTUDIO_PICK_THROUGH=1 — the old pick — every
+# click on the capture below selects the figure.
+import test_scene.ply
+wait 20
+expect figures == 2
+select 1
+scale 40
+move 0 0 -160
+select -1
+view front
+lookat 0 0.9 0 1.3
+shot 01_in_front_of_the_wall
+
+# The wall beside her leg, well inside her box (her arms reach further out than this).
+clickat 0.5 0.4 -0.4
+expect selection == 1
+shot 02_capture_selected
+select -1
+# The wall right beside her knee — within the joint pick's reach of it on screen.
+clickat 0.24 0.5 -0.4
+expect selection == 1
+select -1
+# ... and on her other side.
+clickat -0.45 0.6 -0.4
+expect selection == 1
+select -1
+# Her own chest and her thigh: hers, as ever.
+clickat 0 1.28 0.1
+expect selection == 0
+select -1
+clickat 0.09 0.72 0.08
+expect selection == 0
+shot 03_figure_selected
+select -1
+# Beside her, above the wall: nothing is there — but her box is, and a click just off a figure
+# still selects her (the box is the fallback where the cursor is on no surface).
+clickat 0.45 1.1 0
+expect selection == 0
+# Far off both: the selection is cleared.
+clickat 1.6 1.9 0
+expect selection == -1
+
+# SHE STANDS BEHIND THE WALL: it hides her legs. A click on it there is on the capture, not on
+# the knee behind it.
+select 0
+move 0 0 -80
+select -1
+shot 04_behind_the_wall
+clickat 0.09 0.5 -0.4
+expect selection == 1
+select -1
+# Her chest shows above it and is hers.
+clickat 0 1.28 -0.7
+expect selection == 0
+shot 05_figure_selected_behind

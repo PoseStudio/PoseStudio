@@ -19,6 +19,7 @@
 #define VIEWPORTWIDGET_H
 
 #include "scene/camera.h" // AxisView (the View menu's camera entries)
+#include "scene/scenelight.h" // SceneLight, LightKind (the Lights tab)
 
 #include <QPointF>
 #include <QStringList>
@@ -151,6 +152,21 @@ public:
     /// thumbnails; null without one.
     std::shared_ptr<const DecodedImage> materialSlotImage(MaterialMap map, int* channel = nullptr) const;
 
+    /// THE LIGHTS TAB's side of the scene's light objects (scene/scenelight.h; VulkanWindow's
+    /// methods of the same names): the list and the selected light, adding and removing (one
+    /// undo entry each), and the light edit — one undo entry per begin..end however many values
+    /// are set between. Empty / no-ops if the viewport degraded. lightsChanged says when to
+    /// re-read.
+    std::vector<SceneLight> lights() const;
+    int                     selectedLight() const;
+    void                    selectLight(int index);
+    int                     addLight(LightKind kind);
+    void                    removeLight(int index);
+    bool                    beginLightEdit();
+    void                    setLight(int index, const SceneLight& light);
+    void                    endLightEdit();
+    void                    aimLightAtSubject(int index);
+
     /// The scene as the viewport shows it, frozen for a render engine (VulkanWindow::
     /// captureRenderScene; render/renderscene.h) — what the Render window renders. Null while the
     /// viewport has no renderer.
@@ -235,7 +251,8 @@ signals:
     /// The Preferences dialog is wanted on that tab — the strip's Selection button, and the
     /// scripted test's `prefs <tab>` (the shell opens it — MenuManager::openPreferencesDialog).
     void preferencesRequested(const QString& tab);
-    /// The scripted test's `renderwindow [start]` (the shell opens it — MenuManager::renderImage).
+    /// The Render window is wanted (@p start: and a render begun) — the strip's Render button,
+    /// and the scripted test's `renderwindow [start]` (the shell opens it — MenuManager::renderImage).
     void renderWindowRequested(bool start);
     /// Re-emitted from the viewport when VR Mode starts or ends (by the user or because the
     /// headset session was lost); the View menu's checkable entry follows it.
@@ -262,6 +279,9 @@ signals:
     /// material edited by any means (VulkanWindow::materialViewChanged). The Materials tab
     /// re-reads materialView() on it.
     void materialViewChanged();
+    /// The light objects or the selected light changed by any means (VulkanWindow::lightsChanged).
+    /// The Lights tab re-reads lights() / selectedLight() on it.
+    void lightsChanged();
     /// Re-emitted from the viewport when the .pss document's state changes (path adopted, dirty
     /// flag transitioned), so the main window can keep its title in sync. The window-title update
     /// listens to this; the state itself is read back through projectPath() / isProjectDirty().

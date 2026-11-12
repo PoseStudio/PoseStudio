@@ -12,6 +12,10 @@ Every control in one place. "Viewport focus" means you have clicked in the 3D vi
 | Ctrl + left-drag | on a limb, the head or the torso | Scoped IK: only the chain the joint belongs to follows — a limb up to the body, the head and neck, the torso down to the pelvis. Nothing else moves; pinned joints below the chain stay where they are pinned. |
 | Ctrl + left-drag | on the hips | Moves the whole figure as she is posed: nothing is anchored to the floor, no joint turns. Pinned joints stay where they are pinned. |
 | Left-click | on a model | Select it (blue outline); on empty space, deselect. |
+| Left-click | on a light's marker | Select the light; the Lights tab shows it. |
+| Left-drag | on a light's marker | Move the light in the plane facing you. A light aimed at the figure stays aimed at it. |
+| Wheel | during a left-drag of a light | Move the light toward or away from the camera. |
+| Right-click | on a light's marker | The light's menu: Aim at Subject, Switch Off / Switch On, Delete Light. |
 | Left-click | on a joint | Select the joint (and make its figure the active one). A click on the face selects the head; a click on the palm or the back of the hand selects the hand. |
 | Shift + left-click | on a joint | Add the joint to the selection, or take a selected joint out of it again. |
 | Shift + left-drag | on a selected joint | Move all the selected joints together, by the same amount; the body follows as in a plain drag. |
@@ -44,8 +48,9 @@ The keys work on the number row and on the numeric keypad. With NumLock off, the
 | Left click or `Enter` | while `B` / `S` / `T` is on | Keep the result |
 | `Esc`, right click, or the same key again | while `B` / `S` / `T` is on | Put the joint back as it was |
 | `Esc` | in VR Mode (anywhere in the window) | Leave VR Mode — see [VR Mode](vr.md) |
-| `Esc` | otherwise, anywhere in the window | Deselect whatever is selected — the model and its joint |
+| `Esc` | otherwise, anywhere in the window | Deselect whatever is selected — the model and its joint, or the light |
 | `Delete` or `Backspace` | viewport focus, a model selected | Delete the selected model (clears the undo history) |
+| `Delete` or `Backspace` | viewport focus, a light selected | Delete the selected light (an undo step) |
 | `Ctrl+Z` | | Undo |
 | `Ctrl+Y` | | Redo |
 
@@ -88,6 +93,17 @@ The keys work on the number row and on the numeric keypad. With NumLock off, the
 | Drag across a value | Scrub it |
 | Click a value | Type it; `Enter` confirms, `Esc` cancels |
 | The small button beside a row | Restore that setting's default |
+
+## Lights tab
+
+| Gesture | Action |
+| --- | --- |
+| **Add Light** | Add a point, spot, area or sun light, aimed at the figure |
+| Drag across a value | Scrub the selected light's setting; `Shift` + drag for fine steps |
+| Click a value | Type it; `Enter` confirms, `Esc` cancels |
+| Click the Color swatch | Open the color picker; `Cancel` puts the color back |
+| The small button beside a row | Restore that setting's default |
+| **Aim at Subject** | Turn the light to shine at the figure from where it stands |
 
 ## Transform tab
 

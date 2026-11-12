@@ -433,6 +433,39 @@ bool readEnvironment(const json& j, ProjectEnvironment& env) {
     return true;
 }
 
+/// One light object (scenelight.h): every field by name, absent = the struct's default; a kind
+/// this build does not know keeps Point. False on a value of the wrong type or a non-finite one.
+bool readLight(const json& j, SceneLight& light) {
+    if (!j.is_object()) {
+        return false;
+    }
+    if (const auto it = j.find("name"); it != j.end()) {
+        if (!it->is_string()) {
+            return false;
+        }
+        light.name = it->get<std::string>();
+    }
+    if (const auto it = j.find("kind"); it != j.end()) {
+        if (!it->is_string()) {
+            return false;
+        }
+        const std::string kind = it->get<std::string>();
+        light.kind = kind == "spot" ? LightKind::Spot : kind == "area" ? LightKind::Area : kind == "sun" ? LightKind::Sun : LightKind::Point;
+    }
+    if (const auto it = j.find("position"); it != j.end() && !readVec3(*it, light.position)) {
+        return false;
+    }
+    if (const auto it = j.find("color"); it != j.end() && !readVec3(*it, light.color)) {
+        return false;
+    }
+    return readBoolSetting(j, "enabled", light.enabled) && readSetting(j, "turnDeg", light.turnDeg) &&
+           readSetting(j, "tiltDeg", light.tiltDeg) && readSetting(j, "intensity", light.intensity) &&
+           readSetting(j, "radius", light.radius) && readSetting(j, "coneDeg", light.coneDeg) &&
+           readSetting(j, "blend", light.blend) && readSetting(j, "width", light.width) &&
+           readSetting(j, "height", light.height) && readSetting(j, "sunAngleDeg", light.sunAngleDeg) &&
+           readBoolSetting(j, "castShadow", light.castShadow);
+}
+
 /// Reads one camera scalar by field name. Absent keeps the struct's default; present but
 /// non-numeric or non-finite rejects the file.
 bool readCameraScalar(const json& j, const char* field, float& out) {
@@ -643,6 +676,30 @@ bool writeProjectFile(const std::string& path, const ProjectDocument& doc) {
           {"shadowReach",            s.shadowReach}}},
     };
 
+    // The light objects (scenelight.h): every field by name.
+    json lights = json::array();
+    for (const SceneLight& light : doc.lights) {
+        static const char* const kKinds[] = {"point", "spot", "area", "sun"};
+        lights.push_back({
+            {"name", light.name},
+            {"kind", kKinds[static_cast<int>(light.kind) & 3]},
+            {"enabled", light.enabled},
+            {"position", json::array({light.position.x, light.position.y, light.position.z})},
+            {"turnDeg", light.turnDeg},
+            {"tiltDeg", light.tiltDeg},
+            {"color", json::array({light.color.x, light.color.y, light.color.z})},
+            {"intensity", light.intensity},
+            {"radius", light.radius},
+            {"coneDeg", light.coneDeg},
+            {"blend", light.blend},
+            {"width", light.width},
+            {"height", light.height},
+            {"sunAngleDeg", light.sunAngleDeg},
+            {"castShadow", light.castShadow},
+        });
+    }
+    root["lights"] = std::move(lights);
+
     const ProjectCamera& cam = doc.camera;
     root["camera"] = {
         {"target",   json::array({cam.target.x, cam.target.y, cam.target.z})},
@@ -714,6 +771,21 @@ bool readProjectFile(const std::string& path, ProjectDocument& doc, std::string&
     if (environmentIt != root.end() && !readEnvironment(*environmentIt, doc.environment)) {
         error = "malformed document: \"environment\" is not an object";
         return false;
+    }
+    const auto lightsIt = root.find("lights");
+    if (lightsIt != root.end()) {
+        if (!lightsIt->is_array()) {
+            error = "malformed document: \"lights\" is not an array";
+            return false;
+        }
+        for (const json& entry : *lightsIt) {
+            SceneLight light;
+            if (!readLight(entry, light)) {
+                error = "malformed light entry";
+                return false;
+            }
+            doc.lights.push_back(std::move(light));
+        }
     }
     const auto cameraIt = root.find("camera");
     if (cameraIt != root.end() && !readCamera(*cameraIt, doc.camera)) {

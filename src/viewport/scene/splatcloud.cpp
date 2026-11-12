@@ -69,6 +69,7 @@ SplatCloud::SplatCloud(VulkanContext& context, const SplatData& data, VkDescript
     const std::size_t n = m_count;
     // The GPU splats: the centre with its opacity, then the covariance Σ = (R S)(R S)ᵀ.
     std::vector<glm::vec4> gpu(n * 3);
+    m_pick.resize(n);
     m_boundsMin = glm::vec3(std::numeric_limits<float>::max());
     m_boundsMax = glm::vec3(std::numeric_limits<float>::lowest());
     for (std::size_t i = 0; i < n; ++i) {
@@ -81,6 +82,9 @@ SplatCloud::SplatCloud(VulkanContext& context, const SplatData& data, VkDescript
         gpu[i * 3] = glm::vec4(p, data.opacities[i]);
         gpu[i * 3 + 1] = glm::vec4(cov[0][0], cov[1][0], cov[2][0], cov[1][1]);
         gpu[i * 3 + 2] = glm::vec4(cov[2][1], cov[2][2], 0.0f, 0.0f);
+        m_pick[i] = PickSplat{{cov[0][0], cov[1][0], cov[2][0], cov[1][1], cov[2][1], cov[2][2]},
+                              data.opacities[i],
+                              3.0f * std::max(s.x, std::max(s.y, s.z))};
         m_boundsMin = glm::min(m_boundsMin, p);
         m_boundsMax = glm::max(m_boundsMax, p);
     }
@@ -140,6 +144,94 @@ SplatCloud::SplatCloud(VulkanContext& context, const SplatData& data, VkDescript
     m_hist.resize(static_cast<std::size_t>(chunks) * kBins);
     m_chunkMin.resize(static_cast<std::size_t>(chunks));
     m_chunkMax.resize(static_cast<std::size_t>(chunks));
+}
+
+bool SplatCloud::pick(const glm::vec3& origin, const glm::vec3& direction, float& tOut, float& opacityOut) const {
+    opacityOut = 0.0f;
+    const float dd = glm::dot(direction, direction);
+    if (m_pick.empty() || dd < 1.0e-18f) {
+        return false;
+    }
+    struct Hit {
+        float t;
+        float alpha;
+    };
+    std::vector<Hit> hits;
+    const glm::dvec3 d(direction);
+    for (std::size_t i = 0; i < m_pick.size(); ++i) {
+        const PickSplat& s = m_pick[i];
+        // The cheap test first: the centre in front of the eye and within the footprint's reach
+        // of the ray. (Nearly every splat of a cloud fails it.)
+        const glm::vec3 toCentre = m_positions[i] - origin;
+        const float     along = glm::dot(toCentre, direction);
+        if (along <= 0.0f || glm::dot(toCentre, toCentre) - along * along / dd > s.reach * s.reach) {
+            continue;
+        }
+        // The Gaussian at the ray's closest approach, in the splat's own metric: the least of
+        // (p − c)ᵀ Σ⁻¹ (p − c) over the ray — which is what the projected 2D footprint gives
+        // the pixel (projecting a Gaussian along the view minimizes its exponent over depth).
+        // Σ⁻¹ by the adjugate, in double; a flat splat's zero thickness is given a thousandth
+        // of its largest spread, so the inverse exists.
+        const double thin = (s.reach / 3.0) * 1.0e-3;
+        const double xx = s.cov[0] + thin * thin, xy = s.cov[1], xz = s.cov[2];
+        const double yy = s.cov[3] + thin * thin, yz = s.cov[4], zz = s.cov[5] + thin * thin;
+        const double a00 = yy * zz - yz * yz, a01 = xz * yz - xy * zz, a02 = xy * yz - xz * yy;
+        const double a11 = xx * zz - xz * xz, a12 = xy * xz - xx * yz, a22 = xx * yy - xy * xy;
+        const double det = xx * a00 + xy * a01 + xz * a02;
+        if (!(det > 0.0)) {
+            continue;
+        }
+        const glm::dvec3 v(toCentre);
+        const glm::dvec3 av(a00 * v.x + a01 * v.y + a02 * v.z, a01 * v.x + a11 * v.y + a12 * v.z,
+                            a02 * v.x + a12 * v.y + a22 * v.z);
+        const glm::dvec3 ad(a00 * d.x + a01 * d.y + a02 * d.z, a01 * d.x + a11 * d.y + a12 * d.z,
+                            a02 * d.x + a12 * d.y + a22 * d.z);
+        const double dAd = glm::dot(d, ad) / det;
+        if (!(dAd > 0.0)) {
+            continue;
+        }
+        const double dAv = glm::dot(d, av) / det;
+        const double t = dAv / dAd;
+        const double q = glm::dot(v, av) / det - dAv * dAv / dAd;
+        if (t <= 0.0 || q > 9.0) {
+            continue; // behind the eye, or past the footprint's 3-sigma cut (splat.frag)
+        }
+        const double alpha = std::min(0.99, static_cast<double>(s.opacity) * std::exp(-0.5 * std::max(q, 0.0)));
+        if (alpha < 1.0 / 255.0) {
+            continue;
+        }
+        hits.push_back({static_cast<float>(t), static_cast<float>(alpha)});
+    }
+    if (hits.empty()) {
+        return false;
+    }
+    std::sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) { return a.t < b.t; });
+    // Near to far, as the eye meets them: the transmittance left, and where a half is covered.
+    double through = 1.0;
+    float  atHalf = -1.0f;
+    for (const Hit& hit : hits) {
+        through *= 1.0 - hit.alpha;
+        if (atHalf < 0.0f && 1.0 - through >= 0.5) {
+            atHalf = hit.t;
+        }
+    }
+    opacityOut = static_cast<float>(1.0 - through);
+    if (opacityOut < kPickFaintOpacity) {
+        return false;
+    }
+    if (atHalf < 0.0f) {
+        // Fainter than a half in all: where half of what there is has gathered.
+        through = 1.0;
+        for (const Hit& hit : hits) {
+            through *= 1.0 - hit.alpha;
+            atHalf = hit.t;
+            if (1.0 - through >= 0.5 * opacityOut) {
+                break;
+            }
+        }
+    }
+    tOut = atHalf;
+    return true;
 }
 
 SplatCloud::~SplatCloud() {
@@ -332,7 +424,7 @@ void SplatCloud::workerLoop() {
 }
 
 void SplatCloud::record(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t frameIndex, const Camera& camera,
-                        const glm::mat4& model) const {
+                        const glm::mat4& model, const glm::vec4& cut) const {
     if (m_count == 0) {
         return;
     }
@@ -364,6 +456,7 @@ void SplatCloud::record(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t f
     // POSESTUDIO_SPLAT_NO_AA=1: the compensation off (the A/B).
     static const bool kNoAa = std::getenv("POSESTUDIO_SPLAT_NO_AA") != nullptr;
     push.camPos = glm::vec4(glm::vec3(glm::inverse(model) * glm::vec4(camera.position(), 1.0f)), kNoAa ? 0.0f : 1.0f);
+    push.cut = cut;
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 1, 1, &m_sets[frameIndex], 0, nullptr);
     vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
     vkCmdDraw(cmd, 4, static_cast<uint32_t>(m_count), 0, 0); // a strip of four, once a splat

@@ -35,6 +35,10 @@ layout(push_constant) uniform PC {
     vec4 params; // x = SH degree, y = harmonics uints per splat, z = 1 shrinks every quad to a
                  // pixel (POSESTUDIO_SPLAT_TINY: the vertex stage's cost alone), w = orthographic (0/1)
     vec4 camPos; // xyz = the eye in the splat's own (model) space; w = 1 for the opacity compensation (0 = the A/B off)
+    vec4 cut;    // THE FLOOR CUT: y != 0 leaves out every splat whose centre lies beyond the level
+                 // plane at world height x, seen from the eye (y = +1: the eye is above the plane,
+                 // -1: below it) — a render's FRONT layer, which holds only what stands in front
+                 // of the floor (VulkanRenderer::renderSplatLayers). 0 = every splat, as ever.
 } pc;
 
 layout(location = 0) out vec2 vLocal;
@@ -75,6 +79,10 @@ void main() {
     vec4 c0 = splats.data[splat * 3u + 1u];
     vec4 c1 = splats.data[splat * 3u + 2u];
     vec4 posW = pc.model * vec4(p0.xyz, 1.0);
+    if (pc.cut.y != 0.0 && (posW.y - pc.cut.x) * pc.cut.y < 0.0) {
+        cull(); // beyond the floor's plane: not in a front layer
+        return;
+    }
     vec4 posV = cam.view * posW;
     bool ortho = pc.params.w > 0.5;
     if (!ortho && posV.z > -0.05) {

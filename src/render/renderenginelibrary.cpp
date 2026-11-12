@@ -83,17 +83,26 @@ std::unique_ptr<RenderEngineLibrary> RenderEngineLibrary::load(const QString& di
         QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath(QStringLiteral("cycles"));
     QDir().mkpath(userDir);
     const auto create = reinterpret_cast<renderapi::CreateEngineFn>(entry);
-    renderapi::Engine* engine = create(POSESTUDIO_RENDER_API_VERSION,
-                                       QDir::toNativeSeparators(QFileInfo(file).absolutePath()).toUtf8().constData(),
-                                       QDir::toNativeSeparators(userDir).toUtf8().constData());
+    const QByteArray resourceDir = QDir::toNativeSeparators(QFileInfo(file).absolutePath()).toUtf8();
+    const QByteArray userDirUtf8 = QDir::toNativeSeparators(userDir).toUtf8();
+    renderapi::Engine* engine = create(POSESTUDIO_RENDER_API_VERSION, resourceDir.constData(), userDirUtf8.constData());
     if (engine == nullptr) {
         return fail(QCoreApplication::translate(
             "RenderEngineLibrary", "The render engine was built for another version of PoseStudio and cannot be used."));
     }
     std::unique_ptr<RenderEngineLibrary> result(new RenderEngineLibrary());
     result->m_engine = engine;
+    result->m_create = create;
+    result->m_resourceDir = resourceDir;
+    result->m_userDir = userDirUtf8;
     result->m_directory = QFileInfo(file).absolutePath();
     return result;
+}
+
+std::unique_ptr<RenderEngineInstance> RenderEngineLibrary::createEngine() const {
+    renderapi::Engine* engine =
+        m_create != nullptr ? m_create(POSESTUDIO_RENDER_API_VERSION, m_resourceDir.constData(), m_userDir.constData()) : nullptr;
+    return engine != nullptr ? std::make_unique<RenderEngineInstance>(engine) : nullptr;
 }
 
 RenderEngineLibrary::~RenderEngineLibrary() {

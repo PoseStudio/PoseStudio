@@ -19,7 +19,9 @@
 #define RENDERSESSION_H
 
 #include "renderengineapi.h"
+#include "renderenginelibrary.h"
 #include "renderscene.h"
+#include "splatcomposite.h"
 
 #include <QImage>
 #include <QObject>
@@ -50,6 +52,14 @@ struct RenderDevice {
     QString label() const;
 };
 
+/// What RenderSession::activity() returns: changed(n) whenever the number of running final
+/// renders does.
+class RenderActivity : public QObject {
+    Q_OBJECT
+signals:
+    void changed(int running);
+};
+
 class RenderSession : public QObject {
     Q_OBJECT
 
@@ -60,8 +70,16 @@ public:
     /// The process's render engine, loaded on first call. Null — with @p error saying why — in
     /// a build without one or when it will not load.
     static renderapi::Engine* engine(QString* error = nullptr);
+    /// A further engine of the same library, the caller's own (the viewport's interactive render:
+    /// renderenginelibrary.h). Null without an engine.
+    static std::unique_ptr<RenderEngineInstance> createEngine(QString* error = nullptr);
     /// Whether an engine is installed at all (nothing is loaded).
     static bool engineInstalled();
+    /// How many final renders are running in the process now, and a signal (on the object
+    /// returned) whenever that changes: the viewport's interactive render pauses for them — one
+    /// device is not shared by two renders that each want all of it.
+    static int             activeRenders();
+    static RenderActivity* activity();
     /// "Cycles 5.3.0", or "" without an engine.
     static QString engineName();
     /// The engine's devices, the CPU first (empty without an engine).
@@ -83,6 +101,8 @@ public:
     /// The picture: the image as displayed (8-bit sRGB; alpha kept for a transparent render).
     /// Null before the first pixels.
     const QImage& image() const { return m_image; }
+    /// Whether this render's picture has the scene's Gaussian splats composited into it.
+    bool compositesSplats() const { return m_composite != nullptr; }
     bool          hasImage() const { return !m_image.isNull(); }
 
     /// Saves the image: `.exr` the engine's LINEAR pixels (32-bit float, before the tonemap —
@@ -110,8 +130,9 @@ private:
     bool                               m_running = false;
     bool                               m_tonemap = true;
     quint64                            m_shownVersion = 0;
-    std::vector<float>                 m_linear; // the engine's pixels: RGBA, row 0 = top
+    std::vector<float>                 m_linear; // the picture's linear pixels: RGBA, row 0 = top
     QImage                             m_image;
+    std::unique_ptr<SplatComposite>    m_composite; // set for a scene with Gaussian splats (splatcomposite.h)
 };
 
 } // namespace pose

@@ -15,7 +15,23 @@
 
 #include "renderengineapi.h"
 
+#include <memory>
+#include <vector>
+
 namespace pose {
+
+/// A scene's GAUSSIAN SPLATS for one render, drawn by the viewport's own splat renderer at the
+/// render's size and through its camera (splatcomposite.h says what a render does with them).
+/// Tightly packed floats, top row first.
+struct RenderSplatLayers {
+    int                width = 0;
+    int                height = 0;
+    std::vector<float> all;   ///< RGBA, premultiplied, DISPLAY-referred: every splat — the plate
+    std::vector<float> front; ///< RGBA likewise: only the splats in front of the scene's surfaces and of the floor
+    /// The backdrop a render draws behind everything, as RGB radiance a pixel (before the
+    /// exposure) — for an ENVIRONMENT backdrop; empty for the scene's flat backdropColor.
+    std::vector<float> backdrop;
+};
 
 class RenderSceneHolder {
 public:
@@ -35,9 +51,19 @@ public:
     };
     virtual View view() const = 0;
 
-    /// What of the scene a render engine cannot draw, counted for the user (Gaussian splat
-    /// scenes are rasterized by the viewport alone).
+    /// The Gaussian splat scenes in the scene (a render engine cannot draw them: see
+    /// splatLayers).
     virtual int skippedSplatScenes() const = 0;
+
+    /// The scene's splats as layers of a render of @p width × @p height pixels — drawn NOW, by
+    /// the viewport that made this holder, so it is asked right after the capture and on the
+    /// same thread. Null when the scene has none, or when they could not be drawn (the render
+    /// then goes without them, as it did before there were layers).
+    virtual std::shared_ptr<RenderSplatLayers> splatLayers(int width, int height) {
+        (void)width;
+        (void)height;
+        return nullptr;
+    }
 };
 
 } // namespace pose

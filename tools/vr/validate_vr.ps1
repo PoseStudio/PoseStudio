@@ -9,8 +9,9 @@
 #
 # Put the headset on once the app is up (the session renders only while the headset is worn and
 # focused); walk and grab a joint or two. The summary counts errors, synchronization hazards,
-# warnings and performance notes; the 8 "OutputNotConsumed" performance notes from shadow.vert
-# are the known baseline. The full log stays beside the script's output folder.
+# warnings and performance notes; the 10 "OutputNotConsumed" performance notes — shadow.vert's
+# eight and the splat occluder pipeline's two (mesh.vert's outputs depthcutout.frag does not
+# read) — are the known baseline. The full log stays beside the script's output folder.
 param(
     [string]$Figure = "C:\Users\Public\Documents\My DAZ 3D Library\People\Genesis 8 Female\Genesis 8 Basic Female.duf",
     [int]$Seconds = 40,
@@ -49,7 +50,7 @@ if (Test-Path $logFile) {
     Write-Host ("errors:   " + (($t | Select-String -Pattern "Validation Error" | Measure-Object).Count))
     Write-Host ("sync:     " + (($t | Select-String -Pattern "SYNC-HAZARD" | Measure-Object).Count))
     Write-Host ("warnings: " + (($t | Select-String -Pattern "Validation Warning" | Measure-Object).Count))
-    Write-Host ("perf:     " + (($t | Select-String -Pattern "Validation Performance Warning" | Measure-Object).Count) + "  (8 = the known shadow.vert baseline)")
+    Write-Host ("perf:     " + (($t | Select-String -Pattern "Validation Performance Warning" | Measure-Object).Count) + "  (10 = the known baseline: shadow.vert's eight, the splat occluder pipeline's two)")
     $t | Select-String -Pattern "Validation Error|SYNC-HAZARD" | Select-Object -First 10 | ForEach-Object { $_.Line.Substring(0, [Math]::Min(400, $_.Line.Length)) }
     Write-Host "full log: $logFile"
 } else {

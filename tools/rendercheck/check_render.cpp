@@ -117,7 +117,7 @@ struct TestScene {
     std::vector<Image>         images;
     std::vector<Material>      materials;
     std::vector<Mesh>          meshes;
-    SunLight                   sun;
+    Light                      sun; // the key light: a distant light
     Scene                      scene;
     Vec3                       eye{0.0f, 1.2f, 4.5f};
     Vec3                       target{0.0f, 0.45f, 0.0f};
@@ -176,9 +176,10 @@ struct TestScene {
         meshes = {meshOf(left, "left", 0), meshOf(middle, "middle", 1), meshOf(right, "right", 2)};
 
         const Vec3 toSun = normalized({0.45f, 0.8f, 0.55f});
-        sun.direction[0] = toSun.x;
-        sun.direction[1] = toSun.y;
-        sun.direction[2] = toSun.z;
+        sun.type = LightType::Sun;
+        sun.direction[0] = -toSun.x; // (a light's direction is the way it SHINES)
+        sun.direction[1] = -toSun.y;
+        sun.direction[2] = -toSun.z;
         sun.color[0] = 1.0f;
         sun.color[1] = 0.96f;
         sun.color[2] = 0.9f;
@@ -191,8 +192,8 @@ struct TestScene {
         scene.materialCount = static_cast<uint32_t>(materials.size());
         scene.meshes = meshes.data();
         scene.meshCount = static_cast<uint32_t>(meshes.size());
-        scene.suns = &sun;
-        scene.sunCount = 1;
+        scene.lights = &sun;
+        scene.lightCount = 1;
         scene.floorShadows = 1;
         scene.floorHeight = 0.0f;
 
@@ -203,6 +204,12 @@ struct TestScene {
         scene.environment.backdropColor[1] = 0.20f;
         scene.environment.backdropColor[2] = 0.30f;
 
+        lookFrom(eye);
+    }
+
+    /// Puts the camera at @p from, looking at the target.
+    void lookFrom(Vec3 from) {
+        eye = from;
         // Camera -> world, column-major: right, up, back (the camera looks down -Z), eye.
         const Vec3 back = normalized(eye - target);
         const Vec3 rightAxis = normalized(cross({0.0f, 1.0f, 0.0f}, back));
@@ -292,6 +299,47 @@ State render(Engine* engine, const Scene& scene, const Settings& settings, std::
         *last = status;
     }
     return status.state;
+}
+
+/// Waits until an INTERACTIVE render has taken in scene @p sceneVersion and update @p updates,
+/// rendered all its samples and shown them (the image's version then stands still), and copies
+/// the image out at the size the engine reports. False on a failure or after @p timeoutMs.
+bool waitInteractive(Engine* engine, uint64_t sceneVersion, uint64_t updates, std::vector<float>& rgba, Status& status,
+                     int timeoutMs = 120000) {
+    uint64_t lastVersion = 0;
+    int      still = 0;
+    for (int waited = 0; waited < timeoutMs; waited += 20) {
+        engine->status(status);
+        if (status.state == State::Failed || status.state == State::Cancelled || status.state == State::Finished) {
+            return false;
+        }
+        const bool in = status.sceneVersion >= sceneVersion && status.updatesShown >= updates;
+        const bool done = in && status.imageWidth > 0 && status.samples > 0 && status.sample >= status.samples;
+        still = (done && status.imageVersion == lastVersion) ? still + 1 : 0;
+        lastVersion = status.imageVersion;
+        if (still >= 15) { // (300 ms with nothing new: the last update has been shown)
+            rgba.assign(static_cast<std::size_t>(status.imageWidth) * status.imageHeight * 4, 0.0f);
+            return engine->copyImage(rgba.data(), status.imageWidth, status.imageHeight);
+        }
+        QThread::msleep(20);
+    }
+    return false;
+}
+
+/// One flat quad in the plane y = @p height, @p half metres to each side, facing up.
+struct QuadData {
+    std::vector<float>    positions;
+    std::vector<float>    normals;
+    std::vector<float>    uvs;
+    std::vector<uint32_t> indices;
+};
+QuadData makeQuad(float height, float half) {
+    QuadData q;
+    q.positions = {-half, height, -half, -half, height, half, half, height, half, half, height, -half};
+    q.normals = {0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0};
+    q.uvs = {0, 0, 0, 1, 1, 1, 1, 0};
+    q.indices = {0, 1, 2, 0, 2, 3};
+    return q;
 }
 
 unsigned char toDisplay(float linear) {
@@ -519,6 +567,33 @@ int main(int argc, char** argv) {
         const Pixel solid = meanAt(image, w, h, px, py);
         check(s == State::Finished && sky.a < 0.01f && solid.a > 0.99f, "a transparent background leaves alpha = coverage",
               QStringLiteral("sky %1  sphere %2").arg(sky.a, 0, 'f', 3).arg(solid.a, 0, 'f', 3));
+        // ... and the floor leaves no trace in it: not its surface, not the shadows on it.
+        at = shadowPoint(0.0f);
+        test.project(at, w, h, px, py);
+        const Pixel noShadow = meanAt(image, w, h, px, py);
+        check(s == State::Finished && noShadow.a < 0.02f, "… and no trace of the floor's shadows",
+              QStringLiteral("alpha in the shadow %1").arg(noShadow.a, 0, 'f', 3));
+
+        // WITH shadowAlpha the shadows are kept, as coverage of black: laid over a plate the
+        // picture darkens it where the shadow falls, and nowhere else.
+        alpha.shadowAlpha = 1;
+        std::vector<float> kept;
+        const State        s2 = render(engine, test.scene, alpha, kept, false);
+        const Pixel        inShadow = meanAt(kept, w, h, px, py);
+        test.project({0.0f, 0.0f, 1.6f}, w, h, px, py);
+        const Pixel openFloor = meanAt(kept, w, h, px, py);
+        test.project({0.0f, 0.5f, 0.5f}, w, h, px, py);
+        const Pixel solidKept = meanAt(kept, w, h, px, py);
+        const Pixel skyKept = meanAt(kept, w, h, 6, 6);
+        check(s2 == State::Finished && inShadow.a > 0.10f && inShadow.g < 0.02f && openFloor.a < 0.05f && skyKept.a < 0.01f &&
+                  solidKept.a > 0.99f,
+              "with shadowAlpha the floor's shadow is coverage of black, for a plate under the picture",
+              QStringLiteral("shadow a %1 g %2  open floor a %3  sky a %4  sphere a %5")
+                  .arg(inShadow.a, 0, 'f', 3)
+                  .arg(inShadow.g, 0, 'f', 3)
+                  .arg(openFloor.a, 0, 'f', 3)
+                  .arg(skyKept.a, 0, 'f', 3)
+                  .arg(solidKept.a, 0, 'f', 3));
     }
 
     // A PANORAMA, laid out the application's way (u = atan2(x, -z) / 2π from the left edge, row 0
@@ -557,7 +632,7 @@ int main(int argc, char** argv) {
         lit.scene.environment.image = 1;
         lit.scene.environment.strength = 1.0f;
         lit.scene.environment.backdrop = 1;
-        lit.scene.sunCount = 0;
+        lit.scene.lightCount = 0;
         Settings quick = settings;
         quick.samples = 16;
         std::vector<float> image0;
@@ -588,7 +663,7 @@ int main(int argc, char** argv) {
         lit.scene.environment.backdropColor[0] = 0.10f;
         lit.scene.environment.backdropColor[1] = 0.20f;
         lit.scene.environment.backdropColor[2] = 0.30f;
-        lit.scene.sunCount = 1;
+        lit.scene.lightCount = 1;
         quick.samples = 48;
         std::vector<float> under;
         const State        su = render(engine, lit.scene, quick, under, false);
@@ -600,6 +675,277 @@ int main(int argc, char** argv) {
         check(su == State::Finished && std::abs(clear.g - 0.20f) < 0.03f && shaded.g < clear.g * 0.85f,
               "under a panorama's light the floor still shows the backdrop and catches the shadow",
               QStringLiteral("shadow %1  open %2").arg(shaded.g, 0, 'f', 3).arg(clear.g, 0, 'f', 3));
+    }
+
+    // THE LIGHT KINDS, each at a strength of 1 a metre above a white matte table: a strength is
+    // the irradiance a light puts on a surface facing it — a sun's anywhere, the others' a metre
+    // away on their axis (renderapi::Light) — so all four light the spot under them alike:
+    // radiance = albedo × 1 / π. Twice as far a point light gives a quarter; outside its cone a
+    // spot gives nothing; behind its face an area light gives nothing.
+    {
+        const float    kAlbedo = 0.8f;
+        const QuadData table = makeQuad(0.5f, 3.0f);
+        Material       matte;
+        matte.name = "matte";
+        matte.baseColor[0] = matte.baseColor[1] = matte.baseColor[2] = kAlbedo;
+        matte.specular = 0.0f;
+        matte.roughness = 1.0f;
+        Mesh mesh;
+        mesh.name = "table";
+        mesh.positions = table.positions.data();
+        mesh.normals = table.normals.data();
+        mesh.uvs = table.uvs.data();
+        mesh.vertexCount = 4;
+        mesh.indices = table.indices.data();
+        mesh.indexCount = 6;
+        mesh.material = 0;
+
+        TestScene bench; // (its camera; everything else is replaced)
+        bench.target = {0.0f, 0.5f, 0.0f};
+        bench.lookFrom({0.0f, 3.0f, 2.5f});
+        bench.scene.materials = &matte;
+        bench.scene.materialCount = 1;
+        bench.scene.meshes = &mesh;
+        bench.scene.meshCount = 1;
+        bench.scene.images = nullptr;
+        bench.scene.imageCount = 0;
+        bench.scene.floorShadows = 0;
+        bench.scene.environment.strength = 0.0f;
+        bench.scene.environment.backdropColor[0] = 0.0f;
+        bench.scene.environment.backdropColor[1] = 0.0f;
+        bench.scene.environment.backdropColor[2] = 0.0f;
+
+        Light light;
+        light.position[0] = 0.0f;
+        light.position[1] = 1.5f; // a metre above the table
+        light.position[2] = 0.0f;
+        light.direction[0] = 0.0f;
+        light.direction[1] = -1.0f;
+        light.direction[2] = 0.0f;
+        light.strength = 1.0f;
+        light.radius = 0.0f;
+        light.angle = 0.6f;  // a spot's cone: 34 degrees across — half a metre wide on the table
+        light.blend = 0.1f;
+        light.sizeU = 0.1f;
+        light.sizeV = 0.1f;
+        bench.scene.lights = &light;
+        bench.scene.lightCount = 1;
+
+        Settings quick = settings;
+        quick.samples = 64;
+        const float expected = kAlbedo / 3.14159265f;
+        int         cx = 0;
+        int         cy = 0;
+        bench.project({0.0f, 0.5f, 0.0f}, w, h, cx, cy);
+        const auto under = [&](const std::vector<float>& image) { return meanAt(image, w, h, cx, cy, 1).g; };
+        const auto within = [&](float value, float want) { return std::abs(value - want) < 0.06f * want; };
+
+        std::vector<float> image;
+        const char* const  names[4] = {"a sun", "a point light", "a spot light", "an area light"};
+        const LightType    kinds[4] = {LightType::Sun, LightType::Point, LightType::Spot, LightType::Area};
+        float              got[4] = {0, 0, 0, 0};
+        bool               all = true;
+        for (int k = 0; k < 4; ++k) {
+            light.type = kinds[k];
+            light.angle = kinds[k] == LightType::Sun ? 0.01f : 0.6f;
+            all = all && render(engine, bench.scene, quick, image, false) == State::Finished;
+            got[k] = under(image);
+            all = all && within(got[k], expected);
+        }
+        check(all, "a strength of 1 lights the spot a metre under a sun, a point, a spot and an area light alike (albedo / pi)",
+              QStringLiteral("sun %1  point %2  spot %3  area %4  expected %5 (%6, %7, %8, %9)")
+                  .arg(got[0], 0, 'f', 4)
+                  .arg(got[1], 0, 'f', 4)
+                  .arg(got[2], 0, 'f', 4)
+                  .arg(got[3], 0, 'f', 4)
+                  .arg(expected, 0, 'f', 4)
+                  .arg(QLatin1String(names[0]), QLatin1String(names[1]), QLatin1String(names[2]), QLatin1String(names[3])));
+
+        // Twice as far: a quarter.
+        light.type = LightType::Point;
+        light.position[1] = 2.5f;
+        render(engine, bench.scene, quick, image, false);
+        const float far = under(image);
+        check(within(far, expected * 0.25f), "a point light twice as far lights a quarter as much",
+              QStringLiteral("%1, expected %2").arg(far, 0, 'f', 4).arg(expected * 0.25f, 0, 'f', 4));
+
+        // A spot: nothing outside its cone (a metre to the side of a 34-degree cone's axis).
+        light.type = LightType::Spot;
+        light.position[1] = 1.5f;
+        light.angle = 0.6f;
+        render(engine, bench.scene, quick, image, false);
+        int sx = 0;
+        int sy = 0;
+        bench.project({1.0f, 0.5f, 0.0f}, w, h, sx, sy);
+        const float outside = meanAt(image, w, h, sx, sy, 1).g;
+        check(under(image) > expected * 0.9f && outside < expected * 0.02f, "a spot light lights its cone and nothing outside it",
+              QStringLiteral("inside %1  outside %2").arg(under(image), 0, 'f', 4).arg(outside, 0, 'f', 4));
+
+        // An area light shines from ONE face: turned to shine up, the table under it is dark.
+        light.type = LightType::Area;
+        light.direction[1] = 1.0f;
+        render(engine, bench.scene, quick, image, false);
+        check(under(image) < expected * 0.02f, "an area light shines from one face only",
+              QStringLiteral("%1 under a light that shines up").arg(under(image), 0, 'f', 4));
+    }
+
+    // AN INTERACTIVE RENDER (the viewport's): alive when its samples are done, and changed while
+    // it runs — a camera, a whole new scene, a new size — on a SECOND engine, beside the first.
+    {
+        const std::unique_ptr<pose::RenderEngineInstance> second = library->createEngine();
+        check(second != nullptr, "the library makes a second engine");
+        Engine* live = second ? second->get() : nullptr;
+        if (live != nullptr) {
+            TestScene view;
+            Settings  interactive = settings;
+            interactive.interactive = 1;
+            interactive.samples = 24;
+            std::vector<float> first;
+            Status             st;
+            const bool started = live->start(view.scene, interactive) && waitInteractive(live, 1, 0, first, st);
+            const Pixel cornerLive = started ? meanAt(first, w, h, 6, 6) : Pixel{0, 0, 0, 0};
+            check(started && st.state == State::Rendering && st.imageWidth == w && st.imageHeight == h,
+                  "an interactive render shows its samples and stays alive",
+                  QStringLiteral("state %1  %2x%3  %4").arg(static_cast<int>(st.state)).arg(st.imageWidth).arg(st.imageHeight).arg(QString::fromUtf8(st.error)));
+            check(started && std::abs(cornerLive.r - 0.10f) < 0.01f && std::abs(cornerLive.g - 0.20f) < 0.01f &&
+                      std::abs(cornerLive.b - 0.30f) < 0.01f,
+                  "its picture is the final render's (the backdrop, exactly)",
+                  QStringLiteral("%1 %2 %3").arg(cornerLive.r, 0, 'f', 3).arg(cornerLive.g, 0, 'f', 3).arg(cornerLive.b, 0, 'f', 3));
+            // … and the gold sphere where the final render has it.
+            view.project({0.0f, 0.5f, 0.5f}, w, h, px, py);
+            const Pixel goldLive = started ? meanAt(first, w, h, px, py, 3) : Pixel{0, 0, 0, 0};
+            const Pixel goldFinal = meanAt(rgba, w, h, px, py, 3);
+            check(started && std::abs(goldLive.r - goldFinal.r) < 0.25f * goldFinal.r + 0.02f && goldLive.r > goldLive.b * 1.5f,
+                  "it renders the scene the final render does (the metal sphere)",
+                  QStringLiteral("live %1 %2 %3  final %4 %5 %6")
+                      .arg(goldLive.r, 0, 'f', 3)
+                      .arg(goldLive.g, 0, 'f', 3)
+                      .arg(goldLive.b, 0, 'f', 3)
+                      .arg(goldFinal.r, 0, 'f', 3)
+                      .arg(goldFinal.g, 0, 'f', 3)
+                      .arg(goldFinal.b, 0, 'f', 3));
+
+            // A CAMERA update: from the other side (-Z), where the textured sphere is on the RIGHT.
+            view.lookFrom({0.0f, 1.2f, -4.5f});
+            std::vector<float> moved;
+            const uint64_t     afterCamera = live->update(view.scene, interactive, kUpdateCamera);
+            const bool         movedOk = afterCamera == 1 && waitInteractive(live, 1, 1, moved, st);
+            // Seen from behind the spheres have swapped sides: where the first picture had the
+            // textured sphere (screen-left) there is now the GLASS one, and the picture as a whole
+            // is another picture.
+            view.project({1.2f, 0.5f, 0.0f}, w, h, px, py); // the glass sphere, from the new camera
+            const Pixel glassNow = movedOk ? meanAt(moved, w, h, px, py, 3) : Pixel{0, 0, 0, 0};
+            const Pixel thereBefore = started ? meanAt(first, w, h, px, py, 3) : Pixel{0, 0, 0, 0};
+            double      difference = 0.0;
+            if (movedOk && moved.size() == first.size()) {
+                for (std::size_t i = 0; i < moved.size(); ++i) {
+                    difference += std::abs(moved[i] - first[i]);
+                }
+                difference /= static_cast<double>(moved.size());
+            }
+            check(movedOk && px < w / 2 && difference > 0.01 &&
+                      std::abs(glassNow.r - thereBefore.r) + std::abs(glassNow.g - thereBefore.g) + std::abs(glassNow.b - thereBefore.b) > 0.05f &&
+                      st.sceneVersion == 1,
+                  "a camera update moves the view without a new scene",
+                  QStringLiteral("pixel %1,%2  now %3 %4 %5  before %6 %7 %8  mean difference %9  scene %10")
+                      .arg(px)
+                      .arg(py)
+                      .arg(glassNow.r, 0, 'f', 3)
+                      .arg(glassNow.g, 0, 'f', 3)
+                      .arg(glassNow.b, 0, 'f', 3)
+                      .arg(thereBefore.r, 0, 'f', 3)
+                      .arg(thereBefore.g, 0, 'f', 3)
+                      .arg(thereBefore.b, 0, 'f', 3)
+                      .arg(difference, 0, 'f', 4)
+                      .arg(st.sceneVersion));
+
+            // A SCENE update: the metal turned blue, the glass sphere taken away — and the old
+            // description's memory given up once the new one is in.
+            view.lookFrom({0.0f, 1.2f, 4.5f});
+            TestScene changed;
+            changed.materials[1].baseColor[0] = 0.1f;
+            changed.materials[1].baseColor[1] = 0.2f;
+            changed.materials[1].baseColor[2] = 1.0f;
+            changed.meshes.pop_back();
+            changed.scene.meshCount = static_cast<uint32_t>(changed.meshes.size());
+            std::vector<float> rebuilt;
+            const uint64_t     afterScene = live->update(changed.scene, interactive, kUpdateScene);
+            const bool         rebuiltOk = afterScene == 2 && waitInteractive(live, 2, 2, rebuilt, st);
+            view = TestScene(); // (the first description's memory is gone: the engine must not read it)
+            changed.project({0.0f, 0.5f, 0.5f}, w, h, px, py);
+            const Pixel blue = rebuiltOk ? meanAt(rebuilt, w, h, px, py, 3) : Pixel{0, 0, 0, 0};
+            changed.project({1.2f, 0.5f, 0.0f}, w, h, px, py);
+            const Pixel gone = rebuiltOk ? meanAt(rebuilt, w, h, px, py, 2) : Pixel{0, 0, 0, 0};
+            check(rebuiltOk && blue.b > blue.r * 1.5f, "a scene update rebuilds the materials (the metal is blue)",
+                  QStringLiteral("%1 %2 %3").arg(blue.r, 0, 'f', 3).arg(blue.g, 0, 'f', 3).arg(blue.b, 0, 'f', 3));
+            check(rebuiltOk && std::abs(gone.g - 0.20f) < 0.03f && std::abs(gone.r - 0.10f) < 0.03f,
+                  "… and the geometry (the glass sphere is gone: the backdrop shows)",
+                  QStringLiteral("%1 %2 %3").arg(gone.r, 0, 'f', 3).arg(gone.g, 0, 'f', 3).arg(gone.b, 0, 'f', 3));
+
+            // A LIGHTING update: the sun and the environment taken away, another backdrop — the
+            // geometry untouched. The metal sphere goes dark; the corner shows the new backdrop.
+            TestScene dark;
+            dark.scene.lightCount = 0;
+            dark.scene.environment.strength = 0.0f;
+            dark.scene.environment.backdropColor[0] = 0.30f;
+            dark.scene.environment.backdropColor[1] = 0.10f;
+            dark.scene.environment.backdropColor[2] = 0.20f;
+            dark.scene.meshCount = 0; // (a lighting description brings no geometry)
+            dark.scene.materialCount = 0;
+            std::vector<float> relit;
+            const uint64_t     afterLighting = live->update(dark.scene, interactive, kUpdateLighting);
+            const bool         relitOk = afterLighting == 3 && waitInteractive(live, 3, 3, relit, st);
+            const Pixel        cornerRelit = relitOk ? meanAt(relit, w, h, 6, 6) : Pixel{0, 0, 0, 0};
+            changed.project({0.0f, 0.5f, 0.5f}, w, h, px, py);
+            const Pixel unlit = relitOk ? meanAt(relit, w, h, px, py, 3) : Pixel{0, 0, 0, 0};
+            check(relitOk && std::abs(cornerRelit.r - 0.30f) < 0.01f && std::abs(cornerRelit.g - 0.10f) < 0.01f && unlit.b < 0.01f,
+                  "a lighting update relights the scene without rebuilding it",
+                  QStringLiteral("corner %1 %2 %3  sphere %4 %5 %6  version %7")
+                      .arg(cornerRelit.r, 0, 'f', 3)
+                      .arg(cornerRelit.g, 0, 'f', 3)
+                      .arg(cornerRelit.b, 0, 'f', 3)
+                      .arg(unlit.r, 0, 'f', 3)
+                      .arg(unlit.g, 0, 'f', 3)
+                      .arg(unlit.b, 0, 'f', 3)
+                      .arg(afterLighting));
+            // … and back: the first lighting again (the scene description's own), the sphere blue.
+            std::vector<float> relit2;
+            TestScene          lightsBack;
+            lightsBack.scene.meshCount = 0;
+            lightsBack.scene.materialCount = 0;
+            live->update(lightsBack.scene, interactive, kUpdateLighting);
+            const bool  backOk = waitInteractive(live, 4, 4, relit2, st);
+            const Pixel blueAgain = backOk ? meanAt(relit2, w, h, px, py, 3) : Pixel{0, 0, 0, 0};
+            check(backOk && blueAgain.b > blueAgain.r * 1.5f && blueAgain.b > 0.05f, "… and back again (the materials were kept)",
+                  QStringLiteral("%1 %2 %3").arg(blueAgain.r, 0, 'f', 3).arg(blueAgain.g, 0, 'f', 3).arg(blueAgain.b, 0, 'f', 3));
+
+            // A new SIZE, through a camera update.
+            Settings resized = interactive;
+            resized.width = 200;
+            resized.height = 120;
+            std::vector<float> small;
+            live->update(changed.scene, resized, kUpdateCamera);
+            const bool  smallOk = waitInteractive(live, 4, 5, small, st);
+            const Pixel cornerSmall = smallOk ? meanAt(small, 200, 120, 4, 4) : Pixel{0, 0, 0, 0};
+            check(smallOk && st.imageWidth == 200 && st.imageHeight == 120 && std::abs(cornerSmall.g - 0.20f) < 0.01f,
+                  "a camera update resizes the image", QStringLiteral("%1x%2").arg(st.imageWidth).arg(st.imageHeight));
+
+            // Paused it renders nothing new; resumed it goes on; and a FINAL render runs beside it
+            // on the first engine.
+            live->setPaused(1);
+            std::vector<float> beside;
+            Settings           few = settings;
+            few.samples = 8;
+            check(render(engine, test.scene, few, beside, false) == State::Finished,
+                  "a final render runs on the first engine beside a paused interactive one");
+            live->setPaused(0);
+
+            live->cancel();
+            live->status(st);
+            check(st.state == State::Cancelled, "cancel ends an interactive render",
+                  QStringLiteral("state %1").arg(static_cast<int>(st.state)));
+            check(live->update(changed.scene, interactive, kUpdateCamera) == 0, "… after which an update is refused");
+        }
     }
 
     // Cancel: a render that would take minutes stops when told to, and reports it.

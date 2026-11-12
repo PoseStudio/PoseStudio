@@ -17,13 +17,28 @@
 
 #include <glm/glm.hpp>
 
+#include <vector>
+
 namespace pose {
 
 class Camera;
 struct EnvironmentSH;
 struct LightingSettings;
+struct SceneLight;
 struct SelectionStyle;
 struct ShadeMode;
+
+/// One LIGHT OBJECT as the shaders read it (scenelight.h; camera_ubo.glsl's SceneLightUbo).
+struct LightUbo {
+    glm::vec4 position;  // xyz = where it is (world); w = its kind (0 point, 1 spot, 2 area, 3 sun)
+    glm::vec4 direction; // xyz = the way it shines (unit); w = the least squared distance it is
+                         //       evaluated at (its radius squared: no singularity on its surface)
+    glm::vec4 color;     // rgb = its color × intensity (linear: the irradiance a metre away);
+                         //       w = a spot's cos(half cone)
+    glm::vec4 params;    // x = a spot's edge: 1 / ((1 - cos half cone) × blend); yzw spare
+};
+/// How many of them the block carries (= kMaxViewportLights, scenelight.h).
+inline constexpr int kCameraUboLights = 8;
 
 /// std140-compatible camera + lighting block. vec3 fields are padded to vec4. Must match the
 /// `CameraUbo` block declared in mesh.vert / mesh.frag. Layout (std140) must match both shaders.
@@ -49,6 +64,8 @@ struct CameraUbo {
                            // w = the wireframe overlay's linear grey (ShadeMode::wireLevel)
     glm::vec4 selection;   // the selected-joint highlight (SelectionStyle): rgb = its color, linear;
                            // a = its opacity at a full skin weight
+    glm::vec4 lightInfo;   // x = how many of `lights` are in use; yzw spare
+    LightUbo  lights[kCameraUboLights]; // the scene's light objects (the first enabled ones)
 };
 
 /// The normalized world-space direction TO the key light from the Environment panel's
@@ -79,6 +96,10 @@ glm::vec3 keyLightDirection(const LightingSettings& lighting, bool pbrFollowsRot
 void fillCameraUbo(CameraUbo& ubo, const Camera& camera, const LightingSettings& lighting,
                    const ShadeMode& spec, const EnvironmentSH& sh, const glm::mat4& lightViewProj,
                    const glm::vec3& keyDir, const SelectionStyle& selection);
+
+/// The scene's LIGHT OBJECTS into @p ubo: the first kCameraUboLights enabled ones of @p lights,
+/// each as the PBR mode shades with it (mesh.frag) — unshadowed; a render traces them all.
+void fillCameraUboLights(CameraUbo& ubo, const std::vector<SceneLight>& lights);
 
 } // namespace pose
 

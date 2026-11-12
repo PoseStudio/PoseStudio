@@ -345,12 +345,8 @@ void RenderWindow::startRender() {
         QMessageBox::information(this, tr("Render"), tr("The viewport is not ready to be rendered yet."));
         return;
     }
-    if (scene->scene().meshCount == 0) {
-        QMessageBox::information(this, tr("Render"),
-                                 scene->skippedSplatScenes() > 0
-                                     ? tr("There is nothing here the render engine can draw: a Gaussian splat scene is shown by the "
-                                          "viewport alone. Import a figure or a model to render it.")
-                                     : tr("The scene is empty. Import a figure or a model to render it."));
+    if (scene->scene().meshCount == 0 && scene->skippedSplatScenes() == 0) {
+        QMessageBox::information(this, tr("Render"), tr("The scene is empty. Import a figure or a model to render it."));
         return;
     }
     m_skippedSplats = scene->skippedSplatScenes();
@@ -442,8 +438,10 @@ void RenderWindow::showStatus() {
         text = tr("The render failed: %1").arg(QString::fromUtf8(status.error));
         break;
     }
-    if (m_skippedSplats > 0 && status.state != renderapi::State::Idle) {
-        text += QStringLiteral("   ·   ") + tr("Gaussian splat scenes are not rendered");
+    if (m_skippedSplats > 0 && status.state != renderapi::State::Idle && !m_session.compositesSplats()) {
+        // (The capture's layers could not be drawn at this size — the graphics card ran out of
+        // room, most likely: the render went without it.)
+        text += QStringLiteral("   ·   ") + tr("The Gaussian splat scene could not be drawn at this size and was left out");
     }
     m_statusText->setText(text);
     m_progress->setValue(static_cast<int>(status.progress * 1000.0f + 0.5f));

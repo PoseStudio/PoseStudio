@@ -1,6 +1,6 @@
 # Project Files
 
-A project file (`.pss`) saves the whole scene — every figure with its pose and position, the environment, and the camera — as one small document you can reopen later or share. It is the way to keep a work in progress: close the app, come back, open the project, and the scene is exactly where you left it.
+A project file (`.pss`) saves the whole scene — every figure with its pose and position, the environment, your lights, and the camera — as one small document you can reopen later or share. It is the way to keep a work in progress: close the app, come back, open the project, and the scene is exactly where you left it.
 
 ## Saving and opening
 
@@ -8,7 +8,7 @@ A project file (`.pss`) saves the whole scene — every figure with its pose and
 - **File → Save As…** (`Ctrl+Shift+S`) picks a new `.pss` location and becomes the project's file from then on. The dialog opens in the folder you used last time; `.pss` is added to the name if you leave it off.
 - **File → Open** (`Ctrl+O`) loads a `.pss` project. Everything currently in the scene is replaced by the project's content.
 
-A save is tiny — kilobytes, not megabytes: the file stores references and numbers, never geometry or textures. Opening a project re-imports the figure files it names through the normal import pipeline and restores their poses, transforms, [material edits](materials.md) (the zones whose material differs from the import, by zone name — every value, and each texture slot that was replaced by a file or cleared, and each zone's [overlays](materials.md#overlays-tattoos-marks-and-makeup) with their controls; a replaced map and an overlay image are referenced by their paths, like the figure file itself), the environment (HDRI and every lighting dial) and the camera framing on top.
+A save is tiny — kilobytes, not megabytes: the file stores references and numbers, never geometry or textures. Opening a project re-imports the figure files it names through the normal import pipeline and restores their poses, transforms, [material edits](materials.md) (the zones whose material differs from the import, by zone name — every value, and each texture slot that was replaced by a file or cleared, and each zone's [overlays](materials.md#overlays-tattoos-marks-and-makeup) with their controls; a replaced map and an overlay image are referenced by their paths, like the figure file itself), the environment (HDRI and every lighting dial), your [lights](lights.md) (each with its kind, place, direction, color and settings) and the camera framing on top.
 
 ## If a figure file has moved
 
@@ -22,7 +22,7 @@ The scene you had stays untouched until every referenced file is found or explic
 
 ## Unsaved changes
 
-PoseStudio tracks whether the scene has changed since the last save — posing, moving a figure, editing a material, importing, deleting, and changing the environment all count; moving the camera does not (see [Preferences](preferences.md) to make it count). When there are unsaved changes, **New**, **Open** and closing the window ask first:
+PoseStudio tracks whether the scene has changed since the last save — posing, moving a figure, editing a material, importing, deleting, changing the environment, and adding or changing a light all count; moving the camera does not (see [Preferences](preferences.md) to make it count). When there are unsaved changes, **New**, **Open** and closing the window ask first:
 
 - **Save** writes the project and continues;
 - **Discard Changes** discards the changes and continues;
@@ -57,6 +57,22 @@ The file is versioned JSON and can be read by hand:
     "hdri": "C:/hdris/studio.hdr",
     "settings": { "exposure": 0.65, "keyIntensity": 1.25 }
   },
+  "lights": [
+    {
+      "name": "Spot Light 1",
+      "kind": "spot",
+      "enabled": true,
+      "position": [-1.3, 1.9, 1.5],
+      "turnDeg": -40.0,
+      "tiltDeg": 15.0,
+      "color": [1.0, 1.0, 1.0],
+      "intensity": 4.0,
+      "radius": 0.05,
+      "coneDeg": 50.0,
+      "blend": 0.2,
+      "castShadow": true
+    }
+  ],
   "camera": {
     "target": [0.0, 1.0, 0.0],
     "yaw": 0.61,
@@ -67,4 +83,4 @@ The file is versioned JSON and can be read by hand:
 }
 ```
 
-Each figure row carries its pose the same way a `.pose` file does (bone rotations, the root's `@trans:` offset, pins), plus its transform — translation, rotation as a quaternion `[x, y, z, w]`, scale. The camera's `yaw` and `pitch` are in radians. Figure and panorama paths are absolute: a project opened on another computer, or after the files were moved, asks where each one is (above). Unknown fields are ignored on load, so files written by a newer version open in an older one; a file from a newer major version is rejected with an explanation rather than guessed at. A damaged file — bad JSON, a missing section, a non-numeric value — is rejected whole: the current scene is never half-replaced.
+Each figure row carries its pose the same way a `.pose` file does (bone rotations, the root's `@trans:` offset, pins), plus its transform — translation, rotation as a quaternion `[x, y, z, w]`, scale. A light's `kind` is `point`, `spot`, `area` or `sun`; its `position` and sizes are in metres, its angles in degrees, its `color` in linear values; an area light also has `width` and `height`, a sun `sunAngleDeg`. The camera's `yaw` and `pitch` are in radians. Figure and panorama paths are absolute: a project opened on another computer, or after the files were moved, asks where each one is (above). Unknown fields are ignored on load, so files written by a newer version open in an older one; a file from a newer major version is rejected with an explanation rather than guessed at. A damaged file — bad JSON, a missing section, a non-numeric value — is rejected whole: the current scene is never half-replaced.
