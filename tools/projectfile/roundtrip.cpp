@@ -82,6 +82,7 @@ ProjectDocument makeDoc() {
     torso.params.transmission = 0.3f;
     torso.params.transmissionColor = glm::vec3(0.2f, 0.9f, 0.3f);
     torso.params.thinWalled = true;
+    torso.params.transmissionRoughness = 0.125f;
     torso.params.subsurfaceRadius = 2.5f;
     torso.params.sheen = 0.4f;
     torso.params.coatIor = 1.7f;

@@ -81,6 +81,8 @@ void VulkanWindow::beginEnvironmentBake(const QString& hdrPath, bool autoAimKey)
             failDevice("Environment upload", e);
             return;
         }
+        m_appliedEnvironmentPath = hdrPath;
+        m_appliedEnvironmentScale = baked->luminanceScale;
         // Auto-aim the key light at the environment's dominant light (its "sun"): in the PBR
         // mode the figure is visibly lit by the HDRI, so a key/shadow pointing anywhere else
         // reads as broken — the ground shadow must fall away from where the light comes from.

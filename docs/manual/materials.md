@@ -20,7 +20,7 @@ Turn the box off to edit one zone alone — a tattooed arm glossier than the res
 
 ## Overlays: tattoos, marks and makeup
 
-The **Overlays** section, right under the zone picker, layers color and pictures over the skin: a tattoo, freckles, a birthmark, a bruise, veins, stretch marks, a scar — and makeup: lipstick, eye shadow, blush. An overlay is one of two things, or both:
+The **Overlays** section, under Base — folded while the zone has no overlay, open once it has one; folded, its heading shows a **+** while the zone has none, or how many it has; click the heading to open it — layers color and pictures over the skin: a tattoo, freckles, a birthmark, a bruise, veins, stretch marks, a scar — and makeup: lipstick, eye shadow, blush. An overlay is one of two things, or both:
 
 - a **picture** painted on the zone's **UV layout** — the same square the zone's own texture maps are painted on, so an image made for a figure's torso map lands where it was painted on that figure's torso — with **transparency where the skin shows**. A PNG with an alpha channel is the usual file;
 - a **color and a mask**: a flat color, and an image on the Opacity row that says where it goes. A lipstick or an eye shadow needs no picture at all.
@@ -47,7 +47,7 @@ An overlay belongs to the **texture map**, not to the one zone. A figure's face,
 
 The card's top line has the overlay's **name** — click it to fold or unfold the card — a **switch** that turns the overlay off and on with every value kept, arrows that move it up and down among the other overlays, and **×** to remove it.
 
-Overlays are named *Overlay 1*, *Overlay 2* and so on as they are added, and keep their names when they are moved. To give one a name of your own, right-click its name and choose **Rename…**: the name becomes a text field. Press Enter, or click elsewhere, to keep what you typed; press Esc to leave the name as it was.
+Overlays are named by their place as they are added — the third overlay of a zone is *Overlay 3*, whatever the first two have been renamed to — and keep their names when they are moved. To give one a name of your own, right-click its name and choose **Rename…**: the name becomes a text field. Press Enter, or click elsewhere, to keep what you typed; press Esc to leave the name as it was.
 
 Below the top line are the overlay's controls; each is one undo step and has a button that returns it to its default. A **small square** on a row is that row's image. Click it to choose an image file, right-click it to remove the image or open its folder, rest the pointer on it for a larger view.
 
@@ -141,7 +141,7 @@ For makeup, an overlay with no picture is the most flexible: the **Opacity** row
 
 ### Several overlays
 
-A zone carries as many overlays as you like. The cards are listed as an image editor lists its layers — the **top** one first — and a new overlay goes on top. The arrows on a card move it up and down; the order matters wherever overlays overlap and one of them covers (Normal) rather than darkens.
+A zone carries as many overlays as you like. The cards are listed in the order they are painted: the first card first, and a new overlay at the bottom of the list, painted over the ones above it. The arrows on a card move it up and down the list; the order matters wherever overlays overlap and one of them covers (Normal) rather than darkens.
 
 ### What overlays do not do
 
@@ -155,7 +155,7 @@ The material is laid out in collapsible sections; click a heading to fold or unf
 
 Every value is a **scrub field** like the Environment tab's dials: drag left or right across it to change it — with **Shift** held, in steps a tenth the size — or click it once to type a number (`Enter` confirms, `Esc` cancels). A color is a **swatch**: click it for a color picker, and the color changes on the figure as you choose (`Cancel` puts it back). The small button beside each row returns that one value to what the file imported with — never to a generic default. The figure changes as you scrub.
 
-A row marked *stored for rendering engines* is saved with the material and written to the project file, but the viewport does not draw it.
+A row marked *stored for rendering engines* is saved with the material and written to the project file, but the viewport does not draw it. A **render** ([Rendering](rendering.md)) reads the material itself, and uses some of what the viewport cannot show: glass really bends and blurs what is behind it and takes its **Transmission Color** over the **Depth** you give it; skin scatters light under its surface as far as its **Scattering Distance**, **Scattering Direction** and the transmission color at its depth say. Displacement, the Detail layer, dispersion and the maps marked as stored are not rendered yet.
 
 ### Base
 

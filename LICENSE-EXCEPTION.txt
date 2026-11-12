@@ -1,0 +1,34 @@
+PoseStudio: additional permission under GNU GPL version 3 section 7
+====================================================================
+
+PoseStudio is licensed under the GNU General Public License, version 3 (the file LICENSE),
+with the following additional permission, granted by its copyright holders under section 7
+of that license:
+
+    If you modify this Program, or any covered work, by linking or combining it with
+    NVIDIA Corporation's OptiX SDK or CUDA Toolkit (or a modified version of either),
+    containing parts covered by the terms of NVIDIA's license agreements for that software,
+    the licensors of this Program grant you additional permission to convey the resulting
+    work.
+
+
+What this is for
+----------------
+
+PoseStudio's render engine (Cycles, loaded as a plugin from the "engines/cycles" folder) can
+render on NVIDIA graphics cards through CUDA and OptiX. To do so the engine is compiled against
+NVIDIA's OptiX headers and its GPU kernels are compiled with NVIDIA's CUDA compiler. That
+software is NVIDIA's, under NVIDIA's own license terms, and is not open source. The permission
+above says that PoseStudio's license does not stand in the way of building, using and
+distributing PoseStudio together with it.
+
+What it does not do
+-------------------
+
+- It places nothing of NVIDIA's under the GNU General Public License. The OptiX SDK and the
+  CUDA Toolkit remain under NVIDIA's license agreements, and whoever builds or distributes a
+  PoseStudio that uses them must meet those agreements themselves.
+- It changes nothing for any other library. Everything else PoseStudio is combined with is
+  under a license compatible with the GNU General Public License (see ATTRIBUTIONS.md).
+- As section 7 says, you may remove this additional permission from a copy you convey; a copy
+  built without the NVIDIA devices has no need of it.

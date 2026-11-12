@@ -223,23 +223,19 @@ inline const std::string& overlayTitle(const MaterialOverlay& o) {
     return o.name;
 }
 
-/// The number a NEW overlay's default name takes ("Overlay 3"): one more than the highest among
-/// the names of @p overlays that are @p prefix, a space and a number — so a default name is not
-/// handed out twice while its overlay is in the stack, and an overlay keeps its name when the
-/// stack is reordered.
+/// The number a NEW overlay's default name takes: its PLACE in the stack — the third overlay is
+/// "Overlay 3" whatever the two before it have been renamed to — or the next number after that
+/// which no overlay of the stack already carries (one was removed from the middle).
 inline int nextOverlayNumber(const std::vector<MaterialOverlay>& overlays, const std::string& prefix) {
-    int highest = 0;
-    for (const MaterialOverlay& o : overlays) {
-        if (o.name.size() <= prefix.size() + 1 || o.name.size() > prefix.size() + 7 || o.name.compare(0, prefix.size(), prefix) != 0 ||
-            o.name[prefix.size()] != ' ') {
-            continue;
-        }
-        const std::string digits = o.name.substr(prefix.size() + 1);
-        if (std::all_of(digits.begin(), digits.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
-            highest = std::max(highest, std::atoi(digits.c_str()));
-        }
+    int number = static_cast<int>(overlays.size()) + 1;
+    const auto taken = [&](int n) {
+        const std::string name = prefix + " " + std::to_string(n);
+        return std::any_of(overlays.begin(), overlays.end(), [&](const MaterialOverlay& o) { return o.name == name; });
+    };
+    while (taken(number)) {
+        ++number;
     }
-    return highest + 1;
+    return number;
 }
 
 /// The overlay's SCALAR controls as fields with their DISPLAY units (percent, degrees, a plain

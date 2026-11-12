@@ -191,6 +191,9 @@ jobs:
           # LightUSD and the rest - NOTICES.txt lists them), and NOTICES.txt, the index, rendered with the Qt version so it names exactly what
           # was shipped and where its source lives.
           Copy-Item LICENSE dist\app\LICENSE.txt
+          # The GPL section 7 additional permission (the render engine's NVIDIA devices) is part
+          # of PoseStudio's license terms, so it travels with the GPL text.
+          Copy-Item LICENSE-EXCEPTION.txt dist\app\LICENSE-EXCEPTION.txt
           New-Item -ItemType Directory -Force dist\app\licenses | Out-Null
           Copy-Item packaging\licenses\*.txt dist\app\licenses\
           $qtMajorMinor = $env:QT_VERSION -replace '\.\d+$', ''

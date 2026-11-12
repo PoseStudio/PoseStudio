@@ -84,6 +84,17 @@
 /* The Materials tab's layer switches, at the right of a section header. */
 #MaterialPanel #PropertyLayerToggle { spacing: 0px; }
 
+/* The Overlays header's summary while folded: a "+" (drawn in code: PlusMark) with no overlay,
+ * else the count. Marks on the header, not controls: no background, no hover of their own. */
+#MaterialSectionCount {
+    color: #cfcfd2;
+    font-size: 12px;
+    font-weight: bold;
+    background: transparent;
+    border: none;
+    padding: 0px;
+}
+
 /* The Overlays section's cards (overlaystack.cpp): one framed card per overlay — a header (the
  * color image's thumbnail, the fold arrow + name, the on/off switch, move up / down, remove)
  * over its controls. A shade lighter than the pane, so a stack of them reads as layers. */

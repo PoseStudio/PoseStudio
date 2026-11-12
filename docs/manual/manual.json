@@ -9,6 +9,7 @@
     { "id": "shading",          "title": "Shading and Display",     "file": "shading.md" },
     { "id": "materials",        "title": "Materials",               "file": "materials.md" },
     { "id": "environment",      "title": "Lighting and Environment","file": "environment.md" },
+    { "id": "rendering",        "title": "Rendering",               "file": "rendering.md" },
     { "id": "vr",               "title": "VR Mode",                 "file": "vr.md" },
     { "id": "posing",           "title": "Posing",                  "file": "posing.md",
       "children": [

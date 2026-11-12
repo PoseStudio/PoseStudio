@@ -52,6 +52,20 @@ the authoritative text is the license file in the library's own repository.
 | [stb_image](https://github.com/nothings/stb) | Radiance `.hdr` panorama decoding | MIT or public domain |
 | [tinyexr](https://github.com/syoyo/tinyexr) | OpenEXR `.exr` panorama decoding | BSD 3-Clause |
 
+The **render engine** is a separate, optional part of the application — a plugin built only when
+asked for (`-DPOSESTUDIO_WITH_CYCLES=ON`), not linked into PoseStudio itself:
+
+| Library | Used for | License |
+| --- | --- | --- |
+| [Cycles](https://www.cycles-renderer.org/) (Blender Foundation) | The path tracer behind Render → Render Image | Apache 2.0 |
+| Cycles's precompiled libraries, as Blender builds them: OpenImageIO, OpenEXR / Imath, OpenJPH, OpenColorIO, Embree, Open Image Denoise, oneTBB, the SYCL runtime Embree loads, pugixml, {fmt}, zlib, Zstandard, libpng, libjpeg-turbo, libwebp, OpenJPEG, libaom, pthreads-win32 | Image input and output, color management, ray acceleration, denoising, threading | Each under its own permissive license (BSD, Apache 2.0, MIT, zlib and similar; pthreads-win32 LGPL) |
+
+The engine's GPU kernels are compiled with NVIDIA's CUDA compiler, and its OptiX device against
+NVIDIA's OptiX headers; neither is redistributed as such, but both come under NVIDIA's own license
+terms rather than an open-source license. PoseStudio's license carries an additional permission
+for exactly this combination ([LICENSE-EXCEPTION.txt](LICENSE-EXCEPTION.txt)); what NVIDIA's terms
+ask of a release is in [docs/RELEASING.md](docs/RELEASING.md).
+
 LightUSD carries third-party code of its own (among them LZ4, Zstandard, pugixml, fast_float,
 Dragonbox, nanoflann, xxHash and MikkTSpace), each under its own permissive license; its
 [LICENSE.3rdparty](https://github.com/lighttransport/tinyusdz/blob/main/LICENSE.3rdparty)

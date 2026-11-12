@@ -61,6 +61,7 @@ The keys work on the number row and on the numeric keypad. With NumLock off, the
 | `Ctrl+S` | File → Save — save the scene to its `.pss` file (asks for a place first if it has none) |
 | `Ctrl+Shift+S` | File → Save As… — save the scene under a new `.pss` name |
 | `Ctrl+Q` | Quit |
+| `F12` | Render → Render Image — render the scene as the viewport shows it |
 
 ## Asset Manager
 
@@ -109,6 +110,15 @@ The keys work on the number row and on the numeric keypad. With NumLock off, the
 | **+ Add Overlay** | Add an empty overlay over the zone's skin, to make into a tattoo, a mark or makeup on its card (see [Overlays](materials.md#overlays-tattoos-marks-and-makeup)) |
 | Click a small square on an overlay's card | Choose that row's image — the picture on Base Color, the mask on Opacity, the Metallic map, a Bump, Normal or Displacement image; right-click to remove the image or open its folder |
 | Right-click an overlay's name | **Rename…** it (Enter keeps the new name, Esc drops it) |
+
+## Render window
+
+| Key or gesture | Action |
+| --- | --- |
+| `F12` (in the main window) | Open the window and start a render |
+| `Esc` | Stop the render; with nothing rendering, close the window |
+| `Ctrl+S` | Save Image… |
+| Drag across **Samples** | Change it in steps of 8; `Shift` + drag in single steps; click to type |
 
 ## This manual
 

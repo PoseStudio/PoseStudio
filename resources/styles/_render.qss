@@ -1,0 +1,104 @@
+/**
+ * @file _render.qss
+ * @brief Styling for the Render window (src/render/renderwindow.cpp): the toolbar with its
+ *        Render / Stop / Save buttons and settings, the picture's field, the status line.
+ *
+ * The size and device pickers are MenuPickerButtons whose field style is set in code (the
+ * viewport strip's, so the two read as one family); the scrub field paints itself.
+ */
+
+/* =========================================================================
+   [ WINDOW + TOOLBAR ]
+   ========================================================================= */
+
+#RenderWindow {
+    background-color: #191a1b;
+}
+
+#RenderToolbar {
+    background-color: #191a1b;
+    border-bottom: 1px solid #121212;
+}
+
+#RenderCaption {
+    color: #9a9b9e;
+    font-size: 12px;
+    padding-left: 6px;
+}
+
+#RenderToolbar QCheckBox {
+    color: #d8d8da;
+    font-size: 12px;
+    spacing: 6px;
+    padding-left: 6px;
+}
+
+#RenderStartButton, #RenderStopButton, #RenderSaveButton {
+    background-color: #2a2d30;
+    color: #e8e8ea;
+    border: 1px solid #3a3b3c;
+    border-radius: 4px;
+    padding: 5px 16px;
+    min-width: 56px;
+    font-size: 12px;
+}
+
+/* (The widest label: without a floor of its own the toolbar's layout squeezes it first.) */
+#RenderSaveButton {
+    min-width: 84px;
+}
+
+#RenderStartButton {
+    background-color: #314d7a;
+    border-color: #5b87cc;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+#RenderStartButton:hover {
+    background-color: #3d5f96;
+}
+
+#RenderStopButton:hover, #RenderSaveButton:hover {
+    background-color: #3a3b3c;
+}
+
+#RenderStartButton:pressed, #RenderStopButton:pressed, #RenderSaveButton:pressed {
+    background-color: #5b87cc;
+}
+
+#RenderStartButton:disabled, #RenderStopButton:disabled, #RenderSaveButton:disabled {
+    color: #666666;
+    border-color: #2a2b2d;
+    background-color: #202224;
+}
+
+/* =========================================================================
+   [ STATUS LINE ]
+   ========================================================================= */
+
+#RenderStatusBar {
+    background-color: #191a1b;
+    border-top: 1px solid #121212;
+}
+
+#RenderStatusText {
+    color: #c8c8ca;
+    font-size: 12px;
+}
+
+#RenderEngineText {
+    color: #77787b;
+    font-size: 12px;
+}
+
+#RenderProgress {
+    background-color: #2a2b2d;
+    border: none;
+    border-radius: 4px;
+}
+
+#RenderProgress::chunk {
+    background-color: #5b87cc;
+    border-radius: 4px;
+}

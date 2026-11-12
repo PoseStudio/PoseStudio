@@ -162,6 +162,10 @@ Ray Camera::screenPointToRay(float px, float py, float viewportWidth, float view
     return ray;
 }
 
+float Camera::orthographicHeight() const {
+    return 2.0f * m_distance * std::tan(0.5f * m_fovYRadians);
+}
+
 void Camera::rebuildProjection() {
     // GLM_FORCE_DEPTH_ZERO_TO_ONE (set in CMake) makes perspective()/ortho() emit Vulkan's
     // [0,1] depth range. Vulkan's clip-space Y also points opposite to OpenGL's, so we

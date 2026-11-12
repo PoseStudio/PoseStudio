@@ -58,6 +58,32 @@ namespace pose {
 
 namespace {
 
+/// The Overlays header's folded "+": a mark, DRAWN — two bars on whole pixels — so that its four
+/// arms are the same length and it is centered exactly (a "+" glyph sits wherever its font's
+/// math axis puts it). An EVEN size around a 2 px bar: 4 + 2 + 4 with a pixel of margin all
+/// round (an odd one left the top and left arms a pixel short — a cross).
+class PlusMark : public QWidget {
+public:
+    static constexpr int kSize = 12; ///< logical pixels, the margin included
+    static constexpr int kBar = 2;
+    explicit PlusMark(QWidget* parent) : QWidget(parent) {
+        setFixedSize(kSize, kSize);
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter     painter(this);
+        const QColor ink(0xcf, 0xcf, 0xd2);
+        const int    mid = (kSize - kBar) / 2;
+        painter.fillRect(QRect(mid, 1, kBar, kSize - 2), ink);
+        painter.fillRect(QRect(1, mid, kSize - 2, kBar), ink);
+    }
+};
+/// A collapsible section's body margin (propertyrows::addCollapsibleGroup's form margins): how
+/// far in from the section's edge its rows — and their restore buttons — end.
+constexpr int kSectionMargin = 8;
+
 /// Linear → display (sRGB) and back, per channel: the swatch shows what the screen shows.
 float linearToSrgb(float c) {
     c = std::clamp(c, 0.0f, 1.0f);
@@ -153,14 +179,6 @@ void MaterialPanel::buildUi() {
     m_linkedNote->setObjectName(QStringLiteral("MaterialHint"));
     zone->addRow(QString(), m_linkedNote);
 
-    // --- Overlays: images layered over the zone's skin (tattoos, bruises, freckles, makeup) —
-    // first under the zone, where the thing most often reached for is not twelve sections down.
-    // The section is OverlayStack's (overlaystack.h); it edits through the viewport and says so.
-    QFormLayout* overlays = addSection(col, tr("Overlays"), /*expanded=*/true, [](const MaterialView& v) { return !v.params.overlays.empty(); });
-    m_overlays = new OverlayStack(m_viewport);
-    connect(m_overlays, &OverlayStack::edited, this, &MaterialPanel::refresh);
-    overlays->addRow(m_overlays);
-
     // --- Base: the color and the specular response ---
     QFormLayout* base = addSection(col, tr("Base"), /*expanded=*/true, nullptr, MaterialLayer::Base);
     addColorRow(base, MaterialColor::Base, tr("Base Color"),
@@ -174,6 +192,32 @@ void MaterialPanel::buildUi() {
     addRow(base, MaterialField::DiffuseRoughness, tr("Diffuse Roughness"),
            tr("How rough the diffuse surface is at the micro scale (cloth, chalk, the moon): 0 is a smooth Lambertian surface, 100 flattens the shading toward the light."),
            0.0, 100.0, 1.0, 0);
+
+    // --- Overlays: images layered over the zone's skin (tattoos, bruises, freckles, makeup) —
+    // first under the zone, where the thing most often reached for is not twelve sections down.
+    // The section is OverlayStack's (overlaystack.h); it edits through the viewport and says so.
+    QFormLayout* overlays = addSection(col, tr("Overlays"), /*expanded=*/false, [](const MaterialView& v) { return !v.params.overlays.empty(); });
+    m_overlays = new OverlayStack(m_viewport);
+    connect(m_overlays, &OverlayStack::edited, this, &MaterialPanel::refresh);
+    overlays->addRow(m_overlays);
+    // Folded, the header says what is inside: a "+" while the zone has no overlay, else how many
+    // it has. MARKS, not controls: they are children of the header button itself and let the
+    // mouse through, so the header's hover runs under them and a click there folds or unfolds
+    // the section like a click anywhere else on it. Both sit in the restore buttons' column
+    // (placeOverlaySummary).
+    if (QToolButton* header = m_sections.back().header) {
+        m_overlayHeader = header;
+        header->setProperty("testId", QStringLiteral("overlay.section")); // (the scripted test folds it with `ui click`)
+        m_overlayAdd = new PlusMark(header);
+        m_overlayAdd->setProperty("testId", QStringLiteral("overlay.header.add"));
+        m_overlayCount = new QLabel(header);
+        m_overlayCount->setObjectName(QStringLiteral("MaterialSectionCount"));
+        m_overlayCount->setAttribute(Qt::WA_TransparentForMouseEvents);
+        m_overlayCount->setAlignment(Qt::AlignCenter);
+        m_overlayCount->setProperty("testId", QStringLiteral("overlay.header.count"));
+        header->installEventFilter(this); // (its Resize re-places the two marks)
+        connect(header, &QToolButton::toggled, this, [this](bool) { syncOverlaySummary(); });
+    }
 
     // --- Specular: the dielectric reflection (a metal's is its base color) ---
     QFormLayout* specular = addSection(col, tr("Specular"), /*expanded=*/true, nullptr, MaterialLayer::Specular);
@@ -1070,9 +1114,53 @@ void MaterialPanel::refresh() {
         }
         section.wasInUse = use;
     }
+    syncOverlaySummary();
 
     m_resetZone->setEnabled(view.valid);
     m_resetAll->setEnabled(view.valid);
+}
+
+void MaterialPanel::syncOverlaySummary() {
+    if (m_overlayHeader == nullptr) {
+        return;
+    }
+    const bool folded = !m_overlayHeader->isChecked();
+    const int  count = m_view.valid ? static_cast<int>(m_view.params.overlays.size()) : 0;
+    m_overlayCount->setText(QString::number(count));
+    placeOverlaySummary();
+    m_overlayAdd->setVisible(folded && m_view.valid && count == 0);
+    m_overlayCount->setVisible(folded && count > 0);
+}
+
+void MaterialPanel::placeOverlaySummary() {
+    if (m_overlayHeader == nullptr) {
+        return;
+    }
+    // THE RESTORE BUTTONS' COLUMN: a section's body is as wide as its header and lays its rows
+    // out inside kSectionMargin, each row ending in a restore button — so the column's centre is
+    // that margin plus half a restore button in from the header's right edge.
+    int restoreWidth = 18;
+    if (!m_rows.empty() && m_rows.front().restore != nullptr) {
+        QToolButton* restore = m_rows.front().restore;
+        restoreWidth = restore->isVisible() ? restore->width() : restore->sizeHint().width();
+    }
+    const QPoint centre(m_overlayHeader->width() - kSectionMargin - restoreWidth / 2, m_overlayHeader->height() / 2);
+    for (QWidget* mark : {m_overlayAdd, static_cast<QWidget*>(m_overlayCount)}) {
+        if (mark == m_overlayCount) {
+            mark->ensurePolished(); // (the stylesheet's font, before it is measured)
+            mark->resize(mark->sizeHint());
+        }
+        QRect place = mark->rect();
+        place.moveCenter(centre);
+        mark->move(place.topLeft());
+    }
+}
+
+bool MaterialPanel::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_overlayHeader && event->type() == QEvent::Resize) {
+        placeOverlaySummary();
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 void MaterialPanel::showEvent(QShowEvent* event) {

@@ -73,7 +73,8 @@ QString loadStylesheets() {
         QStringLiteral(":/resources/styles/_menumanager.qss"),
         QStringLiteral(":/resources/styles/_preferences.qss"),
         QStringLiteral(":/resources/styles/_environment.qss"),
-        QStringLiteral(":/resources/styles/_help.qss")
+        QStringLiteral(":/resources/styles/_help.qss"),
+        QStringLiteral(":/resources/styles/_render.qss")
     };
 
     for (const QString& filePath : filesToLoad) {

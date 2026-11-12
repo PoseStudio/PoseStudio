@@ -82,6 +82,11 @@ public:
                        ImmediateBatch& batch);
 
     bool empty() const { return m_correctives.empty(); }
+    /// THE BLEND ON THE CPU (Model::bakePosedMesh — a render engine's geometry): the delta table
+    /// as the vertex stage reads it (Vertex::correctiveRange addresses a vertex's run) and the
+    /// weights as last evaluated (refresh() first for the pose as it stands).
+    const std::vector<CorrectiveEntry>& entries() const { return m_entries; }
+    const std::vector<float>&           weights() const { return m_weight; }
     /// The delta table (set 2 binding 2) and frame slot @p frameIndex's weight buffer (binding 1).
     VkBuffer deltaBuffer() const { return m_deltaBuffer.handle(); }
     VkBuffer weightBuffer(uint32_t frameIndex) const { return m_weightBuffers[frameIndex].handle(); }
@@ -123,6 +128,7 @@ private:
 
     std::vector<RuntimeCorrective>                m_correctives;
     std::vector<float>                            m_weight; // current weight per corrective
+    std::vector<CorrectiveEntry>                  m_entries; // the delta table's CPU copy (see entries())
     VulkanBuffer                                  m_deltaBuffer;
     std::array<VulkanBuffer, kMaxFramesInFlight>  m_weightBuffers;
     std::array<std::uint64_t, kMaxFramesInFlight> m_uploaded{}; // weight version per slot

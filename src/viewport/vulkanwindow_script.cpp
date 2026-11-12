@@ -26,6 +26,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QImage>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -561,6 +562,11 @@ void VulkanWindow::scriptStep() {
             // (from the event loop: give it a `wait` before driving its widgets with `ui`; picture
             // it with `uishot`, close it with `ui click preferences.close`).
             emit preferencesRequested(w.mid(1).join(QLatin1Char(' ')));
+        } else if (cmd == QLatin1String("renderwindow")) {
+            // renderwindow [start]: the Render window, as Render → Show Render Window opens it —
+            // with `start`, as Render → Render Image does (from the event loop: `wait` before
+            // driving it with `ui`; `uienabled.render.stop.0` reads 1 while its render runs).
+            emit renderWindowRequested(w.size() > 1 && w[1].compare(QLatin1String("start"), Qt::CaseInsensitive) == 0);
         } else if (cmd == QLatin1String("uishot") && w.size() > 1) {
             // uishot <name>: ui/<name>.png of the application's widgets — the side tabs (start on
             // one with POSESTUDIO_TAB=<title>); in a folder of its own, beside the viewport's shots
@@ -791,6 +797,55 @@ void VulkanWindow::scriptStep() {
             }
         } else if (cmd == QLatin1String("report")) {
             scriptReport(w.size() > 1 ? qPrintable(line.section(QLatin1Char(' '), 1)) : "report");
+        } else if (cmd == QLatin1String("light") && w.size() > 2) {
+            // light <dial> <value>: one of the Environment tab's dials, as the tab sets it (no undo
+            // entry; the tab's own widgets are not told).
+            LightingSettings lighting = m_deferred.lighting;
+            const QString    dial = w[1].toLower();
+            const float      value = w[2].toFloat();
+            const QHash<QString, float LightingSettings::*> dials = {
+                {QStringLiteral("exposure"), &LightingSettings::exposure},
+                {QStringLiteral("diffuse"), &LightingSettings::diffuseIntensity},
+                {QStringLiteral("specular"), &LightingSettings::specularIntensity},
+                {QStringLiteral("ambient"), &LightingSettings::ambientFill},
+                {QStringLiteral("key"), &LightingSettings::keyIntensity},
+                {QStringLiteral("rotation"), &LightingSettings::environmentRotationDeg},
+                {QStringLiteral("azimuth"), &LightingSettings::keyAzimuthDeg},
+                {QStringLiteral("elevation"), &LightingSettings::keyElevationDeg},
+                {QStringLiteral("subsurface"), &LightingSettings::subsurface},
+                {QStringLiteral("rim"), &LightingSettings::rimIntensity},
+                {QStringLiteral("backdropbrightness"), &LightingSettings::backdropBrightness},
+                {QStringLiteral("backdropblur"), &LightingSettings::backdropBlur},
+                {QStringLiteral("shadowintensity"), &LightingSettings::shadowIntensity},
+                {QStringLiteral("shadowsoftness"), &LightingSettings::shadowSoftness},
+            };
+            if (const auto it = dials.constFind(dial); it != dials.constEnd()) {
+                lighting.*(it.value()) = value;
+            } else if (dial == QLatin1String("tonemap")) {
+                lighting.tonemap = value != 0.0f;
+            } else if (dial == QLatin1String("shadows")) {
+                lighting.shadowsEnabled = value != 0.0f;
+            } else if (dial == QLatin1String("backdrop")) {
+                lighting.backdropMode = static_cast<int>(value);
+            } else {
+                say("[ikscript]   unknown light dial '%s'\n", qPrintable(w[1]));
+            }
+            setLightingSettings(lighting);
+        } else if (cmd == QLatin1String("environment") && w.size() > 1) {
+            // environment <file.hdr|.exr>: the Environment tab's panorama pick (a relative path
+            // resolves like `texture`'s). The bake runs off-thread: `wait` for it.
+            QString file = line.section(QLatin1Char(' '), 1).trimmed();
+            if (QFileInfo(file).isRelative()) {
+                const QString assets = qEnvironmentVariable("POSESTUDIO_IK_SCRIPT_ASSETS");
+                file = QDir(assets.isEmpty() ? s.outDir : assets).filePath(file);
+            }
+            setEnvironmentFile(file);
+        } else if (cmd == QLatin1String("render") && w.size() > 1) {
+            // render <name> [<width> <height>] [<samples>] [<device text>|cpu] [nodenoise] [transparent]:
+            // a PRODUCTION RENDER of the scene as it stands, through the render engine, run to its
+            // end and saved as render/<name>.png (metrics: render.ok, render.seconds, render.mean,
+            // render.covered).
+            scriptRender(w);
         } else if (cmd == QLatin1String("shot") && w.size() > 1) {
             s.shotPath = QDir(s.outDir).filePath(w[1] + QStringLiteral(".png"));
             s.awaitingShot = true;
@@ -976,6 +1031,23 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         value = isProjectDirty() ? 1.0 : 0.0;
         return true;
     }
+    // THE LAST `render`: render.ok (1 = it finished), render.seconds, render.mean (the picture's
+    // mean display value, 0-255), render.covered (percent of pixels that are not the backdrop).
+    if (name.startsWith(QLatin1String("render."), Qt::CaseInsensitive)) {
+        const QString what = name.mid(7).toLower();
+        if (what == QLatin1String("ok")) {
+            value = s.renderOk;
+        } else if (what == QLatin1String("seconds")) {
+            value = s.renderSeconds;
+        } else if (what == QLatin1String("mean")) {
+            value = s.renderMean;
+        } else if (what == QLatin1String("covered")) {
+            value = s.renderCovered;
+        } else {
+            return false;
+        }
+        return true;
+    }
     // PREFERENCES → SELECTION as the viewport holds it: `selstyle.outline.<r|g|b|opacity>` and
     // `selstyle.joint.<r|g|b|opacity>` — the color as display bytes (0-255), the opacity in percent.
     if (name.startsWith(QLatin1String("selstyle."), Qt::CaseInsensitive)) {
@@ -1043,11 +1115,12 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
     }
     // THE WIDGETS' metrics (the `ui` command's): `uicount.<id>` (how many widgets carry that
     // testId), `uivalue.<id>.<n>` (the n-th's value: a scrub field's, a checkbox's 0 / 1, a
-    // picker's index) and `uienabled.<id>.<n>`. An id may itself contain dots.
+    // picker's index, a label's number), `uienabled.<id>.<n>` and `uivisible.<id>.<n>` (shown, as
+    // far as its window goes). An id may itself contain dots.
     if (name.startsWith(QLatin1String("uicount."), Qt::CaseInsensitive) || name.startsWith(QLatin1String("uivalue."), Qt::CaseInsensitive) ||
-        name.startsWith(QLatin1String("uienabled."), Qt::CaseInsensitive)) {
+        name.startsWith(QLatin1String("uienabled."), Qt::CaseInsensitive) || name.startsWith(QLatin1String("uivisible."), Qt::CaseInsensitive)) {
         const int     dot = name.indexOf(QLatin1Char('.'));
-        const QString what = name.left(dot).mid(2).toLower(); // count / value / enabled
+        const QString what = name.left(dot).mid(2).toLower(); // count / value / enabled / visible
         QString       id = name.mid(dot + 1);
         int           index = 0;
         if (what != QLatin1String("count")) {

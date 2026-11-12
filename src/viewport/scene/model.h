@@ -309,6 +309,22 @@ public:
     /// for a ray that misses or a model without samples.
     bool pickSurface(const Ray& ray, float& tOut, glm::vec3& hitWorld, int& bone, int* mesh = nullptr) const;
 
+    /// One mesh of the model AS POSED, in world space — what the vertex stage makes of it
+    /// (mesh.vert: the pose correctives and soft-body fields blended into the bind mesh, then the
+    /// dual-quaternion or linear skin, then the model transform), computed on the CPU for a
+    /// RENDER ENGINE. Per vertex: position, unit normal, UV and the UV tangent with its
+    /// handedness (w = 0 where none was baked); the indices are the mesh's own.
+    struct PosedMesh {
+        std::vector<glm::vec3> positions;
+        std::vector<glm::vec3> normals;
+        std::vector<glm::vec2> uvs;
+        std::vector<glm::vec4> tangents;
+        std::vector<uint32_t>  indices;
+    };
+    /// Fills @p out with mesh @p i as the pose stands (the corrective weights are re-evaluated
+    /// first). False for a bad index or a model without meshes.
+    bool bakePosedMesh(std::size_t i, PosedMesh& out);
+
     /// The world height of the CURRENT pose's lowest point (GroundSampler::lowestY): positive =
     /// hovering that far above the floor, negative = sunk into it. False when there is no
     /// geometry to measure. The viewport animates the ground button's drop from this and

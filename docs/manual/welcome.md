@@ -13,7 +13,7 @@ This manual describes everything that works in the version you are running. It o
 
 ## What it does not do yet
 
-PoseStudio is an early-stage project. Animation, timelines, final-frame rendering and the other file formats listed in the File menu are on the roadmap but do not exist in this build — every menu entry that is greyed out is a placeholder for something planned. The project's website and release notes say what is coming; see [What's New](changelog.md) for what changed in this version.
+PoseStudio is an early-stage project. Animation, timelines and the other file formats listed in the File menu are on the roadmap but do not exist in this build — every menu entry that is greyed out is a placeholder for something planned. The project's website and release notes say what is coming; see [What's New](changelog.md) for what changed in this version.
 
 ## How to use this manual
 

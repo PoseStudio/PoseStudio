@@ -141,6 +141,8 @@ private:
     void buildUi();
     /// The first show: the label column aligned across every section (see alignLabelColumn).
     void showEvent(QShowEvent* event) override;
+    /// The Overlays header's Resize: its folded summary re-placed (placeOverlaySummary).
+    bool eventFilter(QObject* watched, QEvent* event) override;
     /// Gives every row label the widest label's width, so the fields line up down the whole tab.
     void alignLabelColumn();
     bool m_columnAligned = false;
@@ -225,6 +227,15 @@ private:
     QToolButton*      m_doubleSidedRestore = nullptr;
     std::vector<Section> m_sections;
     OverlayStack*     m_overlays = nullptr;   // the Overlays section: the zone's overlay stack (overlaystack.h)
+    // The Overlays header's summary while it is FOLDED: a "+" that adds the first overlay, or the
+    // number of overlays the zone carries (syncOverlaySummary).
+    // Marks, not controls: children of the header that let the mouse through (its hover runs
+    // under them, a click there is the header's), centered on the restore buttons' column.
+    QToolButton*      m_overlayHeader = nullptr;
+    QWidget*          m_overlayAdd = nullptr;   // (the drawn "+": PlusMark in the .cpp)
+    QLabel*           m_overlayCount = nullptr;
+    void              syncOverlaySummary();
+    void              placeOverlaySummary();
     QPushButton*      m_resetZone = nullptr;
     QPushButton*      m_resetAll = nullptr;
     QStringList       m_zoneNames;            // the picker's items as last built

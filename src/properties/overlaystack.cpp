@@ -258,7 +258,7 @@ void OverlayStack::rebuild() {
     m_cards.reserve(static_cast<std::size_t>(count));
     for (int i = 0; i < count; ++i) {
         m_cards.push_back(buildCard(i));
-        m_cardColumn->insertWidget(0, m_cards.back().frame); // (the last overlay is the top of the stack: listed first)
+        m_cardColumn->addWidget(m_cards.back().frame); // (in the stack's order: the first overlay first, a new one at the bottom, painted over those above it)
         // (Shown now: a widget added to a visible parent's layout is otherwise shown by a queued
         // call, a turn of the event loop later.)
         m_cards.back().frame->show();
@@ -358,14 +358,14 @@ OverlayStack::Card OverlayStack::buildCard(int index) {
         }
     });
     h->addWidget(card.enabled, 0, Qt::AlignVCenter);
-    card.up = headerButton(Qt::UpArrow, tr("Move up: over the overlay above it"));
-    card.down = headerButton(Qt::DownArrow, tr("Move down: under the overlay below it"));
+    card.up = headerButton(Qt::UpArrow, tr("Move up the list: painted before the overlay now above it, so under it"));
+    card.down = headerButton(Qt::DownArrow, tr("Move down the list: painted after the overlay now below it, so over it"));
     card.remove = headerButton(Qt::NoArrow, tr("Remove this overlay"));
     tagged(card.up, "overlay.up");
     tagged(card.down, "overlay.down");
     tagged(card.remove, "overlay.remove");
-    connect(card.up, &QToolButton::clicked, this, [this, index]() { moveOverlay(index, +1); });
-    connect(card.down, &QToolButton::clicked, this, [this, index]() { moveOverlay(index, -1); });
+    connect(card.up, &QToolButton::clicked, this, [this, index]() { moveOverlay(index, -1); });
+    connect(card.down, &QToolButton::clicked, this, [this, index]() { moveOverlay(index, +1); });
     connect(card.remove, &QToolButton::clicked, this, [this, index]() { removeOverlay(index); });
     h->addWidget(card.up);
     h->addWidget(card.down);
@@ -539,8 +539,8 @@ void OverlayStack::syncCard(int index) {
         const QSignalBlocker blocker(card.enabled);
         card.enabled->setChecked(o.enabled);
     }
-    card.up->setEnabled(index < count - 1); // (the stack's top is the highest index, listed first)
-    card.down->setEnabled(index > 0);
+    card.up->setEnabled(index > 0); // (the list is the stack's order: the first overlay first)
+    card.down->setEnabled(index < count - 1);
     card.dim->setOpacity(o.enabled ? 1.0 : 0.45);
 
     // The color's controls are always live (with no picture the overlay is a flat Base Color); a

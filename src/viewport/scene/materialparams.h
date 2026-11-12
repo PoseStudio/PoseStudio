@@ -191,6 +191,10 @@ struct MaterialParams {
     float     transmission = 0.0f;  ///< 0 opaque … 1 fully transmissive (glass, water). Rendered: the frame shows through, tinted, under the reflection.
     glm::vec3 transmissionColor{1.0f}; ///< The tint light takes on passing through (rendered; deeper toward a solid's edges).
     float     transmissionDepth = 0.0f; ///< Metres over which the tint is reached (0 = at the surface).
+    /// How rough the surface is to what passes THROUGH it, where that is not its Roughness (a
+    /// negative value = the Roughness): an eye's clear shells reflect softly and transmit sharply.
+    /// Stored for the rendering engines (the viewport's transmission is unblurred either way).
+    float     transmissionRoughness = -1.0f;
     float     dispersion = 0.0f;    ///< 0 none … 1 strong chromatic dispersion (stored; not rendered).
     bool      thinWalled = false;   ///< A single sheet (a window pane, a leaf) rather than a solid.
     // --- Subsurface (the weight is `translucency`, the native skin shaders' name) ---
@@ -305,7 +309,7 @@ struct MaterialParams {
                specular == o.specular && specularColor == o.specularColor && roughness == o.roughness && ior == o.ior &&
                anisotropy == o.anisotropy && anisotropyRotation == o.anisotropyRotation && transmission == o.transmission &&
                transmissionColor == o.transmissionColor && transmissionDepth == o.transmissionDepth && dispersion == o.dispersion &&
-               thinWalled == o.thinWalled && translucency == o.translucency && subsurfaceColor == o.subsurfaceColor &&
+               transmissionRoughness == o.transmissionRoughness && thinWalled == o.thinWalled && translucency == o.translucency && subsurfaceColor == o.subsurfaceColor &&
                subsurfaceRadius == o.subsurfaceRadius && subsurfaceRadiusColor == o.subsurfaceRadiusColor &&
                subsurfaceAnisotropy == o.subsurfaceAnisotropy && sheen == o.sheen && sheenColor == o.sheenColor &&
                sheenRoughness == o.sheenRoughness && topCoat == o.topCoat && topCoatRoughness == o.topCoatRoughness &&
@@ -336,7 +340,8 @@ struct MaterialParams {
                close(specular, o.specular) && close3(specularColor, o.specularColor) && close(roughness, o.roughness) &&
                close(ior, o.ior) && close(anisotropy, o.anisotropy) && close(anisotropyRotation, o.anisotropyRotation) &&
                close(transmission, o.transmission) && close3(transmissionColor, o.transmissionColor) &&
-               close(transmissionDepth, o.transmissionDepth) && close(dispersion, o.dispersion) && thinWalled == o.thinWalled &&
+               close(transmissionDepth, o.transmissionDepth) && close(dispersion, o.dispersion) &&
+               close(transmissionRoughness, o.transmissionRoughness) && thinWalled == o.thinWalled &&
                close(translucency, o.translucency) && close3(subsurfaceColor, o.subsurfaceColor) &&
                close(subsurfaceRadius, o.subsurfaceRadius) && close3(subsurfaceRadiusColor, o.subsurfaceRadiusColor) &&
                close(subsurfaceAnisotropy, o.subsurfaceAnisotropy) && close(sheen, o.sheen) && close3(sheenColor, o.sheenColor) &&

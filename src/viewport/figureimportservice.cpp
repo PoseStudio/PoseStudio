@@ -116,6 +116,7 @@ ModelData toModelData(FigureData&& fig) {
         mesh.transmission = zone.material.transmission;
         mesh.transmissionColor = zone.material.transmissionColor;
         mesh.transmissionDepth = zone.material.transmissionDepth;
+        mesh.transmissionRoughness = zone.material.transmissionRoughness;
         mesh.thinWalled = zone.material.thinWalled;
         mesh.subsurfaceColor = zone.material.subsurfaceColor;
         mesh.subsurfaceRadiusColor = zone.material.subsurfaceRadiusColor;

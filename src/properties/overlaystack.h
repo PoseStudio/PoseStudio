@@ -85,6 +85,9 @@ public:
     void setView(const MaterialView& view);
 
 public slots:
+    /// Adds an EMPTY overlay at the bottom of the list (one undo entry) — the + Add Overlay
+    /// button's, and the folded section header's "+".
+    void addOverlay();
     /// Opens the inline NAME editor on overlay @p index's card (Enter or a click elsewhere keeps
     /// the text, Esc drops it). What the header's Rename… runs.
     void beginRename(int index);
@@ -142,7 +145,6 @@ private:
     std::vector<MaterialOverlay> stack() const;
     /// Hands @p overlays to the viewport and tells the tab.
     void apply(const std::vector<MaterialOverlay>& overlays);
-    void addOverlay();
     void removeOverlay(int index);
     void moveOverlay(int index, int delta);
     void setField(int index, OverlayField field, double value);

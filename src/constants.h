@@ -52,6 +52,16 @@ namespace Constants {
     inline constexpr const char* PREF_LAST_PROJECT_DIR = "LastProjectDir";
     /// Where the Materials tab's Choose-a-texture dialog opened last (2026-11-09).
     inline constexpr const char* PREF_LAST_TEXTURE_DIR = "LastTextureDir";
+    /// THE RENDER WINDOW (src/render/renderwindow, 2026-11-11): what a render was last chosen by
+    /// — the size preset's index (0 = the viewport's size), the samples, the device's id (absent =
+    /// the best one there is), denoising (absent = on), a transparent background — and where
+    /// Save Image opened last.
+    inline constexpr const char* PREF_RENDER_SIZE = "RenderSize";
+    inline constexpr const char* PREF_RENDER_SAMPLES = "RenderSamples";
+    inline constexpr const char* PREF_RENDER_DEVICE = "RenderDevice";
+    inline constexpr const char* PREF_RENDER_DENOISE = "RenderDenoise";
+    inline constexpr const char* PREF_RENDER_TRANSPARENT = "RenderTransparent";
+    inline constexpr const char* PREF_LAST_RENDER_DIR = "LastRenderDir";
     /// Where the Materials tab's Add Overlay dialog opened last (2026-11-11): overlays — tattoos,
     /// makeup — live in a library of their own, apart from a figure's texture maps.
     inline constexpr const char* PREF_LAST_OVERLAY_DIR = "LastOverlayDir";

@@ -118,9 +118,9 @@ EnvironmentImage generateStudioEnvironment(int width, int height) {
     return env;
 }
 
-void normalizeEnvironmentLuminance(EnvironmentImage& env, float targetAverageLuminance) {
+float normalizeEnvironmentLuminance(EnvironmentImage& env, float targetAverageLuminance) {
     if (env.pixels.empty() || targetAverageLuminance <= 0.0f) {
-        return;
+        return 1.0f;
     }
     // Solid-angle weighted average (equirect over-samples the poles, so weight rows by sin(theta)).
     // Rows are independent: each sums its own texels in parallel, and the row partials are
@@ -148,7 +148,7 @@ void normalizeEnvironmentLuminance(EnvironmentImage& env, float targetAverageLum
     }
     const double avg = (weight > 0.0) ? weighted / weight : 0.0;
     if (avg <= 1e-6) {
-        return;
+        return 1.0f;
     }
     const float scale = static_cast<float>(targetAverageLuminance / avg);
     parallelFor(env.height, [&](int y) {
@@ -157,6 +157,7 @@ void normalizeEnvironmentLuminance(EnvironmentImage& env, float targetAverageLum
             row[x] *= scale;
         }
     });
+    return scale;
 }
 
 EnvironmentSH projectIrradianceSH(const EnvironmentImage& env) {
@@ -357,9 +358,9 @@ BrdfLut integrateBrdfLut(int size, int samples) {
 BakedEnvironment bakeEnvironment(EnvironmentImage env) {
     // Normalize to a fixed average luminance so a bright outdoor HDRI and a dim interior light the
     // subject at the same exposure (the shader's exposure dial then sets the final level).
-    constexpr float kTargetAverageLuminance = 0.5f;
-    normalizeEnvironmentLuminance(env, kTargetAverageLuminance);
+    const float luminanceScale = normalizeEnvironmentLuminance(env, kEnvironmentAverageLuminance);
     BakedEnvironment baked;
+    baked.luminanceScale = luminanceScale;
     baked.sh = projectIrradianceSH(env);
     baked.specular = prefilterSpecular(env);
 

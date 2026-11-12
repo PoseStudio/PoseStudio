@@ -85,17 +85,17 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
     // pristine (the ground samples and bounds read it after this), and the batch copies the
     // temporary into its staging buffer before returning. (A one-time whole-array copy per
     // touched mesh at import; not worth avoiding.)
+    // (The uploaded vertices are KEPT, with the indices: a render engine is handed the mesh
+    // itself — see cpuVertices().)
+    m_cpuVertices = data.vertices;
     if (correctiveRanges != nullptr && correctiveRanges->size() == data.vertices.size()) {
-        std::vector<Vertex> stamped = data.vertices;
-        for (std::size_t i = 0; i < stamped.size(); ++i) {
-            stamped[i].correctiveRange = (*correctiveRanges)[i];
+        for (std::size_t i = 0; i < m_cpuVertices.size(); ++i) {
+            m_cpuVertices[i].correctiveRange = (*correctiveRanges)[i];
         }
-        m_vertexBuffer = createDeviceLocalBuffer(context, stamped.data(), vertexBytes,
-                                                 VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, batch);
-    } else {
-        m_vertexBuffer = createDeviceLocalBuffer(context, data.vertices.data(), vertexBytes,
-                                                 VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, batch);
     }
+    m_cpuIndices = data.indices;
+    m_vertexBuffer = createDeviceLocalBuffer(context, m_cpuVertices.data(), vertexBytes,
+                                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, batch);
     m_indexBuffer = createDeviceLocalBuffer(context, data.indices.data(), indexBytes,
                                             VK_BUFFER_USAGE_INDEX_BUFFER_BIT, batch);
 
@@ -230,6 +230,7 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
     imported.transmission = data.transmission;
     imported.transmissionColor = data.transmissionColor;
     imported.transmissionDepth = data.transmissionDepth;
+    imported.transmissionRoughness = data.transmissionRoughness;
     imported.dispersion = data.dispersion;
     imported.thinWalled = data.thinWalled;
     imported.subsurfaceColor = data.subsurfaceColor;

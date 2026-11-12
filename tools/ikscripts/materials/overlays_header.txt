@@ -1,0 +1,58 @@
+# THE OVERLAYS SECTION'S FOLDED HEADER (2026-11-12): a "+" while the zone has no overlay, the
+# count while it has some, nothing while open. Marks, not buttons: a click on the heading —
+# anywhere on it — folds and unfolds, and adds nothing.
+#   POSESTUDIO_TEST_FIGURE=<figure> POSESTUDIO_TAB=Materials tools/ikscripts/run.sh tools/ikscripts/materials/overlays_header.txt <out>
+wait 20
+click chest
+wait 5
+expect overlays == 0
+expect uivalue.overlay.section.0 == 0
+expect uivisible.overlay.header.add.0 == 1
+expect uivisible.overlay.header.count.0 == 0
+uishot 01_folded_empty
+# Opened and folded again with nothing added: still no overlay, still the "+".
+ui click overlay.section 0
+wait 3
+expect uivalue.overlay.section.0 == 1
+expect overlays == 0
+expect uivisible.overlay.header.add.0 == 0
+expect uivisible.overlay.header.count.0 == 0
+uishot 02_open_empty
+ui click overlay.section 0
+wait 3
+expect uivalue.overlay.section.0 == 0
+expect overlays == 0
+expect uivisible.overlay.header.add.0 == 1
+expect uivisible.overlay.header.count.0 == 0
+# One overlay, folded: "1".
+ui click overlay.section 0
+ui click overlay.add 0
+wait 5
+expect overlays == 1
+expect overlay.0.named.overlay_1 == 1
+ui click overlay.section 0
+wait 3
+expect uivisible.overlay.header.add.0 == 0
+expect uivisible.overlay.header.count.0 == 1
+expect uivalue.overlay.header.count.0 == 1
+uishot 03_folded_one
+# Three, folded: "3".
+ui click overlay.section 0
+ui click overlay.add 0
+ui click overlay.add 0
+wait 5
+ui click overlay.section 0
+wait 3
+expect uivalue.overlay.section.0 == 0
+expect uivisible.overlay.header.add.0 == 0
+expect uivisible.overlay.header.count.0 == 1
+expect uivalue.overlay.header.count.0 == 3
+uishot 04_folded_three
+undo
+undo
+undo
+wait 5
+expect overlays == 0
+expect uivalue.overlay.section.0 == 0
+expect uivisible.overlay.header.add.0 == 1
+expect uivisible.overlay.header.count.0 == 0

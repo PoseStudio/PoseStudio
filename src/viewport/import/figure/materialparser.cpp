@@ -447,6 +447,20 @@ std::unordered_map<std::string, MaterialRefs> parseMaterials(const nlohmann::jso
             channelColor(*c, ref.transmissionColor);
         }
         ref.transmissionDepth = std::max(0.0f, scalarChannel("Transmitted Measurement Distance", 0.0f)) * 0.01f; // cm → m
+        // What passes through is as rough as what reflects unless the shader keeps the two apart
+        // ("Share Glossy Inputs" off): an eye's clear shells author a soft glossy lobe over a
+        // refraction of roughness 0, and read as one they are frosted glass over the iris.
+        if (refraction > 0.0f) {
+            bool shared = true;
+            if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "Share Glossy Inputs")) {
+                shared = channelBool(*c, true);
+            }
+            if (!shared) {
+                ref.transmissionRoughness = std::clamp(std::max(scalarChannel("Refraction Roughness", 0.0f),
+                                                                1.0f - scalarChannel("Refraction Glossiness", 1.0f)),
+                                                       0.0f, 1.0f);
+            }
+        }
         if (const nlohmann::json* c = effectiveChannel(sceneIndex, baseIndex, "Thin Walled")) {
             ref.thinWalled = channelBool(*c, false);
         }

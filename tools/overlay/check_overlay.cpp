@@ -936,9 +936,12 @@ void checkNames() {
         o.name = name;
         stack.push_back(o);
     }
-    check(first && pose::nextOverlayNumber(stack, "Overlay") == 4, "name: a new overlay takes the next number after the highest in the stack");
-    stack.erase(stack.begin() + 1); // "Overlay 3" removed: 2 is free again
-    check(pose::nextOverlayNumber(stack, "Overlay") == 2, "name: ... counting only the overlays that are there");
+    check(first && pose::nextOverlayNumber(stack, "Overlay") == 9, "name: a new overlay is numbered by its place in the stack, whatever the others are called");
+    stack.erase(stack.begin() + 1); // "Overlay 3" removed
+    check(pose::nextOverlayNumber(stack, "Overlay") == 8, "name: ... counting only the overlays that are there");
+    stack.resize(2); // two left; the second renamed to the number the next one would take
+    stack[1].name = "Overlay 3";
+    check(pose::nextOverlayNumber(stack, "Overlay") == 4, "name: ... and never a number an overlay of the stack already carries");
 
     // The name is the overlay's title — not its picture's file — an edit of its own (it undoes),
     // and no part of any map: a rename re-paints nothing.

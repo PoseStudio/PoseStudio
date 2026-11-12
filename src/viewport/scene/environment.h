@@ -45,7 +45,12 @@ EnvironmentImage generateStudioEnvironment(int width = 512, int height = 256);
 /// Different HDRIs (a bright outdoor sky vs. a dim interior) otherwise light the subject at wildly
 /// different exposures; normalizing here makes the *diffuse* result predictable and HDRI-independent,
 /// so a single exposure control then dials the final brightness. No-op for an empty/black image.
-void normalizeEnvironmentLuminance(EnvironmentImage& env, float targetAverageLuminance);
+/// Returns the factor the pixels were multiplied by (1 for the no-op cases): a renderer that
+/// reads the panorama's FILE itself lights by the same amount with it.
+float normalizeEnvironmentLuminance(EnvironmentImage& env, float targetAverageLuminance);
+
+/// The average luminance every environment is normalized to before it lights the viewport.
+constexpr float kEnvironmentAverageLuminance = 0.5f;
 
 /// Nine RGB spherical-harmonic coefficients (the L_lm projections of the environment radiance,
 /// solid-angle weighted). Evaluated in the shader to reconstruct per-normal diffuse irradiance —
@@ -84,6 +89,8 @@ struct BakedEnvironment {
     // the direction below ~0.1 (an overcast/indoor environment has no meaningful "sun").
     glm::vec3           dominantDir{0.0f, 1.0f, 0.0f};
     float               dominantStrength = 0.0f;
+    /// The factor the source image was normalized by (normalizeEnvironmentLuminance).
+    float               luminanceScale = 1.0f;
 };
 
 /// Normalizes @p env's brightness (so any HDRI lights at a consistent exposure) and bakes its SH

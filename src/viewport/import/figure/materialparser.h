@@ -93,6 +93,9 @@ struct MaterialRefs {
     float       transmission = 0.0f;     ///< "Refraction Weight" (the clear shells' signal, kept for the renderer).
     glm::vec3   transmissionColor{1.0f}; ///< "Transmitted Color".
     float       transmissionDepth = 0.0f; ///< "Transmitted Measurement Distance" (cm → m).
+    /// The refraction's own roughness where the shader does not share its glossy inputs with it
+    /// ("Share Glossy Inputs" off: "Refraction Roughness"); negative = the surface's roughness.
+    float       transmissionRoughness = -1.0f;
     bool        thinWalled = false;      ///< "Thin Walled".
     glm::vec3   subsurfaceColor{1.0f};   ///< "Translucency Color" (the tint skins author under the surface).
     glm::vec3   subsurfaceRadiusColor{1.0f}; ///< "SSS Color": the volume's scattering color.

@@ -34,6 +34,61 @@ Run the workflow manually: **Actions → Build Release → Run workflow**. A man
 4. Downloads the **stock HDRI content pack** (see below) — the installer places it in the user's `Documents\My PoseStudio Library\hdri`; the portable zip carries it as `stock-content\hdri` with copy-me instructions.
 5. Compiles `packaging/PoseStudio.iss` with Inno Setup (preinstalled on the GitHub runner image; the workflow falls back to `choco install innosetup` if it is missing), zips the portable variant, generates `SHA256SUMS.txt`, and publishes the GitHub Release. Only a tag build carries the install-ping signing key — a manual pipeline-test build ships keyless, so downloading and running its artifacts never counts as an install.
 
+## The render engine (not in the release pipeline yet)
+
+The Cycles render engine (`cmake/CyclesEngine.cmake`, `engines/cycles/`) is an opt-in part of the
+build — `-DPOSESTUDIO_WITH_CYCLES=ON` — and **the release workflow does not build it yet**: a
+released PoseStudio says "this copy has no render engine" under Render → Render Image. Shipping
+it means, in the workflow and in `packaging/`:
+
+- **Building it**: git-lfs on the runner (it has it), `-DPOSESTUDIO_WITH_CYCLES=ON` at configure
+  — the fetch is about 0.6 GB, plus the CUDA compiler archives — and time for Cycles and its GPU
+  kernels (a `cache` step keyed on the Cycles tag for `build/_deps/cycles-*` is worth its setup).
+  Decide the kernel list (`POSESTUDIO_CYCLES_CUDA_ARCH`): the default covers the NVIDIA
+  generations CUDA 13 supports, Turing and later; older cards need kernels built with an older
+  CUDA release, which wants an older MSVC than the newest.
+- **Staging it**: the mirrored `engines/cycles` folder goes into the package as it is (the app
+  finds it next to the executable). It is about 160 MB; the debug-suffixed DLLs and the
+  `api-ms-win-*` forwarders Cycles's install rules add can be pruned. The VC-runtime scan must
+  read the engine's binaries too.
+- **Licenses**: a `licenses/` entry and a `NOTICES.txt` section for Cycles (Apache 2.0) and for
+  every precompiled library the engine folder carries — the list is in ATTRIBUTIONS.md; Blender's
+  own `release/license` folder has the texts as Blender ships them.
+- **NVIDIA's terms — releases ship the OptiX device (decided 2026-11-12).** The CUDA compiler
+  is used at build time only (its redistributable archives; nothing of it is shipped but what a
+  compiled kernel contains). The OptiX device is compiled against the OptiX SDK's headers, which
+  are under NVIDIA's own license (the LICENSE file of `NVIDIA/optix-dev`, "Software Developer
+  Kits, Samples and Tools License Agreement (with distribution rights)") — not an open-source
+  one. Two sides to it:
+  - *PoseStudio's side (GPL v3)* is settled by **`LICENSE-EXCEPTION.txt`**: an additional
+    permission under section 7 to combine PoseStudio with NVIDIA's OptiX and CUDA software. It
+    is the copyright holders' to grant: contributions come in under the CLA, which gives the
+    project the right to relicense them — **check that every contributor with merged code has
+    signed it** before the first release that carries the engine. The file ships next to
+    `LICENSE.txt` in the package (the stage step copies it; the installer's license page is the
+    GPL's).
+  - *NVIDIA's side* is the distributor's to meet, release by release:
+    **(1) notify NVIDIA before the first release — DONE, filed 2026-11-12** (section 1.5
+    requires notification before use in a commercial application; PoseStudio is free, but the
+    project reserves commercial licensing). The web form at `developer.nvidia.com/sw-notification`
+    was submitted for PoseStudio with "NVIDIA OptiX SDK 9.0.0 (used through the OptiX device of
+    the Cycles 5.3.0 renderer); CUDA Toolkit 13.5.0 (build-time compiler for the GPU kernels)"
+    and a planned release date of December 1, 2026; the confirmation is kept with the project's
+    records. File it again if the engine moves to another OptiX major version. **(2) Ship NVIDIA's license text** in
+    `licenses/` with a `NOTICES.txt` section saying that the engine's OptiX device incorporates
+    NVIDIA software, in binary form, for use on NVIDIA hardware, under that agreement — section
+    1.1(ii) allows distribution in binary form only and asks that recipients be bound to terms
+    consistent with it. **(3) Never ship the OptiX headers or SDK themselves** (the build fetches
+    them; they are not in the repository and not in the package). Section 2.1(xii) forbids use
+    that would make the SDK "subject to an Open Source License": the additional permission above
+    exists so that PoseStudio's license makes no such claim on it. Blender ships the same OptiX
+    device in its GPL builds.
+  `-DPOSESTUDIO_CYCLES_OPTIX=OFF` remains the way to build without it (CUDA and the processor
+  remain); such a build needs none of the above. This is a maintainer's reading, not legal
+  advice — have counsel look at it once.
+
+Use a `workflow_dispatch` run to prove the pipeline with the engine before a tagged release has it.
+
 ## The install-ping signing key
 
 The app sends an anonymous install ping on every launch (`src/core/installping.h`), signed with an HMAC key that must never be committed. It reaches the build as the repository secret **`POSESTUDIO_PING_KEY`** (Settings → Secrets and variables → Actions), which the workflow passes to CMake as `-DPOSESTUDIO_PING_KEY=…`. Generate it once with `openssl rand -hex 32` (keep it to hex — it travels through a CMake compile definition) and use the same value as the server's verification key. If the secret is missing the workflow warns and the build ships with the ping disabled (an empty key never sends), so forks never ping. Rotating the key means updating the secret and the server together, then cutting a release — older builds keep signing with the old key and are rejected, which is the intended way to retire them from the count.

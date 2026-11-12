@@ -17,6 +17,7 @@
 #define MESH_H
 
 #include "materialparams.h" // MaterialParams / MaterialMaps / MaterialMap (the Materials tab's values and slots)
+#include "vertex.h"         // Vertex (the CPU copy of the uploaded geometry)
 #include "vulkanbuffer.h"
 
 #include <glm/glm.hpp>
@@ -242,6 +243,11 @@ public:
     /// Bind-pose centroid (local space) — the transparent pass's back-to-front sort key, carried
     /// through the dominant joint's pose by Model::posedCentroid.
     const glm::vec3& centroid() const { return m_centroid; }
+    /// THE GEOMETRY ON THE CPU, as it was uploaded (the vertices with their pose-corrective
+    /// ranges stamped in) — the GPU buffers are device-local and unreadable, and a RENDER ENGINE
+    /// needs the mesh itself: Model::bakePosedMesh skins these as the vertex stage does.
+    const std::vector<Vertex>&   cpuVertices() const { return m_cpuVertices; }
+    const std::vector<uint32_t>& cpuIndices() const { return m_cpuIndices; }
     /// The joint carrying most of this mesh's summed skin weight (0 for an unskinned mesh) —
     /// whose skin transform moves the centroid with the pose for the transparency sort.
     uint32_t dominantJoint() const { return m_dominantJoint; }
@@ -262,6 +268,8 @@ private:
     VulkanBuffer                   m_vertexBuffer;
     VulkanBuffer                   m_indexBuffer;
     uint32_t                       m_indexCount = 0;
+    std::vector<Vertex>            m_cpuVertices;       // see cpuVertices()
+    std::vector<uint32_t>          m_cpuIndices;
     std::string                    m_name;              // the zone's name (MeshData::name)
     MaterialParams                 m_material;          // the values as they stand (see material())
     MaterialParams                 m_importedMaterial;  // … and as imported (the restore target)

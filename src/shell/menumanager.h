@@ -68,6 +68,11 @@ private:
     /// then the scene itself (models / camera / lighting / HDRI / history) to startup defaults.
     void newScene();
 
+    /// Render → Render Image / Show Render Window: opens the Render window (src/render/) on the
+    /// viewport's scene and, with @p start, begins a render. Explains itself in a build without
+    /// the render engine.
+    void renderImage(bool start);
+
     /// Opens a file dialog and imports the chosen OBJ into the viewport.
     void importObjFile();
 

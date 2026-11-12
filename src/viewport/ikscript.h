@@ -37,6 +37,13 @@ struct IkScript {
     int         retries = 0;
     bool        materialLinked = true; ///< The Materials tab's "Edit matching zones together" for `material` (matlink on|off).
     int         waitTicks = 0;         ///< The ticks a `wait` has left (scriptWaitTick: each one also advances a fall in flight).
+    // The last `render` (a production render through the engine): whether it finished, how long
+    // it took, the picture's mean display value (0-255), and its covered share (percent of pixels
+    // that differ from the top-left corner's — the backdrop).
+    double      renderOk = 0.0;
+    double      renderSeconds = 0.0;
+    double      renderMean = 0.0;
+    double      renderCovered = 0.0;
 
     // --- A drag in flight ------------------------------------------------------------------
     bool      dragging = false;   ///< Between `press` and `release`.

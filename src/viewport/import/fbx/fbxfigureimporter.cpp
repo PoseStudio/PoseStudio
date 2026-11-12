@@ -632,6 +632,7 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                 pbrReal(mat->pbr.transmission_factor, out.transmission, 0.0f, 1.0f);
                 pbrColor(mat->pbr.transmission_color, out.transmissionColor);
                 pbrReal(mat->pbr.transmission_depth, out.transmissionDepth, 0.0f, 1e6f);
+                pbrReal(mat->pbr.transmission_roughness, out.transmissionRoughness, 0.0f, 1.0f); // (its own, where authored)
                 pbrReal(mat->pbr.transmission_dispersion, out.dispersion, 0.0f, 1.0f);
                 pbrColor(mat->pbr.subsurface_color, out.subsurfaceColor);
                 pbrColor(mat->pbr.subsurface_radius, out.subsurfaceRadiusColor);

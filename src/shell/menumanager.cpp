@@ -23,6 +23,7 @@
 #include "updatecheck.h"
 #include "helpwindow.h"
 #include "whatsnewdialog.h"
+#include "renderwindow.h"    // Render → Render Image: the Render window and its session
 #include "viewport/viewportwidget.h"
 #include "jointtransform.h" // pose::JointTransform: which of the joint-mode keys are live
 #include "scene/shademode.h" // kDefaultShadeMode (File → New's picker reset)
@@ -314,6 +315,18 @@ void MenuManager::setupMenus() {
     m_recenterVrAction->setEnabled(false);
 
     // =========================================================================
+    // RENDER MENU — the production render (src/render/: the Render window and the Cycles engine)
+    // Render Image opens the Render window and starts a render of the scene as the viewport
+    // shows it; F12 is app-wide, like the View keys (a render is asked for from wherever the
+    // user is). Show Render Window brings the window back without starting anything.
+    QMenu *renderMenu = mainWindow->menuBar()->addMenu(tr("Render"));
+    QAction *renderImageAction = renderMenu->addAction(tr("Render Image"));
+    renderImageAction->setShortcut(QKeySequence(Qt::Key_F12));
+    QObject::connect(renderImageAction, &QAction::triggered, mainWindow, [this]() { renderImage(/*start=*/true); });
+    QAction *renderWindowAction = renderMenu->addAction(tr("Show Render Window"));
+    QObject::connect(renderWindowAction, &QAction::triggered, mainWindow, [this]() { renderImage(/*start=*/false); });
+
+    // =========================================================================
     // HELP MENU — documentation, support links, and the About dialog
     QMenu *helpMenu = mainWindow->menuBar()->addMenu(tr("Help"));
 
@@ -462,6 +475,9 @@ void MenuManager::setViewportWidget(pose::ViewportWidget *viewport) {
     // dialog's loop) and closes the dialog through its button.
     QObject::connect(viewport, &pose::ViewportWidget::preferencesRequested, this,
                      [this](const QString &tab) { openPreferencesDialog(tab); }, Qt::QueuedConnection);
+    // The scripted test's `renderwindow [start]`: the Render menu's two entries.
+    QObject::connect(viewport, &pose::ViewportWidget::renderWindowRequested, this,
+                     [this](bool start) { renderImage(start); }, Qt::QueuedConnection);
 }
 
 void MenuManager::explainVrUnavailable() {
@@ -552,6 +568,26 @@ void MenuManager::newScene() {
     }
     // 3. The scene itself: models, camera home, deferred state to startup defaults, history cleared.
     viewportWidget->resetToEmptyScene();
+}
+
+void MenuManager::renderImage(bool start) {
+    // A build without the engine says so here, where a render is asked for — and nowhere else:
+    // the application is whole without one.
+    if (!pose::RenderSession::engineInstalled()) {
+        QMessageBox::information(
+            mainWindow, tr("Render"),
+            tr("This copy of PoseStudio has no render engine, so there is nothing to render with.\n\n"
+               "The Cycles engine is a separate part of the application — the engines folder beside it. A copy built "
+               "from the source code has it when it was built with POSESTUDIO_WITH_CYCLES turned on."));
+        return;
+    }
+    pose::RenderWindow *window = pose::RenderWindow::open(mainWindow);
+    window->setSceneSource([this]() -> std::shared_ptr<pose::RenderSceneHolder> {
+        return viewportWidget ? viewportWidget->captureRenderScene() : nullptr;
+    });
+    if (start) {
+        window->startRender();
+    }
 }
 
 void MenuManager::setEnvironmentPanel(pose::EnvironmentPanel *panel) {

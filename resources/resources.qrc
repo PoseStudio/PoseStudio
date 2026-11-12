@@ -8,6 +8,7 @@
         <file>styles/_preferences.qss</file>
         <file>styles/_environment.qss</file>
         <file>styles/_help.qss</file>
+        <file>styles/_render.qss</file>
         
         <file>database/initialize.sql</file>
 

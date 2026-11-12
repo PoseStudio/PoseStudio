@@ -11,6 +11,7 @@
 #include "scene/materialparams.h"
 #include "scene/shademode.h"
 #include "rendering/selectionstyle.h" // kJointHighlightDefaultOpacity
+#include "renderscene.h"              // RenderSceneHolder (captureRenderScene)
 #include "selectionsettings.h"
 #include "viewportstrip.h"
 #include "vrsettings.h"
@@ -173,6 +174,12 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
                 dialogPath.replace(QStringLiteral(".png"), QStringLiteral("_dialog.png"));
                 dialog->grab().save(dialogPath);
             }
+            // ... and the Render window, a window of its own too, as <name>_render.png.
+            if (QWidget* render = top->findChild<QWidget*>(QStringLiteral("RenderWindow")); render != nullptr && render->isVisible()) {
+                QString renderPath = path;
+                renderPath.replace(QStringLiteral(".png"), QStringLiteral("_render.png"));
+                render->grab().save(renderPath);
+            }
         }
         if (m_strip) {
             QString stripPath = path;
@@ -290,6 +297,10 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
         *ok = true;
         if (what == QLatin1String("enabled")) {
             *value = target->isEnabled() ? 1.0 : 0.0;
+        } else if (what == QLatin1String("visible")) {
+            *value = target->isVisibleTo(window()) ? 1.0 : 0.0;
+        } else if (auto* label = qobject_cast<QLabel*>(target)) {
+            *value = label->text().toDouble(ok); // (a label that is a number: a count)
         } else if (auto* box = qobject_cast<DragNumberBox*>(target)) {
             *value = box->value();
         } else if (auto* check = qobject_cast<QCheckBox*>(target)) {
@@ -352,6 +363,7 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
         }
     });
     connect(m_window, &VulkanWindow::preferencesRequested, this, &ViewportWidget::preferencesRequested);
+    connect(m_window, &VulkanWindow::renderWindowRequested, this, &ViewportWidget::renderWindowRequested);
     // Same forward for the document state: the main window's title listens on the facade.
     connect(m_window, &VulkanWindow::documentChanged, this, &ViewportWidget::documentChanged);
     connect(m_window, &VulkanWindow::environmentRestored, this, &ViewportWidget::environmentRestored);
@@ -506,6 +518,10 @@ bool ViewportWidget::setMaterialTexture(MaterialMap map, const QString& source) 
 
 std::shared_ptr<const DecodedImage> ViewportWidget::materialSlotImage(MaterialMap map, int* channel) const {
     return m_window ? m_window->materialSlotImage(map, channel) : nullptr;
+}
+
+std::shared_ptr<RenderSceneHolder> ViewportWidget::captureRenderScene() {
+    return m_window ? m_window->captureRenderScene() : nullptr;
 }
 
 bool ViewportWidget::setMaterialOverlays(const std::vector<MaterialOverlay>& overlays) {

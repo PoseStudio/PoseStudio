@@ -39,6 +39,7 @@ class QMoveEvent;
 namespace pose {
 
 class OpenXrSystem;
+class RenderSceneHolder; // a scene frozen for a render engine (render/renderscene.h)
 class ViewportStrip;
 class VulkanWindow;
 struct JointTransform;
@@ -149,6 +150,11 @@ public:
     /// The selected zone's image in slot @p map (VulkanWindow::materialSlotImage), for the tab's
     /// thumbnails; null without one.
     std::shared_ptr<const DecodedImage> materialSlotImage(MaterialMap map, int* channel = nullptr) const;
+
+    /// The scene as the viewport shows it, frozen for a render engine (VulkanWindow::
+    /// captureRenderScene; render/renderscene.h) — what the Render window renders. Null while the
+    /// viewport has no renderer.
+    std::shared_ptr<RenderSceneHolder> captureRenderScene();
     /// THE OVERLAYS (materialoverlay.h): the selected zone's overlay stack replaced — on every
     /// zone painted on its color map — and composited into the maps (VulkanWindow::
     /// setMaterialOverlays; one undo entry, or the open edit's); and an overlay image file
@@ -229,6 +235,8 @@ signals:
     /// The Preferences dialog is wanted on that tab — the strip's Selection button, and the
     /// scripted test's `prefs <tab>` (the shell opens it — MenuManager::openPreferencesDialog).
     void preferencesRequested(const QString& tab);
+    /// The scripted test's `renderwindow [start]` (the shell opens it — MenuManager::renderImage).
+    void renderWindowRequested(bool start);
     /// Re-emitted from the viewport when VR Mode starts or ends (by the user or because the
     /// headset session was lost); the View menu's checkable entry follows it.
     void vrModeChanged(bool on);

@@ -67,6 +67,7 @@ PoseStudio is early in development, but the foundations are real and usable now:
 * A **Vulkan-powered 3D viewport** with photoreal PBR shading, image-based lighting from HDR environments (`.hdr`/`.exr`), MSAA, HDR post-processing (bloom, ACES tonemapping, screen-space subsurface scattering), soft PCSS ground shadows, and eighteen selectable shade modes (PBR, textured, cartoon, matcap, clay, lighting-only, silhouette, four wireframe variants including hidden-line, and data views for albedo, ambient occlusion, roughness, specular, normals, and UVs).
 * **Rigged, morphable character figures** imported from their native scene format — per-zone physically-based materials, baked character-shape morphs, GPU dual-quaternion skinning, joint-driven pose correctives, Catmull-Clark subdivision, and follower addons (lashes, brows, replacement anatomy).
 * **Rigged characters from FBX, glTF / GLB, VRM and USD files** — File → Import brings in a character with its meshes, materials and textures, standing on the floor at her true height. Its skeleton is read into PoseStudio's own **rig standard** (`docs/RIG_STANDARD.md`): every bone is given its role by the skeleton's structure (a VRM avatar's humanoid map is honoured), every joint the standard's rotation frame and anatomical range of motion (which these files do not carry), the rig's own helper bones are driven again, and the bones take the standard's names — so the whole posing system below works on it as on a native figure, and a pose saved on one conformed character loads on any other. Five rigging conventions have been worked through so far, each from FBX and from the Blender glTF/USD exports of the same characters.
+* **Final renders with Cycles** — Render → Render Image (**F12**) path-traces the scene exactly as the viewport frames it: the pose, the camera, the materials with their maps and overlays, the environment and the key light. Real shadows and bounce light, skin that scatters light beneath its surface, eyes behind clear refracting corneas, glass with depth. The picture appears as it renders in its own window while you go on posing; choose the size, the samples, the device (the processor, or an NVIDIA card through CUDA or OptiX) and denoising, then save a PNG, a JPEG or a linear OpenEXR — with a transparent background if you want one. The engine is a plugin beside the application, built on request (see [Building from Source](#building-from-source)).
 * **Gaussian splat scenes** (`.ply`, `.splat`, `.spz`) — a photographed place or person reconstructed with 3D Gaussian Splatting imports as a static object and renders exactly as its trainers meant it: photoreal, with its own captured light, and a figure standing inside it is shaded and covered correctly. Place, turn and scale it from the Transform tab.
 * **VR Mode** (View → VR Mode) — see the scene in an OpenXR headset at true scale, standing on your real floor, and pose in it with the controllers: walk with the left stick, turn with the right, grab any joint with the trigger (the same full-body IK as the mouse), twist it with your wrist, pin / undo / redo / ground on the face buttons. Works with whatever OpenXR runtime is installed (Quest Link, SteamVR, Virtual Desktop); the desktop window mirrors the left eye.
 * **Soft body physics** — breasts hang and settle with the pose (forward in a bow, spread lying on her back, toward the lower side on her side) and bounce with quick moves and the Ground button's landings, sized to the bust the figure actually has; buttocks jiggle with the hips' movement. It works on every rigged figure — native figures, and characters whose rigs have no breast bones at all (bipeds, game and avatar rigs), where the chest's own skin is moved. The **Soft Body Physics** tab switches and scales all of it.
@@ -81,7 +82,7 @@ PoseStudio is early in development, but the foundations are real and usable now:
 * **File → New (`Ctrl+N`)** — resets the scene to a fresh launch: no models, home camera, startup lighting and HDRI, default shade mode, skeleton off, cleared history.
 * **Project files (`.pss`)** — File → Save / Save As / Open persist the whole scene as a small versioned document: every figure's source file, pose and transform, the environment (HDRI + lighting dials) and the camera framing. Opening re-imports the referenced files and restores everything; a moved figure file can be located again, and unsaved changes are confirmed before New / Open / import / close.
 
-The animation/timeline systems and final-frame rendering described below are roadmap — they don't exist in code yet.
+The animation/timeline systems described below are roadmap — they don't exist in code yet.
 
 ## <img src="/docs/assets/icons/features.png" width="28" alt="Key Features"> Key Features (Proposed)
 
@@ -173,7 +174,7 @@ Building a powerful tool requires a powerful community.
 
 ## <img src="/docs/assets/icons/license.png" width="28" alt="License"> License
 
-PoseStudio is open-source software licensed under the **[GNU General Public License v3.0](https://github.com/PoseStudio/PoseStudio/blob/main/LICENSE)**.
+PoseStudio is open-source software licensed under the **[GNU General Public License v3.0](https://github.com/PoseStudio/PoseStudio/blob/main/LICENSE)**, with one additional permission under section 7 of that license: it may be built and distributed together with NVIDIA's OptiX and CUDA software, which the render engine uses on NVIDIA graphics cards — see **[LICENSE-EXCEPTION.txt](LICENSE-EXCEPTION.txt)**. That software stays under NVIDIA's own license terms.
 
 The binary releases also ship the [Qt framework](https://www.qt.io) under the LGPL v3, together with a few other open-source runtime components; their license texts and notices are in the `licenses\` folder next to the app (sources in [`packaging/licenses/`](packaging/licenses/)), and Help → About Qt shows Qt's own notice.
 
@@ -189,6 +190,7 @@ This project is built using the following core technologies and design resources
 * **FBX Import:** [ufbx](https://github.com/ufbx/ufbx) — the single-file FBX reader behind the rigged-character import (MIT; also fetched automatically by CMake)
 * **glTF / GLB / VRM Import:** [cgltf](https://github.com/jkuhlmann/cgltf) — the single-header glTF 2.0 reader (MIT; also fetched automatically by CMake)
 * **USD Import:** [LightUSD](https://github.com/lighttransport/tinyusdz) (formerly TinyUSDZ) — reads `.usd`/`.usda`/`.usdc`/`.usdz` without the full OpenUSD stack (Apache 2.0; also fetched and built by CMake)
+* **Final Rendering:** [Cycles](https://www.cycles-renderer.org/), Blender's path tracer, as a run-time plugin (Apache 2.0; fetched and built by CMake when asked for — see Building from Source)
 * **VR Mode:** the [OpenXR SDK](https://github.com/KhronosGroup/OpenXR-SDK)'s loader, linked statically (Apache 2.0; also fetched and built by CMake)
 * **Figure Import:** [nlohmann/json](https://github.com/nlohmann/json) (JSON parsing) and [miniz](https://github.com/richgel999/miniz) (gzip inflate), used by the native rigged-figure importer (also fetched automatically by CMake)
 * **HDR Environments:** [stb_image](https://github.com/nothings/stb) (`.hdr`) and [tinyexr](https://github.com/syoyo/tinyexr) (`.exr`) — decode the panoramas used for the viewport's image-based lighting and backdrop (both fetched automatically by CMake)
@@ -214,6 +216,17 @@ cmake --build build
 ```
 
 > Don't hardcode your personal Qt path into `CMakeLists.txt` — pass it via `-DCMAKE_PREFIX_PATH` as shown.
+
+**The render engine (optional)**
+
+The Cycles render engine is not part of the default build — PoseStudio builds and runs without it, and Render → Render Image then says that this copy has no engine. To build it too:
+
+```bash
+cmake -B build -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/msvc2022_64" -DPOSESTUDIO_WITH_CYCLES=ON
+cmake --build build --config Release
+```
+
+This needs **[git-lfs](https://git-lfs.com)** and fetches Cycles, a sparse checkout of its precompiled libraries (about 0.6 GB) and — for NVIDIA cards — the CUDA compiler and the OptiX headers, all into the build folder; nothing is installed on your system. The first build compiles Cycles and its GPU kernels and takes a while. `-DPOSESTUDIO_CYCLES_CUDA=OFF -DPOSESTUDIO_CYCLES_OPTIX=OFF` builds the processor-only engine. The engine is a plugin: it lands in `engines/cycles` next to the executable and is loaded when a render is first asked for. `cmake/CyclesEngine.cmake` has the details. The OptiX headers are under NVIDIA's own license, not an open-source one; [LICENSE-EXCEPTION.txt](LICENSE-EXCEPTION.txt) is PoseStudio's permission to be combined with them, and whoever distributes such a build must meet NVIDIA's terms themselves.
 
 ## Contributors ✨
 

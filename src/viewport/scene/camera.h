@@ -80,6 +80,14 @@ public:
     float viewportWidth() const { return m_viewportWidth; }
     float viewportHeight() const { return m_viewportHeight; }
 
+    /// The lens, for a renderer that builds its own projection (a render engine's camera): the
+    /// vertical field of view, the clip planes, and an orthographic view's full height in world
+    /// units (2 · distance · tan(fov / 2) — rebuildProjection's own rule).
+    float fovY() const { return m_fovYRadians; }
+    float nearPlane() const { return m_nearPlane; }
+    float farPlane() const { return m_farPlane; }
+    float orthographicHeight() const;
+
     const glm::vec3& target() const { return m_target; }
     float            pitch() const { return m_pitch; }
     float            yaw() const { return m_yaw; }

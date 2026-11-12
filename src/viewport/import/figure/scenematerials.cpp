@@ -150,6 +150,7 @@ void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolve
         mesh.material.transmission = ref.transmission;
         mesh.material.transmissionColor = ref.transmissionColor;
         mesh.material.transmissionDepth = ref.transmissionDepth;
+        mesh.material.transmissionRoughness = ref.transmissionRoughness;
         mesh.material.thinWalled = ref.thinWalled;
         mesh.material.subsurfaceColor = ref.subsurfaceColor;
         mesh.material.subsurfaceRadiusColor = ref.subsurfaceRadiusColor;

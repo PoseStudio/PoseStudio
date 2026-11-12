@@ -349,13 +349,13 @@ undo
 undo
 expect overlay.0.tint.g == 0.125
 expect overlay.1.hue == 0
-expect uienabled.overlay.up.1 == 0
-expect uienabled.overlay.down.1 == 1
-expect uienabled.overlay.down.0 == 0
-ui click overlay.down 1
+expect uienabled.overlay.down.1 == 0
+expect uienabled.overlay.up.1 == 1
+expect uienabled.overlay.up.0 == 0
+ui click overlay.up 1
 expect overlay.0.gloss == 0
 expect overlay.1.gloss == 80
-ui click overlay.down 1
+ui click overlay.down 0
 expect overlay.0.gloss == 80
 ui click overlay.remove 1
 expect overlays == 1

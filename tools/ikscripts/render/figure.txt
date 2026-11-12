@@ -1,0 +1,85 @@
+# THE RENDER ENGINE, on a figure (2026-11-11): the viewport's picture beside the path-traced one.
+#   POSESTUDIO_TEST_FIGURE=<figure> tools/ikscripts/run.sh tools/ikscripts/render/figure.txt <out>
+# NOT run by run_all.sh (the subfolder): it needs a render engine — one built with
+# -DPOSESTUDIO_WITH_CYCLES=ON sits next to the executable; POSESTUDIO_CYCLES_DIR=<folder> points
+# at another. Each `shot` is the viewport's frame (in <out>), each `render` the engine's picture
+# of the same view (in <out>/render): LOOK AT THE PAIRS — a render is the viewport's PBR mode,
+# path traced: the same framing, the same backdrop grey, the same skin tone, with real shadows,
+# eyes behind clear shells and the floor showing only the shadows on it. The numbers assert that
+# the renders finish, show a figure and are neither black nor blown out; the last section drives
+# the Render window itself. POSESTUDIO_RENDER_TRACE=1 prints what the engine is handed.
+wait 20
+view home
+wait 5
+shot 01_viewport_home
+render 01_home 128
+expect render.ok == 1
+expect render.covered > 8
+expect render.mean > 40
+expect render.mean < 110
+# The head: skin, lips, eyes.
+closeup head 0.22
+wait 5
+shot 02_viewport_head
+render 02_head 128
+expect render.ok == 1
+expect render.covered > 20
+# An eye, from the front: the iris through its clear shells, catchlights, the lid's shadow.
+view front
+closeup lEye 0.045
+wait 5
+shot 03_viewport_eye
+render 03_eye 256
+expect render.ok == 1
+# The back (the environment-lit side) and a profile.
+view back
+closeup chest 0.45
+wait 5
+shot 04_viewport_back
+render 04_back 128
+expect render.ok == 1
+view left
+closeup head 0.2
+wait 5
+shot 05_viewport_profile
+render 05_profile 128
+expect render.ok == 1
+# The key light alone: the figure's shadow on the floor is all there is of the floor, and long.
+view home
+light diffuse 0
+light ambient 0
+wait 5
+shot 06_viewport_sun_only
+render 06_sun_only 64
+expect render.ok == 1
+expect render.covered > 7.5
+light diffuse 0.5
+light ambient 0.15
+# The environment as the backdrop.
+light backdrop 1
+wait 8
+shot 07_viewport_backdrop
+render 07_backdrop 64
+expect render.ok == 1
+light backdrop 0
+# A transparent render and the processor (a small one: it is the slow device).
+render 08_transparent 480 360 32 transparent
+expect render.ok == 1
+render 09_cpu 320 240 16 cpu
+expect render.ok == 1
+# The Render window: opened, a render started with its own button, the picture kept.
+closeup head 0.28
+wait 5
+renderwindow
+wait 30
+expect uicount.render.start == 1
+expect uienabled.render.start.0 == 1
+expect uienabled.render.save.0 == 0
+ui set render.samples 0 64
+ui click render.start 0
+wait 12
+uishot 10_rendering
+wait 400
+uishot 11_done
+expect uienabled.render.save.0 == 1
+expect uienabled.render.stop.0 == 0

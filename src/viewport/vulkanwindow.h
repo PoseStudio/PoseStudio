@@ -77,6 +77,7 @@ class QVulkanInstance;
 namespace pose {
 
 class OpenXrSystem;
+class RenderSceneHolder;     // a scene frozen for a render engine (render/renderscene.h)
 struct VrInput;
 struct DecodedImage;
 struct OverlayImage;         // a decoded overlay image, cropped (scene/overlaycompositor.h)
@@ -239,6 +240,13 @@ public:
     /// nothing but the import's size cap; a roughness or metalness map with @p channel the one it
     /// reads), for the tab's thumbnails; null without one.
     std::shared_ptr<const DecodedImage> materialSlotImage(MaterialMap map, int* channel = nullptr) const;
+
+    /// A PRODUCTION RENDER's scene (vulkanwindow_render.cpp): what the viewport shows — every
+    /// mesh as posed, its materials and maps with the overlays painted in, the camera as framed,
+    /// the key light and the environment — frozen for a render engine and kept alive by the
+    /// object returned (render/renderscene.h). Null before the renderer exists. The live scene
+    /// is not touched afterwards: posing goes on while a render runs.
+    std::shared_ptr<RenderSceneHolder> captureRenderScene();
     /// THE OVERLAYS (materialoverlay.h; vulkanwindow_materials.cpp; the tab's Overlays section):
     /// the selected zone's overlay stack replaced by @p overlays — an overlay added, removed,
     /// moved, or one of its controls set — on EVERY zone painted on the zone's color map
@@ -384,6 +392,11 @@ signals:
     /// preferences page driven through its own widgets (`ui`), pictured (`uishot` saves an open
     /// dialog as <name>_dialog.png) and closed by its Close button (`ui click preferences.close`).
     void preferencesRequested(const QString& tab);
+    /// The scripted test's `renderwindow [start]`: the Render window is wanted, as Render → Show
+    /// Render Window opens it (@p start: as Render → Render Image does, a render begun at once).
+    /// Its controls carry `testId`s for `ui` (render.start, render.samples …) and `uishot` saves
+    /// it as <name>_render.png.
+    void renderWindowRequested(bool start);
     /// The scripted test's `ui`: one of the application's WIDGETS driven in-process — the widget
     /// is the @p index-th (in creation order) carrying the dynamic property `testId` == @p id, and
     /// @p verb is click (a button), set (a scrub field to @p value), check (a checkbox to
@@ -459,8 +472,13 @@ private:
     /// Ends a material edit's bracket: pushes the pre-edit zone materials as one undo entry if
     /// anything changed (and marks the document dirty).
     void commitMaterialUndo();
-    /// One edit's derived images, shared by the zones of a map (vulkanwindow_materials.cpp).
-    struct OverlayBake;
+    /// One edit's derived images by what they were made from, so the zones of one map (and the
+    /// partner slots of one binding) are handed the SAME image — which the model then uploads
+    /// once (SlotUploads). Lives for one call: the images are released with it, the textures
+    /// stay. (A render capture uses one too: the zones of one map share one composite.)
+    struct OverlayBake {
+        std::map<std::string, std::shared_ptr<const DecodedImage>> images;
+    };
     /// Makes mesh @p mesh of model @p model carry in slot @p map what @p source says ("" none,
     /// kImportedTexture the import's, else a file): decodes, then bindSlot. False when a file
     /// could not be read.
@@ -476,8 +494,10 @@ private:
     /// when none does), made once per edit for the zones that share it.
     /// @p baseScale is the Metalness slot's: the zone's Metallic value, multiplied into the map
     /// before the overlays' metal is painted (compositeOverlays).
+    /// @p forRenderer: the map as a RENDER ENGINE is handed it — the overlays' bump images stay
+    /// in the BUMP map (the viewport alone carries them in its normal map: see kOverlaySlots).
     std::shared_ptr<const DecodedImage> overlaid(int model, int mesh, MaterialMap map, const std::shared_ptr<const DecodedImage>& base,
-                                                 int channel, OverlayBake& bake, float baseScale = 1.0f);
+                                                 int channel, OverlayBake& bake, float baseScale = 1.0f, bool forRenderer = false);
     /// THE OVERLAYS' METAL: a zone whose overlays paint its metalness binds a parameter map baked
     /// for the zone's Metallic VALUE (Mesh::setMetalBaked). Re-bakes every zone of @p model whose
     /// value has moved off the one its map was baked for — after anything that sets material
@@ -561,6 +581,11 @@ private:
     QString defaultEnvironmentPath() const;
 
     quint64 m_environmentRequestId = 0; // ++ per HDRI request; a slower earlier bake with a stale id is discarded
+    // The panorama that LIGHTS the scene now — the last bake applied ("" = the procedural studio)
+    // — and the factor its pixels were normalized by: a render engine reads the file itself and
+    // must light by the same amount (captureRenderSnapshot).
+    QString m_appliedEnvironmentPath;
+    float   m_appliedEnvironmentScale = 1.0f;
 
     // =========================================================================================
     // Input (vulkanwindow_input.cpp) — the handlers ROUTE; the gestures live in the sections
@@ -890,6 +915,7 @@ private:
     void scriptSettled();        ///< A release's settle finished: the `release` line's wait is over.
     void scriptFrameRendered();  ///< A frame was presented after `shot`: save the capture, resume.
     void scriptReport(const char* label); ///< `report`: what a user would see, as numbers.
+    void scriptRender(const QStringList& words); ///< `render`: a production render, to its end, saved (vulkanwindow_render.cpp).
     bool scriptMetric(const QString& name, double& value); ///< A number `expect` can assert on.
     std::unique_ptr<IkScript> m_script;
 

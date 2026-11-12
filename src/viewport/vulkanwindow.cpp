@@ -196,6 +196,8 @@ void VulkanWindow::initializeVulkan() {
                 m_xr = nullptr;
             }
         }
+        m_appliedEnvironmentPath.clear(); // (a new Scene starts on the procedural studio)
+        m_appliedEnvironmentScale = 1.0f;
         m_renderer = std::make_unique<VulkanRenderer>(*m_context, toExtent(pixelExtent()),
                                                       m_shaderDir.toStdString());
         m_deferred.applyTo(*m_renderer);

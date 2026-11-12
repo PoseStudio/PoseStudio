@@ -266,6 +266,7 @@ bool readFigure(const json& j, ProjectFigure& fig) {
             if (!number("ior", m.params.ior) || !number("anisotropy", m.params.anisotropy) ||
                 !number("anisotropyRotation", m.params.anisotropyRotation) || !number("diffuseRoughness", m.params.diffuseRoughness) ||
                 !number("transmission", m.params.transmission) || !number("transmissionDepth", m.params.transmissionDepth) ||
+                !number("transmissionRoughness", m.params.transmissionRoughness) ||
                 !number("dispersion", m.params.dispersion) || !number("subsurfaceRadius", m.params.subsurfaceRadius) ||
                 !number("sheen", m.params.sheen) || !number("sheenRoughness", m.params.sheenRoughness) ||
                 !number("coatIor", m.params.coatIor) || !number("coatBumpStrength", m.params.coatBumpStrength) ||
@@ -531,6 +532,7 @@ bool writeProjectFile(const std::string& path, const ProjectDocument& doc) {
                     {"transmission", p.transmission},
                     {"transmissionColor", vec3(p.transmissionColor)},
                     {"transmissionDepth", p.transmissionDepth},
+                    {"transmissionRoughness", p.transmissionRoughness},
                     {"dispersion", p.dispersion},
                     {"thinWalled", p.thinWalled},
                     {"doubleSided", p.doubleSided},

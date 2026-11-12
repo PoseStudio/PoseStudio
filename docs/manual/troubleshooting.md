@@ -27,6 +27,15 @@ PoseStudio renders with Vulkan, which needs a graphics driver that provides it. 
 - **Skin details sit slightly off** — a seam across the scalp, a patch of mismatched skin on the back, the throat's notch out of place: the figure's maps are painted on a UV layout other than the one its materials name. PoseStudio reads each zone through the layout its material names, so this only happens when the content itself names the wrong one.
 - **The figure floats or sinks**: press the **Ground** button. Figures import on the floor; loading a pose file, turning joints with `B` / `S` / `T` or the Transform tab, or lifting her with Ctrl + drag can leave her off it.
 
+## A render will not start, or looks wrong
+
+- **"This copy of PoseStudio has no render engine"**: the engine is a separate part of the application, the `engines` folder beside it. See [Rendering](rendering.md#if-this-copy-has-no-render-engine).
+- **The render fails to start on the graphics card**: update the card's driver — the engine's graphics-card programs need a current one — or choose the processor under **Device** in the Render window. The processor always works.
+- **The first render on a graphics card takes a while to begin**: the card's programs are prepared the first time and kept; later renders start at once.
+- **The picture is grainy**: turn **Denoise** on, or raise **Samples**.
+- **The picture is not what the viewport shows**: the viewport must be in **PBR Shaded** to be the preview of a render, and a few of its dials have no counterpart in one — see [Where a render differs from the viewport](rendering.md#where-a-render-differs-from-the-viewport).
+- **A Gaussian splat scene is missing from the render**: splat scenes are shown by the viewport alone.
+
 ## Posing does not do what I expect
 
 - **The joint I clicked is not the one I wanted**: the pick is the joint nearest the pointer, and on a thick limb the twist bone in its middle counts as the limb. Turn on **View → Show Skeleton** to see where the joints are, or click a little closer to the joint you mean.

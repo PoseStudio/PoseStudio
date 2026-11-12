@@ -300,6 +300,16 @@ add_executable(
     src/properties/softbodypanel.cpp     # the Soft Body Physics tab: the breasts' and the buttocks' switches and dials
     src/properties/softbodypanel.h
 
+    # --- Production rendering (the Render window; the engine itself is a plugin: engines/cycles) ---
+    src/render/renderengineapi.h          # THE ENGINE INTERFACE: the plain-data contract with an engine library
+    src/render/renderscene.h              # a scene description with what it points at, held for a render
+    src/render/renderenginelibrary.cpp    # finds and loads the engine library (QLibrary)
+    src/render/renderenginelibrary.h
+    src/render/rendersession.cpp          # one render: start, poll, the image, save
+    src/render/rendersession.h
+    src/render/renderwindow.cpp           # Render -> Render Image (F12): the window
+    src/render/renderwindow.h
+
     # --- 3D Viewport (Vulkan) ---
     # Qt-facing layer (the only viewport files that touch Qt):
     src/viewport/viewportwidget.cpp
@@ -320,6 +330,8 @@ add_executable(
     src/viewport/vulkanwindow_ik.cpp      # the FBIK drag loop, ground fall, X/Y/Z wheel hold
     src/viewport/vulkanwindow_pose.cpp    # pose utilities, pins, pose files, delete, undo/redo
     src/viewport/vulkanwindow_materials.cpp # the Materials tab's side: the view, the edit bracket, the texture slots (decode + bake + upload)
+    src/viewport/vulkanwindow_render.cpp  # the scene captured for a render engine (captureRenderScene)
+    src/viewport/rendersnapshot.h         # that capture: the description and the storage behind it
     src/viewport/vulkanwindow_bench.cpp   # POSESTUDIO_IK_PERF / _BENCH diagnostics
     src/viewport/vulkanwindow_vr.cpp      # VR Mode: the OpenXR session's lifecycle, wait thread, stereo frame
     # The OpenXR layer (Qt-free: OpenXR + Vulkan + GLM): the headset found at startup, the session
@@ -481,6 +493,9 @@ add_executable(
     src/viewport/scene/groundsampler.h
     src/viewport/scene/model.cpp         # one imported model: meshes + armature + per-frame pose data
     src/viewport/scene/model.h
+    src/viewport/scene/modelbake.cpp     # Model::bakePosedMesh: the vertex stage on the CPU, for a render engine
+    src/viewport/scene/renderexport.cpp  # material / camera / lighting translated for a render engine
+    src/viewport/scene/renderexport.h
     src/viewport/scene/bonepicker.cpp    # screen-space joint / bone-body picking across figures
     src/viewport/scene/bonepicker.h
     src/viewport/scene/posefile.cpp      # the plain-text .pose file reader/writer
@@ -648,6 +663,7 @@ target_include_directories(PoseStudio PRIVATE
     src/assets
     src/widgets
     src/properties
+    src/render
     src/preferences
     src/viewport
     src/viewport/util
@@ -901,6 +917,30 @@ target_compile_definitions(PoseStudioFigureCheck PRIVATE
 target_link_libraries(PoseStudioFigureCheck PRIVATE Vulkan::Headers)
 add_test(NAME figure-shape-check COMMAND PoseStudioFigureCheck)
 
+# The render engine's guard (tools/rendercheck): loads the engine library the way the application
+# does (src/render/renderenginelibrary) and renders a small scene made in the tool through the
+# engine interface, checking the conventions the interface states and start / status / cancel.
+# Qt6::Core + Gui (QLibrary, QImage for --out); no Vulkan, no figure. WITHOUT an engine — a build
+# made without Cycles — it reports that and passes: the application is complete without one.
+add_executable(PoseStudioRenderCheck
+    tools/rendercheck/check_render.cpp
+    src/render/renderenginelibrary.cpp
+)
+target_include_directories(PoseStudioRenderCheck PRIVATE src/render)
+target_link_libraries(PoseStudioRenderCheck PRIVATE Qt6::Core Qt6::Gui)
+add_test(NAME render-engine-check COMMAND PoseStudioRenderCheck)
+
+# THE CYCLES RENDER ENGINE, opt-in (-DPOSESTUDIO_WITH_CYCLES=ON; cmake/CyclesEngine.cmake has the
+# whole story): fetched, built as the plugin PoseStudioCycles and mirrored to
+# <app folder>/engines/cycles. Off, nothing is fetched and the application is built without a
+# render engine — which it says where a render is asked for, and is otherwise complete.
+include(cmake/CyclesEngine.cmake)
+if(POSESTUDIO_WITH_CYCLES)
+    add_dependencies(PoseStudioRenderCheck PoseStudioCyclesEngine)
+    # (The check renders with the engine as built, wherever the tool's own folder is.)
+    set_tests_properties(render-engine-check PROPERTIES ENVIRONMENT "POSESTUDIO_CYCLES_DIR=${POSESTUDIO_CYCLES_ENGINE_DIR}")
+endif()
+
 # .pss save/restore diagnostic (see tools/projectfile/probe.cpp): runs the real import + scene
 # classes headless and prints which document fields diverge across a save/load round-trip. OPT-IN:
 # it compiles the whole engine a second time, which no ordinary build (or the release workflow)
@@ -935,6 +975,7 @@ target_sources(PoseStudioPssProbe PRIVATE
 target_include_directories(PoseStudioPssProbe PRIVATE
     src
     src/core
+    src/render                 # renderengineapi.h (scene/renderexport.cpp names its types)
     src/viewport
     src/viewport/util
     src/viewport/rendering

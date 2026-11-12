@@ -286,6 +286,7 @@ void CorrectiveSet::createBuffers(VulkanContext& context,
     // The corrective delta table: one static device-local buffer for the whole model (the vertex
     // shaders index it through each vertex's range), riding the same upload batch as the meshes;
     // a 16-byte zero placeholder keeps set 2 complete for a model without correctives.
+    m_entries = entries; // (kept: the CPU blend of a render engine's geometry reads the table)
     if (!entries.empty()) {
         m_deltaBuffer = createDeviceLocalBuffer(context, entries.data(),
                                                 sizeof(CorrectiveEntry) * entries.size(),

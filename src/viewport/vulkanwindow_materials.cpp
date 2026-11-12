@@ -47,13 +47,6 @@
 
 namespace pose {
 
-/// One edit's derived images by what they were made from, so the zones of one map (and the
-/// partner slots of one binding) are handed the SAME image — which the model then uploads once
-/// (SlotUploads). Lives for one call: the images are released with it, the textures stay.
-struct VulkanWindow::OverlayBake {
-    std::map<std::string, std::shared_ptr<const DecodedImage>> images;
-};
-
 namespace {
 
 /// The decoded overlay images kept at most (their cropped bytes): beyond it the least recently
@@ -158,9 +151,10 @@ void VulkanWindow::rebindSlot(int model, int mesh, MaterialMap map, OverlayBake&
 
 std::shared_ptr<const DecodedImage> VulkanWindow::overlaid(int model, int mesh, MaterialMap map,
                                                            const std::shared_ptr<const DecodedImage>& base, int channel, OverlayBake& bake,
-                                                           float baseScale) {
-    // (The viewport's normal map carries the overlays' bump images too: see kOverlaySlots.)
-    const bool                         bumpAsNormal = map == MaterialMap::Normal;
+                                                           float baseScale, bool forRenderer) {
+    // (The viewport's normal map carries the overlays' bump images too: see kOverlaySlots. A
+    // render engine gets them where they belong, in the bump map.)
+    const bool                         bumpAsNormal = map == MaterialMap::Normal && !forRenderer;
     const std::vector<MaterialOverlay> overlays = scene().meshOverlays(model, mesh);
     const std::string                  signature = overlaySignature(overlays, map, bumpAsNormal);
     if (signature.empty()) {
@@ -168,8 +162,8 @@ std::shared_ptr<const DecodedImage> VulkanWindow::overlaid(int model, int mesh, 
     }
     char scale[40];
     std::snprintf(scale, sizeof(scale), "%a", static_cast<double>(baseScale));
-    const std::string key =
-        std::string(materialMapName(map)) + "#" + pointerKey(base.get()) + "#" + std::to_string(channel) + "#" + scale + "#" + signature;
+    const std::string key = std::string(materialMapName(map)) + (forRenderer ? "@render#" : "#") + pointerKey(base.get()) + "#" +
+                            std::to_string(channel) + "#" + scale + "#" + signature;
     if (const auto it = bake.images.find(key); it != bake.images.end()) {
         return it->second;
     }

@@ -267,6 +267,7 @@ struct MeshData {
     float                 transmission = 0.0f;
     glm::vec3             transmissionColor{1.0f};
     float                 transmissionDepth = 0.0f;
+    float                 transmissionRoughness = -1.0f; ///< < 0: the surface's own roughness
     float                 dispersion = 0.0f;
     bool                  thinWalled = false;
     glm::vec3             subsurfaceColor{1.0f};
