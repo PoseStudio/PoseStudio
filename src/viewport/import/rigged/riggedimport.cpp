@@ -45,13 +45,16 @@ float srgbToLinear(float c) {
 void fillMissingNormals(MeshData& mesh) {
     std::vector<char> missing(mesh.vertices.size(), 0);
     bool              any = false;
+    bool              all = !mesh.vertices.empty();
     for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
         missing[i] = glm::dot(mesh.vertices[i].normal, mesh.vertices[i].normal) < 1e-12f ? 1 : 0;
         any = any || missing[i];
+        all = all && missing[i];
     }
     if (!any) {
         return;
     }
+    mesh.normalsGenerated = all; // (a file with no normals at all: the import smooths it by angle, smoothnormals.h)
     std::vector<glm::vec3> accum(mesh.vertices.size(), glm::vec3(0.0f));
     for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
         const uint32_t  i0 = mesh.indices[i];

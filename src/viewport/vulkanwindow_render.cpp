@@ -53,6 +53,18 @@
 
 namespace pose {
 
+const std::vector<glm::vec3>& VulkanWindow::studioEnvironmentPixels() const {
+    // (Made once: see RenderSnapshot::environmentPixels.)
+    if (!m_studioEnvironment) {
+        EnvironmentImage studio = generateStudioEnvironment();
+        normalizeEnvironmentLuminance(studio, kEnvironmentAverageLuminance); // (the pixels carry the factor)
+        m_studioEnvironmentWidth = studio.width;
+        m_studioEnvironmentHeight = studio.height;
+        m_studioEnvironment = std::make_shared<const std::vector<glm::vec3>>(std::move(studio.pixels));
+    }
+    return *m_studioEnvironment;
+}
+
 void VulkanWindow::captureRenderLighting(RenderSnapshot& snapshotRef) const {
     using renderapi::ColorSpace;
     RenderSnapshot* const   snapshot = &snapshotRef;
@@ -67,14 +79,7 @@ void VulkanWindow::captureRenderLighting(RenderSnapshot& snapshotRef) const {
         environment.file = snapshot->environmentFile.c_str();
         luminanceScale = m_appliedEnvironmentScale;
     } else {
-        // (Made once: see RenderSnapshot::environmentPixels.)
-        if (!m_studioEnvironment) {
-            EnvironmentImage studio = generateStudioEnvironment();
-            normalizeEnvironmentLuminance(studio, kEnvironmentAverageLuminance); // (the pixels carry the factor)
-            m_studioEnvironmentWidth = studio.width;
-            m_studioEnvironmentHeight = studio.height;
-            m_studioEnvironment = std::make_shared<const std::vector<glm::vec3>>(std::move(studio.pixels));
-        }
+        studioEnvironmentPixels(); // (made once: see RenderSnapshot::environmentPixels)
         snapshot->environmentPixels = m_studioEnvironment;
         renderapi::Image image;
         image.id = 1; // (no DecodedImage has this address)
@@ -197,44 +202,105 @@ std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderLightingOnly() {
     return snapshot;
 }
 
+renderapi::Material VulkanWindow::captureZoneMaterial(RenderSnapshot& snapshot, OverlayBake& bake, int modelIndex, int meshIndex,
+                                                      const char* name, const RenderMaterialContext& context, bool withOverlays) {
+    using renderapi::ColorSpace;
+    using renderapi::MapSlot;
+    const Mesh& mesh = scene().modelAt(static_cast<std::size_t>(modelIndex))->mesh(static_cast<std::size_t>(meshIndex));
+
+    renderapi::Material material = renderMaterial(mesh.material(), mesh.importedMaterial(), name, context);
+    const auto          put = [&](MapSlot slot, int image, int channel) {
+        material.maps[static_cast<int>(slot)].image = image;
+        material.maps[static_cast<int>(slot)].channel = image >= 0 ? channel : -1;
+    };
+    // A slot's plain image and the channel its value rides in.
+    const auto plainOf = [&](MaterialMap map, int* channel) {
+        int        c = 0;
+        const auto image = mesh.slotImage(map);
+        if (image) {
+            c = mesh.slotChannel(map);
+        }
+        if (channel != nullptr) {
+            *channel = c;
+        }
+        return image;
+    };
+    // … with the zone's overlays painted in, as a renderer is handed it.
+    const auto painted = [&](MaterialMap map, const std::shared_ptr<const DecodedImage>& base, int channel, float scale = 1.0f) {
+        if (!withOverlays) {
+            return base;
+        }
+        return overlaid(modelIndex, meshIndex, map, base, channel, bake, scale, /*forRenderer=*/true);
+    };
+    const std::string label = std::string(name) + ":";
+
+    // Base color (sRGB), and the cutout: its own mask, or the base color image's alpha
+    // where the import keeps the shape there (a glTF's alpha mode).
+    const auto base = painted(MaterialMap::BaseColor, plainOf(MaterialMap::BaseColor, nullptr), 0);
+    const int  baseImage = snapshot.imageOf(base, ColorSpace::SRgb, label + "base color");
+    put(MapSlot::BaseColor, baseImage, -1);
+    int maskChannel = 0;
+    if (const auto mask = plainOf(MaterialMap::Opacity, &maskChannel)) {
+        put(MapSlot::Opacity, snapshot.imageOf(mask, ColorSpace::Linear, label + "cutout"), maskChannel);
+    } else if (mesh.hasOpacityMask() && baseImage >= 0) {
+        put(MapSlot::Opacity, baseImage, 3);
+    }
+
+    // Roughness (the overlays' gloss in it) and metalness — where the overlays paint
+    // metal, the zone's ABSOLUTE metalness (its Metallic value in the map: the material's
+    // own value is then 1, the viewport's rule — see bindSlot).
+    int        roughChannel = 0;
+    const auto rough = plainOf(MaterialMap::Roughness, &roughChannel);
+    const auto glossed = painted(MaterialMap::Roughness, rough, rough ? roughChannel : 0);
+    put(MapSlot::Roughness, snapshot.imageOf(glossed, ColorSpace::Linear, label + "roughness"), rough ? roughChannel : 0);
+    int  metalChannel = 0;
+    auto metal = plainOf(MaterialMap::Metalness, &metalChannel);
+    if (withOverlays && !overlaySignature(mesh.material().overlays, MaterialMap::Metalness).empty()) {
+        const float value = mesh.material().baseEnabled ? mesh.material().metalness : 0.0f;
+        const auto  baked = painted(MaterialMap::Metalness, metal, metal ? metalChannel : 0, value);
+        if (baked != metal) {
+            metal = baked;
+            material.metallic = 1.0f;
+        }
+    }
+    put(MapSlot::Metallic, snapshot.imageOf(metal, ColorSpace::Linear, label + "metalness"), metalChannel);
+
+    // The surface maps: the normal map with the overlays' normals, the bump map with
+    // their heights.
+    const auto normal = painted(MaterialMap::Normal, plainOf(MaterialMap::Normal, nullptr), 0);
+    put(MapSlot::Normal, snapshot.imageOf(normal, ColorSpace::Linear, label + "normal"), -1);
+    const auto bump = painted(MaterialMap::Bump, plainOf(MaterialMap::Bump, nullptr), 0);
+    put(MapSlot::Bump, snapshot.imageOf(bump, ColorSpace::Linear, label + "bump"), 0);
+
+    // The rest are the zone's own maps, as they are.
+    const auto plain = [&](MapSlot slot, MaterialMap map, ColorSpace space, bool color, const char* what) {
+        int        channel = 0;
+        const auto image = plainOf(map, &channel);
+        put(slot, snapshot.imageOf(image, space, label + what), color ? -1 : channel);
+    };
+    plain(MapSlot::Specular, MaterialMap::SpecularMask, ColorSpace::Linear, false, "specular");
+    plain(MapSlot::Emission, MaterialMap::Emission, ColorSpace::SRgb, true, "emission");
+    plain(MapSlot::Subsurface, MaterialMap::Translucency, ColorSpace::SRgb, true, "translucency");
+    plain(MapSlot::DetailNormal, MaterialMap::PoreDetail, ColorSpace::Linear, true, "detail normal");
+    plain(MapSlot::CoatWeight, MaterialMap::CoatWeight, ColorSpace::Linear, false, "coat weight");
+    plain(MapSlot::CoatRoughness, MaterialMap::CoatRoughness, ColorSpace::Linear, false, "coat roughness");
+    plain(MapSlot::SheenWeight, MaterialMap::SheenWeight, ColorSpace::Linear, false, "sheen weight");
+    plain(MapSlot::SheenColor, MaterialMap::SheenColor, ColorSpace::SRgb, true, "sheen color");
+    plain(MapSlot::ThinFilmThickness, MaterialMap::ThinFilmThickness, ColorSpace::Linear, false, "thin film");
+    plain(MapSlot::TransmissionWeight, MaterialMap::TransmissionWeight, ColorSpace::Linear, false, "transmission");
+    return material;
+}
+
 std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
     if (!m_renderer) {
         return nullptr;
     }
-    using renderapi::ColorSpace;
     using renderapi::MapSlot;
 
     Scene&                  live = scene();
     const LightingSettings& lighting = live.lightingSettings();
     auto                    snapshot = std::make_shared<RenderSnapshot>();
     OverlayBake             bake;
-
-    // An image of the scene as an entry of the description: one per image and encoding.
-    std::map<std::pair<const DecodedImage*, int>, int> imageIndex;
-    const auto imageOf = [&](const std::shared_ptr<const DecodedImage>& image, ColorSpace space, const std::string& label) -> int {
-        if (!image || image->pixels.empty() || image->width == 0 || image->height == 0) {
-            return -1;
-        }
-        const std::pair<const DecodedImage*, int> key(image.get(), static_cast<int>(space));
-        if (const auto it = imageIndex.find(key); it != imageIndex.end()) {
-            return it->second;
-        }
-        snapshot->imageOwners.push_back(image);
-        snapshot->names.push_back(label);
-        renderapi::Image out;
-        out.id = (reinterpret_cast<std::uintptr_t>(image.get()) << 1) | static_cast<std::uintptr_t>(space);
-        out.pixels = image->pixels.data();
-        out.width = static_cast<int32_t>(image->width);
-        out.height = static_cast<int32_t>(image->height);
-        out.channels = 4;
-        out.format = renderapi::PixelFormat::UInt8;
-        out.colorSpace = space;
-        out.name = snapshot->names.back().c_str();
-        const int index = static_cast<int>(snapshot->images.size());
-        snapshot->images.push_back(out);
-        imageIndex.emplace(key, index);
-        return index;
-    };
 
     for (std::size_t mi = 0; mi < live.modelCount(); ++mi) {
         Model* model = live.modelAt(mi);
@@ -261,83 +327,8 @@ std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
             snapshot->names.push_back(mesh.name().empty() ? ("Zone " + std::to_string(k + 1)) : mesh.name());
             const char* name = snapshot->names.back().c_str();
 
-            renderapi::Material material = renderMaterial(mesh.material(), mesh.importedMaterial(), name, context);
-            const auto          put = [&](MapSlot slot, int image, int channel) {
-                material.maps[static_cast<int>(slot)].image = image;
-                material.maps[static_cast<int>(slot)].channel = image >= 0 ? channel : -1;
-            };
-            // A slot's plain image and the channel its value rides in.
-            const auto plainOf = [&](MaterialMap map, int* channel) {
-                int        c = 0;
-                const auto image = mesh.slotImage(map);
-                if (image) {
-                    c = mesh.slotChannel(map);
-                }
-                if (channel != nullptr) {
-                    *channel = c;
-                }
-                return image;
-            };
-            // … with the zone's overlays painted in, as a renderer is handed it.
-            const auto painted = [&](MaterialMap map, const std::shared_ptr<const DecodedImage>& base, int channel, float scale = 1.0f) {
-                return overlaid(modelIndex, meshIndex, map, base, channel, bake, scale, /*forRenderer=*/true);
-            };
-            const std::string label = std::string(name) + ":";
-
-            // Base color (sRGB), and the cutout: its own mask, or the base color image's alpha
-            // where the import keeps the shape there (a glTF's alpha mode).
-            const auto base = painted(MaterialMap::BaseColor, plainOf(MaterialMap::BaseColor, nullptr), 0);
-            const int  baseImage = imageOf(base, ColorSpace::SRgb, label + "base color");
-            put(MapSlot::BaseColor, baseImage, -1);
-            int maskChannel = 0;
-            if (const auto mask = plainOf(MaterialMap::Opacity, &maskChannel)) {
-                put(MapSlot::Opacity, imageOf(mask, ColorSpace::Linear, label + "cutout"), maskChannel);
-            } else if (mesh.hasOpacityMask() && baseImage >= 0) {
-                put(MapSlot::Opacity, baseImage, 3);
-            }
-
-            // Roughness (the overlays' gloss in it) and metalness — where the overlays paint
-            // metal, the zone's ABSOLUTE metalness (its Metallic value in the map: the material's
-            // own value is then 1, the viewport's rule — see bindSlot).
-            int        roughChannel = 0;
-            const auto rough = plainOf(MaterialMap::Roughness, &roughChannel);
-            const auto glossed = painted(MaterialMap::Roughness, rough, rough ? roughChannel : 0);
-            put(MapSlot::Roughness, imageOf(glossed, ColorSpace::Linear, label + "roughness"), rough ? roughChannel : 0);
-            int  metalChannel = 0;
-            auto metal = plainOf(MaterialMap::Metalness, &metalChannel);
-            if (!overlaySignature(mesh.material().overlays, MaterialMap::Metalness).empty()) {
-                const float value = mesh.material().baseEnabled ? mesh.material().metalness : 0.0f;
-                const auto  baked = painted(MaterialMap::Metalness, metal, metal ? metalChannel : 0, value);
-                if (baked != metal) {
-                    metal = baked;
-                    material.metallic = 1.0f;
-                }
-            }
-            put(MapSlot::Metallic, imageOf(metal, ColorSpace::Linear, label + "metalness"), metalChannel);
-
-            // The surface maps: the normal map with the overlays' normals, the bump map with
-            // their heights.
-            const auto normal = painted(MaterialMap::Normal, plainOf(MaterialMap::Normal, nullptr), 0);
-            put(MapSlot::Normal, imageOf(normal, ColorSpace::Linear, label + "normal"), -1);
-            const auto bump = painted(MaterialMap::Bump, plainOf(MaterialMap::Bump, nullptr), 0);
-            put(MapSlot::Bump, imageOf(bump, ColorSpace::Linear, label + "bump"), 0);
-
-            // The rest are the zone's own maps, as they are.
-            const auto plain = [&](MapSlot slot, MaterialMap map, ColorSpace space, bool color, const char* what) {
-                int        channel = 0;
-                const auto image = plainOf(map, &channel);
-                put(slot, imageOf(image, space, label + what), color ? -1 : channel);
-            };
-            plain(MapSlot::Specular, MaterialMap::SpecularMask, ColorSpace::Linear, false, "specular");
-            plain(MapSlot::Emission, MaterialMap::Emission, ColorSpace::SRgb, true, "emission");
-            plain(MapSlot::Subsurface, MaterialMap::Translucency, ColorSpace::SRgb, true, "translucency");
-            plain(MapSlot::DetailNormal, MaterialMap::PoreDetail, ColorSpace::Linear, true, "detail normal");
-            plain(MapSlot::CoatWeight, MaterialMap::CoatWeight, ColorSpace::Linear, false, "coat weight");
-            plain(MapSlot::CoatRoughness, MaterialMap::CoatRoughness, ColorSpace::Linear, false, "coat roughness");
-            plain(MapSlot::SheenWeight, MaterialMap::SheenWeight, ColorSpace::Linear, false, "sheen weight");
-            plain(MapSlot::SheenColor, MaterialMap::SheenColor, ColorSpace::SRgb, true, "sheen color");
-            plain(MapSlot::ThinFilmThickness, MaterialMap::ThinFilmThickness, ColorSpace::Linear, false, "thin film");
-            plain(MapSlot::TransmissionWeight, MaterialMap::TransmissionWeight, ColorSpace::Linear, false, "transmission");
+            const renderapi::Material material =
+                captureZoneMaterial(*snapshot, bake, modelIndex, meshIndex, name, context, /*withOverlays=*/true);
 
             renderapi::Mesh out;
             out.name = name;

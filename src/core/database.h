@@ -39,4 +39,9 @@ enum class DbInitMode {
  */
 bool initializeDatabase(DbInitMode mode);
 
+/// Brings an open database's schema up to date: every column and table added since the first
+/// schema, each step a no-op once applied. initializeDatabase() runs it on the application's
+/// database; exposed so a check can run the same steps on a database of its own.
+void ensureSchemaCurrent(QSqlDatabase& db);
+
 #endif // DATABASE_H

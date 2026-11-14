@@ -12,6 +12,14 @@
  * an asset's only filing when the add half failed, because the move is one transaction here).
  * Library folders are NOT this module's business: those go through core/assetlibraries.h.
  *
+ * More than one browser is built on this data (the Asset Manager and the Materials Library,
+ * assets/assetmanagerscope.h). COLLECTIONS belong to one browser: every collection row carries
+ * the SCOPE of the browser it was made in (AssetCollectionScope: "" = the Asset Manager), and
+ * the three calls that are not about one known collection — list them, name a new one, create
+ * one — take that scope. FAVORITES are one list for the whole application: a browser that looks
+ * at part of the disk shows the favorites that lie there (the caller filters), and reordering
+ * that part leaves the rest of the list as it was (setFavoriteOrder).
+ *
  * Uses the shared application connection (appDatabase()); GUI thread only like the rest of the
  * data layer. QtSql only, no widgets.
  */
@@ -33,17 +41,20 @@ struct CollectionRow {
     int parentId = 0; ///< 0 = top level
 };
 
-/// Every collection, ordered by name (COLLATE NOCASE, the order the tree shows siblings in).
-/// One query for the whole hierarchy: the caller nests them in memory.
-QList<CollectionRow> allCollections();
+/// Every collection of `scope`, ordered by name (COLLATE NOCASE, the order the tree shows
+/// siblings in). One query for the whole hierarchy: the caller nests them in memory.
+QList<CollectionRow> allCollections(const QString& scope = QString());
 
-/// `baseName` if no sibling under `parentCollectionId` already has it, otherwise
+/// `baseName` if no sibling under `parentCollectionId` in `scope` already has it, otherwise
 /// "baseName (2)", "baseName (3)", ... so repeated "New Collection" clicks under the same
-/// parent each create a distinct collection instead of colliding on name.
-QString uniqueCollectionName(const QString& baseName, int parentCollectionId);
+/// parent each create a distinct collection instead of colliding on name. (The top level is
+/// where the scope matters: two browsers' top-level collections all have parent 0.)
+QString uniqueCollectionName(const QString& baseName, int parentCollectionId,
+                             const QString& scope = QString());
 
-/// Inserts a new collection under `parentCollectionId` (0 = top level). Returns its id, or -1.
-int createCollection(const QString& name, int parentCollectionId);
+/// Inserts a new collection of `scope` under `parentCollectionId` (0 = top level). Returns its
+/// id, or -1.
+int createCollection(const QString& name, int parentCollectionId, const QString& scope = QString());
 
 bool renameCollection(int collectionId, const QString& newName);
 
@@ -94,12 +105,30 @@ struct Filing {
 /// together, so a failed add can never delete the asset's only filing.
 bool moveItem(const QString& path, const Filing& from, const Filing& to);
 
-/// Rewrites FavoriteSortOrder to match `pathsInOrder` (index = order), in one transaction.
+/// Puts the favorites named in `pathsInOrder` into that order, in one transaction. The list may
+/// be PART of the favorites (a browser that shows only those under its own folder, or a grid
+/// that left out favorites whose files have gone): its members trade the places they hold among
+/// themselves and every other favorite keeps its place.
 bool setFavoriteOrder(const QStringList& pathsInOrder);
+
+/// Counts every change of the Favorites list (add, remove, reorder) in this process. Favorites
+/// are shared between the browsers, so one that is showing them compares this with the count it
+/// displayed at to know its grid has gone stale behind another's edit.
+int favoritesRevision();
 
 /// Rewrites a collection's AssetCollectionItemSortOrder to match `pathsInOrder`, in one
 /// transaction.
 bool setCollectionOrder(int collectionId, const QStringList& pathsInOrder);
+
+/// The asset filed as `oldPath` is at `newPath` now — renamed or moved on disk (assetstore.h):
+/// its Favorites entry and every collection filing follow it, each keeping its place. Where the
+/// new path is filed already (a favorite, or in the same collection), the old filing just goes.
+/// One transaction.
+bool repathItem(const QString& oldPath, const QString& newPath);
+
+/// The asset filed as `path` is gone from disk: its Favorites entry and every collection filing
+/// go with it. One transaction.
+bool forgetItem(const QString& path);
 
 } // namespace AssetDb
 

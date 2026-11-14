@@ -1,0 +1,161 @@
+# THE TEXTURE STORE (src/assets/assetstore.h): a saved material's texture files lie in a
+# `textures` folder BESIDE it and are named by relative paths, so the material's folder is all
+# the material needs. Saving collects them there — copied once, the same bytes shared, an image
+# that has no file of its own written out — and applying finds them again, by name if they are
+# no longer where the material says.
+#
+# NOT run by run_all.sh (the subfolder). On the six-sphere scene and the loose files
+# tools/materials/make_test_assets.py writes:
+#
+#   python tools/materials/make_test_assets.py <assets>
+#   POSESTUDIO_TEST_FIGURE=<assets>/showcase.gltf tools/ikscripts/run.sh \
+#       tools/ikscripts/materials/store.txt <out> POSESTUDIO_IK_SCRIPT_ASSETS=<assets>
+#
+# The run's folder is the "library": <out>/lib/Fabric, <out>/lib/Other, <out>/lib/Cube, and
+# <out>/linked for the saves that are told not to copy. LOOK at <out>/lib/Cube/Packed.png beside
+# PackedOnSphere.png (the same material before and after its maps went through the store), and
+# at the three files in <out>/lib/Cube/textures/Packed.
+
+wait 10
+select 0
+expect zones == 6
+
+# --- 1. Saving COPIES the maps beside the material -------------------------------------------------
+zone Brushed
+texture basecolor tex_red.png
+texture roughness tex_rough.png
+expect matstore.basecolor == 0
+savematerial lib/Fabric/Red.psm noicon
+expect matfile.ok == 1
+expect matfile.copied == 2
+expect matfile.reused == 0
+expect matfile.linked == 0
+expect matfile.written == 0
+expect matfile.embedded == 0
+
+# --- 2. … ONCE: a variant saved into the same folder shares the files ----------------------------
+material roughness 80
+savematerial lib/Fabric/RedRough.psm noicon
+expect matfile.ok == 1
+expect matfile.copied == 0
+expect matfile.reused == 2
+
+# --- 3. Applied, the maps are the STORE's, not the files they were copied from ---------------------
+zone Velvet
+applymaterial lib/Fabric/Red.psm
+expect matfile.ok == 1
+expect matfile.missing == 0
+expect matfile.relocated == 0
+expect mattex.basecolor == 2
+expect mattex.roughness == 2
+expect matstore.basecolor == 1
+expect matstore.roughness == 1
+
+# --- 4. Saved again from there: named where they are; into ANOTHER folder: collected there --------
+savematerial lib/Fabric/Again.psm noicon
+expect matfile.linked == 2
+expect matfile.copied == 0
+expect matfile.reused == 0
+savematerial lib/Other/Elsewhere.psm noicon
+expect matfile.copied == 2
+expect matfile.linked == 0
+savematerial lib/Other/ElsewhereToo.psm noicon
+expect matfile.linked == 0
+expect matfile.copied == 0
+expect matfile.reused == 2
+
+# --- 5. Told not to copy: every file is named where it is ----------------------------------------
+zone Brushed
+savematerial linked/Red.psm noicon link
+expect matfile.ok == 1
+expect matfile.linked == 2
+expect matfile.copied == 0
+zone Iridescent
+applymaterial linked/Red.psm
+expect matfile.missing == 0
+expect mattex.basecolor == 2
+expect matstore.basecolor == 0
+undo
+expect mattex.basecolor == 0
+
+# --- 6. Maps that have no file of their own are WRITTEN OUT ----------------------------------------
+# The cube's base color image lives inside the .gltf; its roughness is the GREEN and its metalness
+# the BLUE of one packed image beside it — and a file chosen for a slot is read from its RED. So
+# all three are written as files of their own.
+import packed_cube.gltf
+wait 30
+select 1
+expect zones == 2
+zone Packed
+expect matmap.basecolor == 1
+expect matmap.roughness == 1
+expect matmap.metalness == 1
+savematerial lib/Cube/Packed.psm
+expect matfile.ok == 1
+expect matfile.written == 3
+expect matfile.copied == 0
+expect matfile.linked == 0
+expect matfile.embedded == 0
+expect maticon.ok == 1
+# (Told not to copy, the image inside the file has nothing to be named by and is left out; the
+# packed file is named as it is.)
+savematerial linked/Packed.psm noicon link
+expect matfile.embedded == 1
+expect matfile.linked == 2
+expect matfile.written == 0
+# On a sphere of the other model, from the store's files.
+select 0
+zone Chalk
+applymaterial lib/Cube/Packed.psm
+expect matfile.ok == 1
+expect matfile.missing == 0
+expect mattex.basecolor == 2
+expect mattex.roughness == 2
+expect mattex.metalness == 2
+expect matstore.basecolor == 1
+expect matstore.roughness == 1
+expect matstore.metalness == 1
+expect mat.metallic == 100
+expect mat.roughness == 100
+# (Its icon, to LOOK at beside Packed.png: the same surface, its maps now three plain files.)
+savematerial lib/Cube/PackedOnSphere.psm
+expect matfile.linked == 3
+expect matfile.written == 0
+expect maticon.ok == 1
+undo
+expect mattex.basecolor == 0
+
+# --- 7. A material whose maps are not where it says: found BY NAME, or said to be missing ----------
+zone Glass
+applymaterial relocated.psm
+expect matfile.ok == 1
+expect matfile.relocated == 2
+expect matfile.missing == 0
+expect mattex.basecolor == 2
+expect mattex.roughness == 2
+undo
+applymaterial broken.psm
+expect matfile.ok == 1
+expect matfile.missing == 1
+expect matfile.relocated == 0
+expect mattex.basecolor == 0
+undo
+
+# --- 8. A material saved OVER itself with another map does not leave the old one behind ------------
+zone Iridescent
+texture basecolor tex_red.png
+savematerial lib/Solo/One.psm noicon
+expect matfile.copied == 1
+expect exists.lib/Solo/textures/One/tex_red.png == 1
+texture basecolor tex_mask.png
+savematerial lib/Solo/One.psm noicon
+expect matfile.copied == 1
+expect exists.lib/Solo/textures/One/tex_mask.png == 1
+expect exists.lib/Solo/textures/One/tex_red.png == 0
+# (… but a map another material of the folder still names stays.)
+savematerial lib/Solo/Two.psm noicon
+expect matfile.reused == 1
+texture basecolor tex_red.png
+savematerial lib/Solo/One.psm noicon
+expect exists.lib/Solo/textures/One/tex_mask.png == 1
+expect exists.lib/Solo/textures/One/tex_red.png == 1

@@ -76,17 +76,29 @@ bool samePath(const QString& a, const QString& b);
 /// "Find In Library" for every subfolder of that library.
 bool folderWithinLibrary(const QString& folderPath, const QString& libRoot);
 
+/// The members of `assetPaths` that lie in or under one of `roots`, in input order: what a
+/// browser that looks at part of the disk shows of a list kept for the whole application
+/// (Favorites, in the Materials Library).
+QStringList pathsWithin(const QStringList& assetPaths, const QStringList& roots);
+
 /// Display name for a folder: its dirName(), or the path itself for a drive root ("D:/"), whose
 /// dirName() is empty. A drive-root library would otherwise render as a nameless tree row.
 QString folderDisplayName(const QString& path);
 
-/// True when `path` has at least one real (non-symlink) subdirectory: decides whether a tree
-/// row gets the "..." lazy-load placeholder that makes it expandable.
+/// True when `path` has at least one real (non-symlink) subdirectory that is listed (a texture
+/// store is not): decides whether a tree row gets the "..." lazy-load placeholder that makes it
+/// expandable.
 bool hasSubdirectories(const QString& path);
 
 /// The real subdirectories of `path`, sorted by name, case-insensitive: the order the tree
-/// and the grid list them in.
+/// and the grid list them in. Texture stores (folders named `textures`) are left out.
 QFileInfoList listSubdirectories(const QString& path);
+
+/// True when `path`, below `root`, is a texture store or lies inside one (a folder named
+/// `textures`, assetstore.h): the tree and the grid never list such a folder
+/// (hasSubdirectories / listSubdirectories / classifyFolder leave it out), and the search
+/// passes over what is in it.
+bool inTextureStore(const QString& path, const QString& root);
 
 /// True if any ancestor directory of `path` is present in `set`. Walks up with
 /// QFileInfo::path() so a drive-root ancestor ("D:/") is reached: truncating at the last '/'

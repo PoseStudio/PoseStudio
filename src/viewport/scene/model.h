@@ -143,7 +143,9 @@ public:
         std::vector<std::pair<std::string, std::string>> textures;
     };
     std::vector<MaterialOverride> materialOverrides() const;
-    bool applyMaterialOverride(const std::string& zone, const MaterialParams& params);
+    /// (@p keepSmoothing: the zone keeps its own smoothing whatever @p params carry — a project
+    /// saved before THE SMOOTHING existed says nothing of it.)
+    bool applyMaterialOverride(const std::string& zone, const MaterialParams& params, bool keepSmoothing = false);
     /// THE TEXTURE SLOTS: replaces slot @p map of mesh @p i (Mesh::setSlotImage — the caller has
     /// derived @p gpuImage and waited for the device), re-partitioning the meshes if the cutout
     /// changed the mesh's transparency; bumps materialRevision(). False for a bad index.
@@ -160,6 +162,18 @@ public:
     std::vector<int> overlayZones(std::size_t i) const;
     /// Bumped by every material change — the cheap "has anything changed" the frame notify reads.
     std::uint64_t materialRevision() const { return m_materialRevision; }
+
+    /// THE SMOOTHING (import/smoothnormals.h): true while a zone's material asks for another
+    /// smoothing than its geometry has (a value set through setMeshMaterial — the tab, a linked
+    /// zone, undo, Reset, a project).
+    bool smoothingPending() const;
+    /// Brings the geometry in line: the zones that are to be smooth by angle are computed again
+    /// from their FILE geometry — together, a surface being smoothed across its zones, so a zone
+    /// whose own setting did not move may still come out different — and uploaded where they
+    /// changed; a zone that is to be as imported gets its file geometry back. New device buffers:
+    /// THE CALLER HAS WAITED FOR THE DEVICE. True if any geometry changed (materialRevision()
+    /// is bumped: a render engine's scene is another one).
+    bool applySmoothing();
 
     /// The world-space point a transparent @p mesh (one of this model's) sorts by: its bind
     /// centroid carried by its weight-dominant joint's CURRENT skin transform, through the model

@@ -7,6 +7,7 @@
 
 #include "descriptorutil.h"
 #include "modeldata.h"
+#include "tangentgen.h"
 #include "textureuploadcache.h"
 #include "vertex.h"
 #include "vulkancommands.h"
@@ -98,6 +99,16 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
                                              VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, batch);
     m_indexBuffer = createDeviceLocalBuffer(context, data.indices.data(), indexBytes,
                                             VK_BUFFER_USAGE_INDEX_BUFFER_BIT, batch);
+    // THE SMOOTHING: a mesh the import smoothed by angle (its file brought no smoothing of its
+    // own) arrives smoothed, with the file's geometry beside it — set aside before the occlusion
+    // bake, so not complete yet (prepareFileGeometry).
+    m_smoothApplied = data.smoothByAngle;
+    m_smoothAngleApplied = data.smoothAngle;
+    if (data.smoothByAngle && !data.fileVertices.empty() && data.fileIndices.size() == data.indices.size()) {
+        m_fileVertices = data.fileVertices;
+        m_fileIndices = data.fileIndices;
+        m_fileComplete = false;
+    }
 
     // THE TEXTURE SLOTS as imported: per slot the plain decoded image (what the Materials tab
     // replaces or clears) and the UPLOADED texture the slot drives — the shared uploads of the
@@ -248,6 +259,8 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
     imported.coatAnisotropyRotation = data.coatAnisotropyRotation;
     imported.uvRotation = data.uvRotation;
     imported.doubleSided = data.doubleSided;
+    imported.smoothByAngle = data.smoothByAngle;
+    imported.smoothAngle = data.smoothAngle;
     imported.thinFilm = data.thinFilm;
     imported.thinFilmThickness = data.thinFilmThickness;
     imported.thinFilmIor = data.thinFilmIor;
@@ -372,6 +385,74 @@ bool Mesh::setMaterial(const MaterialParams& params) {
     return true;
 }
 
+void Mesh::prepareFileGeometry() {
+    if (m_fileVertices.empty()) {
+        // Shaded as imported until now: the uploaded geometry is the file's, with everything on it.
+        m_fileVertices = m_cpuVertices;
+        m_fileIndices = m_cpuIndices;
+        m_fileComplete = true;
+        return;
+    }
+    if (m_fileComplete || m_fileIndices.size() != m_cpuIndices.size()) {
+        m_fileComplete = true;
+        return;
+    }
+    // Set aside by the import before the occlusion was baked, the tangents made and the
+    // corrective ranges stamped: each file vertex takes them from the uploaded vertices at its
+    // corners (the occlusion their mean), and gets tangents for its own normals.
+    std::vector<float>    occlusion(m_fileVertices.size(), 0.0f);
+    std::vector<uint32_t> corners(m_fileVertices.size(), 0);
+    for (std::size_t k = 0; k < m_fileIndices.size(); ++k) {
+        const uint32_t file = m_fileIndices[k];
+        const uint32_t now = m_cpuIndices[k];
+        if (file >= m_fileVertices.size() || now >= m_cpuVertices.size()) {
+            continue;
+        }
+        occlusion[file] += m_cpuVertices[now].ao;
+        ++corners[file];
+        m_fileVertices[file].correctiveRange = m_cpuVertices[now].correctiveRange;
+    }
+    for (std::size_t i = 0; i < m_fileVertices.size(); ++i) {
+        if (corners[i] > 0) {
+            m_fileVertices[i].ao = occlusion[i] / static_cast<float>(corners[i]);
+        }
+    }
+    computeTangents(m_fileVertices, m_fileIndices);
+    m_fileComplete = true;
+}
+
+void Mesh::uploadGeometry() {
+    m_indexCount = static_cast<uint32_t>(m_cpuIndices.size());
+    m_vertexBuffer = createDeviceLocalBuffer(*m_context, m_cpuVertices.data(), sizeof(Vertex) * m_cpuVertices.size(),
+                                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    m_indexBuffer = createDeviceLocalBuffer(*m_context, m_cpuIndices.data(), sizeof(uint32_t) * m_cpuIndices.size(),
+                                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+}
+
+void Mesh::setSmoothedGeometry(std::vector<Vertex> vertices, std::vector<uint32_t> indices, float angle) {
+    if (vertices.empty() || indices.size() < 3) {
+        return;
+    }
+    m_cpuVertices = std::move(vertices);
+    m_cpuIndices = std::move(indices);
+    markSmoothed(angle);
+    uploadGeometry();
+}
+
+void Mesh::restoreFileGeometry() {
+    m_smoothApplied = false;
+    if (m_fileVertices.empty()) {
+        return; // (the uploaded geometry is the file's already)
+    }
+    prepareFileGeometry();
+    m_cpuVertices = std::move(m_fileVertices);
+    m_cpuIndices = std::move(m_fileIndices);
+    m_fileVertices.clear();
+    m_fileIndices.clear();
+    m_fileComplete = true;
+    uploadGeometry();
+}
+
 std::shared_ptr<const DecodedImage> Mesh::slotImage(MaterialMap map, bool imported) const {
     return imported ? m_importedSlotPlain[idx(map)] : m_slotPlain[idx(map)];
 }
@@ -389,7 +470,7 @@ std::string Mesh::slotLabel(MaterialMap map) const {
         const std::string& path = m_importedSlotPath[idx(map)];
         return path.empty() ? std::string("embedded") : baseName(path);
     }
-    return baseName(source);
+    return baseName(textureSourcePath(source));
 }
 
 std::string Mesh::slotPath(MaterialMap map) const {
@@ -397,7 +478,7 @@ std::string Mesh::slotPath(MaterialMap map) const {
     if (source.empty()) {
         return std::string();
     }
-    return source == kImportedTexture ? m_importedSlotPath[idx(map)] : source;
+    return source == kImportedTexture ? m_importedSlotPath[idx(map)] : textureSourcePath(source);
 }
 
 void Mesh::setMetalBaked(float scalar) {

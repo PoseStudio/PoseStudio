@@ -1,0 +1,40 @@
+# THE MATERIALS LIBRARY TAB (assets/assetmanagerscope.h): the Asset Manager's own widget, built a
+# second time over the one folder "My PoseStudio Library/Materials".
+#
+# NOT run by run_all.sh (the subfolder): it looks at a stand-in library, so the user's own is
+# never touched.
+#
+#   python tools/assets/make_test_library.py <assets>
+#   POSESTUDIO_TEST_FIGURE=<assets>/triangle.obj tools/ikscripts/run.sh \
+#       tools/ikscripts/library/materials_library.txt <out> \
+#       POSESTUDIO_TAB="Materials Library" POSESTUDIO_MATERIALS_DIR=<assets>/Materials
+#
+# The pictures (<out>/ui/*.png) are what to LOOK at: the tab right under Materials; its tree —
+# Favorites, Collections (its own: none of the Asset Manager's), and ONE root, Materials, open,
+# with the folder icons of its categories (Fabric greyed: nothing in it) — and the root's
+# contents in the grid from the first show; then a search, which looks in that folder alone.
+# The data behind it (collections per browser, favorites shown in part) is CTest
+# `asset-db-check`.
+
+wait 20
+# Both library tabs are the same widget: each has a search field (0 = the Asset Manager's).
+expect uicount.library.search == 2
+uishot 01_opened
+
+# "gold" is a file in Metals: the folder that holds it is the result.
+ui type library.search 1 gold
+ui key library.search 1 enter
+wait 10
+uishot 02_search_gold
+
+# A folder's own name matches too ("Painted", inside Metals).
+ui type library.search 1 painted
+ui key library.search 1 enter
+wait 10
+uishot 03_search_painted
+
+# Emptying the field takes the results away.
+ui type library.search 1
+ui key library.search 1 enter
+wait 10
+uishot 04_search_cleared

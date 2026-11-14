@@ -26,7 +26,23 @@ Writes into the folder given as argv[1]:
                      anisotropic metal), Iridescent (a thin film over a metal), CarPaint (a clear coat over
                      a red metallic) and Chalk (a rough diffuse, its Oren-Nayar roughness set
                      by the script) — what materials/showcase.txt looks at
-Every buffer is a base64 data URI, every image a PNG data URI — one file each, no sidecars.
+  packed_cube.gltf   THE TEXTURE STORE (tools/ikscripts/materials/store.txt): a cube whose
+  packed_mr.png      "Packed" material has a base color image INSIDE the file (a data URI) and a
+                     metallic-roughness image BESIDE it (packed_mr.png: roughness, a left-to-right
+                     ramp, in its green; metalness, the top half, in its blue) — the two kinds
+                     of map a saved material cannot simply name a file for
+  relocated.psm      two saved materials written by hand: one whose two maps are named at paths
+  broken.psm         that do not exist while files of those names lie beside it (found by name),
+                     and one that names a file that is nowhere
+  materials.mtlx     MATERIALX documents (tools/ikscripts/materials/materialx.txt): three
+  moved.mtlx         materials in one file — Painted (a tiled color image, roughness and
+  broken.mtlx        metalness from the green and blue of packed_mr.png, a normal map through a
+  mtlx_pack/         normalmap node, a coat), Glass (values only) and Speckled (its roughness a
+                     procedural noise: nothing to carry, and said); a document whose image is
+                     named at a path that does not exist while a file of that name lies beside
+                     it; one that is not XML; and a folder with a document that names its image
+                     through a fileprefix, the way published material packs do
+Every buffer is a base64 data URI, every image a PNG data URI but packed_mr.png — one file each.
 """
 import base64, json, math, struct, sys, zlib, os
 
@@ -327,4 +343,125 @@ showcase = {
                        "KHR_materials_anisotropy", "KHR_materials_iridescence", "KHR_materials_clearcoat"],
 }
 json.dump(showcase, open(os.path.join(out, "showcase.gltf"), "w"), indent=1)
+
+# packed_cube: a base color image inside the file, a packed metallic-roughness image beside it.
+packed_rows = []
+for y in range(W):
+    row = []
+    for x in range(W):
+        row += [0, int(round(255 * x / (W - 1))), 255 if y < W // 2 else 0, 255]
+    packed_rows.append(row)
+open(os.path.join(out, "packed_mr.png"), "wb").write(png(W, W, packed_rows))
+packed = gltf([
+    {"name": "Packed", "pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1], "baseColorTexture": {"index": 0},
+                                                "metallicFactor": 1.0, "roughnessFactor": 1.0, "metallicRoughnessTexture": {"index": 1}}},
+    {"name": "Plain", "pbrMetallicRoughness": {"baseColorFactor": [0.2, 0.6, 0.2, 1], "metallicFactor": 0.0, "roughnessFactor": 0.6}},
+], None, images=[{"uri": data_uri("image/png", png(W, W, diffuse_rows)), "name": "diffuse"}, {"uri": "packed_mr.png", "name": "packed"}],
+    textures=[{"source": 0, "sampler": 0}, {"source": 1, "sampler": 0}], name='packed')
+json.dump(packed, open(os.path.join(out, "packed_cube.gltf"), "w"), indent=1)
+
+# Two saved materials whose maps are not where they say (the load's search: assets/assetstore.h).
+def psm(name, textures):
+    return {"format": "posestudio.material", "version": 1, "name": name,
+            "material": {"roughness": 0.4, "textures": [{"slot": s, "source": p} for s, p in textures]}}
+json.dump(psm("relocated", [("basecolor", "C:/nowhere/else/tex_red.png"), ("roughness", "gone/TEX_ROUGH.PNG")]),
+          open(os.path.join(out, "relocated.psm"), "w"), indent=2)
+json.dump(psm("broken", [("basecolor", "nowhere/absent_map.png")]), open(os.path.join(out, "broken.psm"), "w"), indent=2)
+
+# MaterialX documents: the reader's in-app test.
+open(os.path.join(out, "materials.mtlx"), "w").write("""<?xml version="1.0"?>
+<materialx version="1.38" colorspace="lin_rec709">
+  <nodegraph name="NG_painted">
+    <tiledimage name="color" type="color3">
+      <input name="file" type="filename" value="tex_red.png" colorspace="srgb_texture" />
+      <input name="uvtiling" type="vector2" value="2.0, 2.0" />
+    </tiledimage>
+    <image name="packed" type="color3">
+      <input name="file" type="filename" value="packed_mr.png" />
+    </image>
+    <extract name="rough" type="float">
+      <input name="in" type="color3" nodename="packed" />
+      <input name="index" type="integer" value="1" />
+    </extract>
+    <separate3 name="split" type="multioutput">
+      <input name="in" type="color3" nodename="packed" />
+    </separate3>
+    <image name="nrm" type="vector3">
+      <input name="file" type="filename" value="overlay_normal.png" />
+    </image>
+    <normalmap name="nmap" type="vector3">
+      <input name="in" type="vector3" nodename="nrm" />
+      <input name="scale" type="float" value="0.75" />
+    </normalmap>
+    <output name="out_color" type="color3" nodename="color" />
+    <output name="out_rough" type="float" nodename="rough" />
+    <output name="out_metal" type="float" nodename="split" output="outb" />
+    <output name="out_normal" type="vector3" nodename="nmap" />
+  </nodegraph>
+  <standard_surface name="SR_painted" type="surfaceshader">
+    <input name="base" type="float" value="1" />
+    <input name="base_color" type="color3" nodegraph="NG_painted" output="out_color" />
+    <input name="specular_roughness" type="float" nodegraph="NG_painted" output="out_rough" />
+    <input name="metalness" type="float" nodegraph="NG_painted" output="out_metal" />
+    <input name="normal" type="vector3" nodegraph="NG_painted" output="out_normal" />
+    <input name="coat" type="float" value="0.5" />
+    <input name="coat_roughness" type="float" value="0.1" />
+  </standard_surface>
+  <surfacematerial name="Painted" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="SR_painted" />
+  </surfacematerial>
+
+  <standard_surface name="SR_glass" type="surfaceshader">
+    <input name="base" type="float" value="0" />
+    <input name="specular_roughness" type="float" value="0.05" />
+    <input name="specular_IOR" type="float" value="1.45" />
+    <input name="transmission" type="float" value="1" />
+    <input name="transmission_color" type="color3" value="0.6, 0.9, 0.7" />
+  </standard_surface>
+  <surfacematerial name="Glass" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="SR_glass" />
+  </surfacematerial>
+
+  <noise2d name="speckle" type="float" />
+  <standard_surface name="SR_speckled" type="surfaceshader">
+    <input name="base" type="float" value="1" />
+    <input name="base_color" type="color3" value="0.2, 0.5, 0.8" />
+    <input name="specular_roughness" type="float" nodename="speckle" />
+    <input name="metalness" type="float" value="1" />
+  </standard_surface>
+  <surfacematerial name="Speckled" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="SR_speckled" />
+  </surfacematerial>
+</materialx>
+""")
+open(os.path.join(out, "moved.mtlx"), "w").write("""<?xml version="1.0"?>
+<materialx version="1.38" fileprefix="../../../Images/">
+  <image name="color" type="color3"><input name="file" type="filename" value="tex_red.png" /></image>
+  <standard_surface name="Moved" type="surfaceshader">
+    <input name="base" type="float" value="1" />
+    <input name="base_color" type="color3" nodename="color" />
+    <input name="specular_roughness" type="float" value="0.3" />
+  </standard_surface>
+</materialx>
+""")
+open(os.path.join(out, "broken.mtlx"), "w").write("<materialx version=\"1.38\"><standard_surface name=\"A\">")
+pack = os.path.join(out, "mtlx_pack")
+os.makedirs(os.path.join(pack, "textures"), exist_ok=True)
+open(os.path.join(pack, "textures", "pack_color.png"), "wb").write(open(os.path.join(out, "tex_mask.png"), "rb").read())
+open(os.path.join(pack, "pack.mtlx"), "w").write("""<?xml version="1.0"?>
+<materialx version="1.38" colorspace="lin_rec709" fileprefix="textures/">
+  <nodegraph name="NG">
+    <image name="color" type="color3"><input name="file" type="filename" value="pack_color.png" colorspace="srgb_texture" /></image>
+    <output name="out" type="color3" nodename="color" />
+  </nodegraph>
+  <open_pbr_surface name="SR" type="surfaceshader">
+    <input name="base_color" type="color3" nodegraph="NG" output="out" />
+    <input name="specular_roughness" type="float" value="0.45" />
+    <input name="coat_weight" type="float" value="0.8" />
+  </open_pbr_surface>
+  <surfacematerial name="Packed_Material" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="SR" />
+  </surfacematerial>
+</materialx>
+""")
 print("wrote", out)

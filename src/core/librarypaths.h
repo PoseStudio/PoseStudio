@@ -8,7 +8,8 @@
  * table and browsable in the Asset Manager. initializeDatabase() creates it in Documents once on a
  * fresh install; a user who already has a library folder by that name (registered from anywhere on
  * disk) keeps theirs, and that one is resolved here. HDRI environment panoramas live in its hdri/
- * subfolder — the folder the Environment panel lists and where users drop their own .hdr files.
+ * subfolder — the folder the Environment panel lists and where users drop their own .hdr files —
+ * and materials in its Materials/ subfolder, the folder the Materials Library tab browses.
  *
  * Cost model: the library root is looked up in the database ONCE and cached (see
  * invalidateCache); every other function is pure path arithmetic or a directory scan, and the
@@ -50,6 +51,24 @@ QString hdriDirectory();
 /// Called from the startup path (the HDRI selector's constructor) and the "Open HDRI Folder…"
 /// link — deliberately not from every lookup, which used to cost a filesystem write per call.
 QString ensureHdriDirectory();
+
+/// The materials folder inside the user library (<root>/Materials): the ONE folder the Materials
+/// Library tab browses (assets/assetmanagerscope.h) — a pure path, which may not exist yet;
+/// ensureMaterialsDirectory() creates it. Subfolders are the library's categories. A developer
+/// lever, POSESTUDIO_MATERIALS_DIR=<folder>, names another folder for a run (how the tab is
+/// looked at with test content, without touching the user's own library).
+QString materialsDirectory();
+
+/// materialsDirectory(), created on disk if it is missing, so the tab always has its root and
+/// "put materials here" always has a target (an install that predates the folder gets it the
+/// first time the tab is built).
+QString ensureMaterialsDirectory();
+
+/// The library a folder belongs to: the outermost registered asset library (or the materials
+/// folder, where the developer lever points it elsewhere) that @p folder is or lies under; ""
+/// for a folder outside every library. What a saved asset's textures are searched under when
+/// they are not where the asset says (assets/assetstore.h).
+QString libraryRootOf(const QString& folder);
 
 /// One panorama in the HDRI menu, with everything the menu shows precomputed.
 struct HdriEntry {

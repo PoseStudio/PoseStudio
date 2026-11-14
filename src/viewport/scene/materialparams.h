@@ -91,8 +91,46 @@ constexpr int kMaterialMapCount = static_cast<int>(MaterialMap::Count);
 /// always restorable; a chosen file is decoded again when a project or an undo asks for it.
 constexpr const char* kImportedTexture = "@imported";
 
+/// A CHOSEN FILE READ FROM ONE CHANNEL. A slot's value may ride in the green, blue or alpha of
+/// an image that packs several maps (a MaterialX or glTF occlusion / roughness / metalness
+/// image, a cutout in a color image's alpha). The source then carries the channel after its
+/// path — "D:/maps/orm.png?channel=g" — so that whatever reads the source again (an undo, a
+/// project) reads the same channel. ('?' cannot be part of a Windows file name.) A source
+/// without the mark is read from its red.
+constexpr const char* kTextureChannelMark = "?channel=";
+
+/// @p path as a slot's source read from @p channel (0 red … 3 alpha): the path itself for 0.
+inline std::string textureSourceWithChannel(const std::string& path, int channel) {
+    if (channel <= 0 || channel > 3 || path.empty() || path == kImportedTexture) {
+        return path;
+    }
+    return path + kTextureChannelMark + "rgba"[channel];
+}
+
+/// The file a slot's source names, without its channel mark; @p channel (when given) is the
+/// channel it names, 0 where it names none.
+inline std::string textureSourcePath(const std::string& source, int* channel = nullptr) {
+    if (channel != nullptr) {
+        *channel = 0;
+    }
+    const std::string mark(kTextureChannelMark);
+    const std::size_t at = source.rfind(mark);
+    if (at == std::string::npos || at + mark.size() + 1 != source.size()) {
+        return source;
+    }
+    const char letter = source.back();
+    const int  index = letter == 'r' ? 0 : letter == 'g' ? 1 : letter == 'b' ? 2 : letter == 'a' ? 3 : -1;
+    if (index < 0) {
+        return source;
+    }
+    if (channel != nullptr) {
+        *channel = index;
+    }
+    return source.substr(0, at);
+}
+
 struct MaterialTextureRef {
-    std::string source; ///< "", kImportedTexture, or a file path
+    std::string source; ///< "", kImportedTexture, or a file path (which may end in a channel mark: textureSourcePath)
     bool operator==(const MaterialTextureRef& o) const { return source == o.source; }
     bool operator!=(const MaterialTextureRef& o) const { return source != o.source; }
 };
@@ -239,6 +277,13 @@ struct MaterialParams {
     float     displacementSubdiv = 0.0f;   ///< Subdivision levels applied before displacing (0..5).
     float     aoWeight = 1.0f;             ///< How much a baked ambient-occlusion map darkens the environment's light (rendered; nothing without the map).
     bool      doubleSided = false;         ///< Render the back faces too (a leaf, a cloth card); the viewport always does (stored).
+    // --- THE SMOOTHING (import/smoothnormals.h): the zone's shading normals computed here, by
+    // angle, instead of taken from its file. Off = as imported (which may already be smooth). An
+    // OBJECT's state shown with its material: a value for undo, linked zones, Reset and a
+    // project — sameValues counts it — but not part of a surface: nearlyEqual (the linked zones'
+    // "same material") does not, and a saved material file neither carries nor changes it.
+    bool      smoothByAngle = false;
+    float     smoothAngle = 60.0f;         ///< Degrees: edges sharper than this stay crisp (0 faceted, 180 smooth everywhere).
     glm::vec2 uvTiling{1.0f};       ///< The material's UV repeat (a tiled floor).
     glm::vec2 uvOffset{0.0f};
     float     uvRotation = 0.0f;    ///< The material's UV rotation, degrees, about the UV origin after the tiling (rendered).
@@ -316,6 +361,7 @@ struct MaterialParams {
                coatColor == o.coatColor && coatIor == o.coatIor && coatBumpStrength == o.coatBumpStrength && thinFilm == o.thinFilm &&
                coatAnisotropy == o.coatAnisotropy && coatAnisotropyRotation == o.coatAnisotropyRotation && uvRotation == o.uvRotation &&
                doubleSided == o.doubleSided && topCoatEnabled == o.topCoatEnabled && sheenEnabled == o.sheenEnabled && thinFilmEnabled == o.thinFilmEnabled && transmissionEnabled == o.transmissionEnabled && subsurfaceEnabled == o.subsurfaceEnabled && emissionEnabled == o.emissionEnabled && displacementEnabled == o.displacementEnabled && detailEnabled == o.detailEnabled && baseEnabled == o.baseEnabled && specularEnabled == o.specularEnabled && geometryEnabled == o.geometryEnabled && tilingEnabled == o.tilingEnabled &&
+               smoothByAngle == o.smoothByAngle && smoothAngle == o.smoothAngle &&
                thinFilmThickness == o.thinFilmThickness && thinFilmIor == o.thinFilmIor && emissionColor == o.emissionColor &&
                emission == o.emission && opacity == o.opacity && normalStrength == o.normalStrength &&
                bumpStrength == o.bumpStrength && detailWeight == o.detailWeight && detailTiles == o.detailTiles &&
@@ -555,6 +601,8 @@ enum class MaterialField {
     GeometryEnabled,
     TilingEnabled,
     ThinWalled, ///< 0 / 1: the Transmission section's Thin Walled box (a sheet, not a solid)
+    SmoothByAngle, ///< 0 / 1: the Geometry section's Smooth by Angle box (THE SMOOTHING)
+    SmoothAngle,   ///< … and its angle, degrees
     Count
 };
 
@@ -620,6 +668,8 @@ inline float materialFieldValue(const MaterialParams& p, MaterialField field) {
     case MaterialField::GeometryEnabled: return p.geometryEnabled ? 1.0f : 0.0f;
     case MaterialField::TilingEnabled: return p.tilingEnabled ? 1.0f : 0.0f;
     case MaterialField::ThinWalled: return p.thinWalled ? 1.0f : 0.0f;
+    case MaterialField::SmoothByAngle: return p.smoothByAngle ? 1.0f : 0.0f;
+    case MaterialField::SmoothAngle: return p.smoothAngle;
     default: return 0.0f;
     }
 }
@@ -689,6 +739,8 @@ inline void setMaterialField(MaterialParams& p, MaterialField field, float v) {
     case MaterialField::GeometryEnabled: p.geometryEnabled = v >= 0.5f; break;
     case MaterialField::TilingEnabled: p.tilingEnabled = v >= 0.5f; break;
     case MaterialField::ThinWalled: p.thinWalled = v >= 0.5f; break;
+    case MaterialField::SmoothByAngle: p.smoothByAngle = v >= 0.5f; break;
+    case MaterialField::SmoothAngle: p.smoothAngle = std::clamp(v, 0.0f, 180.0f); break;
     default: break;
     }
 }
@@ -755,6 +807,8 @@ inline const char* materialFieldName(MaterialField field) {
     case MaterialField::GeometryEnabled: return "geometryenabled";
     case MaterialField::TilingEnabled: return "tilingenabled";
     case MaterialField::ThinWalled: return "thinwalled";
+    case MaterialField::SmoothByAngle: return "smooth";
+    case MaterialField::SmoothAngle: return "smoothangle";
     default: return "";
     }
 }
@@ -817,6 +871,17 @@ struct MaterialMaps {
     std::array<bool, kMaterialMapCount> present{};
     bool has(MaterialMap m) const { return present[static_cast<std::size_t>(m)]; }
     bool operator==(const MaterialMaps& o) const { return present == o.present; }
+};
+
+/// What saving a material did with the zone's texture maps (VulkanWindow::saveMaterialFile; the
+/// standard is assets/assetstore.h: an asset's textures lie in a `textures` folder beside it).
+struct MaterialSaveReport {
+    int copied = 0;    ///< Files copied into the material's texture folder.
+    int reused = 0;    ///< … not copied: a file with the same bytes was in the folder's store already.
+    int written = 0;   ///< Images that had no file of their own (inside a model's file, or one channel of a packed map), written out.
+    int linked = 0;    ///< Maps named where they are (beside the material already; or the save was told not to copy).
+    int notCopied = 0; ///< … of those, files that SHOULD have been copied and could not be.
+    int leftOut = 0;   ///< Maps the saved material does not include (an image without a file, when nothing may be written).
 };
 
 /// What the Materials tab shows for the SELECTED object: its zones, the selected zone's values —

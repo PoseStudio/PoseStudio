@@ -1,0 +1,124 @@
+# MATERIALX (scene/materialxfile.h; File > Import > .MTLX, or a double-click on a .mtlx in a
+# library): a material of a MaterialX document put on the selected zone — its values, and its
+# image files in their slots, each read from the channel the document says.
+#
+# NOT run by run_all.sh (the subfolder). On the six-sphere scene and the documents
+# tools/materials/make_test_assets.py writes:
+#
+#   python tools/materials/make_test_assets.py <assets>
+#   POSESTUDIO_TEST_FIGURE=<assets>/showcase.gltf tools/ikscripts/run.sh \
+#       tools/ikscripts/materials/materialx.txt <out> POSESTUDIO_IK_SCRIPT_ASSETS=<assets>
+#
+# LOOK at the shots: the Painted sphere is red, tiled twice, its top half a mirror-like metal
+# and its bottom half not, glossy on one side and matt on the other (the two channels of one
+# packed image), under a coat; the Glass sphere is a clear green glass.
+
+wait 10
+select 0
+expect zones == 6
+view front
+
+# --- 1. A material with maps: the slots, the channels, the values --------------------------------
+zone Chalk
+applymaterial materials.mtlx Painted
+expect matfile.ok == 1
+expect matfile.materials == 3
+expect matfile.missing == 0
+expect matfile.relocated == 0
+expect matfile.notes == 0
+expect mattex.basecolor == 2
+expect mattex.roughness == 2
+expect mattex.metalness == 2
+expect mattex.normal == 2
+expect mat.metallic == 100
+expect mat.roughness == 100
+expect mat.topcoat == 50
+expect mat.topcoatrough == 10
+expect mat.normal == 75
+expect mat.tilingx == 2
+expect mat.tilingy == 2
+expect mat.subsurface == 0
+expect mat.emission == 0
+lookat 2.75 0.5 0 0.62
+wait 5
+shot 01_painted
+# Saved into a library folder, the two channel maps are written out as files of their own (the
+# green and the blue of the packed image), the two plain files copied: the channels were kept.
+savematerial lib/Painted.psm noicon
+expect matfile.written == 2
+expect matfile.copied == 2
+# … and kept through an undo and a redo, which read the files again.
+undo
+expect mattex.basecolor == 0
+redo
+expect mattex.roughness == 2
+savematerial lib2/Painted.psm noicon
+expect matfile.written == 2
+expect matfile.copied == 2
+# … and through a project.
+saveproject mtlx_scene.pss
+new
+openproject mtlx_scene.pss
+wait 20
+select 0
+zone Chalk
+expect mattex.roughness == 2
+expect mat.topcoat == 50
+savematerial lib3/Painted.psm noicon
+expect matfile.written == 2
+expect matfile.copied == 2
+lookat 2.75 0.5 0 0.62
+wait 5
+shot 02_painted_after_project
+
+# --- 2. Which material: the first by default, or the one named ------------------------------------
+zone Velvet
+applymaterial materials.mtlx
+expect matfile.ok == 1
+expect mattex.basecolor == 2
+expect mat.topcoat == 50
+undo
+zone Brushed
+applymaterial materials.mtlx glass
+expect matfile.ok == 1
+expect mattex.basecolor == 0
+expect mat.transmission == 100
+expect mat.ior == 1.45
+expect mat.roughness == 5
+expect mat.metallic == 0
+lookat -0.55 0.5 0 0.62
+wait 5
+shot 03_glass
+applymaterial materials.mtlx Nobody
+expect matfile.ok == 0
+expect mat.transmission == 100
+
+# --- 3. What cannot be carried is said -------------------------------------------------------------
+zone Iridescent
+applymaterial materials.mtlx Speckled
+expect matfile.ok == 1
+expect matfile.notes == 1
+expect mat.metallic == 100
+expect mat.roughness == 20
+expect mattex.roughness == 0
+
+# --- 4. A pack with a file prefix; an image that is not where the document says; no document ------
+zone CarPaint
+applymaterial mtlx_pack/pack.mtlx
+expect matfile.ok == 1
+expect matfile.materials == 1
+expect matfile.missing == 0
+expect mattex.basecolor == 2
+expect mat.roughness == 45
+expect mat.topcoat == 80
+expect mat.coatior == 1.6
+undo
+applymaterial moved.mtlx
+expect matfile.ok == 1
+expect matfile.relocated == 1
+expect matfile.missing == 0
+expect mattex.basecolor == 2
+undo
+applymaterial broken.mtlx
+expect matfile.ok == 0
+expect mattex.basecolor == 0

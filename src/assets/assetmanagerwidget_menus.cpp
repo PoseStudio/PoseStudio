@@ -18,6 +18,7 @@
 #include "assetfolderproxymodel.h"
 #include "assetgriddragcontroller.h"
 #include "assetnodeids.h"
+#include "assetstore.h"
 #include "assettreeview.h"
 #include "constants.h"
 
@@ -43,7 +44,11 @@ QMenu* AssetManagerWidget::newContextMenu(QWidget* parent) {
 }
 
 QPair<QAction*, QAction*> AssetManagerWidget::addManageRefreshActions(QMenu* menu) {
-    QAction* manage = menu->addAction(icon(QStringLiteral("preferences")), tr("Manage Asset Folders"));
+    // The folders are managed in Preferences -> Assets — the registered libraries. A browser
+    // with roots of its own (the Materials Library) has none there, so it gets Refresh alone.
+    QAction* manage = m_scope.hasOwnRoots()
+        ? nullptr
+        : menu->addAction(icon(QStringLiteral("preferences")), tr("Manage Asset Folders"));
     QAction* refresh = menu->addAction(icon(QStringLiteral("refresh")), tr("Refresh"));
     return {manage, refresh};
 }
@@ -158,7 +163,7 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         QAction *selectedAction = emptyMenu->exec(globalPos);
         emptyMenu->deleteLater();
 
-        if (selectedAction == manageFoldersAction) {
+        if (manageFoldersAction && selectedAction == manageFoldersAction) {
             emit manageAssetFoldersRequested();
         } else if (selectedAction == refreshAction) {
             refreshAssetManager();
@@ -204,10 +209,10 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
 
         if (handleExpandCollapse(selectedAction, expandActions, proxyIndex)) return;
         if (selectedAction == newCollAction) {
-            int cid = createCollection(AssetDb::uniqueCollectionName(tr("New Collection"), 0), 0);
+            int cid = createCollection(newCollectionName(tr("New Collection"), 0), 0);
             if (cid > 0) navigateToCollectionNode(cid, true);
         }
-        else if (selectedAction == manageFoldersAction) emit manageAssetFoldersRequested();
+        else if (manageFoldersAction && selectedAction == manageFoldersAction) emit manageAssetFoldersRequested();
         else if (selectedAction == refreshAction) refreshAssetManager();
 
         return;
@@ -252,9 +257,9 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         } else if (handleExpandCollapse(selectedAction, expandActions, proxyIndex)) {
             return;
         } else if (selectedAction == newSubCollAction) {
-            int cid = createCollection(AssetDb::uniqueCollectionName(tr("New Collection"), collId), collId);
+            int cid = createCollection(newCollectionName(tr("New Collection"), collId), collId);
             if (cid > 0) navigateToCollectionNode(cid, true);
-        } else if (selectedAction == manageFoldersAction) {
+        } else if (manageFoldersAction && selectedAction == manageFoldersAction) {
             emit manageAssetFoldersRequested();
         } else if (selectedAction == refreshAction) {
             refreshAssetManager();
@@ -290,6 +295,11 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         contextMenu->addSeparator();
     }
 
+    // Packages (assetstore.h): this folder zipped with everything in it, or a package unpacked into it.
+    QAction *exportPackageAction = contextMenu->addAction(icon(QStringLiteral("export")), tr("Export Package..."));
+    QAction *installPackageAction = contextMenu->addAction(icon(QStringLiteral("import")), tr("Install Package..."));
+    contextMenu->addSeparator();
+
     const ExpandActions expandActions = addExpandCollapseActions(contextMenu, proxyIndex, true);
     contextMenu->addSeparator();
     const auto [manageFoldersAction, refreshAction] = addManageRefreshActions(contextMenu);
@@ -301,7 +311,9 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         navigateToFolderInTree(folderPath);
     else if (handleExpandCollapse(selectedAction, expandActions, proxyIndex)) return;
     else if (selectedAction == browseAction) QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
-    else if (selectedAction == manageFoldersAction) emit manageAssetFoldersRequested();
+    else if (selectedAction == exportPackageAction) exportPackageOf(folderPath);
+    else if (selectedAction == installPackageAction) installPackageInto(folderPath);
+    else if (manageFoldersAction && selectedAction == manageFoldersAction) emit manageAssetFoldersRequested();
     else if (selectedAction == refreshAction) refreshAssetManager();
 }
 
@@ -343,10 +355,16 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
         if (!inCollectionOrSearch)
             browseAction = folderMenu->addAction(icon(QStringLiteral("browse-folder")), tr("Browse Folder"));
         folderMenu->addSeparator();
+        QAction *exportPackageAction = folderMenu->addAction(icon(QStringLiteral("export")), tr("Export Package..."));
+        folderMenu->addSeparator();
         QAction *refreshAction = folderMenu->addAction(icon(QStringLiteral("refresh")), tr("Refresh"));
 
         QAction *selected = folderMenu->exec(globalPos);
         folderMenu->deleteLater();
+        if (selected != nullptr && selected == exportPackageAction) {
+            exportPackageOf(folderPath);
+            return;
+        }
 
         if (selected == openAction) {
             deselectTree();
@@ -376,6 +394,13 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
             && QDir(m_currentFolderPath).exists();
         browseAction->setEnabled(hasPhysicalFolder);
 
+        // Packages: the folder shown, zipped; or a package unpacked into it.
+        emptyMenu->addSeparator();
+        QAction *exportPackageAction = emptyMenu->addAction(icon(QStringLiteral("export")), tr("Export Package..."));
+        QAction *installPackageAction = emptyMenu->addAction(icon(QStringLiteral("import")), tr("Install Package..."));
+        exportPackageAction->setEnabled(hasPhysicalFolder);
+        installPackageAction->setEnabled(hasPhysicalFolder);
+
         emptyMenu->addSeparator();
         QAction *refreshAction = emptyMenu->addAction(icon(QStringLiteral("refresh")), tr("Refresh"));
         QAction *selectedAction = emptyMenu->exec(globalPos);
@@ -383,6 +408,10 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
 
         if (selectedAction == browseAction) {
             QDesktopServices::openUrl(QUrl::fromLocalFile(m_currentFolderPath));
+        } else if (selectedAction == exportPackageAction) {
+            exportPackageOf(m_currentFolderPath);
+        } else if (selectedAction == installPackageAction) {
+            installPackageInto(m_currentFolderPath);
         } else if (selectedAction == refreshAction) {
             refreshCurrentView();
         }
@@ -455,7 +484,7 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
     if (currentCollectionId == -1) {
         QAction *newCollAction = addMenu->addAction(tr("New Collection"));
         connect(newCollAction, &QAction::triggered, this, [this, fullPath]() {
-            int cid = createCollection(AssetDb::uniqueCollectionName(tr("New Collection"), 0), 0);
+            int cid = createCollection(newCollectionName(tr("New Collection"), 0), 0);
             if (cid > 0 && addAssetToCollection(fullPath, cid)) navigateToCollectionNode(cid, true);
         });
     }
@@ -520,6 +549,9 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
     if (inFavoritesView)
         removeFromFavAction = itemMenu->addAction(icon(QStringLiteral("unfavorite")), tr("Remove From Favorites"));
 
+    // An asset of PoseStudio's own (a saved material): its file operations (assetstore.h).
+    const FileActions fileActions = addFileActions(itemMenu, fullPath);
+
     itemMenu->addSeparator();
 
     // Action 4: Refresh
@@ -529,8 +561,14 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
     QAction *selectedAction = itemMenu->exec(globalPos);
     itemMenu->deleteLater();
 
+    if (handleFileAction(selectedAction, fileActions, fullPath)) {
+        return;
+    }
     if (selectedAction == openAction) {
-        QDesktopServices::openUrl(QUrl::fromLocalFile(fullPath));
+        // What a double-click does for an asset PoseStudio opens itself (a saved material is
+        // applied); anything else goes to the application that owns it.
+        if (AssetStore::isOwnAsset(fullPath)) openAsset(fullPath);
+        else QDesktopServices::openUrl(QUrl::fromLocalFile(fullPath));
     }
     else if (removeFromColAction && selectedAction == removeFromColAction) {
         if (removeAssetFromCollection(fullPath, currentCollectionId)) refreshCurrentView();

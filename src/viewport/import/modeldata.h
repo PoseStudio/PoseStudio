@@ -55,6 +55,17 @@ using DecodedImagePtr = std::shared_ptr<const DecodedImage>;
 struct MeshData {
     std::vector<Vertex>   vertices;
     std::vector<uint32_t> indices;
+    /// THE SMOOTHING (import/smoothnormals.h). A reader sets normalsGenerated where the file had
+    /// NO normals and it made its own. The import's applyImportSmoothing then decides: a mesh
+    /// whose file brings no smoothing of its own gets smoothByAngle set, its `vertices` /
+    /// `indices` replaced by the smoothed geometry, and the FILE's geometry kept in fileVertices /
+    /// fileIndices (what the Materials tab's "as imported" puts back; the two index lists run
+    /// corner for corner). Empty file lists = `vertices` IS the file's geometry.
+    bool                  normalsGenerated = false;
+    bool                  smoothByAngle = false;
+    float                 smoothAngle = 60.0f;
+    std::vector<Vertex>   fileVertices;
+    std::vector<uint32_t> fileIndices;
     /// The material zone's name as the file has it ("Torso", a glTF material's name, an MTL
     /// material's): what the Materials tab lists and a project's material overrides are keyed
     /// by. Empty = unnamed (the tab shows "Zone N").

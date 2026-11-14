@@ -174,7 +174,14 @@ int main(int argc, char *argv[]) {
     // The Transform tab: the selected joint's rotation as three dials (see TransformPanel).
     sidePanel->addTab(new pose::TransformPanel(viewport), QObject::tr("Transform"));
     // The Materials tab: the selected object's material zones as sliders (see MaterialPanel).
-    sidePanel->addTab(new pose::MaterialPanel(viewport), QObject::tr("Materials"));
+    pose::MaterialPanel *materialsTab = new pose::MaterialPanel(viewport);
+    sidePanel->addTab(materialsTab, QObject::tr("Materials"));
+    // The Materials Library tab: the Asset Manager's own widget, built a second time over the one
+    // folder "My PoseStudio Library/Materials" (see assetmanagerscope.h). Same class, same code:
+    // what the manager learns, both tabs learn.
+    AssetManagerWidget *materialsLibraryTab =
+        new AssetManagerWidget(AssetManagerScope::materialsLibrary());
+    sidePanel->addTab(materialsLibraryTab, QObject::tr("Materials Library"));
     // The Soft Body Physics tab: the breasts' and the buttocks' switches and dials (see SoftBodyPanel).
     sidePanel->addTab(new pose::SoftBodyPanel(viewport), QObject::tr("Soft Body Physics"));
     // The Environment tab: live image-based-lighting controls for the viewport (see EnvironmentPanel).
@@ -193,18 +200,40 @@ int main(int argc, char *argv[]) {
     }
 
     menuManager->setAssetManagerWidget(assetsTab);
+    menuManager->addLibraryBrowser(materialsLibraryTab);
     menuManager->setViewportWidget(viewport);
     menuManager->setEnvironmentPanel(environmentTab);
 
     // Double-clicking an asset in the grid imports it into the viewport — the same entry points the
     // menu and command-line "open with" use: an .obj as a static model, a character figure (.duf/.dsf)
     // through the figure pipeline.
-    QObject::connect(assetsTab, &AssetManagerWidget::importModelRequested,
-                     viewport, &pose::ViewportWidget::importObj);
-    QObject::connect(assetsTab, &AssetManagerWidget::importFigureRequested,
-                     viewport, &pose::ViewportWidget::importFigure);
-    QObject::connect(assetsTab, &AssetManagerWidget::importSplatRequested,
-                     viewport, &pose::ViewportWidget::importSplat);
+    // Every library tab opens what it holds the same way.
+    for (AssetManagerWidget *browser : {assetsTab, materialsLibraryTab}) {
+        QObject::connect(browser, &AssetManagerWidget::importModelRequested,
+                         viewport, &pose::ViewportWidget::importObj);
+        QObject::connect(browser, &AssetManagerWidget::importFigureRequested,
+                         viewport, &pose::ViewportWidget::importFigure);
+        QObject::connect(browser, &AssetManagerWidget::importSplatRequested,
+                         viewport, &pose::ViewportWidget::importSplat);
+        // … and a saved material (.psm) is not opened but APPLIED: put on the zone the Materials
+        // tab shows.
+        QObject::connect(browser, &AssetManagerWidget::applyMaterialRequested,
+                         materialsTab, &pose::MaterialPanel::applyMaterialFile);
+    }
+    // The Materials folder lies inside a library the Asset Manager browses too: files one browser
+    // renamed, moved, deleted or installed are read again by the other.
+    QObject::connect(assetsTab, &AssetManagerWidget::assetFilesChanged, materialsLibraryTab, &AssetManagerWidget::refreshAssetManager);
+    QObject::connect(materialsLibraryTab, &AssetManagerWidget::assetFilesChanged, assetsTab, &AssetManagerWidget::refreshAssetManager);
+    // File > Import > .MTLX: a MaterialX material is applied to the selected zone, as a
+    // double-click on one in a library is.
+    QObject::connect(menuManager, &MenuManager::materialFileChosen, materialsTab, &pose::MaterialPanel::applyMaterialFile);
+    // (The scripted in-app test's `asset` command: the Materials Library's file operations.)
+    QObject::connect(viewport, &pose::ViewportWidget::libraryOperationRequested, materialsLibraryTab, &AssetManagerWidget::runFileOperation);
+    // A material saved from the Materials tab appears in the Materials Library at once.
+    QObject::connect(materialsTab, &pose::MaterialPanel::materialSaved,
+                     materialsLibraryTab, [materialsLibraryTab](const QString&) {
+                         materialsLibraryTab->refreshAssetManager();
+                     });
 
     mainSplitter->addWidget(viewport);
     mainSplitter->addWidget(sidePanel);
@@ -213,6 +242,15 @@ int main(int argc, char *argv[]) {
     mainWindow.setCentralWidget(mainSplitter);
 
     // --- 4. Execution ---
+    // A SCRIPTED RUN (POSESTUDIO_IK_SCRIPT) opens BEHIND every other window and takes no focus:
+    // it is started on a desktop someone is working at, and a window that jumps in front of their
+    // work gets minimized — and a minimized window draws no frame, so the run's shots never come
+    // (its frames are read back from the GPU: an occluded window serves as well as a visible
+    // one). POSESTUDIO_IK_SCRIPT_FRONT=1 opens it as any other run, to watch a script go.
+    if (qEnvironmentVariableIsSet("POSESTUDIO_IK_SCRIPT") && !qEnvironmentVariableIsSet("POSESTUDIO_IK_SCRIPT_FRONT")) {
+        mainWindow.setAttribute(Qt::WA_ShowWithoutActivating);
+        mainWindow.setWindowFlag(Qt::WindowStaysOnBottomHint);
+    }
     mainWindow.show();
 
     // Boot branding screen; dismisses itself on the user's next click anywhere. A SCRIPTED RUN

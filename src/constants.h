@@ -52,6 +52,21 @@ namespace Constants {
     inline constexpr const char* PREF_LAST_PROJECT_DIR = "LastProjectDir";
     /// Where the Materials tab's Choose-a-texture dialog opened last (2026-11-09).
     inline constexpr const char* PREF_LAST_TEXTURE_DIR = "LastTextureDir";
+    /// The folder of the Materials library the Materials tab's Save last wrote into (2026-11-13):
+    /// the save dialog starts there next time — a category folder is saved into again and again
+    /// — while it is still inside the library's Materials folder, where the dialog starts
+    /// otherwise.
+    inline constexpr const char* PREF_LAST_MATERIAL_DIR = "LastMaterialDir";
+    /// Where a MaterialX document was last imported from (File > Import > .MTLX).
+    inline constexpr const char* PREF_LAST_MATERIALX_DIR = "LastMaterialXDir";
+    /// Where a package (.zip) was last exported to or installed from (the library's Export
+    /// Package / Install Package).
+    inline constexpr const char* PREF_LAST_PACKAGE_DIR = "LastPackageDir";
+    /// Saving a material copies the texture files it uses into a `textures` folder beside it
+    /// ("1", the default when absent) or names them where they are ("0"). Preferences > Assets.
+    inline constexpr const char* PREF_MATERIAL_COPY_TEXTURES = "MaterialCopyTextures";
+    /// A saved material's icon — the picture of it on a ball beside its file — in pixels, square.
+    inline constexpr int MATERIAL_ICON_SIZE = 255;
     /// THE RENDER WINDOW (src/render/renderwindow, 2026-11-11): what a render was last chosen by
     /// — the size preset's index (0 = the viewport's size), the samples, the device's id (absent =
     /// the best one there is), denoising (absent = on), a transparent background — and where

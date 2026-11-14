@@ -114,6 +114,7 @@ void MenuManager::setupMenus() {
         {".DUF (DUF File)",                   &MenuManager::importFigureFile},
         {".FBX (FBX File)",                   &MenuManager::importFbxFile},
         {".GLB (GL Transmission Format .glTF)", &MenuManager::importGltfFile},
+        {".MTLX (MaterialX Material)",        &MenuManager::importMaterialXFile},
         {".OBJ (Wavefront)",                  &MenuManager::importObjFile},
         {".PLY / .SPLAT / .SPZ (Gaussian Splat)",    &MenuManager::importSplatFile},
         {".USD (Universal Scene Description)", &MenuManager::importUsdFile},
@@ -407,6 +408,10 @@ void MenuManager::setAssetManagerWidget(AssetManagerWidget *widget) {
                       mainWindow, [this]() { openPreferencesDialog(tr("Assets")); });
 }
 
+void MenuManager::addLibraryBrowser(AssetManagerWidget *widget) {
+    if (widget) m_libraryBrowsers.append(widget);
+}
+
 void MenuManager::setViewportWidget(pose::ViewportWidget *viewport) {
     viewportWidget = viewport;
     if (!viewport || !m_showSkeletonAction) {
@@ -666,6 +671,20 @@ void MenuManager::importVrmFile() {
     importRiggedFile(tr("Import VRM Avatar"), tr("VRM Avatars (*.vrm)"));
 }
 
+void MenuManager::importMaterialXFile() {
+    // A MaterialX document is not a model: one of its materials is put on the selected object's
+    // zone (the Materials tab's), exactly as a saved material is. The Materials panel does it
+    // (it asks which material where the file holds several) — main.cpp wires the signal.
+    const QString path = QFileDialog::getOpenFileName(
+        mainWindow, tr("Import MaterialX Material"), rememberedStartDir(Constants::PREF_LAST_MATERIALX_DIR),
+        tr("MaterialX Files (*.mtlx)"));
+    if (path.isEmpty()) return; // user cancelled
+
+    PreferencesManager::instance().setValue(Constants::PREF_LAST_MATERIALX_DIR,
+                                            QFileInfo(path).absolutePath());
+    emit materialFileChosen(path);
+}
+
 void MenuManager::importSplatFile() {
     // A Gaussian splat scene — the trained .ply or the compact .splat — as a static, unlit model
     // (SplatImportService; drawn by the scene's splat pass).
@@ -885,6 +904,11 @@ void MenuManager::openPreferencesDialog(const QString &initialTab) {
                           assetManagerWidget, &AssetManagerWidget::refreshAssetManager);
         QObject::connect(&dialog, &PreferencesDialog::navigateToLibraryRequested,
                           assetManagerWidget, &AssetManagerWidget::navigateToLibraryRoot);
+    }
+    for (const QPointer<AssetManagerWidget>& browser : std::as_const(m_libraryBrowsers)) {
+        if (!browser) continue;
+        QObject::connect(&dialog, &PreferencesDialog::assetLibrariesChanged,
+                          browser.data(), &AssetManagerWidget::refreshAssetManager);
     }
     if (viewportWidget) {
         // The Selection page: the viewport redraws with a color or an opacity as it changes,

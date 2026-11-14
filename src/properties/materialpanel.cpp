@@ -5,7 +5,10 @@
 
 #include "materialpanel.h"
 
+#include "assetscan.h"      // pathsWithin (is the remembered save folder still in the library)
 #include "constants.h"
+#include "importformats.h"  // the material file's extension
+#include "librarypaths.h"   // the Materials library folder
 #include "materialthumbbutton.h"
 #include "overlaystack.h"
 #include "dragnumberbox.h"
@@ -32,11 +35,13 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
+#include <QInputDialog>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPaintEvent>
 #include <QPainterPath>
 #include <QPen>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScreen>
@@ -152,9 +157,23 @@ void MaterialPanel::buildUi() {
     col->setContentsMargins(12, 12, 12, 12);
     col->setSpacing(10);
 
+    // The heading: the object's name, and across from it the Save button.
+    auto* heading = new QHBoxLayout;
+    heading->setContentsMargins(0, 0, 0, 0);
+    heading->setSpacing(8);
     m_objectName = new QLabel;
     m_objectName->setObjectName(QStringLiteral("MaterialObjectName"));
-    col->addWidget(m_objectName);
+    heading->addWidget(m_objectName, 1);
+    m_save = new QPushButton(tr("Save"));
+    m_save->setObjectName(QStringLiteral("PropertyResetButton")); // (the side panel's one plain-button look)
+    m_save->setCursor(Qt::ArrowCursor);
+    m_save->setToolTip(tr("Saves this zone's material — its values and its maps — to a file in your Materials library, "
+                          "with a picture of it on a ball as its icon. A saved material is applied to another object "
+                          "by double-clicking it in the Materials Library tab."));
+    m_save->setProperty("testId", QStringLiteral("materials.save"));
+    connect(m_save, &QPushButton::clicked, this, &MaterialPanel::saveMaterial);
+    heading->addWidget(m_save, 0, Qt::AlignTop);
+    col->addLayout(heading);
 
     // --- Zone: which material group of the object the rows show ---
     QFormLayout* zone = propertyrows::addGroup(col, tr("Zone"));
@@ -373,6 +392,26 @@ void MaterialPanel::buildUi() {
         }
     });
     geometry->addRow(QString(), propertyrows::rowWithRestore(m_doubleSided, m_doubleSidedRestore));
+    // THE SMOOTHING (import/smoothnormals.h): the zone's shading normals computed here, by angle.
+    m_smoothByAngle = new QCheckBox(tr("Smooth by Angle"));
+    m_smoothByAngle->setToolTip(tr("Shade the surface smoothly: PoseStudio works out its normals from its faces instead of using the file's. Faces that "
+                                   "meet at less than the Smoothing Angle blend into one another; sharper edges stay crisp. Off, the surface is shaded "
+                                   "as its file says — which may already be smooth, or faceted. On by default for a file that brings no smoothing of "
+                                   "its own. With matching zones edited together, the zones smoothed the same way follow."));
+    m_smoothByAngle->setProperty("testId", QStringLiteral("materials.smooth"));
+    connect(m_smoothByAngle, &QCheckBox::toggled, this, &MaterialPanel::setSmoothByAngle);
+    m_smoothByAngleRestore = propertyrows::makeRestoreButton();
+    m_smoothByAngleRestore->setToolTip(tr("Back to what the file imported with"));
+    connect(m_smoothByAngleRestore, &QToolButton::clicked, this, [this]() {
+        if (m_view.valid) {
+            setSmoothByAngle(m_view.imported.smoothByAngle);
+        }
+    });
+    geometry->addRow(QString(), propertyrows::rowWithRestore(m_smoothByAngle, m_smoothByAngleRestore));
+    addRow(geometry, MaterialField::SmoothAngle, tr("Smoothing Angle"),
+           tr("How sharp an edge may be and still be smoothed over, in degrees: faces that meet at less than this blend, sharper edges stay crisp. "
+              "60 rounds a sphere and keeps a cube's edges; 0 is faceted; 180 smooths everything. Greyed while Smooth by Angle is off."),
+           0.0, 180.0, 1.0, 0);
 
     // --- Displacement: a renderer's tessellated displacement (stored) ---
     QFormLayout* displacement = addSection(col, tr("Displacement"), /*expanded=*/false,
@@ -941,6 +980,17 @@ void MaterialPanel::setDoubleSided(bool on) {
     refresh();
 }
 
+void MaterialPanel::setSmoothByAngle(bool on) {
+    if (!m_viewport || !m_view.valid || !m_viewport->beginMaterialEdit()) {
+        return;
+    }
+    MaterialParams p = m_viewport->materialView().params;
+    p.smoothByAngle = on;
+    m_viewport->setSelectedMaterial(p, linked());
+    m_viewport->endMaterialEdit();
+    refresh();
+}
+
 void MaterialPanel::chooseTexture(MaterialMap map) {
     if (!m_viewport || !m_view.valid) {
         return;
@@ -968,6 +1018,159 @@ void MaterialPanel::setTexture(MaterialMap map, const QString& source) {
     refresh(); // (a section the map brings into use opens itself: refresh)
 }
 
+void MaterialPanel::saveMaterial() {
+    if (!m_viewport || !m_view.valid || m_view.zone < 0) {
+        return;
+    }
+    // Where: the Materials library — the folder of it saved into last, while that is still
+    // inside the library (a category is saved into again and again), else its root.
+    PreferencesManager& prefs = PreferencesManager::instance();
+    const QString       key = QString::fromLatin1(Constants::PREF_LAST_MATERIAL_DIR);
+    const QString       library = LibraryPaths::ensureMaterialsDirectory();
+    QString             start = prefs.rememberedDirectory(key, library);
+    if (AssetScan::pathsWithin({start}, {library}).isEmpty()) {
+        start = library;
+    }
+    // The name offered: the zone's, less what a file name cannot hold.
+    QString suggested = m_view.zone < static_cast<int>(m_view.zones.size())
+                            ? QString::fromStdString(m_view.zones[static_cast<std::size_t>(m_view.zone)])
+                            : tr("Material");
+    static const QString kForbidden = QStringLiteral("\\/:*?\"<>|");
+    for (QChar& c : suggested) {
+        if (kForbidden.contains(c)) {
+            c = QLatin1Char('-');
+        }
+    }
+    const QString extension = ImportFormats::materialFileExtension();
+    QString       path = QFileDialog::getSaveFileName(this, tr("Save Material"), QDir(start).filePath(suggested + extension),
+                                                      tr("PoseStudio Material (*%1)").arg(extension));
+    if (path.isEmpty()) {
+        return;
+    }
+    if (!path.endsWith(extension, Qt::CaseInsensitive)) {
+        path += extension;
+    }
+    const QFileInfo file(path);
+    prefs.setValue(key, file.absolutePath());
+
+    // The icon lies beside the file under its name. (The file dialog has already asked about
+    // replacing the FILE.) An icon that is there is the user's to keep or to have made again.
+    const QString iconPath = file.absoluteDir().filePath(file.completeBaseName() + QStringLiteral(".png"));
+    bool          makeIcon = true;
+    if (QFileInfo::exists(iconPath)) {
+        QMessageBox box(QMessageBox::Question, tr("Save Material"),
+                        tr("\"%1\" already has an icon.").arg(file.completeBaseName()), QMessageBox::NoButton, this);
+        box.setInformativeText(tr("Recreate the icon from the material as it is now, and overwrite the old one?"));
+        QPushButton* recreate = box.addButton(tr("Recreate Icon"), QMessageBox::YesRole);
+        box.addButton(tr("Keep Existing Icon"), QMessageBox::NoRole);
+        QPushButton* cancel = box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(recreate);
+        box.exec();
+        if (box.clickedButton() == cancel || box.clickedButton() == nullptr) {
+            return; // nothing is saved
+        }
+        makeIcon = box.clickedButton() == recreate;
+    }
+
+    // The textures go WITH the material — copied into a `textures` folder beside it — unless
+    // Preferences > Assets says to name them where they are (assets/assetstore.h).
+    const bool         copyTextures = prefs.getValue(QString::fromLatin1(Constants::PREF_MATERIAL_COPY_TEXTURES), true).toBool();
+    QString            error;
+    MaterialSaveReport report;
+    if (!m_viewport->saveMaterialFile(path, copyTextures, &error, &report)) {
+        QMessageBox::warning(this, tr("Save Material"), error);
+        return;
+    }
+    bool iconFailed = false;
+    if (makeIcon) {
+        // A render engine traces the ball, which takes a moment (the first time on a graphics
+        // card, several seconds): the window waits behind a note, not a frozen button.
+        QProgressDialog busy(tr("Rendering the material's icon..."), QString(), 0, 0, this);
+        busy.setWindowTitle(tr("Save Material"));
+        busy.setWindowModality(Qt::WindowModal);
+        busy.setMinimumDuration(0);
+        busy.setCancelButton(nullptr);
+        busy.show();
+        QGuiApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        const QImage icon = m_viewport->renderMaterialIcon(Constants::MATERIAL_ICON_SIZE);
+        busy.close();
+        iconFailed = icon.isNull() || !icon.save(iconPath, "PNG");
+    }
+    emit materialSaved(path);
+
+    QStringList notes;
+    if (iconFailed) {
+        notes << tr("The icon could not be written, so the material will not be listed in the Materials Library until it has one "
+                    "(an image named like the file, beside it).");
+    }
+    if (report.notCopied > 0) {
+        notes << tr("%n texture file(s) could not be copied into the material's \"textures\" folder. The material refers to "
+                    "them where they are, and will not find them on another computer.", nullptr, report.notCopied);
+    }
+    if (report.leftOut > 0) {
+        notes << (copyTextures
+                      ? tr("%n map(s) of this zone could not be written out as files: the saved material does not include them.",
+                           nullptr, report.leftOut)
+                      : tr("%n map(s) of this zone exist only inside the model's file and have no file of their own to refer to: "
+                           "the saved material does not include them. (With \"Copy texture files when saving a material\" on, in "
+                           "Preferences > Assets, they are written out beside the material.)", nullptr, report.leftOut));
+    }
+    if (!notes.isEmpty()) {
+        QMessageBox::information(this, tr("Save Material"),
+                                 tr("The material was saved as \"%1\".").arg(file.fileName()) + QStringLiteral("\n\n") +
+                                     notes.join(QStringLiteral("\n\n")));
+    }
+}
+
+void MaterialPanel::applyMaterialFile(const QString& path) {
+    if (!m_viewport) {
+        return;
+    }
+    // A MATERIALX document may hold several materials: which one is the user's to say.
+    QString material;
+    QString error;
+    if (pose::ImportFormats::isMaterialXFile(path)) {
+        const QStringList names = m_viewport->materialNamesIn(path, &error);
+        if (names.isEmpty()) {
+            QMessageBox::information(this, tr("Apply Material"), error);
+            return;
+        }
+        material = names.first();
+        if (names.size() > 1) {
+            bool chosen = false;
+            material = QInputDialog::getItem(this, tr("Apply Material"),
+                                             tr("\"%1\" holds %n material(s). Apply which one?", nullptr, static_cast<int>(names.size()))
+                                                 .arg(QFileInfo(path).fileName()),
+                                             names, 0, /*editable=*/false, &chosen);
+            if (!chosen) {
+                return;
+            }
+        }
+    }
+    int         missing = 0;
+    QStringList notes;
+    if (!m_viewport->applyMaterialFile(path, &error, &missing, nullptr, material, &notes)) {
+        QMessageBox::information(this, tr("Apply Material"), error);
+        return;
+    }
+    refresh();
+    QStringList said;
+    if (missing > 0) {
+        said << tr("%n texture file(s) of \"%1\" could not be found — not where the material says, and not by name "
+                   "beside it or anywhere in its library. Those slots were left empty.", nullptr, missing)
+                    .arg(QFileInfo(path).fileName());
+    }
+    if (!notes.isEmpty()) {
+        // What a MaterialX document describes that a PoseStudio material cannot hold.
+        said << tr("Not everything in this material could be carried over:") + QStringLiteral("\n\n") + notes.join(QStringLiteral("\n\n"));
+    }
+    if (!said.isEmpty()) {
+        QMessageBox box(missing > 0 ? QMessageBox::Warning : QMessageBox::Information, tr("Apply Material"), said.join(QStringLiteral("\n\n")),
+                        QMessageBox::Ok, this);
+        box.exec();
+    }
+}
+
 bool MaterialPanel::linked() const {
     return m_linked != nullptr && m_linked->isChecked();
 }
@@ -977,6 +1180,7 @@ void MaterialPanel::refresh() {
     const MaterialView& view = m_view;
 
     m_objectName->setText(view.valid ? QString::fromStdString(view.modelName) : tr("No object selected"));
+    m_save->setEnabled(view.valid && view.zone >= 0);
     m_hint->setVisible(!view.valid);
 
     // The zone picker: rebuilt only when the zone list changed (a rebuild closes an open menu).
@@ -1050,6 +1254,8 @@ void MaterialPanel::refresh() {
             on = on && view.maps.has(MaterialMap::Displacement);
         } else if (field == MaterialField::AmbientOcclusion) {
             on = on && view.maps.has(MaterialMap::AmbientOcclusion);
+        } else if (field == MaterialField::SmoothAngle) {
+            on = on && view.params.smoothByAngle;
         } else if (field == MaterialField::Lobe1Roughness || field == MaterialField::Lobe2Roughness || field == MaterialField::LobeRatio) {
             // Dual-lobe materials only (skin): the rows are hidden, not greyed, for the rest.
             const bool dual = view.valid && (view.params.dualLobe() || view.imported.dualLobe());
@@ -1067,7 +1273,9 @@ void MaterialPanel::refresh() {
                 const double top = std::max(100.0, std::ceil(static_cast<double>(materialFieldValue(view.params, field))));
                 row.box->setRange(0.0, top);
             }
-            row.box->setValue(on ? static_cast<double>(materialFieldValue(view.params, field)) : 0.0);
+            // (A greyed row reads 0 — but the smoothing's angle is kept while it is off, and shown.)
+            const bool shown = on || (view.valid && field == MaterialField::SmoothAngle);
+            row.box->setValue(shown ? static_cast<double>(materialFieldValue(view.params, field)) : 0.0);
         }
         // (After the value: disabling a box mid-gesture ends the gesture, which closes its edit.)
         row.box->setEnabled(on);
@@ -1086,6 +1294,12 @@ void MaterialPanel::refresh() {
     }
     m_doubleSided->setEnabled(view.valid);
     m_doubleSidedRestore->setEnabled(view.valid);
+    {
+        const QSignalBlocker blocker(m_smoothByAngle);
+        m_smoothByAngle->setChecked(view.valid && view.params.smoothByAngle);
+    }
+    m_smoothByAngle->setEnabled(view.valid);
+    m_smoothByAngleRestore->setEnabled(view.valid);
 
     refreshSlots();
     if (m_overlays != nullptr) {

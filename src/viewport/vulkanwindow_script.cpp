@@ -21,7 +21,10 @@
 #include "scene/armature.h"
 #include "scene/ik/bonealiases.h"
 #include "scene/ik/ikrig.h"
+#include "scene/mesh.h"
+#include "scene/model.h"
 #include "scene/scene.h"
+#include "smoothnormals.h" // the scripted `matfaceted`
 
 #include "importformats.h" // the scripted `import`'s route by extension
 
@@ -920,6 +923,45 @@ void VulkanWindow::scriptStep() {
                 file = QDir(assets.isEmpty() ? s.outDir : assets).filePath(file);
             }
             setEnvironmentFile(file);
+        } else if (cmd == QLatin1String("savematerial") && w.size() > 1) {
+            // savematerial <name.psm> [noicon] [link] [<size>]: the Materials tab's Save — the
+            // selected zone's material written into the run's folder (<name> may carry folders),
+            // its textures collected beside it (`link`: named where they are) and its ball icon
+            // rendered as <name>.png (metrics: matfile.ok, matfile.copied / .reused / .written /
+            // .linked / .embedded, maticon.ok, maticon.engine, maticon.size,
+            // maticon.<r|g|b|a>.<x%>.<y%>).
+            scriptSaveMaterial(w);
+        } else if (cmd == QLatin1String("asset") && w.size() > 2) {
+            // asset rename <file> <name> | duplicate <file> | move <file> <folder> | delete <file>
+            //     | export <file or folder> <zip> | install <zip> <folder> [replace]:
+            // the library browser's file operations on files of the run's folder (what its
+            // context menu's entries do, without their dialogs; a delete is for good, not to
+            // the trash). Every path is relative to the run's folder; a rename's <name> is a
+            // name, and the file of a duplicate or a delete is the REST OF THE LINE (a duplicate's
+            // name has a space in it). Read the outcome with `exists.<path>` / `count.<glob>`.
+            QStringList words = w.mid(1);
+            const QString op = words[0].toLower();
+            if (op == QLatin1String("duplicate") || op == QLatin1String("delete")) {
+                words = QStringList{op, words.mid(1).join(QLatin1Char(' '))};
+            }
+            const auto inRun = [&s](const QString& path) { return QDir::cleanPath(QDir(s.outDir).absoluteFilePath(path)); };
+            words[1] = inRun(words[1]);
+            if (words.size() > 2 && op != QLatin1String("rename")) {
+                words[2] = inRun(words[2]);
+            }
+            if (op == QLatin1String("install") || op == QLatin1String("move")) {
+                QDir().mkpath(words.value(2));
+            } else if (op == QLatin1String("export")) {
+                QDir().mkpath(QFileInfo(words.value(2)).absolutePath()); // (a save dialog names a folder that is there)
+            }
+            emit libraryOperationRequested(words);
+        } else if (cmd == QLatin1String("applymaterial") && w.size() > 1) {
+            // applymaterial <name.psm>: a saved material put on the selected zone, as a
+            // double-click in the Materials Library does (metrics: matfile.ok, matfile.missing,
+            // matfile.relocated). applymaterial <file.mtlx> [<material>]: a material of a
+            // MaterialX document (the first, or the one named) the same way (matfile.materials:
+            // how many the file holds; matfile.notes: what it could not carry, counted).
+            scriptApplyMaterial(w);
         } else if (cmd == QLatin1String("render") && w.size() > 1) {
             // render <name> [<width> <height>] [<samples>] [<device text>|cpu] [nodenoise] [transparent]:
             // a PRODUCTION RENDER of the scene as it stands, through the render engine, run to its
@@ -931,6 +973,20 @@ void VulkanWindow::scriptStep() {
             s.awaitingShot = true;
             m_renderer->requestCapture();
             requestUpdate();
+            // A window that is MINIMIZED (or hidden) draws no frame, and the shot would wait for
+            // good — a run started on a desktop in use, its window put away by the user, hung at
+            // its next `shot` with nothing in the log. After 20 s the shot is given up as a
+            // FAILURE (the exit code counts it) and the script goes on.
+            const int serial = ++s.shotSerial;
+            QTimer::singleShot(20000, this, [this, serial]() {
+                if (m_script && m_script->awaitingShot && m_script->shotSerial == serial) {
+                    m_script->awaitingShot = false;
+                    ++m_script->failures;
+                    say("[ikscript]   SHOT FAILED: no frame was drawn in 20 s (is the window minimized or hidden?) - %s\n",
+                        qPrintable(m_script->shotPath));
+                    scriptStep();
+                }
+            });
             return; // renderFrame calls scriptFrameRendered()
         } else if (cmd == QLatin1String("quit")) {
             break;
@@ -1165,6 +1221,43 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         }
         return true;
     }
+    // THE LAST `savematerial` / `applymaterial`: matfile.ok, matfile.embedded, matfile.missing,
+    // matfile.copied, matfile.reused, matfile.written, matfile.linked, matfile.relocated;
+    // maticon.ok, maticon.engine (1 = the render engine made it), maticon.size, and the icon's
+    // pixel at a place given in percent of its width and height: maticon.<r|g|b|a>.<x>.<y>.
+    if (name.startsWith(QLatin1String("matfile."), Qt::CaseInsensitive)) {
+        const QString what = name.mid(8).toLower();
+        value = what == QLatin1String("ok") ? s.matFileOk
+                : what == QLatin1String("embedded") ? s.matFileEmbedded
+                : what == QLatin1String("missing") ? s.matFileMissing
+                : what == QLatin1String("copied") ? s.matFileCopied
+                : what == QLatin1String("reused") ? s.matFileReused
+                : what == QLatin1String("written") ? s.matFileWritten
+                : what == QLatin1String("linked") ? s.matFileLinked
+                : what == QLatin1String("relocated") ? s.matFileRelocated
+                : what == QLatin1String("materials") ? s.matFileMaterials
+                : what == QLatin1String("notes") ? s.matFileNotes : 0.0;
+        return true;
+    }
+    if (name.startsWith(QLatin1String("maticon."), Qt::CaseInsensitive)) {
+        const QStringList part = name.mid(8).toLower().split(QLatin1Char('.'));
+        if (part[0] == QLatin1String("ok")) {
+            value = s.matIconOk;
+        } else if (part[0] == QLatin1String("engine")) {
+            value = s.matIconEngine;
+        } else if (part[0] == QLatin1String("size")) {
+            value = s.matIcon.isNull() ? 0.0 : s.matIcon.width();
+        } else if (part.size() >= 3 && !s.matIcon.isNull()) {
+            const int  x = qBound(0, static_cast<int>(part[1].toDouble() / 100.0 * s.matIcon.width()), s.matIcon.width() - 1);
+            const int  y = qBound(0, static_cast<int>(part[2].toDouble() / 100.0 * s.matIcon.height()), s.matIcon.height() - 1);
+            const QRgb p = s.matIcon.pixel(x, y);
+            value = part[0] == QLatin1String("r") ? qRed(p) : part[0] == QLatin1String("g") ? qGreen(p)
+                    : part[0] == QLatin1String("b") ? qBlue(p) : qAlpha(p);
+        } else {
+            value = 0.0;
+        }
+        return true;
+    }
     if (name.startsWith(QLatin1String("render."), Qt::CaseInsensitive)) {
         const QString what = name.mid(7).toLower();
         if (what == QLatin1String("ok")) {
@@ -1256,6 +1349,29 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         value = static_cast<double>(materialView().linkedZones);
         return true;
     }
+    // THE SMOOTHING, read off the geometry the zone is drawn with: `matfaceted` (the share of its
+    // triangles whose corners carry the triangle's own normal, in percent: 100 faceted, 0 smooth),
+    // `matvertices` and `mattriangles` (its vertex and triangle counts) and `matfilekept` (1 while
+    // the file's own geometry is kept beside a smoothed one).
+    if (name.compare(QLatin1String("matfaceted"), Qt::CaseInsensitive) == 0 || name.compare(QLatin1String("matvertices"), Qt::CaseInsensitive) == 0 ||
+        name.compare(QLatin1String("mattriangles"), Qt::CaseInsensitive) == 0 || name.compare(QLatin1String("matfilekept"), Qt::CaseInsensitive) == 0) {
+        value = -1.0;
+        const MaterialView view = materialView();
+        const Model*       model = (m_renderer && view.valid) ? scene().modelAt(static_cast<std::size_t>(view.model)) : nullptr;
+        if (model != nullptr && view.zone >= 0 && static_cast<std::size_t>(view.zone) < model->meshCount()) {
+            const Mesh& mesh = model->mesh(static_cast<std::size_t>(view.zone));
+            if (name.compare(QLatin1String("matfaceted"), Qt::CaseInsensitive) == 0) {
+                value = 100.0 * static_cast<double>(facetedShare(mesh.cpuVertices(), mesh.cpuIndices()));
+            } else if (name.compare(QLatin1String("matvertices"), Qt::CaseInsensitive) == 0) {
+                value = static_cast<double>(mesh.cpuVertices().size());
+            } else if (name.compare(QLatin1String("mattriangles"), Qt::CaseInsensitive) == 0) {
+                value = static_cast<double>(mesh.cpuIndices().size() / 3);
+            } else {
+                value = (&mesh.fileVertices() != &mesh.cpuVertices()) ? 1.0 : 0.0;
+            }
+        }
+        return true;
+    }
     if (name.startsWith(QLatin1String("matmap."), Qt::CaseInsensitive) || name.startsWith(QLatin1String("mattex."), Qt::CaseInsensitive)) {
         // matmap.<slot>: 1 when the selected zone carries that map — the slot names are the
         // Materials tab's (materialMapName: basecolor, normal, bump, roughness, metalness,
@@ -1273,6 +1389,33 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         }
         const std::string& source = view.params.maps[static_cast<std::size_t>(map)].source;
         value = tex ? (source.empty() ? 0.0 : source == kImportedTexture ? 1.0 : 2.0) : (view.maps.has(map) ? 1.0 : 0.0);
+        return true;
+    }
+    if (name.startsWith(QLatin1String("exists."), Qt::CaseInsensitive)) {
+        // exists.<path>: 1 when that file or folder is in the run's folder (the path is
+        // relative to it and may hold dots and slashes, no spaces).
+        value = QFileInfo::exists(QDir(s.outDir).absoluteFilePath(name.mid(7))) ? 1.0 : 0.0;
+        return true;
+    }
+    if (name.startsWith(QLatin1String("count."), Qt::CaseInsensitive)) {
+        // count.<folder>/<pattern>: how many files and folders of that folder of the run's
+        // folder match the pattern (`*`, `?`) — for names a script cannot spell (a space).
+        const QFileInfo what(QDir(s.outDir).absoluteFilePath(name.mid(6)));
+        value = static_cast<double>(what.absoluteDir().entryList({what.fileName()}, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot).size());
+        return true;
+    }
+    if (name.startsWith(QLatin1String("matstore."), Qt::CaseInsensitive)) {
+        // matstore.<slot>: 1 when the slot's file lies in a TEXTURE STORE of this run's folder (a
+        // `textures` folder beside a material `savematerial` wrote: assets/assetstore.h) — what
+        // an applied material's map must be, not the file the material was saved from.
+        const MaterialView view = materialView();
+        MaterialMap        map = MaterialMap::BaseColor;
+        if (!view.valid || !materialMapByName(name.mid(9).toLower().toStdString(), map)) {
+            return false;
+        }
+        const QString path = QDir::cleanPath(QString::fromStdString(view.mapPaths[static_cast<std::size_t>(map)]));
+        const QString run = QDir::cleanPath(s.outDir);
+        value = !path.isEmpty() && path.startsWith(run, Qt::CaseInsensitive) && path.contains(QLatin1String("/textures/"), Qt::CaseInsensitive) ? 1.0 : 0.0;
         return true;
     }
     // THE WIDGETS' metrics (the `ui` command's): `uicount.<id>` (how many widgets carry that

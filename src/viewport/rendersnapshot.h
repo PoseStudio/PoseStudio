@@ -21,7 +21,9 @@
 #include <glm/glm.hpp>
 
 #include <deque>
+#include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -35,6 +37,33 @@ public:
     int                     skippedSplatScenes() const override { return splatScenes; }
     std::shared_ptr<RenderSplatLayers> splatLayers(int width, int height) override {
         return splatSource ? splatSource(width, height) : nullptr;
+    }
+
+    /// An image of the scene as an entry of the description — one per image and encoding, however
+    /// many zones sample it. -1 for no image. (Before link(), like everything that fills.)
+    int imageOf(const std::shared_ptr<const DecodedImage>& image, renderapi::ColorSpace space, const std::string& label) {
+        if (!image || image->pixels.empty() || image->width == 0 || image->height == 0) {
+            return -1;
+        }
+        const std::pair<const DecodedImage*, int> key(image.get(), static_cast<int>(space));
+        if (const auto it = imageIndex.find(key); it != imageIndex.end()) {
+            return it->second;
+        }
+        imageOwners.push_back(image);
+        names.push_back(label);
+        renderapi::Image out;
+        out.id = (reinterpret_cast<std::uintptr_t>(image.get()) << 1) | static_cast<std::uintptr_t>(space);
+        out.pixels = image->pixels.data();
+        out.width = static_cast<int32_t>(image->width);
+        out.height = static_cast<int32_t>(image->height);
+        out.channels = 4;
+        out.format = renderapi::PixelFormat::UInt8;
+        out.colorSpace = space;
+        out.name = names.back().c_str();
+        const int index = static_cast<int>(images.size());
+        images.push_back(out);
+        imageIndex.emplace(key, index);
+        return index;
     }
 
     /// Points `description` at the vectors below. Call once, after the last one is filled (a
@@ -65,6 +94,7 @@ public:
     std::deque<Model::PosedMesh>                     geometry;    // one per mesh (a deque: elements never move)
     std::deque<std::string>                          names;       // the C strings the description names things by
     std::vector<std::shared_ptr<const DecodedImage>> imageOwners; // the scene's own images, kept alive
+    std::map<std::pair<const DecodedImage*, int>, int> imageIndex; // imageOf's table: (image, encoding) -> its entry
     /// The procedural studio's pixels, when no panorama is loaded — SHARED with the window, which
     /// makes them once: an interactive render is handed many descriptions, and pixels at one
     /// address are one image to the engine (loaded once).

@@ -414,6 +414,7 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                 mat = mesh->materials.data[0];
             }
             MeshData out;
+            out.normalsGenerated = mesh->generated_normals; // (the file had none: the import smooths by angle, smoothnormals.h)
             std::unordered_map<CornerKey, uint32_t, CornerKeyHash> corners;
             const std::size_t faceCount = part != nullptr ? part->num_faces : mesh->num_faces;
             for (std::size_t fi = 0; fi < faceCount; ++fi) {

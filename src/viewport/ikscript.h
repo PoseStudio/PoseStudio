@@ -49,6 +49,20 @@ struct IkScript {
     double      renderSplats = 0.0;  ///< 1 if the last render had the scene's Gaussian splats composited into it
     QImage      renderImage;         ///< The last render's picture (the `probe`'s reading)
     QImage      shotImage;           ///< The last `shot`'s picture (`shot.darkest`, `shot.below.<n>`)
+    // The last `savematerial` / `applymaterial` (a `.psm` material file and its ball icon).
+    double      matFileOk = 0.0;       ///< 1 if the file was written / applied
+    double      matFileEmbedded = 0.0; ///< maps the save left out (images without a file, when it may not write one)
+    double      matFileMissing = 0.0;  ///< maps an applied file names that are not on disk
+    double      matFileCopied = 0.0;   ///< texture files the save copied into the material's texture folder
+    double      matFileReused = 0.0;   ///< … found there already (the same bytes)
+    double      matFileWritten = 0.0;  ///< images without a file of their own, written out
+    double      matFileLinked = 0.0;   ///< maps named where they are
+    double      matFileRelocated = 0.0; ///< maps an applied file names that were found by name, elsewhere
+    double      matFileMaterials = 0.0; ///< how many materials the applied file holds (a MaterialX document's)
+    double      matFileNotes = 0.0;     ///< what an applied MaterialX material could not carry, counted
+    double      matIconOk = 0.0;       ///< 1 if the icon was rendered and written
+    double      matIconEngine = 0.0;   ///< 1 if the render engine made it, 0 the built-in ball shader
+    QImage      matIcon;               ///< the icon (`maticon.size`, `maticon.<r|g|b|a>.<x%>.<y%>`)
     bool        probeSet = false;    ///< `probe <x> <y> <z>`: a WORLD point …
     float       probe[3] = {0.0f, 0.0f, 0.0f}; ///< … whose pixel `render.probe.<r|g|b|lum>` reads off the last render
 
@@ -76,6 +90,7 @@ struct IkScript {
     bool    awaitingSettle = false; ///< `release`: until the settle finishes.
     bool    awaitingShot = false;   ///< `shot`: until the captured frame arrives.
     QString shotPath;               ///< ... and where the shot goes.
+    int     shotSerial = 0;         ///< ... which `shot` it is (the give-up timer's: a shot no frame comes for)
 
     // --- Expectations (`expect`): a script is a TEST, its exit code the number that failed ------
     int expectations = 0;

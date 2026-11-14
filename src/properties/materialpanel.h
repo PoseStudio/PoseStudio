@@ -99,6 +99,23 @@ public:
     /// @param viewport The viewport whose selected object this panel shows and edits. Not owned.
     explicit MaterialPanel(ViewportWidget* viewport, QWidget* parent = nullptr);
 
+public slots:
+    /// THE SAVE BUTTON (the heading's right end): the shown zone's material saved as a `.psm`
+    /// file — the dialog opens in the Materials library ("My PoseStudio Library/Materials", or
+    /// the folder of it saved into last) — with its ICON beside it under the same name: the
+    /// material on a ball, Constants::MATERIAL_ICON_SIZE pixels square on a transparent
+    /// background, which is what lists the file in the Materials Library. A file that already has
+    /// an icon asks first whether to render it again. See scene/materialfile.h.
+    void saveMaterial();
+    /// A saved material (`.psm`) put on the zone this tab shows — one undoable edit — with a
+    /// message where it cannot be (nothing selected, not a material file) or where some of its
+    /// maps are no longer on disk. What a double-click on one in a library tab runs.
+    void applyMaterialFile(const QString& path);
+
+signals:
+    /// A material was saved (file and, unless kept, icon): the Materials Library re-reads.
+    void materialSaved(const QString& path);
+
 private:
     /// The thumbnail cache entry: by the decoded image's identity (the images are shared and
     /// immutable; the weak pointer says when one is gone), with the channel it was read through.
@@ -191,6 +208,7 @@ private:
     /// The Thin Walled checkbox (one bracket).
     void setThinWalled(bool on);
     void setDoubleSided(bool on);
+    void setSmoothByAngle(bool on);
     /// The Textures group: a file dialog for slot @p map, then setTexture.
     void chooseTexture(MaterialMap map);
     /// Slot @p map made @p source ("" clears it, kImportedTexture puts the import's back, else a
@@ -209,6 +227,7 @@ private:
     ViewportWidget*   m_viewport = nullptr;
     QScrollArea*      m_scroll = nullptr;    // the tab's scroll area
     QLabel*           m_objectName = nullptr; // the selected object's file name, or "No object selected"
+    QPushButton*      m_save = nullptr;       // across from the name: saves the shown zone's material to a file
     QLabel*           m_hint = nullptr;       // how to get an object selected (shown while none is)
     MenuPickerButton* m_zonePicker = nullptr; // the object's zones
     QCheckBox*        m_linked = nullptr;     // "Edit matching zones together"
@@ -225,6 +244,8 @@ private:
     QToolButton*      m_thinWalledRestore = nullptr;
     QCheckBox*        m_doubleSided = nullptr;
     QToolButton*      m_doubleSidedRestore = nullptr;
+    QCheckBox*        m_smoothByAngle = nullptr;        // THE SMOOTHING (import/smoothnormals.h)
+    QToolButton*      m_smoothByAngleRestore = nullptr;
     std::vector<Section> m_sections;
     OverlayStack*     m_overlays = nullptr;   // the Overlays section: the zone's overlay stack (overlaystack.h)
     // The Overlays header's summary while it is FOLDED: a "+" that adds the first overlay, or the

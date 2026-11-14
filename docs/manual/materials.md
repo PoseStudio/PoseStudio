@@ -2,6 +2,8 @@
 
 The **Materials** tab on the side panel edits the surfaces of the selected object: a figure's skin, eyes, mouth and nails, an imported prop's materials. Every object imports with the materials its file describes, and this tab lets you change them with sliders, color swatches and texture slots — glossier skin, a metallic prop, a color tint, a see-through surface, a different map — without writing a shader. It is also where images are layered over the skin: [tattoos, marks and makeup](#overlays-tattoos-marks-and-makeup).
 
+The **Save** button at the top of the tab saves the material you are looking at to a file, and the tab below it, **Materials Library**, lists the materials you have saved — see [Saving and reusing a material](#saving-and-reusing-a-material).
+
 PoseStudio has **one material model**: a physically based surface in the metallic / roughness convention, the parameter set the industry's renderers share (the base layer, a coat, transmission, subsurface, sheen, emission, a thin film, and the maps that paint them). The viewport's PBR shading draws nearly all of it — the base layer, the coat, sheen, the thin film, transmission, emission, the detail layer and the maps that paint them; what it cannot (displacement, the subsurface's scattering color and distance) is kept with the material for the rendering engines to come, and the tab says which is which. There is no node editor and no second workflow to choose: files authored in the older specular / glossiness convention are converted when they are imported (see [Importing Content](importing.md#materials-and-the-specular--glossiness-conversion)).
 
 ## Selecting an object and a zone
@@ -249,6 +251,23 @@ Light passing *through* the material — glass, water, gems. The viewport shows 
 | **Bump Strength** | 0 – 400 | The same for a bump (height) map. Greyed without one. |
 | **Ambient Occlusion** | 0 – 100 | How much a baked ambient-occlusion map (the Ambient Occlusion slot: grayscale, white is open) darkens the crevices. Greyed without one. The viewport applies it, over the occlusion it bakes per vertex at import, to the environment's light — a prop's authored occlusion where the vertex bake is coarse. |
 | **Double Sided** | on / off | Render the back faces too — a leaf, a cloth card, an open shell. Stored for rendering engines; the viewport always lights both sides. |
+| **Smooth by Angle** | on / off | Shade the surface smoothly, with normals PoseStudio works out from its faces instead of the file's — see [Smooth shading](#smooth-shading) below. On by default for a model whose file brings no smoothing of its own. |
+| **Smoothing Angle** | 0 – 180 | How sharp an edge may be and still be smoothed over, in degrees. 60 rounds a sphere and keeps a cube's edges; 0 is faceted; 180 smooths everything. Greyed while Smooth by Angle is off (the angle is kept). |
+
+### Smooth shading
+
+A surface is shaded by the direction each point of it faces — its *normals* — and a model's file brings its own. Many files bring none worth the name: unless its author set the surface to smooth, a modelling program writes **one normal per face**, and such a model looks faceted in every program that draws it as written — a sphere shows each of its polygons, in the viewport and in a render alike.
+
+PoseStudio therefore **smooths a model as it imports it when the file carries no smoothing of its own** — one normal per face, or no normals at all — and leaves a file with normals of its own exactly as it is. The import's line in the log says when it did.
+
+**Smooth by Angle** is that switch, for each zone. On, PoseStudio works the normals out itself: faces that meet at less than the **Smoothing Angle** blend into one another, and an edge at that angle or sharper stays crisp. At the default of 60 degrees a ball is round, a can has a round side and flat ends, and a box keeps its edges. Lower the angle to keep gentler edges crisp (0 is fully faceted); raise it to round off sharper ones (past 90 a box turns into a pillow). Off, the zone is shaded as its file says — faceted if the file is, smooth if its author made it so.
+
+- It shows in every shading mode (Flat Texture Shaded is faceted on purpose), in the Rendered mode and in a render: they all use the same normals.
+- A surface is smoothed **across its zones**: two smoothed zones of one object meet without a seam.
+- With **Edit matching zones together** on, a change of the smoothing reaches every zone of the object that was smoothed the same way — usually all of them, whatever their materials — and Reset Zone brings them back together. With it off, only the zone shown changes.
+- It belongs to the **object**, not to the material: a material saved to the library does not carry it, and applying one does not change it. A project keeps it, and Undo steps over it like any other edit.
+- Figures import with smooth normals of their own and are left as they are; a zone of one can still be switched to Smooth by Angle.
+- Smoothing changes how light falls on a surface, not its shape: the **outline** of a coarse model stays polygonal.
 
 ### Displacement
 
@@ -303,6 +322,67 @@ The sliders scale the maps — Roughness multiplies a roughness map, Metallic a 
 - The button beside a row returns that value to what the file imported with.
 - **Reset Zone** returns the whole zone's values — and its matching zones', when editing them together — to the imported material. The texture slots are put back one by one with their arrows, and the overlays are removed with their own **×**.
 - **Reset All Zones** returns every zone's values.
+
+## Saving and reusing a material
+
+A material you have made — a brushed gold, a car paint, a skin you tuned — can be saved to a file and put on any other object.
+
+### Saving
+
+Select the object and the zone, then click **Save**, at the top right of the tab across from the object's name. A file dialog opens in your Materials library — the **Materials** folder of *My PoseStudio Library*, or the folder inside it you saved into last. Choose a category folder if you keep them (*Metal*, *Glass*, *Skin* …), give the material a name, and save. Two files are written side by side:
+
+- **The material**, `name.psm`: every value of the zone as the tab shows it, and for every texture slot that holds a map, the map's file — which is saved *with* the material: see [Where the textures go](#where-the-textures-go), below.
+- **Its icon**, `name.png`: a picture of the material on a ball, 255 pixels square on a transparent background, with a little margin round the ball. The ball is **rendered by the render engine** — path traced, like a picture from [Render → Render Image](rendering.md) — so glass refracts, skin scatters and a coat lies over its base as they would in a render. It is lit by a small studio of its own that is built into PoseStudio — dark walls, a pale floor that falls away into dimness behind the ball, a large softbox above and to the left and a thin strip light to the right, all neutral grey — never by your scene's lighting or by a panorama from your HDRI folder. A polished ball is a mirror of the room it stands in, so the room is made for what a ball should show: chrome comes out black beside white with crisp reflections, a matte material shows its form, and a material's own color is the only color in its icon. The edge of a ball mirrors whatever is behind it, and the library shows icons on a dark background, so what is behind the ball is dim, and straight behind it dark: an icon's edge falls away into the background, never a pale or grey ring round it — whatever the material's color. Every icon is lit alike, on any computer, so two materials can be compared by their icons. Rendering it takes a moment — a second or two, longer the first time a graphics card is used in a session.
+
+Saving over a material that already has an icon asks first: **Recreate Icon** renders it again from the material as it is now, **Keep Existing Icon** saves the material and leaves the picture — your own, perhaps — as it is, and **Cancel** saves nothing.
+
+The saved material appears in the **Materials Library** tab at once.
+
+What a saved material does not hold:
+
+- **Overlays.** A tattoo or a makeup layer is painted on one object's layout and belongs to that object, not to the surface. They stay on the object (and in its [project file](project-files.md)); the material file and its icon are the surface without them.
+
+### Where the textures go
+
+A saved material takes its texture files with it. They are copied into a `textures` folder beside the material, in a subfolder named after it, and the material refers to them by paths relative to itself:
+
+```
+Materials/Fabric/
+    Denim.psm
+    Denim.png
+    textures/
+        Denim/
+            denim_color.jpg
+            denim_normal.png
+```
+
+So a material's folder is all the material needs. Move the folder, copy it to another computer, keep your library in a synced folder, zip it and send it to someone: the materials in it still find their maps. There is no central texture folder that has to be kept in step with your materials, and nothing to "install".
+
+- **A file is stored once.** A second material saved into the same folder that uses the same image — a color variant that shares its normal map — refers to the file that is already there, whatever it is called; nothing is copied twice. A *different* image that happens to have the same name is given a name of its own (`color_2.png`), never written over the first.
+- **A map that is already in place stays there**: one that lies right beside the material, or in that folder's `textures`.
+- **An image that has no file of its own is written out** as a PNG named after the material and the slot (`Denim_roughness.png`): an image that lives inside a model's file (a `.glb`'s), and a map that is one channel of a packed image (a glTF file keeps roughness and metalness in one picture). Such an image is saved as PoseStudio holds it, which is at most 4096 pixels on a side.
+- **Saving a material again under its own name** with other maps removes the copies it no longer uses (they go to the trash) — unless another material in the folder still uses them.
+- The library browsers do not list `textures` folders: they hold pictures, not materials.
+
+If you would rather have no copies — you keep your textures in one place and never move them — turn off **Copy texture files when saving a material** in [Preferences → Assets](preferences.md#assets). A material then refers to each file where it is, stops finding it if it moves, and will not work on another computer; and an image that has no file of its own is left out of the saved material (the save says how many).
+
+To rename, move, duplicate or delete a saved material together with its files, or to send one to somebody, use the library's own commands: see [Working with saved materials](asset-manager.md#working-with-saved-materials) and [Packages](asset-manager.md#packages-sharing-materials).
+
+A copy of PoseStudio without a render engine still writes an icon, drawn by a plainer built-in shader — the base color, metal, roughness and their maps, a coat, emission — so that the material is listed; it is a stand-in, not the rendered ball.
+
+### Applying a saved material
+
+Select an object, click the surface you want — the Materials tab shows which zone that is — and **double-click the material** in the Materials Library tab (or in the Asset Manager, which reaches the same folder). The zone takes the saved material: its values, and its maps in their slots. A slot the saved material has no map for is emptied — the file is the whole surface, so nothing of the old one shows through. The zone's overlays stay where they are.
+
+- It is **one undo step**: `Ctrl+Z` gives the zone back exactly as it was.
+- Only the zone shown is changed, whatever *Edit matching zones together* says: a material is put on one surface at a time.
+- With nothing selected, a message says so and nothing happens.
+- A map that is not where the material says is **looked for**: beside the material, in its `textures` folder, and then by its file name anywhere in the library the material lies in (the nearest one, if there are several). Only a map that is found nowhere leaves its slot empty, and a message says how many were missing.
+- **Reset Zone** still returns the zone to what its own file imported with.
+
+**MaterialX materials** (`.mtlx`, the format material libraries are published in) are applied the same way — double-click one in a library, or use **File → Import → .MTLX (MaterialX Material)**: see [MaterialX materials](importing.md#materialx-materials-mtlx). Save one after applying it and it becomes a material of your own library, with its images copied in beside it.
+
+A material file is plain text (JSON) and can be read, compared or kept under version control.
 
 ## Undo and projects
 

@@ -105,15 +105,46 @@ bool Scene::setSelectedZoneMaterial(const MaterialParams& params, bool linked) {
     // preset's values; its eyes and mouth others), so a zone edited apart earlier still follows
     // the group when the group is edited again — the imported material is the group's identity.
     const MaterialParams imported = model->mesh(zone).importedMaterial();
+    // THE SMOOTHING is the object's rather than the surface's, and travels by its own rule: an
+    // edit that does not touch it leaves every linked zone's own; an edit OF it goes to the
+    // linked zones and to every other zone that was smoothed the same way before — the zones
+    // smoothed alike move together (an object's zones mostly are, whatever their materials).
+    const MaterialParams before = model->mesh(zone).material();
+    const bool           smoothingEdited = params.smoothByAngle != before.smoothByAngle || params.smoothAngle != before.smoothAngle;
     bool                 changed = model->setMeshMaterial(zone, params);
     if (linked) {
         for (std::size_t i = 0; i < count; ++i) {
-            if (i != zone && model->mesh(i).importedMaterial().nearlyEqual(imported)) {
-                changed = model->setMeshMaterial(i, params) || changed;
+            if (i == zone) {
+                continue;
+            }
+            const MaterialParams& own = model->mesh(i).material();
+            if (model->mesh(i).importedMaterial().nearlyEqual(imported)) {
+                MaterialParams next = params;
+                if (!smoothingEdited) {
+                    next.smoothByAngle = own.smoothByAngle;
+                    next.smoothAngle = own.smoothAngle;
+                }
+                changed = model->setMeshMaterial(i, next) || changed;
+            } else if (smoothingEdited && own.smoothByAngle == before.smoothByAngle && own.smoothAngle == before.smoothAngle) {
+                MaterialParams next = own;
+                next.smoothByAngle = params.smoothByAngle;
+                next.smoothAngle = params.smoothAngle;
+                changed = model->setMeshMaterial(i, next) || changed;
             }
         }
     }
+    syncSmoothing(sel);
     return changed;
+}
+
+bool Scene::syncSmoothing(int model) {
+    Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr;
+    if (m == nullptr || !m->smoothingPending()) {
+        return false;
+    }
+    // New vertex and index buffers replace ones a frame in flight may still be drawing from.
+    vkDeviceWaitIdle(m_context.device());
+    return m->applySmoothing();
 }
 
 std::vector<MaterialParams> Scene::captureMaterials(int model) const {
@@ -124,6 +155,7 @@ std::vector<MaterialParams> Scene::captureMaterials(int model) const {
 void Scene::applyMaterials(int model, const std::vector<MaterialParams>& materials) {
     if (Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr) {
         m->applyMaterials(materials);
+        syncSmoothing(model);
     }
 }
 
@@ -224,20 +256,36 @@ bool Scene::resetZoneMaterials(bool allZones, bool linked) {
         for (std::size_t i = 0; i < count; ++i) {
             changed = model->setMeshMaterial(i, model->mesh(i).importedMaterial()) || changed;
         }
+        syncSmoothing(sel);
         return changed;
     }
     const std::size_t zone = (m_selectedZone >= 0 && static_cast<std::size_t>(m_selectedZone) < count)
                                  ? static_cast<std::size_t>(m_selectedZone)
                                  : 0;
     const MaterialParams imported = model->mesh(zone).importedMaterial();
+    const MaterialParams before = model->mesh(zone).material();
     changed = model->setMeshMaterial(zone, imported);
     if (linked) {
         for (std::size_t i = 0; i < count; ++i) {
-            if (i != zone && model->mesh(i).importedMaterial().nearlyEqual(imported)) {
-                changed = model->setMeshMaterial(i, model->mesh(i).importedMaterial()) || changed;
+            if (i == zone) {
+                continue;
+            }
+            const MaterialParams& own = model->mesh(i).material();
+            const MaterialParams& ownImported = model->mesh(i).importedMaterial();
+            if (ownImported.nearlyEqual(imported)) {
+                changed = model->setMeshMaterial(i, ownImported) || changed;
+            } else if (own.smoothByAngle == before.smoothByAngle && own.smoothAngle == before.smoothAngle) {
+                // THE SMOOTHING's rule (setSelectedZoneMaterial): the zones smoothed alike move
+                // together — a smoothing set on this zone went to them, and goes back with it,
+                // each to its own imported one. Their materials are not this zone's and stay.
+                MaterialParams next = own;
+                next.smoothByAngle = ownImported.smoothByAngle;
+                next.smoothAngle = ownImported.smoothAngle;
+                changed = model->setMeshMaterial(i, next) || changed;
             }
         }
     }
+    syncSmoothing(sel);
     return changed;
 }
 

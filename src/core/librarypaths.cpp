@@ -73,6 +73,39 @@ QString LibraryPaths::ensureHdriDirectory() {
     return dir;
 }
 
+QString LibraryPaths::materialsDirectory() {
+    if (const QString lever = qEnvironmentVariable("POSESTUDIO_MATERIALS_DIR"); !lever.isEmpty()) {
+        return QDir::cleanPath(QDir::fromNativeSeparators(lever));
+    }
+    return QDir(userLibraryRoot()).filePath(QStringLiteral("Materials"));
+}
+
+QString LibraryPaths::ensureMaterialsDirectory() {
+    const QString dir = materialsDirectory();
+    QDir().mkpath(dir);
+    return dir;
+}
+
+QString LibraryPaths::libraryRootOf(const QString& folder) {
+    const QString wanted = QDir::cleanPath(QDir::fromNativeSeparators(folder));
+    QStringList   roots = AssetLibraries::enabledPaths();
+    roots.append(materialsDirectory());
+    QString best;
+    for (const QString& candidate : std::as_const(roots)) {
+        const QString root = QDir::cleanPath(QDir::fromNativeSeparators(candidate));
+        if (root.isEmpty()) {
+            continue;
+        }
+        const QString prefix = root.endsWith(QLatin1Char('/')) ? root : root + QLatin1Char('/');
+        const bool    holds = wanted.compare(root, Qt::CaseInsensitive) == 0 || wanted.startsWith(prefix, Qt::CaseInsensitive);
+        // (The OUTERMOST: a search by file name should see the whole library.)
+        if (holds && (best.isEmpty() || root.size() < best.size())) {
+            best = root;
+        }
+    }
+    return best;
+}
+
 QList<LibraryPaths::HdriEntry> LibraryPaths::hdriEntries() {
     const QDir root(hdriDirectory());
 

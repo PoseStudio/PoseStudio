@@ -1,0 +1,118 @@
+# AN ASSET'S FILE OPERATIONS AND PACKAGES (src/assets/assetstore.h; the library's context menu):
+# a saved material renamed, duplicated, moved to another folder and deleted — its icon and its
+# textures going along, a texture staying for as long as another material of the folder names it
+# — and a package exported and installed. What the menu's entries do, without their dialogs (the
+# script's `asset` command reaches the Materials Library's own work functions).
+#
+# NOT run by run_all.sh (the subfolder). The Materials Library must browse the run's own folder:
+#
+#   python tools/materials/make_test_assets.py <assets>
+#   POSESTUDIO_TEST_FIGURE=<assets>/showcase.gltf tools/ikscripts/run.sh \
+#       tools/ikscripts/library/file_operations.txt <out> POSESTUDIO_IK_SCRIPT_ASSETS=<assets> \
+#       POSESTUDIO_MATERIALS_DIR=<out>/lib "POSESTUDIO_TAB=Materials Library"
+#
+# LOOK at ui/*.png: the tab's tree never lists a `textures` folder; the root's grid shows the
+# renamed material under its new name with its icon, and the folders the operations made.
+
+wait 10
+select 0
+expect zones == 6
+
+# --- 0. Three materials in the library: two that share their maps, one at the root ---------------
+zone Brushed
+texture basecolor tex_red.png
+texture roughness tex_rough.png
+savematerial lib/Fabric/Red.psm
+material roughness 80
+savematerial lib/Fabric/RedRough.psm
+expect matfile.reused == 2
+zone Glass
+savematerial lib/Glass.psm
+expect exists.lib/Fabric/textures/Red/tex_red.png == 1
+expect count.lib/Fabric/textures/Red/* == 2
+
+# --- 1. Rename: the file, its icon — and it still finds its maps -----------------------------------
+asset rename lib/Glass.psm Crystal
+expect exists.lib/Crystal.psm == 1
+expect exists.lib/Crystal.png == 1
+expect exists.lib/Glass.psm == 0
+expect exists.lib/Glass.png == 0
+asset rename lib/Fabric/Red.psm Crimson
+expect exists.lib/Fabric/Crimson.psm == 1
+expect exists.lib/Fabric/Crimson.png == 1
+expect exists.lib/Fabric/Red.psm == 0
+expect exists.lib/Fabric/textures/Red/tex_red.png == 1
+zone Velvet
+applymaterial lib/Fabric/Crimson.psm
+expect matfile.ok == 1
+expect matfile.missing == 0
+expect matfile.relocated == 0
+expect matstore.basecolor == 1
+undo
+# (Onto a name that is taken: refused, nothing changes.)
+asset rename lib/Fabric/Crimson.psm RedRough
+expect exists.lib/Fabric/Crimson.psm == 1
+expect count.lib/Fabric/*.psm == 2
+wait 5
+uishot 01_renamed
+
+# --- 2. Duplicate: a second material beside it, the store untouched --------------------------------
+asset duplicate lib/Fabric/Crimson.psm
+expect count.lib/Fabric/Crimson*.psm == 2
+expect count.lib/Fabric/Crimson*.png == 2
+expect count.lib/Fabric/*.psm == 3
+expect count.lib/Fabric/textures/* == 1
+expect count.lib/Fabric/textures/Red/* == 2
+
+# --- 3. Move: its textures are collected into the new folder's store -------------------------------
+asset move lib/Fabric/RedRough.psm lib/Canvas
+expect exists.lib/Canvas/RedRough.psm == 1
+expect exists.lib/Canvas/RedRough.png == 1
+expect exists.lib/Canvas/textures/RedRough/tex_red.png == 1
+expect exists.lib/Canvas/textures/RedRough/tex_rough.png == 1
+expect exists.lib/Fabric/RedRough.psm == 0
+expect exists.lib/Fabric/RedRough.png == 0
+# (Crimson and its copy still name the old folder's files: they stay.)
+expect count.lib/Fabric/textures/Red/* == 2
+zone Velvet
+applymaterial lib/Canvas/RedRough.psm
+expect matfile.missing == 0
+expect matfile.relocated == 0
+expect matstore.basecolor == 1
+expect mat.roughness == 80
+undo
+
+# --- 4. Delete: a texture goes with the LAST material that names it --------------------------------
+asset delete lib/Fabric/Crimson copy.psm
+expect count.lib/Fabric/*.psm == 1
+expect count.lib/Fabric/*.png == 1
+expect count.lib/Fabric/textures/Red/* == 2
+asset delete lib/Fabric/Crimson.psm
+expect count.lib/Fabric/*.psm == 0
+expect count.lib/Fabric/*.png == 0
+expect exists.lib/Fabric/textures == 0
+expect exists.lib/Canvas/textures/RedRough/tex_red.png == 1
+
+# --- 5. A package: one material with what it needs, installed elsewhere and whole there -----------
+asset export lib/Canvas/RedRough.psm packages/redrough.zip
+expect exists.packages/redrough.zip == 1
+asset install packages/redrough.zip lib/Installed
+expect exists.lib/Installed/RedRough.psm == 1
+expect exists.lib/Installed/RedRough.png == 1
+expect exists.lib/Installed/textures/RedRough/tex_red.png == 1
+expect exists.lib/Installed/textures/RedRough/tex_rough.png == 1
+zone Iridescent
+applymaterial lib/Installed/RedRough.psm
+expect matfile.ok == 1
+expect matfile.missing == 0
+expect matstore.basecolor == 1
+expect matstore.roughness == 1
+undo
+# … and a whole folder, which unpacks under its own name.
+asset export lib/Canvas packages/canvas.zip
+asset install packages/canvas.zip lib/Unpacked
+expect exists.lib/Unpacked/Canvas/RedRough.psm == 1
+expect exists.lib/Unpacked/Canvas/RedRough.png == 1
+expect exists.lib/Unpacked/Canvas/textures/RedRough/tex_rough.png == 1
+wait 5
+uishot 02_after

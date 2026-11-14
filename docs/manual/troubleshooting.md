@@ -25,6 +25,7 @@ PoseStudio renders with Vulkan, which needs a graphics driver that provides it. 
 - **The figure is dark**: raise **Exposure**, or switch the HDRI — some panoramas are much dimmer than others.
 - **A black or missing texture**: the texture file the material refers to is not where the preset expects it. PoseStudio skips textures it cannot decode and uses the material's color.
 - **Skin details sit slightly off** — a seam across the scalp, a patch of mismatched skin on the back, the throat's notch out of place: the figure's maps are painted on a UV layout other than the one its materials name. PoseStudio reads each zone through the layout its material names, so this only happens when the content itself names the wrong one.
+- **A model looks faceted — every polygon shows** — or **too soft, its hard edges rounded off**: that is the Materials tab's **Smooth by Angle** (the Geometry section). Turn it on, or change its **Smoothing Angle**, for the zone; with *Edit matching zones together* on, the object's other zones follow. See [Smooth shading](materials.md#smooth-shading). Its outline stays polygonal either way — that is the model's own resolution.
 - **The figure floats or sinks**: press the **Ground** button. Figures import on the floor; loading a pose file, turning joints with `B` / `S` / `T` or the Transform tab, or lifting her with Ctrl + drag can leave her off it.
 
 ## A render will not start, or looks wrong

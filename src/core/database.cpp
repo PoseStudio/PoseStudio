@@ -62,6 +62,67 @@ QSqlDatabase appDatabase() {
 }
 
 /**
+ * @brief The additive schema changes, each a no-op once applied. There is no formal migration
+ *        system: a column or table added after the first schema is added HERE as well as in
+ *        initialize.sql, or pre-existing installs miss it and fail at the first query touching
+ *        it. Schema only — nothing here reads or writes the disk beside the database (the data
+ *        layer's checks call it on an in-memory database).
+ */
+void ensureSchemaCurrent(QSqlDatabase& db) {
+    // Nested collections: parent pointer (0 = top-level).
+    ensureColumn(db, "AssetCollections", "AssetCollectionParentID", "INTEGER NOT NULL DEFAULT 0");
+
+    // Favorites (a single flat list of favorited asset paths) was added after the initial schema,
+    // so older databases lack the table entirely. CREATE TABLE IF NOT EXISTS is a no-op once present.
+    {
+        QSqlQuery q(db);
+        q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS Favorites("
+            "FavoriteID INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "FavoritePath TEXT NOT NULL UNIQUE, "
+            "FavoriteSortOrder INTEGER NOT NULL DEFAULT 0)"));
+    }
+
+    // Repair for a 0.3.6 schema-file regression: the header comment in initialize.sql contained a
+    // semicolon, which initializeDatabase's naive statement splitter treated as a boundary — corrupting
+    // CREATE TABLE Preferences on every fresh install since. Databases created by those builds lack
+    // the table entirely; recreate it here (a no-op once present).
+    {
+        QSqlQuery q(db);
+        q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS Preferences("
+            "PreferenceID INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "PreferenceName TEXT UNIQUE NOT NULL, "
+            "PreferenceValue TEXT NOT NULL DEFAULT '', "
+            "PreferenceStamp DATETIME DEFAULT CURRENT_TIMESTAMP)"));
+        q.exec(QStringLiteral(
+            "CREATE INDEX IF NOT EXISTS idx_PreferenceName ON Preferences(PreferenceName)"));
+    }
+
+    // User-defined manual drag orders (Favorites pane / within a Collection). Seed existing rows
+    // with a stable initial order matching their insertion order (the autoincrement ID).
+    ensureColumn(db, "Favorites", "FavoriteSortOrder", "INTEGER NOT NULL DEFAULT 0",
+                 "UPDATE Favorites SET FavoriteSortOrder = FavoriteID");
+    ensureColumn(db, "AssetCollectionItems", "AssetCollectionItemSortOrder", "INTEGER NOT NULL DEFAULT 0",
+                 "UPDATE AssetCollectionItems SET AssetCollectionItemSortOrder = AssetCollectionItemID");
+
+    // Flags the single "Maquettes" row (synced by initializeDatabase) as shipped-with-the-app rather than
+    // user-added, so the UI knows not to offer removing it.
+    ensureColumn(db, "AssetLibraries", "AssetLibraryIsBuiltIn", "INTEGER NOT NULL DEFAULT 0");
+
+    // Every library reader filters on AssetLibraryEnabled = 1 (see core/assetlibraries.h). The
+    // column has been in initialize.sql since the first schema, so this guard is belt and braces
+    // for a database whose table predates it — without it that first query fails and every
+    // library silently vanishes from the UI.
+    ensureColumn(db, "AssetLibraries", "AssetLibraryEnabled", "INTEGER NOT NULL DEFAULT 1");
+
+    // Which browser a collection belongs to: '' = the Asset Manager, 'materials' = the Materials
+    // Library (see assets/assetmanagerscope.h). Every collection made before the column existed
+    // is the Asset Manager's, which the default says.
+    ensureColumn(db, "AssetCollections", "AssetCollectionScope", "TEXT NOT NULL DEFAULT ''");
+}
+
+/**
  * @brief Opens (or rebuilds) the SQLite database; see database.h for the return contract.
  * @param mode Normal opens the existing file, building the schema only if this is the first
  *             launch (no file yet). FactoryReset deletes the existing file first and always
@@ -200,60 +261,13 @@ bool initializeDatabase(DbInitMode mode) {
         qDebug() << "Success: Database architecture successfully reconstructed.";
     }
 
-    // There's no formal migration system yet, so additive schema changes for existing databases
-    // are applied here via the ensureColumn helper (each a no-op once already present). Add new
-    // ones here, not only in initialize.sql, or pre-existing installs miss them.
-
-    // Nested collections: parent pointer (0 = top-level).
-    ensureColumn(db, "AssetCollections", "AssetCollectionParentID", "INTEGER NOT NULL DEFAULT 0");
-
-    // Favorites (a single flat list of favorited asset paths) was added after the initial schema,
-    // so older databases lack the table entirely. CREATE TABLE IF NOT EXISTS is a no-op once present.
-    {
-        QSqlQuery q(db);
-        q.exec(QStringLiteral(
-            "CREATE TABLE IF NOT EXISTS Favorites("
-            "FavoriteID INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "FavoritePath TEXT NOT NULL UNIQUE, "
-            "FavoriteSortOrder INTEGER NOT NULL DEFAULT 0)"));
-    }
-
-    // Repair for a 0.3.6 schema-file regression: the header comment in initialize.sql contained a
-    // semicolon, which the naive statement splitter above treated as a boundary — corrupting
-    // CREATE TABLE Preferences on every fresh install since. Databases created by those builds lack
-    // the table entirely; recreate it here (a no-op once present).
-    {
-        QSqlQuery q(db);
-        q.exec(QStringLiteral(
-            "CREATE TABLE IF NOT EXISTS Preferences("
-            "PreferenceID INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "PreferenceName TEXT UNIQUE NOT NULL, "
-            "PreferenceValue TEXT NOT NULL DEFAULT '', "
-            "PreferenceStamp DATETIME DEFAULT CURRENT_TIMESTAMP)"));
-        q.exec(QStringLiteral(
-            "CREATE INDEX IF NOT EXISTS idx_PreferenceName ON Preferences(PreferenceName)"));
-    }
-
-    // User-defined manual drag orders (Favorites pane / within a Collection). Seed existing rows
-    // with a stable initial order matching their insertion order (the autoincrement ID).
-    ensureColumn(db, "Favorites", "FavoriteSortOrder", "INTEGER NOT NULL DEFAULT 0",
-                 "UPDATE Favorites SET FavoriteSortOrder = FavoriteID");
-    ensureColumn(db, "AssetCollectionItems", "AssetCollectionItemSortOrder", "INTEGER NOT NULL DEFAULT 0",
-                 "UPDATE AssetCollectionItems SET AssetCollectionItemSortOrder = AssetCollectionItemID");
-
-    // Flags the single "Maquettes" row (synced below) as shipped-with-the-app rather than
-    // user-added, so the UI knows not to offer removing it.
-    ensureColumn(db, "AssetLibraries", "AssetLibraryIsBuiltIn", "INTEGER NOT NULL DEFAULT 0");
-
-    // Every library reader filters on AssetLibraryEnabled = 1 (see core/assetlibraries.h). The
-    // column has been in initialize.sql since the first schema, so this guard is belt and braces
-    // for a database whose table predates it — without it that first query fails and every
-    // library silently vanishes from the UI.
-    ensureColumn(db, "AssetLibraries", "AssetLibraryEnabled", "INTEGER NOT NULL DEFAULT 1");
+    // Additive schema changes for databases that predate them (see ensureSchemaCurrent).
+    ensureSchemaCurrent(db);
 
     // One-time default user library: "My PoseStudio Library" in the user's Documents — the
     // writable, user-facing home for personal content, including the hdri/ folder the Environment
-    // panel reads (see src/core/librarypaths.h). Runs only on the very first launch (flag row in
+    // panel reads and the Materials/ folder the Materials Library tab browses (see
+    // src/core/librarypaths.h). Runs only on the very first launch (flag row in
     // Preferences) and only if the user doesn't already have a non-built-in library by that name
     // registered — so a later deliberate rename/removal isn't fought on every start (unlike the
     // built-in Maquettes row below, which IS re-synced every launch by design).
@@ -284,6 +298,7 @@ bool initializeDatabase(DbInitMode mode) {
                     QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
                         .filePath(QLatin1String(Constants::USER_LIBRARY_DIRNAME));
                 QDir().mkpath(QDir(root).filePath(QStringLiteral("hdri")));
+                QDir().mkpath(QDir(root).filePath(QStringLiteral("Materials")));
                 QSqlQuery insert(db);
                 insert.prepare(QStringLiteral(
                     "INSERT OR IGNORE INTO AssetLibraries (AssetLibraryPath, AssetLibraryIsBuiltIn) "

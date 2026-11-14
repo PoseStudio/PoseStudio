@@ -3,7 +3,10 @@
  * @brief The Asset Manager side panel: the directory/collections tree over the thumbnail grid.
  *
  * This is the one class the rest of the app sees (main.cpp builds it, MenuManager wires its
- * signals). It composes the module's parts, each in its own file, and owns the STATE that ties
+ * signals) — and it is built MORE THAN ONCE: the Asset Manager tab and the Materials Library
+ * tab are two instances of it, told apart by nothing but the AssetManagerScope each is given
+ * (assetmanagerscope.h: which folders are the roots, whose collections it shows). Everything
+ * below is therefore per instance, and anything added here is added to both tabs. It composes the module's parts, each in its own file, and owns the STATE that ties
  * them together (which source is displayed, the tree's section roots, the cached library list):
  * - AssetTreeView over a QStandardItemModel wrapped by AssetFolderProxyModel (folder hit icons,
  *   collection drag-reparent), painted by AssetTreeDelegate;
@@ -32,6 +35,12 @@
 #include <QStringList>
 #include <QWidget>
 
+#include "assetmanagerscope.h"
+
+namespace AssetStore {
+struct Result; // what a file operation did (assetstore.h)
+}
+
 // Forward declarations drastically improve project compilation times
 class AssetBreadcrumbLabel;
 class AssetFolderProxyModel;
@@ -47,6 +56,7 @@ class QListWidget;
 class QListWidgetItem;
 class QMenu;
 class QPushButton;
+class QShowEvent;
 class QStandardItem;
 class QStandardItemModel;
 namespace AssetScan { struct AssetHit; }
@@ -59,8 +69,14 @@ class AssetManagerWidget : public QWidget {
     Q_OBJECT
 
 public:
-    explicit AssetManagerWidget(QWidget *parent = nullptr);
+    /// `scope` says what this instance browses: by default the Asset Manager (every registered
+    /// asset library); AssetManagerScope::materialsLibrary() makes the Materials Library tab.
+    explicit AssetManagerWidget(const AssetManagerScope& scope = AssetManagerScope::assetManager(),
+                                QWidget *parent = nullptr);
     ~AssetManagerWidget() override;
+
+    /// What this instance browses.
+    const AssetManagerScope& scope() const { return m_scope; }
 
     /// Clears the directory tree and rebuilds it from the database, preserving the expanded
     /// nodes and the selection where they still exist. Also re-reads the library list.
@@ -72,14 +88,23 @@ public:
     void navigateToLibraryRoot(const QString& libraryPath);
 
     /// Opens a file the way double-clicking it in the grid does: a model, a figure or a splat
-    /// scene goes to the viewport through the import*Requested signals, a content-library script
+    /// scene goes to the viewport through the import*Requested signals, a saved material is
+    /// applied (applyMaterialRequested), a content-library script
     /// is followed as the link it is (openScriptLink), anything else opens in the operating
     /// system's application for it. Public so a script on the command line takes the same path.
     void openAsset(const QString& path);
 
+    /// The scripted in-app test's door to an asset's file operations (the script's `asset`
+    /// command; assetmanagerwidget_files.cpp): `words` = rename <file> <name> | duplicate <file>
+    /// | move <file> <folder> | delete <file> | export <file or folder> <zip> | install <zip>
+    /// <folder> [replace], with absolute paths. What the context menu's entries do, without
+    /// their dialogs; the outcome is logged.
+    void runFileOperation(const QStringList& words);
+
 signals:
     /// Emitted when the user picks "Manage Asset Folders" from a tree context menu, so
-    /// whatever owns the Preferences dialog can open it directly to the Assets tab.
+    /// whatever owns the Preferences dialog can open it directly to the Assets tab. Never
+    /// emitted by a browser with roots of its own: its menus have no such entry.
     void manageAssetFoldersRequested();
 
     /// Emitted when the user double-clicks an importable model asset (e.g. an .obj) in the grid,
@@ -92,6 +117,14 @@ signals:
 
     /// Emitted when the user double-clicks a Gaussian splat scene (`.ply` / `.splat`) in the grid.
     void importSplatRequested(const QString& path);
+
+    /// Emitted when the user double-clicks a saved material (`.psm`) in the grid: the owner puts
+    /// it on the selected object's zone (the Materials tab's).
+    void applyMaterialRequested(const QString& path);
+
+    /// Emitted after this browser renamed, duplicated, moved or deleted an asset's files, or
+    /// installed a package: another browser that may be showing the same folder reads it again.
+    void assetFilesChanged();
 
 private slots:
     /// A tree row was clicked: section headers toggle their expansion, everything browsable
@@ -149,9 +182,21 @@ private:
     QStandardItem *collectionsRootItem;
 
     // --- State ---
-    /// The enabled library paths in display order, read once per refreshAssetManager(): the
-    /// search, the breadcrumb and "Find In Library" all consult it instead of re-querying.
+    /// What this instance browses (see assetmanagerscope.h). Fixed for the widget's lifetime.
+    const AssetManagerScope m_scope;
+
+    /// The library roots in display order, read once per refreshAssetManager() — the enabled
+    /// asset libraries, or the scope's own roots: the search, the breadcrumb and "Find In
+    /// Library" all consult it instead of re-querying.
     QStringList m_libraryPaths;
+
+    /// False until the widget has been shown: a browser with one root of its own opens that
+    /// root in the grid at its first show (not at construction, which would scan a folder and
+    /// decode thumbnails for a tab nobody has looked at).
+    bool m_shownOnce = false;
+    /// AssetDb::favoritesRevision() as of the Favorites grid on display. Favorites are shared
+    /// between the browsers: one shown again after another edited them re-reads its grid.
+    int m_favoritesRevisionShown = -1;
 
     QString m_currentFolderPath;  ///< Node id of what the grid shows: a folder path, FAVORITES_ROOT or COLLECTION_<id>
     int m_currentAssetCount = 0;
@@ -170,6 +215,8 @@ private:
     void promptAddAssetLibrary();
 
     // --- Tree build/refresh ---
+    /// The roots as they stand now: the scope's own, or the enabled asset libraries.
+    QStringList currentLibraryRoots() const;
     void saveExpandedState(const QModelIndex &parentProxyIndex, QSet<QString> &expandedPaths);
     void restoreExpandedState(const QModelIndex &parentProxyIndex, const QSet<QString> &expandedPaths);
     QModelIndex findProxyIndexByPath(const QModelIndex &parentProxyIndex, const QString &targetPath);
@@ -244,6 +291,11 @@ private:
     QStringList scriptLinkRoots() const;
 
     // --- Collections & favorites ---
+    /// The favorites this browser shows, in the user's order: all of them, or for a browser
+    /// with roots of its own the ones that lie under those roots.
+    QStringList favoritePathsInScope() const;
+    /// A name no sibling collection of this browser has yet ("New Collection", "... (2)").
+    QString newCollectionName(const QString& baseName, int parentCollectionId) const;
     /// Creates a collection in the database and its tree row. Returns the new id, or -1.
     int  createCollection(const QString& name, int parentCollectionId = 0);
     /// Adds the tree row for a collection the database already holds.
@@ -264,7 +316,9 @@ private:
     QMenu* buildAddToCollectionMenu(QWidget* parentMenu, const QString& folderPath);
     /// A QMenu carrying the Asset Manager's context-menu object name (for its QSS).
     QMenu* newContextMenu(QWidget* parent);
-    /// The trailing "Manage Asset Folders" / "Refresh" pair every tree menu ends with.
+    /// The trailing "Manage Asset Folders" / "Refresh" pair every tree menu ends with. A
+    /// browser with roots of its own has no folders to manage: its `first` is null, so test it
+    /// before comparing it with what QMenu::exec returned (null too, for a dismissed menu).
     QPair<QAction*, QAction*> addManageRefreshActions(QMenu* menu);
     struct ExpandActions {
         QAction* expand = nullptr;
@@ -280,7 +334,43 @@ private:
     void expandNodeRecursively(const QModelIndex &proxyIndex);
     void collapseNodeRecursively(const QModelIndex &proxyIndex);
 
+    // --- An asset's file operations and packages (assetmanagerwidget_files.cpp; assetstore.h) ---
+    struct FileActions {
+        QAction* rename = nullptr;
+        QAction* duplicate = nullptr;
+        QAction* move = nullptr;
+        QAction* exportPackage = nullptr;
+        QAction* remove = nullptr;
+    };
+    /// Rename / Duplicate / Move To Folder / Export Package / Delete for an asset of PoseStudio's
+    /// own (a saved material), after a separator; nothing — all null — for any other file.
+    FileActions addFileActions(QMenu* menu, const QString& assetPath);
+    /// Runs a choice among them. True if `selected` was one.
+    bool handleFileAction(QAction* selected, const FileActions& actions, const QString& assetPath);
+    /// The DIALOG halves, which the menu entries run: each asks (a name, a folder, a
+    /// confirmation), runs the work below, and shows what went wrong.
+    void renameAssetFile(const QString& assetPath);
+    void duplicateAssetFile(const QString& assetPath);
+    void moveAssetFile(const QString& assetPath);
+    void deleteAssetFile(const QString& assetPath);
+    /// A package of one asset (with its icon and textures) or of a whole folder.
+    void exportPackageOf(const QString& path);
+    /// A package unpacked into `folderPath`.
+    void installPackageInto(const QString& folderPath);
+    /// The WORK halves, with no dialog: the store's operation, the Favorites / Collections
+    /// filings following the file, the views read again.
+    AssetStore::Result renameAssetTo(const QString& assetPath, const QString& name);
+    AssetStore::Result duplicateAssetAt(const QString& assetPath);
+    AssetStore::Result moveAssetTo(const QString& assetPath, const QString& folder);
+    AssetStore::Result deleteAssetAt(const QString& assetPath, bool permanently);
+    AssetStore::Result installPackageFrom(const QString& package, const QString& folderPath, bool replaceExisting);
+    /// Reads the grid (and, when folders came or went, the tree) again and tells the other browser.
+    void afterFileOperation(bool foldersChanged);
+
 protected:
+    /// Catches up with what changed while the tab was hidden: roots of its own that moved, a
+    /// Favorites grid another browser edited — and, the first time, opens a lone root.
+    void showEvent(QShowEvent *event) override;
     /// Watches the grid viewport: forwards mouse events to the drag controller first, then
     /// manages the custom tooltip's show/hide grace period.
     bool eventFilter(QObject *watched, QEvent *event) override;

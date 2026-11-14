@@ -1,0 +1,161 @@
+# SAVING A MATERIAL (scene/materialfile.h; the Materials tab's Save button): the selected zone's
+# material written to a .psm file, its ICON — the material on a ball, 255 pixels square on a
+# transparent background — rendered beside it, and a saved material applied to another zone as
+# a double-click in the Materials Library applies it.
+#
+# NOT run by run_all.sh (the subfolder). On the six-sphere scene and the loose maps
+# tools/materials/make_test_assets.py writes:
+#
+#   python tools/materials/make_test_assets.py <assets>
+#   POSESTUDIO_TEST_FIGURE=<assets>/showcase.gltf tools/ikscripts/run.sh \
+#       tools/ikscripts/materials/save.txt <out> POSESTUDIO_IK_SCRIPT_ASSETS=<assets>
+#
+# The files land in <out>: brushed.psm / brushed.png, mapped.psm / mapped.png, glass.psm /
+# glass.png, chrome.psm / chrome.png. LOOK at the four icons. With a render engine they are path traced
+# (maticon.engine 1); POSESTUDIO_MATERIAL_ICON_BUILTIN=1 draws them with the built-in ball
+# shader instead, which is what a copy without an engine does (the engine line below then fails:
+# that is the point of it).
+
+wait 10
+select 0
+expect zones == 6
+
+# --- 1. A material saved, with its icon ---------------------------------------------------------
+zone Brushed
+expect mat.metallic == 100
+expect mat.anisotropy == 90
+savematerial brushed.psm
+expect matfile.ok == 1
+expect matfile.embedded == 0
+expect maticon.ok == 1
+expect maticon.engine == 1
+expect maticon.size == 255
+# Transparent round the ball, opaque on it — and a MARGIN: the ball is 78 % as wide as the
+# picture, so the picture's edges are clear at their middles too (11 % in from each).
+expect maticon.a.1.1 == 0
+expect maticon.a.99.1 == 0
+expect maticon.a.1.99 == 0
+expect maticon.a.99.99 == 0
+expect maticon.a.50.5 == 0
+expect maticon.a.50.95 == 0
+expect maticon.a.5.50 == 0
+expect maticon.a.95.50 == 0
+expect maticon.a.50.50 == 255
+expect maticon.a.50.16 == 255
+expect maticon.a.16.50 == 255
+expect maticon.a.84.50 == 255
+expect maticon.a.50.84 == 255
+
+# --- 2. Applied to another zone: the values arrive, as ONE undo step --------------------------------
+zone Chalk
+expect mat.metallic == 0
+expect mat.anisotropy == 0
+applymaterial brushed.psm
+expect matfile.ok == 1
+expect matfile.missing == 0
+expect mat.metallic == 100
+expect mat.anisotropy == 90
+undo
+expect mat.metallic == 0
+expect mat.anisotropy == 0
+redo
+expect mat.metallic == 100
+expect mat.anisotropy == 90
+undo
+
+# --- 3. A material with maps: the files go WITH it, and come back -----------------------------------
+# (Copied into <out>/textures/mapped/ — the texture store, tools/ikscripts/materials/store.txt.)
+texture basecolor tex_red.png
+texture roughness tex_rough.png
+expect mattex.basecolor == 2
+savematerial mapped.psm
+expect matfile.ok == 1
+expect matfile.copied == 2
+expect maticon.ok == 1
+# (The red map on the ball: red at its middle.)
+expect maticon.r.50.50 > maticon.g.50.50
+zone Velvet
+expect mattex.basecolor == 0
+expect mattex.roughness == 0
+applymaterial mapped.psm
+expect matfile.ok == 1
+expect matfile.missing == 0
+expect mattex.basecolor == 2
+expect mattex.roughness == 2
+expect matstore.basecolor == 1
+expect mat.sheen == 0
+# A file is the WHOLE surface: one without maps empties the slots.
+applymaterial brushed.psm
+expect mattex.basecolor == 0
+expect mattex.roughness == 0
+expect mat.metallic == 100
+# … and each apply was one step.
+undo
+expect mattex.basecolor == 2
+undo
+expect mattex.basecolor == 0
+expect mat.sheen == 90
+
+# --- 4. Glass: saved, pictured, applied ---------------------------------------------------------
+zone Glass
+savematerial glass.psm
+expect maticon.ok == 1
+expect maticon.a.50.50 == 255
+zone Chalk
+applymaterial glass.psm
+expect mat.transmission == 100
+undo
+
+# --- 4b. A mirror ball shows the ICON STUDIO ----------------------------------------------------
+# (scene/materialball.h: the room every icon is lit by, whatever lights the scene.) A chrome
+# ball's middle mirrors the dark tent on the camera's side, its upper left the softbox, its
+# upper right the strip, its foot the pale floor: black beside white, which is what reads as
+# chrome. A photographed room in its place read as fuzzy grey. And its EDGE mirrors what is
+# behind the ball, which is DIM, and straight behind it DARK: an icon lies on a dark page. A
+# white wall there drew a pale rim round every material (the chrome ball's read 234; the floor
+# ran white to its foot), and a dim one still a grey line round a saturated metal (105 at the
+# outer pixels, 160 at the foot): the edge falls into the page instead.
+# (The zone still carries section 3's maps: off first.)
+texture basecolor none
+texture roughness none
+material metallic 100
+material roughness 5
+material color 0.549 0.556 0.554
+savematerial chrome.psm
+expect maticon.ok == 1
+expect maticon.r.50.50 < 30
+expect maticon.r.50.20 < 30
+expect maticon.r.41.32 > 230
+expect maticon.r.68.38 > 200
+expect maticon.r.50.81 > 150
+expect maticon.r.13.50 < 150
+expect maticon.r.13.50 > 40
+expect maticon.r.87.50 < 150
+expect maticon.r.12.50 < 85
+expect maticon.r.88.50 < 85
+expect maticon.r.50.88 < 135
+# (… and neutral: the studio has no color of its own.)
+expect maticon.b.50.81 > 150
+expect maticon.g.41.32 > 230
+undo
+undo
+undo
+undo
+undo
+expect mat.metallic == 0
+expect mattex.basecolor == 2
+
+# --- 5. What is no material is refused, and nothing changes -------------------------------------
+applymaterial tex_red.png
+expect matfile.ok == 0
+expect mat.transmission == 0
+expect mat.metallic == 0
+
+# --- 6. Nothing selected: nothing is saved or applied -------------------------------------------
+app esc
+wait 3
+expect selection == -1
+savematerial none.psm
+expect matfile.ok == 0
+applymaterial brushed.psm
+expect matfile.ok == 0

@@ -15,10 +15,21 @@
 
 namespace {
 
+// Bumped by every change of the Favorites list (see AssetDb::favoritesRevision).
+int g_favoritesRevision = 0;
+
 // Logs a failed statement with its context, returning false so callers can `return fail(...)`.
 bool fail(const char* what, const QSqlQuery& q) {
     qWarning() << "[AssetDb]" << what << "failed:" << q.lastError().text();
     return false;
+}
+
+// A scope as it is bound. The Asset Manager's scope is the empty string, and a default-built
+// QString is NULL as well as empty — which Qt binds as SQL NULL: `= NULL` matches no row (every
+// Asset Manager collection would vanish from its tree) and NOT NULL refuses the insert. An
+// empty scope is therefore always bound as '', never as NULL.
+QString boundScope(const QString& scope) {
+    return scope.isNull() ? QStringLiteral("") : scope;
 }
 
 // Runs `body` inside one transaction: committed when it returns true, rolled back otherwise.
@@ -68,14 +79,18 @@ bool insertFavorite(const QString& path) {
     q.prepare("INSERT OR IGNORE INTO Favorites (FavoritePath, FavoriteSortOrder) "
               "VALUES (:path, (SELECT COALESCE(MAX(FavoriteSortOrder), -1) + 1 FROM Favorites))");
     q.bindValue(":path", path);
-    return q.exec() || fail("add asset to favorites", q);
+    if (!q.exec()) return fail("add asset to favorites", q);
+    ++g_favoritesRevision;
+    return true;
 }
 
 bool deleteFavorite(const QString& path) {
     QSqlQuery q(appDatabase());
     q.prepare("DELETE FROM Favorites WHERE FavoritePath = :path");
     q.bindValue(":path", path);
-    return q.exec() || fail("remove asset from favorites", q);
+    if (!q.exec()) return fail("remove asset from favorites", q);
+    ++g_favoritesRevision;
+    return true;
 }
 
 bool applyFiling(const QString& path, const AssetDb::Filing& filing, bool add) {
@@ -90,11 +105,13 @@ bool applyFiling(const QString& path, const AssetDb::Filing& filing, bool add) {
 
 namespace AssetDb {
 
-QList<CollectionRow> allCollections() {
+QList<CollectionRow> allCollections(const QString& scope) {
     QList<CollectionRow> rows;
     QSqlQuery q(appDatabase());
-    if (!q.exec("SELECT AssetCollectionID, AssetCollectionName, AssetCollectionParentID FROM AssetCollections "
-                "ORDER BY AssetCollectionName COLLATE NOCASE")) {
+    q.prepare("SELECT AssetCollectionID, AssetCollectionName, AssetCollectionParentID FROM AssetCollections "
+              "WHERE AssetCollectionScope = :scope ORDER BY AssetCollectionName COLLATE NOCASE");
+    q.bindValue(":scope", boundScope(scope));
+    if (!q.exec()) {
         fail("load collections", q);
         return rows;
     }
@@ -103,10 +120,12 @@ QList<CollectionRow> allCollections() {
     return rows;
 }
 
-QString uniqueCollectionName(const QString& baseName, int parentCollectionId) {
+QString uniqueCollectionName(const QString& baseName, int parentCollectionId, const QString& scope) {
     QSqlQuery q(appDatabase());
-    q.prepare("SELECT AssetCollectionName FROM AssetCollections WHERE AssetCollectionParentID = :pid");
+    q.prepare("SELECT AssetCollectionName FROM AssetCollections "
+              "WHERE AssetCollectionParentID = :pid AND AssetCollectionScope = :scope");
     q.bindValue(":pid", parentCollectionId);
+    q.bindValue(":scope", boundScope(scope));
     if (!q.exec()) fail("list sibling collection names", q);
 
     QSet<QString> existingNames;
@@ -123,11 +142,13 @@ QString uniqueCollectionName(const QString& baseName, int parentCollectionId) {
     return candidate;
 }
 
-int createCollection(const QString& name, int parentCollectionId) {
+int createCollection(const QString& name, int parentCollectionId, const QString& scope) {
     QSqlQuery ins(appDatabase());
-    ins.prepare("INSERT INTO AssetCollections (AssetCollectionName, AssetCollectionParentID) VALUES (:name, :pid)");
+    ins.prepare("INSERT INTO AssetCollections (AssetCollectionName, AssetCollectionParentID, AssetCollectionScope) "
+                "VALUES (:name, :pid, :scope)");
     ins.bindValue(":name", name);
     ins.bindValue(":pid", parentCollectionId);
+    ins.bindValue(":scope", boundScope(scope));
     if (!ins.exec()) {
         fail("create collection", ins);
         return -1;
@@ -264,16 +285,43 @@ bool moveItem(const QString& path, const Filing& from, const Filing& to) {
 }
 
 bool setFavoriteOrder(const QStringList& pathsInOrder) {
-    return inTransaction([&]() {
+    // The whole list as it stands; the members of `pathsInOrder` then take, in their new order,
+    // the places they hold in it between them, and everything is renumbered by position. So a
+    // caller that orders PART of the list (the Materials Library's favorites, or a grid that
+    // dropped favorites whose files are gone) leaves every other favorite where it was — where
+    // numbering just the part from 0 would have shuffled it in among the others' numbers.
+    QStringList all = favoritePaths();
+    const QSet<QString> listed(all.cbegin(), all.cend());
+    QStringList members;
+    members.reserve(pathsInOrder.size());
+    QSet<QString> taken;
+    for (const QString& path : pathsInOrder) {
+        if (listed.contains(path) && !taken.contains(path)) {
+            members.append(path);
+            taken.insert(path);
+        }
+    }
+    qsizetype next = 0;
+    for (QString& path : all) {
+        if (taken.contains(path)) path = members[next++];
+    }
+
+    const bool ok = inTransaction([&]() {
         QSqlQuery q(appDatabase());
         q.prepare("UPDATE Favorites SET FavoriteSortOrder = :ord WHERE FavoritePath = :path");
-        for (int i = 0; i < pathsInOrder.size(); ++i) {
+        for (int i = 0; i < all.size(); ++i) {
             q.bindValue(":ord", i);
-            q.bindValue(":path", pathsInOrder[i]);
+            q.bindValue(":path", all[i]);
             if (!q.exec()) return fail("persist favorites order", q);
         }
         return true;
     });
+    if (ok) ++g_favoritesRevision;
+    return ok;
+}
+
+int favoritesRevision() {
+    return g_favoritesRevision;
 }
 
 bool setCollectionOrder(int collectionId, const QStringList& pathsInOrder) {
@@ -289,6 +337,47 @@ bool setCollectionOrder(int collectionId, const QStringList& pathsInOrder) {
         }
         return true;
     });
+}
+
+bool repathItem(const QString& oldPath, const QString& newPath) {
+    if (oldPath == newPath) return true;
+    const bool ok = inTransaction([&]() {
+        // OR IGNORE: a row that would collide with one already filed under the new path stays
+        // as it is — and is removed below, the new path's own filing standing for both.
+        for (const char* sql : {"UPDATE OR IGNORE Favorites SET FavoritePath = :new WHERE FavoritePath = :old",
+                                "UPDATE OR IGNORE AssetCollectionItems SET AssetCollectionItemPath = :new WHERE AssetCollectionItemPath = :old"}) {
+            QSqlQuery q(appDatabase());
+            q.prepare(QString::fromLatin1(sql));
+            q.bindValue(":new", newPath);
+            q.bindValue(":old", oldPath);
+            if (!q.exec()) return fail("follow a renamed asset", q);
+        }
+        for (const char* sql : {"DELETE FROM Favorites WHERE FavoritePath = :old",
+                                "DELETE FROM AssetCollectionItems WHERE AssetCollectionItemPath = :old"}) {
+            QSqlQuery q(appDatabase());
+            q.prepare(QString::fromLatin1(sql));
+            q.bindValue(":old", oldPath);
+            if (!q.exec()) return fail("follow a renamed asset", q);
+        }
+        return true;
+    });
+    if (ok) ++g_favoritesRevision;
+    return ok;
+}
+
+bool forgetItem(const QString& path) {
+    const bool ok = inTransaction([&]() {
+        for (const char* sql : {"DELETE FROM Favorites WHERE FavoritePath = :path",
+                                "DELETE FROM AssetCollectionItems WHERE AssetCollectionItemPath = :path"}) {
+            QSqlQuery q(appDatabase());
+            q.prepare(QString::fromLatin1(sql));
+            q.bindValue(":path", path);
+            if (!q.exec()) return fail("forget a deleted asset", q);
+        }
+        return true;
+    });
+    if (ok) ++g_favoritesRevision;
+    return ok;
 }
 
 } // namespace AssetDb

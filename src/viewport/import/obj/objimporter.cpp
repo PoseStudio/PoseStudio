@@ -318,6 +318,7 @@ ModelData ObjImporter::load(const std::string& path) const {
     if (!fileHasNormals) {
         for (MeshData& mesh : result.meshes) {
             generateSmoothNormals(mesh);
+            mesh.normalsGenerated = true; // (the import smooths it by angle instead: smoothnormals.h)
         }
     } else {
         // The file has SOME normals, but individual faces may still omit them (mixed `v//n` and

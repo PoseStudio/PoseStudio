@@ -1,6 +1,6 @@
 # The Interface
 
-PoseStudio has one main window: a menu bar, the 3D viewport with its floating control strip, and a side panel with six tabs. Everything else — Preferences, the manual, the import progress dialogs — opens on top of it.
+PoseStudio has one main window: a menu bar, the 3D viewport with its floating control strip, and a side panel with seven tabs. Everything else — Preferences, the manual, the import progress dialogs — opens on top of it.
 
 ## The main window
 
@@ -17,6 +17,7 @@ The viewport sits on the left and the side panel on the right, separated by a dr
 | Save (`Ctrl+S`) / Save As… (`Ctrl+Shift+S`) | Saves the whole scene as a `.pss` project. See [Project Files](project-files.md). |
 | Import → .OBJ (Wavefront) | Imports a static mesh. See [Importing Content](importing.md#static-models-obj). |
 | Import → .DUF (DUF File) | Imports a rigged character figure. See [Importing Content](importing.md#character-figures-duf-dsf). |
+| Import → .MTLX (MaterialX Material) | Puts a material from a MaterialX file on the selected object's zone; it adds no object. See [MaterialX materials](importing.md#materialx-materials-mtlx). |
 | Save Pose… | Writes the active figure's pose to a `.pose` file. |
 | Load Pose… | Applies a `.pose` file to the active figure (undoable). |
 | Quit (`Ctrl+Q`) | Closes PoseStudio. With unsaved changes it asks first: Save, Discard Changes or Cancel. |
@@ -58,16 +59,17 @@ While the mouse is turning a joint (`B`, `S` or `T` with a joint selected: see [
 
 ## The side panel
 
-The six tabs sit on the panel's left edge.
+The seven tabs sit on the panel's left edge.
 
 - **Asset Manager** — a tree of your asset libraries, Favorites and Collections above a thumbnail grid, with a search field at the top. Double-clicking an asset imports it. See [The Asset Manager](asset-manager.md).
 - **Transform** — the selected joint's rotation as three dials: Bend, Side-Side and Twist. See [The Transform tab](posing.md#the-transform-tab).
-- **Materials** — the selected object's material zones as sliders: color, roughness, metallic, specular, opacity, the skin layers — and the overlays layered over the skin: tattoos, marks, makeup. See [Materials](materials.md).
+- **Materials** — the selected object's material zones as sliders: color, roughness, metallic, specular, opacity, the skin layers — and the overlays layered over the skin: tattoos, marks, makeup; its **Save** button saves a material to your library. See [Materials](materials.md).
+- **Materials Library** — the Asset Manager over one folder, the *Materials* folder of your PoseStudio library: the materials you saved from the Materials tab, by category, with search, Favorites and collections of their own; double-click one to put it on the selected object. See [The Materials Library](asset-manager.md#the-materials-library).
 - **Soft Body Physics** — the switches and dials for the breasts' and the buttocks' motion: on and off, their softness, the breasts' bounce. See [The Soft Body Physics tab](posing.md#the-soft-body-physics-tab).
 - **Environment** — the lighting controls: the HDRI picker, the backdrop, exposure and tone, image-based lighting, the key light, shadows, and skin and rim accents. See [Lighting and Environment](environment.md).
 - **Lights** — the scene's light objects: point, spot, area and sun lights, added, placed and set. See [Lights](lights.md).
 
-Drag the divider between the tree and the grid inside the Asset Manager to give either more room.
+Drag the divider between the tree and the grid inside the Asset Manager or the Materials Library to give either more room.
 
 ## Value fields and fine control
 

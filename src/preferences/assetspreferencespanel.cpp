@@ -10,6 +10,7 @@
 #include "librarypaths.h"
 #include "preferencesmanager.h"
 
+#include <QCheckBox>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QListWidget>
@@ -60,6 +61,22 @@ AssetsPreferencesPanel::AssetsPreferencesPanel(QWidget* parent)
     });
     connect(addButton, &QPushButton::clicked, this, &AssetsPreferencesPanel::promptAddLibrary);
     connect(removeButton, &QPushButton::clicked, this, &AssetsPreferencesPanel::removeSelectedLibrary);
+
+    // WHERE A SAVED MATERIAL'S TEXTURES GO (assets/assetstore.h): copied beside it by default, so
+    // that a material's folder is all the material needs; off, the files are named where they are.
+    contentLayout()->addSpacing(12);
+    auto* copyTextures = new QCheckBox(tr("Copy texture files when saving a material"), this);
+    copyTextures->setProperty("testId", QStringLiteral("assets.copytextures"));
+    copyTextures->setChecked(PreferencesManager::instance().getValue(Constants::PREF_MATERIAL_COPY_TEXTURES, true).toBool());
+    contentLayout()->addWidget(copyTextures);
+    addDescription(
+        tr("When on, saving a material copies the texture files it uses into a \"textures\" folder beside it "
+           "(a file that is already there is not copied twice), so the material keeps working when its folder is "
+           "moved, shared or opened on another computer. When off, the material refers to the files where they "
+           "are, and stops finding them if they move."));
+    connect(copyTextures, &QCheckBox::toggled, this, [](bool enabled) {
+        PreferencesManager::instance().setValue(Constants::PREF_MATERIAL_COPY_TEXTURES, enabled ? "1" : "0");
+    });
 
     reloadLibraries();
 }

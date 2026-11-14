@@ -10,6 +10,12 @@
  * that also repaints that collection's tree row (its hit icon is cached by the proxy model).
  * The context menus live in assetmanagerwidget_menus.cpp, a second translation unit of the
  * same class.
+ *
+ * The class is instantiated once per library tab (the Asset Manager, the Materials Library:
+ * assetmanagerscope.h). Where an instance's scope matters it is asked for by name — m_scope —
+ * in a handful of places: where the roots come from (currentLibraryRoots), which collections
+ * are listed and created, which favorites are shown, and the "Manage Asset Folders" entries.
+ * Nothing else may differ between the tabs; keep it that way.
  */
 
 #include "assetmanagerwidget.h"
@@ -48,6 +54,7 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QShowEvent>
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStandardItem>
@@ -88,7 +95,8 @@ QString rowDisplayName(const QModelIndex& index) {
 // [ SETUP ]
 // =============================================================================
 
-AssetManagerWidget::AssetManagerWidget(QWidget *parent) : QWidget(parent) {
+AssetManagerWidget::AssetManagerWidget(const AssetManagerScope& scope, QWidget *parent)
+    : QWidget(parent), m_scope(scope) {
     // App-level theming (Fusion + AppProxyStyle) and global tooltip effects are configured
     // once in main.cpp, before any widget is built, not here.
     setupUI();
@@ -131,7 +139,11 @@ void AssetManagerWidget::setupUI() {
 
     searchInput = new QLineEdit(searchRow);
     searchInput->setObjectName("AssetManagerSearchInput");
-    searchInput->setPlaceholderText(tr("Search assets..."));
+    searchInput->setPlaceholderText(m_scope.searchPlaceholder.isEmpty() ? tr("Search assets...")
+                                                                        : m_scope.searchPlaceholder);
+    // For the scripted `ui` hook (tools/ikscripts): every library tab's search field carries the
+    // same id, told apart by their order — 0 the Asset Manager, 1 the Materials Library.
+    searchInput->setProperty("testId", QStringLiteral("library.search"));
 
     clearSearchButton = new QPushButton(searchRow);
     clearSearchButton->setObjectName("AssetManagerClearButton");
@@ -376,6 +388,10 @@ QModelIndex AssetManagerWidget::findProxyIndexByPath(const QModelIndex &parentPr
     return QModelIndex(); // Return an invalid index if not found
 }
 
+QStringList AssetManagerWidget::currentLibraryRoots() const {
+    return m_scope.hasOwnRoots() ? m_scope.roots() : AssetLibraries::enabledPaths();
+}
+
 QModelIndex AssetManagerWidget::libraryRootIndex(const QString& libraryPath) const {
     const int rootRows = proxyModel->rowCount(QModelIndex());
     for (int r = 0; r < rootRows; ++r) {
@@ -453,9 +469,12 @@ void AssetManagerWidget::refreshAssetManager() {
     // ---------------------------------------------------------
     // 6. Load Physical Asset Libraries
     // ---------------------------------------------------------
-    // Already in display order (built-in first, then user libraries by folder NAME), and read
-    // once here for every later consumer (search, breadcrumb, Find In Library).
-    m_libraryPaths = AssetLibraries::enabledPaths();
+    // Already in display order (built-in first, then user libraries by folder NAME; or the
+    // scope's own roots), and read once here for every later consumer (search, breadcrumb,
+    // Find In Library).
+    const QStringList roots = currentLibraryRoots();
+    const bool rootsChanged = (roots != m_libraryPaths);
+    m_libraryPaths = roots;
 
     bool anyLibraryAdded = false;
     for (const QString& path : std::as_const(m_libraryPaths)) {
@@ -473,7 +492,9 @@ void AssetManagerWidget::refreshAssetManager() {
             qWarning() << "Library path does not exist on disk:" << path;
         }
     }
-    addLibraryHintLabel->setVisible(!anyLibraryAdded);
+    // "Add Asset Folder" is an offer to register a library: a browser with roots of its own
+    // has none to register.
+    addLibraryHintLabel->setVisible(!anyLibraryAdded && !m_scope.hasOwnRoots());
 
     // Search Results (and its separator) stay hidden until a search is actually run:
     // a freshly rebuilt tree has no active search, regardless of stale text left in the box.
@@ -491,12 +512,45 @@ void AssetManagerWidget::refreshAssetManager() {
         QModelIndex newSelectedIndex = findProxyIndexByPath(QModelIndex(), selectedPath);
         if (newSelectedIndex.isValid()) selectTreeIndex(newSelectedIndex);
     }
+
+    // A browser whose whole library is ONE root of its own opens that root: there is nothing
+    // else to choose. When the tree is first built, and again if the root itself has moved (the
+    // user's library registered somewhere else) — never on an ordinary refresh, which keeps the
+    // tree as the user left it. The grid follows only once the tab has been seen (showEvent).
+    if (m_scope.hasOwnRoots() && rootsChanged && m_libraryPaths.size() == 1) {
+        const QModelIndex root = libraryRootIndex(m_libraryPaths.first());
+        if (root.isValid()) {
+            dirTreeView->expand(root);
+            if (m_shownOnce) selectTreeIndex(root);
+        }
+    }
+}
+
+void AssetManagerWidget::showEvent(QShowEvent *event) {
+    QWidget::showEvent(event);
+
+    // Roots of its own are resolved, not registered: they may have moved while the tab was
+    // hidden (a library added or removed elsewhere). Rebuild only when they really did.
+    if (m_scope.hasOwnRoots() && currentLibraryRoots() != m_libraryPaths) refreshAssetManager();
+
+    if (!m_shownOnce) {
+        m_shownOnce = true;
+        if (m_scope.hasOwnRoots() && m_libraryPaths.size() == 1 && m_currentFolderPath.isEmpty())
+            navigateToLibraryRoot(m_libraryPaths.first());
+    }
+
+    // Favorites are one list for every browser: if another one changed it while this one was
+    // showing its Favorites, the grid on display is stale.
+    if (m_currentFolderPath == AssetNode::FAVORITES_ROOT
+        && m_favoritesRevisionShown != AssetDb::favoritesRevision()) {
+        refreshCurrentView();
+    }
 }
 
 void AssetManagerWidget::loadCollectionsTree() {
     // One query for the whole table; nest in memory. Rows arrive name-sorted, so each parent's
     // children are appended in display order without a per-level ORDER BY round trip.
-    const QList<AssetDb::CollectionRow> rows = AssetDb::allCollections();
+    const QList<AssetDb::CollectionRow> rows = AssetDb::allCollections(m_scope.collections);
     QHash<int, QList<const AssetDb::CollectionRow*>> childrenOf;
     for (const AssetDb::CollectionRow& row : rows) childrenOf[row.parentId].append(&row);
 
@@ -716,6 +770,8 @@ void AssetManagerWidget::runSearch(const QString& query) {
             it.next();
             const QFileInfo fi = it.fileInfo();
             if (!fi.fileName().contains(query, Qt::CaseInsensitive)) continue;
+            // (An asset's texture files are not what a search is for: assetstore.h.)
+            if (AssetScan::inTextureStore(fi.absoluteFilePath(), libPath)) continue;
 
             const QString folderMatch = fi.isDir() ? fi.absoluteFilePath() : fi.absolutePath();
 
@@ -787,7 +843,11 @@ void AssetManagerWidget::collectDirectHits(const QString& folderPath, const QDir
 
     if (proxyModel->isDirectHit(folderPath)) {
         added.insert(folderPath);
-        QStandardItem *item = new QStandardItem(AssetScan::truncateSearchPath(libRootDir.relativeFilePath(folderPath)));
+        // (A hit in the library's ROOT folder itself has the relative path "." — it is shown by
+        // the root's name, as the tree shows it.)
+        const QString relativePath = libRootDir.relativeFilePath(folderPath);
+        QStandardItem *item = new QStandardItem(relativePath == QLatin1String(".") ? AssetScan::folderDisplayName(folderPath)
+                                                                                    : AssetScan::truncateSearchPath(relativePath));
         item->setData(folderPath, Qt::UserRole);
         item->setData(true, AssetNode::SearchResult); // the delegate greys the path prefix
         item->setFlags(item->flags() & ~Qt::ItemIsEditable);
@@ -873,7 +933,8 @@ void AssetManagerWidget::displayFolder(const QString& folderPath, const QString&
 
     QList<AssetHit> discoveredAssets;
     if (isFavorites) {
-        discoveredAssets = AssetScan::resolveAssetHits(AssetDb::favoritePaths());
+        discoveredAssets = AssetScan::resolveAssetHits(favoritePathsInScope());
+        m_favoritesRevisionShown = AssetDb::favoritesRevision();
     } else if (isCollection) {
         discoveredAssets = AssetScan::resolveAssetHits(AssetDb::collectionItemPaths(AssetNode::collectionId(folderPath)));
     } else {
@@ -1004,6 +1065,8 @@ void AssetManagerWidget::openAsset(const QString& path) {
         emit importFigureRequested(path);
     } else if (pose::ImportFormats::isSplatFile(path)) {
         emit importSplatRequested(path); // a Gaussian splat scene, as a static model
+    } else if (pose::ImportFormats::isAppliedMaterialFile(path)) {
+        emit applyMaterialRequested(path); // a saved material, or a MaterialX document: put on the selected zone
     } else if (AssetScriptLink::isScriptFile(path)) {
         openScriptLink(path); // read for its link, never run
     } else {
@@ -1159,9 +1222,10 @@ void AssetManagerWidget::persistGridOrder() {
     for (int i = 0; i < assetListWidget->count(); ++i)
         pathsInOrder.append(assetListWidget->item(i)->data(AssetGridRole::FilePath).toString());
 
-    if (m_currentFolderPath == AssetNode::FAVORITES_ROOT)
+    if (m_currentFolderPath == AssetNode::FAVORITES_ROOT) {
         AssetDb::setFavoriteOrder(pathsInOrder);
-    else if (AssetNode::isCollection(m_currentFolderPath))
+        m_favoritesRevisionShown = AssetDb::favoritesRevision(); // the grid already shows it
+    } else if (AssetNode::isCollection(m_currentFolderPath))
         AssetDb::setCollectionOrder(AssetNode::collectionId(m_currentFolderPath), pathsInOrder);
 }
 
@@ -1323,8 +1387,17 @@ void AssetManagerWidget::onItemChanged(QStandardItem *item) {
     parent->sortChildren(0, Qt::AscendingOrder);
 }
 
+QStringList AssetManagerWidget::favoritePathsInScope() const {
+    const QStringList all = AssetDb::favoritePaths();
+    return m_scope.hasOwnRoots() ? AssetScan::pathsWithin(all, m_libraryPaths) : all;
+}
+
+QString AssetManagerWidget::newCollectionName(const QString& baseName, int parentCollectionId) const {
+    return AssetDb::uniqueCollectionName(baseName, parentCollectionId, m_scope.collections);
+}
+
 int AssetManagerWidget::createCollection(const QString& name, int parentCollectionId) {
-    const int newId = AssetDb::createCollection(name, parentCollectionId);
+    const int newId = AssetDb::createCollection(name, parentCollectionId, m_scope.collections);
     if (newId > 0) insertCollectionTreeItem(newId, name, parentCollectionId);
     return newId;
 }
@@ -1347,7 +1420,7 @@ void AssetManagerWidget::insertCollectionTreeItem(int collectionId, const QStrin
 int AssetManagerWidget::addFolderAsCollection(const QString& folderPath, int parentCollectionId) {
     const QString folderName = QDir(folderPath).dirName();
     const int newColId = createCollection(
-        AssetDb::uniqueCollectionName(folderName, parentCollectionId), parentCollectionId);
+        newCollectionName(folderName, parentCollectionId), parentCollectionId);
     if (newColId <= 0) return -1;
 
     // scanFolderAssets returns only this folder's own (non-recursive) thumbnailed assets.
@@ -1429,7 +1502,7 @@ void AssetManagerWidget::dropAssetOnTreeNode(QListWidgetItem* item, const QStrin
     if (targetNodeId == AssetNode::FAVORITES_ROOT) {
         to.favorites = true;
     } else if (targetNodeId == AssetNode::COLLECTIONS_ROOT) {
-        newCollectionId = createCollection(AssetDb::uniqueCollectionName(tr("New Collection"), 0), 0);
+        newCollectionId = createCollection(newCollectionName(tr("New Collection"), 0), 0);
         if (newCollectionId <= 0) return; // logged; nothing was moved
         to.collectionId = newCollectionId;
     } else {

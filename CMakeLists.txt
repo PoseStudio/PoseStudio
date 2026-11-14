@@ -249,10 +249,13 @@ add_executable(
     src/help/whatsnewdialog.cpp           # "What's New in x.y.z": the version's release notes, once per version at startup
     src/help/whatsnewdialog.h
 
-    # --- Asset Manager ---
+    # --- Asset Manager (and the Materials Library: the same widget, built twice) ---
     src/assets/assetmanagerwidget.cpp
     src/assets/assetmanagerwidget.h
     src/assets/assetmanagerwidget_menus.cpp # the same class, second TU: the tree/grid context menus
+    src/assets/assetmanagerwidget_files.cpp # … third TU: an asset's file operations and packages (assetstore.h)
+    src/assets/assetmanagerscope.cpp      # what one instance browses: the Asset Manager / the Materials Library
+    src/assets/assetmanagerscope.h
     src/assets/assetnodeids.h             # node-id / grid-role vocabulary (header-only)
     src/assets/assetfolderproxymodel.cpp  # tree proxy: folder hit icons + collection drag-reparent
     src/assets/assetfolderproxymodel.h
@@ -266,6 +269,8 @@ add_executable(
     src/assets/customtooltip.h
     src/assets/assetscan.cpp              # filesystem scanning: asset/thumbnail pairing, folder hit classification
     src/assets/assetscan.h
+    src/assets/assetstore.cpp             # where a saved asset's files live: the texture store, file operations, packages
+    src/assets/assetstore.h
     src/assets/assetscriptlink.cpp        # a content-library script (.dsa) read as the folder / file / page it links to
     src/assets/assetscriptlink.h
     src/assets/assetdb.cpp                # every Collections/Favorites SQL statement
@@ -335,6 +340,7 @@ add_executable(
     src/viewport/vulkanwindow_pose.cpp    # pose utilities, pins, pose files, delete, undo/redo
     src/viewport/vulkanwindow_materials.cpp # the Materials tab's side: the view, the edit bracket, the texture slots (decode + bake + upload)
     src/viewport/vulkanwindow_render.cpp  # the scene captured for a render engine (captureRenderScene)
+    src/viewport/vulkanwindow_materialfile.cpp # a material saved (.psm), its ball icon rendered, a saved one applied
     src/viewport/vulkanwindow_lights.cpp  # the light objects: the list as an undoable edit, a marker's drag
     src/viewport/vulkanwindow_traced.cpp  # the Rendered mode: the render engine's picture kept in step with the scene
     src/viewport/rendersnapshot.h         # that capture: the description and the storage behind it
@@ -366,6 +372,8 @@ add_executable(
     src/viewport/import/aobaker.h
     src/viewport/import/tangentgen.cpp     # per-vertex UV tangent generation (Lengyel)
     src/viewport/import/tangentgen.h
+    src/viewport/import/smoothnormals.cpp  # THE SMOOTHING BY ANGLE: shading normals computed from the faces
+    src/viewport/import/smoothnormals.h
     src/viewport/stb_impl.cpp             # single TU that compiles stb_image's implementation
     src/viewport/tinyexr_impl.cpp         # single TU that compiles tinyexr's implementation
     # Layer-free utilities (pure std) shared by rendering/, scene/, import/ and the services:
@@ -511,6 +519,14 @@ add_executable(
     src/viewport/scene/posefile.h
     src/viewport/scene/projectfile.cpp   # the versioned-JSON .pss project file reader/writer (nlohmann)
     src/viewport/scene/projectfile.h
+    src/viewport/scene/materialjson.cpp  # a material as JSON: the one codec of the project's zones and the .psm file
+    src/viewport/scene/materialjson.h
+    src/viewport/scene/materialfile.cpp  # the .psm material file (a saved material: values + maps), as text
+    src/viewport/scene/materialfile.h
+    src/viewport/scene/materialxfile.cpp # a MaterialX document (.mtlx) read as materials: values + image files
+    src/viewport/scene/materialxfile.h
+    src/viewport/scene/materialball.cpp  # the ball a saved material is pictured on: its mesh, and the built-in ball shader
+    src/viewport/scene/materialball.h
     src/viewport/scene/armature.cpp   # the runtime skeleton + pose + FK + pins (Vulkan-free)
     src/viewport/scene/armature.h
     src/viewport/scene/armatureik.cpp # the Armature's FBIK drag lifecycle (rig build, begin/drag/settle/end, pins)
@@ -836,6 +852,7 @@ add_test(NAME ik-harness COMMAND PoseStudioIkHarness)
 add_executable(PoseStudioProjectFileCheck
     tools/projectfile/roundtrip.cpp
     src/viewport/scene/projectfile.cpp
+    src/viewport/scene/materialjson.cpp
 )
 target_include_directories(PoseStudioProjectFileCheck PRIVATE
     src/viewport/scene
@@ -865,6 +882,77 @@ target_compile_definitions(PoseStudioOverlayCheck PRIVATE
 )
 target_link_libraries(PoseStudioOverlayCheck PRIVATE Vulkan::Headers)
 add_test(NAME overlay-check COMMAND PoseStudioOverlayCheck)
+
+# The guard of THE SMOOTHING BY ANGLE (tools/smoothing): a faceted sphere made round, a cube's
+# and a hexagon's edges kept, a surface smoothed across its material zones, what a vertex
+# carries over, and the import's rule for which meshes get it. import/smoothnormals.cpp and the
+# per-mesh tangents alone; the Vulkan HEADERS only — no Qt, no device.
+add_executable(PoseStudioSmoothingCheck
+    tools/smoothing/check_smoothing.cpp
+    src/viewport/import/smoothnormals.cpp
+    src/viewport/import/tangentgen.cpp
+)
+target_include_directories(PoseStudioSmoothingCheck PRIVATE
+    src/viewport/import
+    ${glm_SOURCE_DIR}
+)
+target_compile_definitions(PoseStudioSmoothingCheck PRIVATE
+    GLM_FORCE_RADIANS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+)
+target_link_libraries(PoseStudioSmoothingCheck PRIVATE Vulkan::Headers)
+add_test(NAME smoothing-check COMMAND PoseStudioSmoothingCheck)
+
+# The saved material's guard (tools/materialfile): the .psm codec as text — a round trip, the
+# overlays left out, every way a text is not a material — and the ball a material is pictured
+# on: the mesh a render engine traces (winding, normals, where the map's middle is) and the
+# built-in shader a copy without an engine draws the icon with. No Qt, no device (the Vulkan
+# HEADERS only: modeldata.h's vertex layout names them).
+add_executable(PoseStudioMaterialFileCheck
+    tools/materialfile/check_materialfile.cpp
+    src/viewport/scene/materialfile.cpp
+    src/viewport/scene/materialjson.cpp
+    src/viewport/scene/materialball.cpp
+    src/viewport/scene/environment.cpp
+)
+target_include_directories(PoseStudioMaterialFileCheck PRIVATE
+    src/viewport/scene
+    src/viewport/rendering     # ibldata.h (environment.h's bake products)
+    src/viewport/import
+    src/viewport/util
+    ${glm_SOURCE_DIR}
+    ${nlohmann_json_SOURCE_DIR}/single_include
+)
+target_compile_definitions(PoseStudioMaterialFileCheck PRIVATE
+    GLM_FORCE_RADIANS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+)
+target_link_libraries(PoseStudioMaterialFileCheck PRIVATE Vulkan::Headers)
+add_test(NAME material-file-check COMMAND PoseStudioMaterialFileCheck)
+
+# The MaterialX material reader's guard and report tool (tools/materialx): the four shading
+# models, the texture nodes (slot, channel, factor, placement), prefixes and color spaces, the
+# older document form, includes, and what is not a material file — on documents written in the
+# tool; with --report <file.mtlx> it prints what a real file's materials read as. No Qt, no
+# device (materialparams.h is all it needs).
+add_executable(PoseStudioMaterialXCheck
+    tools/materialx/check_materialx.cpp
+    src/viewport/scene/materialxfile.cpp
+)
+target_include_directories(PoseStudioMaterialXCheck PRIVATE
+    src/viewport/scene
+    src/viewport/import
+    src/viewport/util
+    ${glm_SOURCE_DIR}
+    ${nlohmann_json_SOURCE_DIR}/single_include
+)
+target_compile_definitions(PoseStudioMaterialXCheck PRIVATE
+    GLM_FORCE_RADIANS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+)
+set_target_properties(PoseStudioMaterialXCheck PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+target_link_libraries(PoseStudioMaterialXCheck PRIVATE Vulkan::Headers)
+add_test(NAME materialx-check COMMAND PoseStudioMaterialXCheck)
 
 # The guard of a render's Gaussian splat composite (tools/splatcomposite): the display transform
 # and its inverse, the capture coming out of a render as it went in, the backdrop behind it, the
@@ -910,6 +998,54 @@ target_compile_definitions(PoseStudioScriptLinkCheck PRIVATE
 )
 target_link_libraries(PoseStudioScriptLinkCheck PRIVATE Qt6::Core)
 add_test(NAME script-link-check COMMAND PoseStudioScriptLinkCheck)
+
+# The library browsers' data layer (tools/assetdb): the Asset Manager and the Materials Library
+# are one widget over one database, and this checks what keeps them apart and what they share —
+# the scope column's migration and the schema file's own, collections listed / named / created
+# per browser, favorites shown in part and reordered in part. The real AssetDb statements on an
+# in-memory SQLite database; Qt6::Core + Qt6::Sql, no widgets, nothing of the user's touched.
+add_executable(PoseStudioAssetDbCheck
+    tools/assetdb/check_assetdb.cpp
+    src/assets/assetdb.cpp
+    src/assets/assetscan.cpp
+    src/core/database.cpp
+)
+target_include_directories(PoseStudioAssetDbCheck PRIVATE
+    src
+    src/assets
+    src/core
+)
+target_compile_definitions(PoseStudioAssetDbCheck PRIVATE
+    POSESTUDIO_VERSION="0.0.0"
+    POSESTUDIO_SCHEMA_FILE="${CMAKE_SOURCE_DIR}/resources/database/initialize.sql"
+)
+target_link_libraries(PoseStudioAssetDbCheck PRIVATE Qt6::Core Qt6::Sql)
+add_test(NAME asset-db-check COMMAND PoseStudioAssetDbCheck)
+
+# The asset store's guard (tools/assetstore): the standard for where a saved asset's files live
+# (src/assets/assetstore.h) run on folders it makes in the OS temp folder — textures collected
+# beside an asset (linked, copied, the same bytes found), found again after the folder was
+# rearranged, an asset renamed / duplicated / moved / deleted with its icon and textures, and a
+# package written and installed. QtCore + nlohmann + miniz; no widgets, no database, no Vulkan.
+add_executable(PoseStudioAssetStoreCheck
+    tools/assetstore/check_assetstore.cpp
+    src/assets/assetstore.cpp
+    ${miniz_SOURCE_DIR}/miniz.c
+    ${miniz_SOURCE_DIR}/miniz_tinfl.c
+    ${miniz_SOURCE_DIR}/miniz_tdef.c
+    ${miniz_SOURCE_DIR}/miniz_zip.c
+)
+target_include_directories(PoseStudioAssetStoreCheck PRIVATE
+    src
+    src/assets
+    src/core
+    ${nlohmann_json_SOURCE_DIR}/single_include
+    ${miniz_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/cmake/miniz-shim
+)
+set_target_properties(PoseStudioAssetStoreCheck PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+target_link_libraries(PoseStudioAssetStoreCheck PRIVATE Qt6::Core)
+add_test(NAME asset-store-check COMMAND PoseStudioAssetStoreCheck)
 
 # The native figure importer's guard and report tool (tools/figurecheck): with no arguments it
 # writes a synthetic content library — a base figure, shape morphs, controls, a two-figure scene —
@@ -984,6 +1120,7 @@ add_executable(PoseStudioPssProbe
     src/viewport/modelimportservice.cpp
     src/viewport/import/aobaker.cpp
     src/viewport/import/tangentgen.cpp
+    src/viewport/import/smoothnormals.cpp
     src/viewport/import/texturegutters.cpp
     src/viewport/import/importerregistry.cpp
     src/viewport/import/specgloss.cpp

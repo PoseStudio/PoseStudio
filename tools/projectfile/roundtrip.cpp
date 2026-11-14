@@ -93,6 +93,9 @@ ProjectDocument makeDoc() {
     torso.params.bumpStrength = 1.75f;
     torso.params.uvTiling = glm::vec2(2.0f, 3.0f);
     torso.params.uvOffset = glm::vec2(0.25f, -0.5f);
+    // THE SMOOTHING: the zone's faces shaded by angle (the Materials tab's Smooth by Angle).
+    torso.params.smoothByAngle = true;
+    torso.params.smoothAngle = 42.5f;
     torso.textures.push_back({"basecolor", "C:/textures/skin.png"});
     torso.textures.push_back({"cutout", ""});
     // Two overlays: a tattoo moved from where it was painted, with every color control off its
@@ -226,6 +229,9 @@ void checkRoundTrip() {
               b.materials[0].params.overlays[1].scale == 1.0f,
           "f1 overlays (a tattoo's name, opacity map, metal, place, turn, size and color controls, a disabled relief-only scar, an empty one, in order)");
 
+    check(b.materials.size() == 1 && b.materials[0].hasSmoothing && b.materials[0].params.smoothByAngle && b.materials[0].params.smoothAngle == 42.5f,
+          "f1 smoothing (by angle, 42.5 degrees — and the file SAYS so)");
+
     const ProjectFigure& c = out.figures[1];
     check(c.source == path("model.obj") && c.pose.empty() && c.pins.empty() && c.materials.empty() &&
               c.rootBone.empty() && vec3Equal(c.translation, glm::vec3(0.0f)) &&
@@ -296,6 +302,11 @@ void checkForwardCompatibility() {
               vec3Equal(d.figures[0].pose[0].second, glm::vec3(1.0f, 2.0f, 3.0f)) &&
               d.environment.settings.exposure == 0.5f && d.camera.distance == 3.0f,
           "known values survive");
+    // (A zone that says nothing of its smoothing — a project from before there was one — is
+    // marked so: the loader then leaves the zone what the import gives it.)
+    check(d.figures.size() == 1 && d.figures[0].materials.size() == 1 && !d.figures[0].materials[0].hasSmoothing &&
+              !d.figures[0].materials[0].params.smoothByAngle,
+          "a zone without a smoothing is read as not saying");
     check(d.figures[0].materials.size() == 1 && d.figures[0].materials[0].zone == "Torso" &&
               d.figures[0].materials[0].params.roughness == 0.4f &&
               d.figures[0].materials[0].params.metalness == 0.0f && // absent: the default

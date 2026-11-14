@@ -5,6 +5,8 @@
 
 #include "assetscan.h"
 
+#include "assetstore.h"
+
 #include <QDirIterator>
 #include <QFileInfo>
 
@@ -49,6 +51,7 @@ AssetScan::HitState classifyInto(const QString& folderPath,
 
     for (const QFileInfo& sub : entries) {
         if (!sub.isDir()) continue;
+        if (AssetStore::isTextureStore(sub.fileName())) continue; // an asset's textures: never assets
         if (classifyInto(sub.absoluteFilePath(), known, out) != HitState::NoHit) {
             out.insert(folderPath, HitState::IndirectHit);
             return HitState::IndirectHit;
@@ -78,6 +81,19 @@ bool folderWithinLibrary(const QString& folderPath, const QString& libRoot) {
     return folder.startsWith(prefix, kPathCase);
 }
 
+QStringList pathsWithin(const QStringList& assetPaths, const QStringList& roots) {
+    QStringList within;
+    for (const QString& path : assetPaths) {
+        for (const QString& root : roots) {
+            if (folderWithinLibrary(path, root)) {
+                within.append(path);
+                break;
+            }
+        }
+    }
+    return within;
+}
+
 QString folderDisplayName(const QString& path) {
     const QString name = QDir(path).dirName();
     return name.isEmpty() ? QDir::toNativeSeparators(QDir(path).absolutePath()) : name;
@@ -85,11 +101,28 @@ QString folderDisplayName(const QString& path) {
 
 bool hasSubdirectories(const QString& path) {
     QDirIterator it(path, kSubdirFilter, QDirIterator::NoIteratorFlags);
-    return it.hasNext();
+    while (it.hasNext()) {
+        it.next();
+        if (!AssetStore::isTextureStore(it.fileName())) return true;
+    }
+    return false;
 }
 
 QFileInfoList listSubdirectories(const QString& path) {
-    return QDir(path).entryInfoList(kSubdirFilter, QDir::Name | QDir::IgnoreCase);
+    QFileInfoList folders = QDir(path).entryInfoList(kSubdirFilter, QDir::Name | QDir::IgnoreCase);
+    // A `textures` folder is an asset's texture store (assetstore.h): the pictures the assets
+    // beside it sample, never assets. It is not a place to browse.
+    folders.removeIf([](const QFileInfo& folder) { return AssetStore::isTextureStore(folder.fileName()); });
+    return folders;
+}
+
+bool inTextureStore(const QString& path, const QString& root) {
+    const QString relative = QDir(root).relativeFilePath(path);
+    const QStringList parts = relative.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    for (const QString& part : parts) {
+        if (AssetStore::isTextureStore(part)) return true;
+    }
+    return false;
 }
 
 bool hasAncestorIn(const QString& path, const QSet<QString>& set) {

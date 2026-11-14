@@ -1,0 +1,269 @@
+# THE SMOOTHING BY ANGLE (src/viewport/import/smoothnormals.h; the Materials tab's Geometry
+# section: Smooth by Angle, Smoothing Angle). PoseStudio shades a surface with the normals its
+# file gives it; a file that gives none worth the name — one per FACE, a modelling package's
+# default export, or none at all — is smoothed by angle at import, and any zone can be switched
+# either way afterwards. Both the viewport and a render read the same normals.
+#
+# NOT run by run_all.sh (the subfolder). On the assets tools/materials/make_smoothing_assets.py
+# writes:
+#
+#   python tools/materials/make_smoothing_assets.py <assets>
+#   POSESTUDIO_TEST_FIGURE=<assets>/smooth_faceted.obj tools/ikscripts/run.sh \
+#       tools/ikscripts/materials/smoothing.txt <out> POSESTUDIO_IK_SCRIPT_ASSETS=<assets>
+#
+# LOOK at the sheet: 01 the faceted file, round; 02 the same as its file has it, faceted; 05 the
+# three spheres alike; 06 the same in the Rendered mode (needs a render engine: without one the
+# shot is the PBR picture); 08 the ball round, the box crisp, the can round with flat caps.
+#
+# `matfaceted` is the share of the shown zone's triangles whose corners carry the triangle's own
+# normal, in percent (100 faceted, 0 smooth), read off the geometry the zone is drawn with.
+
+wait 10
+lookat 0 0.5 0 1.5
+select 0
+expect zones == 1
+
+# --- 1. A file with a normal per face arrives SMOOTH ------------------------------------------
+# (1984 file vertices — one per face corner — are 559 again: 482 points, the UV seam's and the
+# poles' apart.)
+expect mat.smooth == 1
+expect mat.smoothangle == 60
+expect matimported.smooth == 1
+expect matfaceted == 0
+expect matvertices == 559
+expect mattriangles == 960
+expect matfilekept == 1
+shot 01_faceted_file_smoothed
+
+# --- 2. Off: as its file has it ----------------------------------------------------------------
+material smooth 0
+expect mat.smooth == 0
+expect matfaceted == 100
+expect matvertices == 1984
+expect matfilekept == 0
+shot 02_as_its_file_has_it
+# One undo step each way.
+undo
+expect mat.smooth == 1
+expect matfaceted == 0
+expect matvertices == 559
+redo
+expect mat.smooth == 0
+expect matfaceted == 100
+# The angle is kept while the switch is off, and does nothing.
+material smoothangle 90
+expect mat.smoothangle == 90
+expect matfaceted == 100
+# Reset Zone is back to what the import decided: smooth, by 60.
+matreset
+expect mat.smooth == 1
+expect mat.smoothangle == 60
+expect matfaceted == 0
+expect matvertices == 559
+
+# --- 3. The angle --------------------------------------------------------------------------------
+# 0 is faceted (computed, not the file's: the file's geometry stays beside it); 180 everything.
+material smoothangle 0
+expect matfaceted == 100
+expect matfilekept == 1
+material smoothangle 180
+expect matfaceted == 0
+material smoothangle 60
+expect matfaceted == 0
+expect matvertices == 559
+# (… and a value past the range stops at it.)
+material smoothangle 400
+expect mat.smoothangle == 180
+material smoothangle 60
+
+# --- 4. A file with normals of its own is left as it is -----------------------------------------
+import smooth_authored.obj
+wait 20
+select 1
+expect mat.smooth == 0
+expect matimported.smooth == 0
+expect matfaceted == 0
+expect matfilekept == 0
+expect matvertices == 559
+# It can be smoothed by angle all the same (and comes out as round), and put back exactly.
+material smooth 1
+expect mat.smooth == 1
+expect matfaceted == 0
+expect matfilekept == 1
+material smoothangle 0
+expect matfaceted == 100
+matreset
+expect mat.smooth == 0
+expect matfaceted == 0
+expect matfilekept == 0
+
+# --- 5. A file with no normals at all is smoothed by angle ---------------------------------------
+import smooth_nonormals.obj
+wait 20
+select 2
+expect mat.smooth == 1
+expect matimported.smooth == 1
+expect matfaceted == 0
+expect matvertices == 559
+select -1
+shot 05_three_spheres_alike
+shade 1
+tracedwait 600
+shot 06_rendered_mode
+shade 0
+wait 5
+
+# --- 6. A saved material neither carries the smoothing nor changes it ----------------------------
+select 0
+material roughness 20
+savematerial ball.psm noicon
+expect matfile.ok == 1
+select 1
+expect mat.smooth == 0
+applymaterial ball.psm
+expect matfile.ok == 1
+expect mat.roughness == 20
+expect mat.smooth == 0
+expect matfaceted == 0
+expect matfilekept == 0
+undo
+select 0
+material smooth 0
+savematerial faceted.psm noicon
+select 2
+applymaterial faceted.psm
+expect mat.smooth == 1
+expect matfaceted == 0
+undo
+
+# --- 7. A project keeps it -----------------------------------------------------------------------
+# (Model 0 is as its file has it — faceted — and model 1 smoothed by 30 degrees.)
+select 1
+material smooth 1
+material smoothangle 30
+saveproject smoothing.pss
+new
+expect figures == 0
+openproject smoothing.pss
+wait 20
+expect figures == 3
+select 0
+expect mat.smooth == 0
+expect matfaceted == 100
+expect matvertices == 1984
+select 1
+expect mat.smooth == 1
+expect mat.smoothangle == 30
+expect matfaceted == 0
+select 2
+expect mat.smooth == 1
+expect mat.smoothangle == 60
+expect matfaceted == 0
+select 0
+matreset
+expect matfaceted == 0
+
+# --- 8. Three zones of one model -----------------------------------------------------------------
+import smooth_shapes.obj
+wait 20
+select 3
+expect zones == 3
+zone Ball
+expect mat.smooth == 1
+expect matfaceted == 0
+zone Box
+expect mat.smooth == 1
+# (A cube smoothed by 60 degrees keeps its six flat faces: 24 vertices, 12 triangles, all flat.)
+expect matfaceted == 100
+expect matvertices == 24
+zone Can
+expect mat.smooth == 1
+# (Its side is round, its caps flat: 60 of its 124 triangles.)
+expect matfaceted > 48
+expect matfaceted < 49
+select -1
+lookat 0 0.45 1.5 1.3
+wait 5
+shot 08_ball_box_can
+select 3
+
+# The zones smoothed alike move together, whatever their materials (matlink is on).
+zone Ball
+material smooth 0
+expect matfaceted == 100
+zone Box
+expect mat.smooth == 0
+zone Can
+expect mat.smooth == 0
+expect matfaceted == 100
+# … as ONE undo step.
+undo
+expect mat.smooth == 1
+zone Ball
+expect mat.smooth == 1
+expect matfaceted == 0
+# … and Reset Zone brings them back together too, each to its own imported smoothing.
+material smooth 0
+zone Can
+expect mat.smooth == 0
+zone Ball
+matreset
+expect mat.smooth == 1
+zone Box
+expect mat.smooth == 1
+zone Can
+expect mat.smooth == 1
+expect matfaceted > 48
+zone Ball
+# The angle likewise: past 90 the box is a pillow (8 vertices) and the can's caps round off.
+material smoothangle 100
+zone Box
+expect mat.smoothangle == 100
+expect matfaceted == 0
+expect matvertices == 8
+zone Can
+expect matfaceted == 0
+select -1
+shot 08b_past_ninety_degrees
+select 3
+undo
+zone Box
+expect mat.smoothangle == 60
+expect matvertices == 24
+# With the link off, one zone alone.
+matlink off
+zone Box
+material smooth 0
+expect mat.smooth == 0
+zone Ball
+expect mat.smooth == 1
+zone Can
+expect mat.smooth == 1
+matlink on
+# An edit that is NOT the smoothing reaches the linked zone (Box and Can share one material's
+# values) and leaves its smoothing alone.
+expect matlinked == 1
+material roughness 30
+expect mat.smooth == 1
+zone Box
+expect mat.roughness == 30
+expect mat.smooth == 0
+
+# --- 9. The tab's own checkbox -------------------------------------------------------------------
+# (The Geometry section's Smooth by Angle box, driven through its own slot: one undoable edit.)
+select 0
+wait 5
+expect mat.smooth == 1
+ui check materials.smooth 0 0
+wait 3
+expect mat.smooth == 0
+expect matfaceted == 100
+undo
+expect mat.smooth == 1
+expect matfaceted == 0
+ui check materials.smooth 0 0
+wait 3
+ui check materials.smooth 0 1
+wait 3
+expect mat.smooth == 1
+expect matfaceted == 0

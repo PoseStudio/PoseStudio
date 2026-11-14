@@ -12,7 +12,7 @@ CREATE TABLE AssetLibraries(AssetLibraryID INTEGER PRIMARY KEY AUTOINCREMENT, As
 
 CREATE TABLE Favorites(FavoriteID INTEGER PRIMARY KEY AUTOINCREMENT, FavoritePath TEXT NOT NULL UNIQUE, FavoriteSortOrder INTEGER NOT NULL DEFAULT 0);
 
-CREATE TABLE AssetCollections(AssetCollectionID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionName TEXT NOT NULL, AssetCollectionParentID INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE AssetCollections(AssetCollectionID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionName TEXT NOT NULL, AssetCollectionParentID INTEGER NOT NULL DEFAULT 0, AssetCollectionScope TEXT NOT NULL DEFAULT '');
 
 CREATE TABLE AssetCollectionItems(AssetCollectionItemID INTEGER PRIMARY KEY AUTOINCREMENT, AssetCollectionItemPath TEXT NOT NULL, AssetCollectionItemCol INTEGER NOT NULL DEFAULT 0, AssetCollectionItemSortOrder INTEGER NOT NULL DEFAULT 0, UNIQUE(AssetCollectionItemPath, AssetCollectionItemCol) ON CONFLICT IGNORE);
 CREATE INDEX idx_AssetCollectionItemPath ON AssetCollectionItems(AssetCollectionItemPath);

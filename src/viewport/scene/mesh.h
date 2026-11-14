@@ -257,6 +257,39 @@ public:
     /// needs the mesh itself: Model::bakePosedMesh skins these as the vertex stage does.
     const std::vector<Vertex>&   cpuVertices() const { return m_cpuVertices; }
     const std::vector<uint32_t>& cpuIndices() const { return m_cpuIndices; }
+
+    // --- THE SMOOTHING (import/smoothnormals.h; the Materials tab's Smooth by Angle) ---
+    // The material says how the zone is to be shaded (MaterialParams::smoothByAngle / smoothAngle);
+    // the GEOMETRY is what is shaded so, and follows through the owning Model (applySmoothing),
+    // which smooths a surface across its zones. A smoothed mesh keeps its FILE's geometry beside
+    // the uploaded one: what the next angle is computed from, and what "as imported" puts back.
+    /// How the uploaded geometry is shaded: by angle (and which), or as its file has it.
+    bool  smoothingApplied() const { return m_smoothApplied; }
+    float smoothAngleApplied() const { return m_smoothAngleApplied; }
+    /// True while the material asks for another smoothing than the geometry has.
+    bool smoothingPending() const {
+        return m_material.smoothByAngle != m_smoothApplied || (m_smoothApplied && m_material.smoothAngle != m_smoothAngleApplied);
+    }
+    /// The mesh AS ITS FILE HAS IT: the kept file geometry while the mesh is smoothed, else the
+    /// uploaded geometry itself.
+    const std::vector<Vertex>&   fileVertices() const { return m_fileVertices.empty() ? m_cpuVertices : m_fileVertices; }
+    const std::vector<uint32_t>& fileIndices() const { return m_fileVertices.empty() ? m_cpuIndices : m_fileIndices; }
+    /// Makes the file geometry ready to smooth from or to put back: KEPT APART from the uploaded
+    /// one (a copy, the first time a mesh shaded as imported is smoothed) and COMPLETE — a file
+    /// geometry the import set aside before the occlusion bake has no occlusion, tangents or
+    /// corrective ranges of its own; they are taken from the uploaded geometry, whose index list
+    /// runs corner for corner with the file's.
+    void prepareFileGeometry();
+    /// Replaces the uploaded geometry with @p vertices / @p indices, smoothed by @p angle (new
+    /// device buffers, each on its own submit: THE CALLER HAS WAITED FOR THE DEVICE).
+    void setSmoothedGeometry(std::vector<Vertex> vertices, std::vector<uint32_t> indices, float angle);
+    /// The uploaded geometry already is what @p angle gives: only the record moves.
+    void markSmoothed(float angle) {
+        m_smoothApplied = true;
+        m_smoothAngleApplied = angle;
+    }
+    /// Back to the file's geometry (uploaded likewise), which is then no longer kept apart.
+    void restoreFileGeometry();
     /// The joint carrying most of this mesh's summed skin weight (0 for an unskinned mesh) —
     /// whose skin transform moves the centroid with the pose for the transparency sort.
     uint32_t dominantJoint() const { return m_dominantJoint; }
@@ -269,6 +302,8 @@ private:
     void refreshDetailMode();
     /// Writes every binding of m_materialSet from m_slotTexture (the fallbacks where null).
     void rebindAll();
+    /// m_cpuVertices / m_cpuIndices into new device buffers (the smoothing's; the old ones go).
+    void uploadGeometry();
 
     VulkanContext*       m_context = nullptr;
     const VulkanTexture* m_fallbackDiffuse = nullptr;
@@ -279,6 +314,14 @@ private:
     uint32_t                       m_indexCount = 0;
     std::vector<Vertex>            m_cpuVertices;       // see cpuVertices()
     std::vector<uint32_t>          m_cpuIndices;
+    // THE SMOOTHING: the file's geometry while the uploaded one is smoothed (empty = the uploaded
+    // geometry IS the file's), whether it has its occlusion / tangents / corrective ranges yet
+    // (see prepareFileGeometry), and how the uploaded geometry is shaded.
+    std::vector<Vertex>            m_fileVertices;
+    std::vector<uint32_t>          m_fileIndices;
+    bool                           m_fileComplete = true;
+    bool                           m_smoothApplied = false;
+    float                          m_smoothAngleApplied = 60.0f;
     std::string                    m_name;              // the zone's name (MeshData::name)
     MaterialParams                 m_material;          // the values as they stand (see material())
     MaterialParams                 m_importedMaterial;  // … and as imported (the restore target)

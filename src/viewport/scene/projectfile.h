@@ -19,6 +19,7 @@
 
 #include "posefile.h"          // PoseRows (the figure's pose snapshot rows)
 #include "lightingsettings.h"  // LightingSettings (the environment dials)
+#include "materialjson.h"      // ProjectTexture, and the material's JSON codec (shared with materialfile.h)
 #include "materialparams.h"    // MaterialParams (the Materials tab's per-zone values)
 #include "scenelight.h"        // SceneLight (the light objects)
 
@@ -30,18 +31,17 @@
 namespace pose {
 
 /// One zone's material as the Materials tab left it (2026-11-09): the zone's key (its name, or
-/// "#i" for an unnamed zone — Model::zoneKey) and its whole value set.
-/// One texture slot the Materials tab changed: the slot's name (materialMapName) and what it
-/// holds now — a file path, or "" for a cleared slot (a slot not listed is the import's own).
-struct ProjectTexture {
-    std::string slot;
-    std::string source;
-};
-
+/// "#i" for an unnamed zone — Model::zoneKey), its whole value set, and the texture slots the
+/// tab changed (ProjectTexture, materialjson.h): each slot's name and what it holds now — a file
+/// path, or "" for a cleared slot. A slot not listed is the import's own.
 struct ProjectMaterial {
     std::string                 zone;
     MaterialParams              params;
     std::vector<ProjectTexture> textures; ///< The slots that differ from the import (paths are absolute).
+    /// Whether the file says how the zone is smoothed (params.smoothByAngle / smoothAngle). A
+    /// project saved before the smoothing existed does not: the zone then keeps what the import
+    /// gives it.
+    bool                        hasSmoothing = false;
 };
 
 /// One saved figure: its source file plus the state to restore onto the re-imported model.

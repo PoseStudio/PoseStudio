@@ -14,8 +14,10 @@
 #ifndef MENUMANAGER_H
 #define MENUMANAGER_H
 
+#include <QList>
 #include <QObject>
 #include <QMainWindow>
+#include <QPointer>
 
 class AssetManagerWidget;
 class QAction;
@@ -44,6 +46,11 @@ public:
     /// anything else about AssetManagerWidget.
     void setAssetManagerWidget(AssetManagerWidget *widget);
 
+    /// Registers another library tab built on the Asset Manager's widget (the Materials
+    /// Library): it is refreshed with the Asset Manager when Preferences changes the asset
+    /// libraries, since a root of its own is resolved through them (the user's library).
+    void addLibraryBrowser(AssetManagerWidget *widget);
+
     /// Gives the File → Import actions a viewport to load models into. Must be called before the
     /// user can import (from main.cpp, once the viewport exists).
     void setViewportWidget(pose::ViewportWidget *viewport);
@@ -62,6 +69,11 @@ public:
     /// Save / Discard Changes / Cancel. True = proceed — after Save only if the save actually
     /// happened; false = cancelled. Public because main.cpp's close guard calls it.
     bool confirmDiscardChanges();
+
+signals:
+    /// File > Import > .MTLX chose a material file: the Materials panel applies it to the
+    /// selected object's zone (main.cpp connects the two).
+    void materialFileChosen(const QString& path);
 
 private:
     /// File → New: a fresh launch — picker mirrors synced via signals, the Environment tab reset,
@@ -87,6 +99,9 @@ private:
     void importRiggedFile(const QString &title, const QString &filter);
     /// Opens a file dialog and imports the chosen Gaussian splat scene (`.ply` / `.splat`).
     void importSplatFile();
+    /// Opens a file dialog for a MaterialX document (`.mtlx`) and announces the choice
+    /// (materialFileChosen): its material is applied to the selected zone, not imported.
+    void importMaterialXFile();
 
     /// Saves / loads the current figure's pose to/from a `.pose` file via a file dialog.
     void savePoseFile();
@@ -104,6 +119,7 @@ private:
 
     QMainWindow *mainWindow;
     AssetManagerWidget *assetManagerWidget = nullptr;
+    QList<QPointer<AssetManagerWidget>> m_libraryBrowsers; ///< See addLibraryBrowser.
     pose::ViewportWidget *viewportWidget = nullptr;
     pose::EnvironmentPanel *environmentPanel = nullptr;
     QAction *m_showSkeletonAction = nullptr; // View → Show Skeleton; wired in setViewportWidget

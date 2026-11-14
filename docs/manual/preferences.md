@@ -54,6 +54,8 @@ The list of your **asset libraries** — the folders the [Asset Manager](asset-m
 
 The Asset Manager updates as soon as you add or remove a library.
 
+**Copy texture files when saving a material** (on by default) decides where a saved material's textures live. On, saving a material copies the image files it uses into a `textures` folder beside it — each file once — so the material keeps working when its folder is moved, shared or opened on another computer. Off, the material refers to the files where they are and stops finding them if they move. See [Where the textures go](materials.md#where-the-textures-go).
+
 ## Factory Reset
 
 Wipes everything PoseStudio stores about you — asset libraries, collections, favorites and every preference — and restarts the application as if freshly installed. Your files on disk are untouched, including *My PoseStudio Library* and your HDRIs; only the database is reset (the default library is registered again at the restart, and the install ID is regenerated).

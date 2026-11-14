@@ -707,7 +707,7 @@ int VulkanWindow::loadProjectFile(const QString& path,
         const int modelIndex = static_cast<int>(scene().modelCount()) - 1;
         std::vector<std::pair<int, std::vector<MaterialOverlay>>> overlayStacks;
         for (const ProjectMaterial& m : fig.materials) {
-            model->applyMaterialOverride(m.zone, m.params);
+            model->applyMaterialOverride(m.zone, m.params, /*keepSmoothing=*/!m.hasSmoothing);
             // … its overlays, painted once every slot below is in place (an overlay image that
             // is gone is left out of the composite, with a warning in the log; the stack keeps it).
             if (!m.params.overlays.empty()) {
@@ -732,6 +732,7 @@ int VulkanWindow::loadProjectFile(const QString& path,
             }
         }
         setModelOverlays(modelIndex, overlayStacks);
+        scene().syncSmoothing(modelIndex); // (a zone whose saved smoothing is not the import's: its geometry follows)
     }
 
     // 5. ENVIRONMENT — the saved dials + HDRI (a no-op path keeps the startup bake, as does a

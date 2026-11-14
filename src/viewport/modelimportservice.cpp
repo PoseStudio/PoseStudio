@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include "aobaker.h"
+#include "smoothnormals.h"
 #include "tangentgen.h"
 
 #include "import/importerregistry.h"
@@ -952,6 +953,14 @@ void ModelImportService::uploadModelData(VulkanRenderer& renderer, ModelData& da
     progress.phase(QObject::tr("Decoding textures…"));
     decodeModelTextures(data);
     const qint64 msDecode = progress.elapsedMs();
+
+    // THE SMOOTHING's default (smoothnormals.h): a mesh whose file brings no smoothing of its own
+    // — a normal per face, or none — is smoothed by angle, before the occlusion and the tangents
+    // are made for it. (POSESTUDIO_NO_IMPORT_SMOOTHING: every file as it is, the A/B.)
+    static const bool noImportSmoothing = qEnvironmentVariableIsSet("POSESTUDIO_NO_IMPORT_SMOOTHING");
+    if (!noImportSmoothing) {
+        applyImportSmoothing(data);
+    }
 
     // Bake per-vertex ambient occlusion (skipped internally for very large meshes; parallel
     // across cores) + UV tangents on the FINAL render mesh — post-morph, post-subdivision, all

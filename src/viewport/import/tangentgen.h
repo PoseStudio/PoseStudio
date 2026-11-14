@@ -14,12 +14,20 @@
 #ifndef TANGENTGEN_H
 #define TANGENTGEN_H
 
+#include <cstdint>
+#include <vector>
+
 namespace pose {
 
 struct ModelData;
+struct Vertex;
 
 /// Fills every mesh vertex's `tangent` in place.
 void computeTangents(ModelData& data);
+
+/// One mesh's: the vertices' `tangent` from their positions, normals and UVs (a mesh whose
+/// normals were recomputed after import — the smoothing by angle — gets its tangents again).
+void computeTangents(std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
 
 } // namespace pose
 

@@ -57,6 +57,7 @@
 #include "viewpreset.h"
 
 #include <QElapsedTimer>
+#include <QImage>
 #include <QPointF>
 #include <QWindow>
 
@@ -83,7 +84,9 @@ class RenderSnapshot;        // … and the viewport's own kind of one (rendersn
 struct RenderSplatLayers;    // a scene's Gaussian splats as layers of a render (render/renderscene.h)
 namespace renderapi {
 struct Environment;
+struct Material;
 }
+struct RenderMaterialContext; // what of a model's import says how its materials are read (scene/renderexport.h)
 struct VrInput;
 struct DecodedImage;
 struct OverlayImage;         // a decoded overlay image, cropped (scene/overlaycompositor.h)
@@ -271,6 +274,32 @@ public:
     /// from where it stands. One undo entry (or the open bracket's).
     void aimLightAtSubject(int index);
 
+    /// A SAVED MATERIAL (scene/materialfile.h; vulkanwindow_materialfile.cpp). saveMaterialFile
+    /// writes the selected zone's material — its values and the files of its maps — to the `.psm`
+    /// file @p path. With @p copyTextures the maps are COLLECTED beside it (assets/assetstore.h:
+    /// a file not already beside the material is copied into `textures/<name>/`, an image that
+    /// has no file of its own is written there), so the material's folder is all it needs;
+    /// without, each map is named where it is and an image without a file is left out.
+    /// @p report says what was done with the maps. renderMaterialIcon pictures that material on a ball under a fixed studio
+    /// light, @p size pixels square with a transparent background: path traced where there is a
+    /// render engine (it runs to its end in a local event loop — not for the middle of a drag),
+    /// else drawn by the built-in ball shader; @p renderer says which; a null image without a
+    /// selected zone. applyMaterialFile puts a saved material on the selected zone as ONE
+    /// undoable edit — every slot becomes what the file says, then the values; the zone's
+    /// overlays stay. A map is looked for where the file says, then by its name beside the
+    /// material and through its library (AssetStore::resolveTexture): @p relocatedMaps counts
+    /// the maps found that way, @p missingMaps those found nowhere (their slots are left empty).
+    /// False with @p error when there is nothing selected or the file is no material.
+    bool   saveMaterialFile(const QString& path, bool copyTextures, QString* error = nullptr, MaterialSaveReport* report = nullptr);
+    QImage renderMaterialIcon(int size, QString* renderer = nullptr);
+    /// @p path may also be a MATERIALX document (`.mtlx`; scene/materialxfile.h): the material
+    /// named @p material (the first where the name is empty) is applied the same way, and
+    /// @p notes takes what the document says that a PoseStudio material does not carry.
+    /// materialNamesIn lists a file's materials (one, its own name, for a `.psm`).
+    bool   applyMaterialFile(const QString& path, QString* error = nullptr, int* missingMaps = nullptr, int* relocatedMaps = nullptr,
+                             const QString& material = QString(), QStringList* notes = nullptr);
+    static QStringList materialNamesIn(const QString& path, QString* error = nullptr);
+
     /// A PRODUCTION RENDER's scene (vulkanwindow_render.cpp): what the viewport shows — every
     /// mesh as posed, its materials and maps with the overlays painted in, the camera as framed,
     /// the key light and the environment — frozen for a render engine and kept alive by the
@@ -444,6 +473,10 @@ signals:
     /// preferences page driven through its own widgets (`ui`), pictured (`uishot` saves an open
     /// dialog as <name>_dialog.png) and closed by its Close button (`ui click preferences.close`).
     void preferencesRequested(const QString& tab);
+    /// The scripted test's `asset` command: a file operation of the library browser (rename,
+    /// duplicate, move, delete, export, install — AssetManagerWidget::runFileOperation), its
+    /// paths made absolute against the run's folder.
+    void libraryOperationRequested(const QStringList& words);
     /// The scripted test's `renderwindow [start]`: the Render window is wanted, as Render → Show
     /// Render Window opens it (@p start: as Render → Render Image does, a render begun at once).
     /// Its controls carry `testId`s for `ui` (render.start, render.samples …) and `uishot` saves
@@ -644,13 +677,32 @@ private:
     float   m_appliedEnvironmentScale = 1.0f;
     /// Fills @p snapshot's lighting half (captureRenderScene and captureRenderLightingOnly share it).
     void captureRenderLighting(RenderSnapshot& snapshot) const;
+    /// ONE ZONE's material as a render engine takes it — the values (renderMaterial) and the
+    /// zone's maps, entered into @p snapshot's images — for mesh @p meshIndex of model
+    /// @p modelIndex. @p withOverlays paints the zone's overlays into the maps they touch, as a
+    /// render of the scene shows them; without, the surface alone (a saved material's ball).
+    /// Shared by captureRenderScene and the material ball's scene, so the two cannot differ.
+    renderapi::Material captureZoneMaterial(RenderSnapshot& snapshot, OverlayBake& bake, int modelIndex, int meshIndex,
+                                            const char* name, const RenderMaterialContext& context, bool withOverlays);
     /// The scene's Gaussian splats as a render's layers, drawn now at @p width × @p height
     /// (RenderSceneHolder::splatLayers; vulkanwindow_render.cpp). @p environment is the render's
     /// own description of the backdrop, @p floorShadows whether its floor catches shadows.
     std::shared_ptr<RenderSplatLayers> captureSplatLayers(int width, int height, const renderapi::Environment& environment,
                                                           bool floorShadows);
     // The procedural studio's pixels as a render engine is handed them, made on first need
-    // (RenderSnapshot::environmentPixels says why they are shared).
+    // (RenderSnapshot::environmentPixels says why they are shared) — by studioEnvironmentPixels(),
+    // which every reader goes through.
+    const std::vector<glm::vec3>& studioEnvironmentPixels() const;
+    /// THE LIGHT A MATERIAL'S ICON IS MADE UNDER (renderMaterialIcon): the icon studio of
+    /// scene/materialball.h as a render engine is handed it — never the scene's own environment
+    /// nor a panorama of the library, so every icon is lit alike. Made per icon and let go with
+    /// its render (a tenth of a second against 25 MB kept for the session).
+    struct IconEnvironment {
+        std::shared_ptr<const std::vector<glm::vec3>> pixels;
+        int                                           width = 0;
+        int                                           height = 0;
+    };
+    static IconEnvironment iconEnvironment();
     mutable std::shared_ptr<const std::vector<glm::vec3>> m_studioEnvironment;
     mutable int                                           m_studioEnvironmentWidth = 0;
     mutable int                                           m_studioEnvironmentHeight = 0;
@@ -1021,6 +1073,8 @@ private:
     void scriptFrameRendered();  ///< A frame was presented after `shot`: save the capture, resume.
     void scriptReport(const char* label); ///< `report`: what a user would see, as numbers.
     void scriptRender(const QStringList& words); ///< `render`: a production render, to its end, saved (vulkanwindow_render.cpp).
+    void scriptSaveMaterial(const QStringList& words);  ///< `savematerial`: the zone's material and its icon (vulkanwindow_materialfile.cpp).
+    void scriptApplyMaterial(const QStringList& words); ///< `applymaterial`: a saved material onto the selected zone.
     void scriptLamp(const QStringList& words);   ///< `lamp`: the light objects, driven as the Lights tab and the mouse drive them (vulkanwindow_lights.cpp).
     bool scriptLampMetric(const QString& name, double& value) const; ///< `lamps`, `lampselected`, `lamp.<n>.<field>`.
     bool scriptMetric(const QString& name, double& value); ///< A number `expect` can assert on.

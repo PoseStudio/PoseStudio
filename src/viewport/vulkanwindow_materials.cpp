@@ -59,6 +59,23 @@ std::string pointerKey(const void* p) {
     return buffer;
 }
 
+/// One channel of a decoded image as a cutout mask (its value in every channel, opaque): a
+/// cutout that lives in the ALPHA of a color image (a leaf's), which the mask decode — gray —
+/// would read as the leaf's brightness.
+std::shared_ptr<DecodedImage> channelAsMask(const DecodedImage& image, int channel) {
+    auto out = std::make_shared<DecodedImage>();
+    out->width = image.width;
+    out->height = image.height;
+    out->pixels.resize(image.pixels.size());
+    const std::size_t c = static_cast<std::size_t>(std::clamp(channel, 0, 3));
+    for (std::size_t i = 0; i + 3 < image.pixels.size(); i += 4) {
+        const uint8_t v = image.pixels[i + c];
+        out->pixels[i] = out->pixels[i + 1] = out->pixels[i + 2] = v;
+        out->pixels[i + 3] = 255;
+    }
+    return out;
+}
+
 } // namespace
 
 bool VulkanWindow::setMaterialTexture(MaterialMap map, const QString& source) {
@@ -129,11 +146,24 @@ bool VulkanWindow::applySlotSource(int model, int mesh, MaterialMap map, const s
     } else if (!source.empty()) {
         // A cutout mask is read as gray (the import's decodeMask: a single-channel or RGB mask
         // alike); every other slot as RGBA. A roughness or metalness file read here is a plain
-        // grayscale map whose RED channel is the value.
-        plain = map == MaterialMap::Opacity ? decodeMaskFile(source) : decodeTextureFile(source);
-        channel = 0;
+        // grayscale map whose RED channel is the value — unless the source names ANOTHER channel
+        // (textureSourcePath: a packed image, a cutout in a color image's alpha).
+        int               wanted = 0;
+        const std::string path = textureSourcePath(source, &wanted);
+        if (map == MaterialMap::Opacity) {
+            if (wanted != 0) {
+                const std::shared_ptr<DecodedImage> image = decodeTextureFile(path);
+                plain = image ? channelAsMask(*image, wanted) : nullptr;
+            } else {
+                plain = decodeMaskFile(path);
+            }
+            channel = 0;
+        } else {
+            plain = decodeTextureFile(path);
+            channel = wanted;
+        }
         if (!plain) {
-            qWarning().noquote() << "[materials] could not read the image" << QString::fromStdString(source);
+            qWarning().noquote() << "[materials] could not read the image" << QString::fromStdString(path);
             return false;
         }
     }

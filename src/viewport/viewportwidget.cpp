@@ -375,6 +375,7 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
         }
     });
     connect(m_window, &VulkanWindow::preferencesRequested, this, &ViewportWidget::preferencesRequested);
+    connect(m_window, &VulkanWindow::libraryOperationRequested, this, &ViewportWidget::libraryOperationRequested);
     connect(m_window, &VulkanWindow::renderWindowRequested, this, &ViewportWidget::renderWindowRequested);
     // Same forward for the document state: the main window's title listens on the facade.
     connect(m_window, &VulkanWindow::documentChanged, this, &ViewportWidget::documentChanged);
@@ -568,6 +569,35 @@ bool ViewportWidget::setMaterialTexture(MaterialMap map, const QString& source) 
 
 std::shared_ptr<const DecodedImage> ViewportWidget::materialSlotImage(MaterialMap map, int* channel) const {
     return m_window ? m_window->materialSlotImage(map, channel) : nullptr;
+}
+
+bool ViewportWidget::saveMaterialFile(const QString& path, bool copyTextures, QString* error, MaterialSaveReport* report) {
+    if (m_window) {
+        return m_window->saveMaterialFile(path, copyTextures, error, report);
+    }
+    if (error != nullptr) {
+        *error = tr("The viewport is not available.");
+    }
+    return false;
+}
+
+QImage ViewportWidget::renderMaterialIcon(int size, QString* renderer) {
+    return m_window ? m_window->renderMaterialIcon(size, renderer) : QImage();
+}
+
+QStringList ViewportWidget::materialNamesIn(const QString& path, QString* error) const {
+    return VulkanWindow::materialNamesIn(path, error);
+}
+
+bool ViewportWidget::applyMaterialFile(const QString& path, QString* error, int* missingMaps, int* relocatedMaps, const QString& material,
+                                       QStringList* notes) {
+    if (m_window) {
+        return m_window->applyMaterialFile(path, error, missingMaps, relocatedMaps, material, notes);
+    }
+    if (error != nullptr) {
+        *error = tr("The viewport is not available.");
+    }
+    return false;
 }
 
 std::shared_ptr<RenderSceneHolder> ViewportWidget::captureRenderScene() {

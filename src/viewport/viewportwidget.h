@@ -21,6 +21,7 @@
 #include "scene/camera.h" // AxisView (the View menu's camera entries)
 #include "scene/scenelight.h" // SceneLight, LightKind (the Lights tab)
 
+#include <QImage>
 #include <QPointF>
 #include <QStringList>
 #include <QWidget>
@@ -48,6 +49,7 @@ enum class MaterialMap;
 struct DecodedImage;
 struct MaterialOverlay;
 struct MaterialParams;
+struct MaterialSaveReport;
 struct MaterialView;
 struct OverlayImage;
 enum class OverlayImageKind;
@@ -151,6 +153,17 @@ public:
     /// The selected zone's image in slot @p map (VulkanWindow::materialSlotImage), for the tab's
     /// thumbnails; null without one.
     std::shared_ptr<const DecodedImage> materialSlotImage(MaterialMap map, int* channel = nullptr) const;
+    /// A SAVED MATERIAL (VulkanWindow's methods of the same names; scene/materialfile.h): the
+    /// selected zone's material written to a `.psm` file; that material pictured on a ball,
+    /// @p size pixels square on a transparent background (it may take a moment: a render engine
+    /// traces it where there is one); and a saved material put on the selected zone, one undo
+    /// entry.
+    bool   saveMaterialFile(const QString& path, bool copyTextures, QString* error = nullptr, MaterialSaveReport* report = nullptr);
+    QImage renderMaterialIcon(int size, QString* renderer = nullptr);
+    bool   applyMaterialFile(const QString& path, QString* error = nullptr, int* missingMaps = nullptr, int* relocatedMaps = nullptr,
+                             const QString& material = QString(), QStringList* notes = nullptr);
+    /// The materials a file holds: a MaterialX document's, by name (VulkanWindow::materialNamesIn).
+    QStringList materialNamesIn(const QString& path, QString* error = nullptr) const;
 
     /// THE LIGHTS TAB's side of the scene's light objects (scene/scenelight.h; VulkanWindow's
     /// methods of the same names): the list and the selected light, adding and removing (one
@@ -251,6 +264,8 @@ signals:
     /// The Preferences dialog is wanted on that tab — the strip's Selection button, and the
     /// scripted test's `prefs <tab>` (the shell opens it — MenuManager::openPreferencesDialog).
     void preferencesRequested(const QString& tab);
+    /// The scripted test's `asset` command, for the library browser (VulkanWindow's signal).
+    void libraryOperationRequested(const QStringList& words);
     /// The Render window is wanted (@p start: and a render begun) — the strip's Render button,
     /// and the scripted test's `renderwindow [start]` (the shell opens it — MenuManager::renderImage).
     void renderWindowRequested(bool start);

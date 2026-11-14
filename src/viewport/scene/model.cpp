@@ -12,6 +12,8 @@
 #include "descriptorutil.h"
 #include "modeldata.h"
 #include "ray.h"
+#include "smoothnormals.h"
+#include "tangentgen.h"
 #include "textureuploadcache.h"
 #include "vertex.h"
 #include "vulkancommands.h"
@@ -720,6 +722,68 @@ bool Model::setMeshOverlays(std::size_t i, const std::vector<MaterialOverlay>& o
     return true;
 }
 
+bool Model::smoothingPending() const {
+    for (const Mesh& mesh : m_meshes) {
+        if (mesh.smoothingPending()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Model::applySmoothing() {
+    if (!smoothingPending()) {
+        return false;
+    }
+    // Every zone that is to be smooth, from its file geometry (kept apart first: the lists below
+    // point into the meshes).
+    for (Mesh& mesh : m_meshes) {
+        if (mesh.material().smoothByAngle) {
+            mesh.prepareFileGeometry();
+        }
+    }
+    std::vector<SmoothMesh> zones(m_meshes.size());
+    for (std::size_t i = 0; i < m_meshes.size(); ++i) {
+        const Mesh& mesh = m_meshes[i];
+        zones[i].vertices = &mesh.fileVertices();
+        zones[i].indices = &mesh.fileIndices();
+        zones[i].smooth = mesh.material().smoothByAngle;
+        zones[i].angleDeg = mesh.material().smoothAngle;
+    }
+    std::vector<SmoothedMesh> smoothed = smoothByAngle(zones);
+    static_assert(sizeof(Vertex) == 88, "Vertex is compared bytewise here: no padding");
+    bool changed = false;
+    for (std::size_t i = 0; i < m_meshes.size(); ++i) {
+        Mesh&       mesh = m_meshes[i];
+        const float angle = mesh.material().smoothAngle;
+        if (!mesh.material().smoothByAngle) {
+            if (mesh.smoothingApplied()) {
+                mesh.restoreFileGeometry();
+                changed = true;
+            }
+            continue;
+        }
+        SmoothedMesh& made = smoothed[i];
+        if (made.indices.size() != mesh.fileIndices().size()) {
+            mesh.markSmoothed(angle); // (nothing to smooth: a mesh with no triangle)
+            continue;
+        }
+        computeTangents(made.vertices, made.indices);
+        const bool same = made.indices == mesh.cpuIndices() && made.vertices.size() == mesh.cpuVertices().size() &&
+                          std::memcmp(made.vertices.data(), mesh.cpuVertices().data(), made.vertices.size() * sizeof(Vertex)) == 0;
+        if (same) {
+            mesh.markSmoothed(angle);
+        } else {
+            mesh.setSmoothedGeometry(std::move(made.vertices), std::move(made.indices), angle);
+            changed = true;
+        }
+    }
+    if (changed) {
+        ++m_materialRevision;
+    }
+    return changed;
+}
+
 std::vector<int> Model::overlayZones(std::size_t i) const {
     std::vector<int> zones;
     if (i >= m_meshes.size()) {
@@ -774,11 +838,16 @@ std::vector<Model::MaterialOverride> Model::materialOverrides() const {
     return out;
 }
 
-bool Model::applyMaterialOverride(const std::string& zone, const MaterialParams& params) {
+bool Model::applyMaterialOverride(const std::string& zone, const MaterialParams& params, bool keepSmoothing) {
     bool any = false;
     for (std::size_t i = 0; i < m_meshes.size(); ++i) {
         if (zoneKey(i) == zone) {
-            any = setMeshMaterial(i, params) || any;
+            MaterialParams next = params;
+            if (keepSmoothing) {
+                next.smoothByAngle = m_meshes[i].material().smoothByAngle;
+                next.smoothAngle = m_meshes[i].material().smoothAngle;
+            }
+            any = setMeshMaterial(i, next) || any;
         }
     }
     return any;

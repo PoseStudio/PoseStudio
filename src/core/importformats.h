@@ -58,6 +58,27 @@ inline bool isSplatFile(const QString& path) {
            path.endsWith(QStringLiteral(".spz"), Qt::CaseInsensitive);
 }
 
+/// The extension of a saved material (scene/materialfile.h), lowercase with its dot.
+inline QString materialFileExtension() {
+    return QStringLiteral(".psm");
+}
+
+/// A saved material (`.psm`): not imported — APPLIED to the zone the Materials tab shows.
+inline bool isMaterialFile(const QString& path) {
+    return path.endsWith(materialFileExtension(), Qt::CaseInsensitive);
+}
+
+/// A MaterialX document (`.mtlx`): its materials are read (scene/materialxfile.h) and one is
+/// APPLIED to the zone the Materials tab shows, as a saved material is.
+inline bool isMaterialXFile(const QString& path) {
+    return path.endsWith(QStringLiteral(".mtlx"), Qt::CaseInsensitive);
+}
+
+/// A file that is applied to a zone and not imported: a saved material or a MaterialX document.
+inline bool isAppliedMaterialFile(const QString& path) {
+    return isMaterialFile(path) || isMaterialXFile(path);
+}
+
 /// Anything the figure route imports: a native figure or a rigged interchange file.
 inline bool isFigureRouteFile(const QString& path) {
     return isNativeFigureFile(path) || isRiggedFile(path);

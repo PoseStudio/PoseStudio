@@ -429,6 +429,11 @@ public:
     /// IMPORTED material equals its (the tab's linked zones: a figure's skin zones together).
     /// True if anything changed.
     bool setSelectedZoneMaterial(const MaterialParams& params, bool linked);
+    /// THE SMOOTHING: brings model @p model's geometry in line with what its zones' materials
+    /// ask (Model::applySmoothing, after the device has gone idle). Every call here that sets
+    /// material values ends with it; a caller that sets them on the Model itself — a project's
+    /// load — calls it afterwards. True if any geometry changed.
+    bool syncSmoothing(int model);
     /// Every zone material of model @p model in mesh order (an undo snapshot), and its
     /// re-application. Empty / no-op for a bad index.
     std::vector<MaterialParams> captureMaterials(int model) const;
