@@ -17,7 +17,6 @@ The viewport sits on the left and the side panel on the right, separated by a dr
 | Save (`Ctrl+S`) / Save As… (`Ctrl+Shift+S`) | Saves the whole scene as a `.pss` project. See [Project Files](project-files.md). |
 | Import → .OBJ (Wavefront) | Imports a static mesh. See [Importing Content](importing.md#static-models-obj). |
 | Import → .DUF (DUF File) | Imports a rigged character figure. See [Importing Content](importing.md#character-figures-duf-dsf). |
-| Import → .MTLX (MaterialX Material) | Puts a material from a MaterialX file on the selected object's zone; it adds no object. See [MaterialX materials](importing.md#materialx-materials-mtlx). |
 | Save Pose… | Writes the active figure's pose to a `.pose` file. |
 | Load Pose… | Applies a `.pose` file to the active figure (undoable). |
 | Quit (`Ctrl+Q`) | Closes PoseStudio. With unsaved changes it asks first: Save, Discard Changes or Cancel. |

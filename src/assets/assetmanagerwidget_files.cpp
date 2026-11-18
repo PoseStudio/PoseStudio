@@ -4,7 +4,7 @@
  *        Duplicate, Move To Folder, Delete — and PACKAGES (Export Package, Install Package).
  *
  * The work itself is assets/assetstore.h's (headless, and checked there): the asset, its icon
- * and the texture files of its folder's `textures` store move, are named and go together. This
+ * and the texture files of its folder's `.textures` store move, are named and go together. This
  * file is what the browser adds. Each operation has two halves:
  *
  *   - the DIALOG (renameAssetFile, moveAssetFile, …): what the context menu's entry runs — it
@@ -194,7 +194,7 @@ void AssetManagerWidget::moveAssetFile(const QString& assetPath) {
 void AssetManagerWidget::deleteAssetFile(const QString& assetPath) {
     const QString name = QFileInfo(assetPath).completeBaseName();
     QMessageBox   box(QMessageBox::Question, tr("Delete"), tr("Move \"%1\" to the trash?").arg(name), QMessageBox::NoButton, this);
-    box.setInformativeText(tr("Its icon goes with it, and so do the texture files in this folder's \"textures\" folder that no other "
+    box.setInformativeText(tr("Its icon goes with it, and so do the texture files in this folder's \".textures\" folder that no other "
                               "asset here uses."));
     QPushButton* trash = box.addButton(tr("Move To Trash"), QMessageBox::DestructiveRole);
     box.addButton(QMessageBox::Cancel);

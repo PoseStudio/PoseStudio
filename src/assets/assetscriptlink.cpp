@@ -10,6 +10,7 @@
 
 #include "assetscriptlink.h"
 
+#include "hiddennames.h"
 #include "figureutils.h"   // figureFileKind — the figure importer's own "is this a character?"
 #include "importformats.h"
 
@@ -475,6 +476,7 @@ QString loneFigureIn(const QString& folder) {
         QDir(folder).entryInfoList(QDir::Files | QDir::NoDotAndDotDot | QDir::Readable, QDir::Name);
     QString found;
     for (const QFileInfo& info : files) {
+        if (HiddenNames::isHidden(info.fileName())) continue; // hidden from the browser: not the folder's character
         if (!pose::ImportFormats::isNativeFigureFile(info.fileName())) continue;
         QFile file(info.absoluteFilePath());
         if (!file.open(QIODevice::ReadOnly)) continue;

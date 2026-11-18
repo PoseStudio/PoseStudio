@@ -1,5 +1,5 @@
 # THE TEXTURE STORE (src/assets/assetstore.h): a saved material's texture files lie in a
-# `textures` folder BESIDE it and are named by relative paths, so the material's folder is all
+# `.textures` folder BESIDE it and are named by relative paths, so the material's folder is all
 # the material needs. Saving collects them there — copied once, the same bytes shared, an image
 # that has no file of its own written out — and applying finds them again, by name if they are
 # no longer where the material says.
@@ -14,7 +14,7 @@
 # The run's folder is the "library": <out>/lib/Fabric, <out>/lib/Other, <out>/lib/Cube, and
 # <out>/linked for the saves that are told not to copy. LOOK at <out>/lib/Cube/Packed.png beside
 # PackedOnSphere.png (the same material before and after its maps went through the store), and
-# at the three files in <out>/lib/Cube/textures/Packed.
+# at the three files in <out>/lib/Cube/.textures/Packed.
 
 wait 10
 select 0
@@ -141,21 +141,25 @@ expect matfile.relocated == 0
 expect mattex.basecolor == 0
 undo
 
-# --- 8. A material saved OVER itself with another map does not leave the old one behind ------------
+# --- 8. A material saved OVER itself with another map LEAVES the old one where it is ---------------
+# (A save never removes a texture file: a map out of a slot is not a map out of use.)
 zone Iridescent
 texture basecolor tex_red.png
 savematerial lib/Solo/One.psm noicon
 expect matfile.copied == 1
-expect exists.lib/Solo/textures/One/tex_red.png == 1
+expect exists.lib/Solo/.textures/One/tex_red.png == 1
 texture basecolor tex_mask.png
 savematerial lib/Solo/One.psm noicon
 expect matfile.copied == 1
-expect exists.lib/Solo/textures/One/tex_mask.png == 1
-expect exists.lib/Solo/textures/One/tex_red.png == 0
-# (… but a map another material of the folder still names stays.)
+expect exists.lib/Solo/.textures/One/tex_mask.png == 1
+expect exists.lib/Solo/.textures/One/tex_red.png == 1
+# (… and a second material of the folder finds the file that is there.)
 savematerial lib/Solo/Two.psm noicon
 expect matfile.reused == 1
+# (Saved once more with the first map: it is still there, so nothing is copied.)
 texture basecolor tex_red.png
 savematerial lib/Solo/One.psm noicon
-expect exists.lib/Solo/textures/One/tex_mask.png == 1
-expect exists.lib/Solo/textures/One/tex_red.png == 1
+expect matfile.copied == 0
+expect matfile.reused == 1
+expect exists.lib/Solo/.textures/One/tex_mask.png == 1
+expect exists.lib/Solo/.textures/One/tex_red.png == 1

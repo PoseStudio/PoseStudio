@@ -11,7 +11,7 @@
 #       tools/ikscripts/library/file_operations.txt <out> POSESTUDIO_IK_SCRIPT_ASSETS=<assets> \
 #       POSESTUDIO_MATERIALS_DIR=<out>/lib "POSESTUDIO_TAB=Materials Library"
 #
-# LOOK at ui/*.png: the tab's tree never lists a `textures` folder; the root's grid shows the
+# LOOK at ui/*.png: the tab's tree never lists a `.textures` folder; the root's grid shows the
 # renamed material under its new name with its icon, and the folders the operations made.
 
 wait 10
@@ -28,8 +28,8 @@ savematerial lib/Fabric/RedRough.psm
 expect matfile.reused == 2
 zone Glass
 savematerial lib/Glass.psm
-expect exists.lib/Fabric/textures/Red/tex_red.png == 1
-expect count.lib/Fabric/textures/Red/* == 2
+expect exists.lib/Fabric/.textures/Red/tex_red.png == 1
+expect count.lib/Fabric/.textures/Red/* == 2
 
 # --- 1. Rename: the file, its icon — and it still finds its maps -----------------------------------
 asset rename lib/Glass.psm Crystal
@@ -41,7 +41,7 @@ asset rename lib/Fabric/Red.psm Crimson
 expect exists.lib/Fabric/Crimson.psm == 1
 expect exists.lib/Fabric/Crimson.png == 1
 expect exists.lib/Fabric/Red.psm == 0
-expect exists.lib/Fabric/textures/Red/tex_red.png == 1
+expect exists.lib/Fabric/.textures/Red/tex_red.png == 1
 zone Velvet
 applymaterial lib/Fabric/Crimson.psm
 expect matfile.ok == 1
@@ -61,19 +61,19 @@ asset duplicate lib/Fabric/Crimson.psm
 expect count.lib/Fabric/Crimson*.psm == 2
 expect count.lib/Fabric/Crimson*.png == 2
 expect count.lib/Fabric/*.psm == 3
-expect count.lib/Fabric/textures/* == 1
-expect count.lib/Fabric/textures/Red/* == 2
+expect count.lib/Fabric/.textures/* == 1
+expect count.lib/Fabric/.textures/Red/* == 2
 
 # --- 3. Move: its textures are collected into the new folder's store -------------------------------
 asset move lib/Fabric/RedRough.psm lib/Canvas
 expect exists.lib/Canvas/RedRough.psm == 1
 expect exists.lib/Canvas/RedRough.png == 1
-expect exists.lib/Canvas/textures/RedRough/tex_red.png == 1
-expect exists.lib/Canvas/textures/RedRough/tex_rough.png == 1
+expect exists.lib/Canvas/.textures/RedRough/tex_red.png == 1
+expect exists.lib/Canvas/.textures/RedRough/tex_rough.png == 1
 expect exists.lib/Fabric/RedRough.psm == 0
 expect exists.lib/Fabric/RedRough.png == 0
 # (Crimson and its copy still name the old folder's files: they stay.)
-expect count.lib/Fabric/textures/Red/* == 2
+expect count.lib/Fabric/.textures/Red/* == 2
 zone Velvet
 applymaterial lib/Canvas/RedRough.psm
 expect matfile.missing == 0
@@ -86,12 +86,12 @@ undo
 asset delete lib/Fabric/Crimson copy.psm
 expect count.lib/Fabric/*.psm == 1
 expect count.lib/Fabric/*.png == 1
-expect count.lib/Fabric/textures/Red/* == 2
+expect count.lib/Fabric/.textures/Red/* == 2
 asset delete lib/Fabric/Crimson.psm
 expect count.lib/Fabric/*.psm == 0
 expect count.lib/Fabric/*.png == 0
-expect exists.lib/Fabric/textures == 0
-expect exists.lib/Canvas/textures/RedRough/tex_red.png == 1
+expect exists.lib/Fabric/.textures == 0
+expect exists.lib/Canvas/.textures/RedRough/tex_red.png == 1
 
 # --- 5. A package: one material with what it needs, installed elsewhere and whole there -----------
 asset export lib/Canvas/RedRough.psm packages/redrough.zip
@@ -99,8 +99,8 @@ expect exists.packages/redrough.zip == 1
 asset install packages/redrough.zip lib/Installed
 expect exists.lib/Installed/RedRough.psm == 1
 expect exists.lib/Installed/RedRough.png == 1
-expect exists.lib/Installed/textures/RedRough/tex_red.png == 1
-expect exists.lib/Installed/textures/RedRough/tex_rough.png == 1
+expect exists.lib/Installed/.textures/RedRough/tex_red.png == 1
+expect exists.lib/Installed/.textures/RedRough/tex_rough.png == 1
 zone Iridescent
 applymaterial lib/Installed/RedRough.psm
 expect matfile.ok == 1
@@ -113,6 +113,6 @@ asset export lib/Canvas packages/canvas.zip
 asset install packages/canvas.zip lib/Unpacked
 expect exists.lib/Unpacked/Canvas/RedRough.psm == 1
 expect exists.lib/Unpacked/Canvas/RedRough.png == 1
-expect exists.lib/Unpacked/Canvas/textures/RedRough/tex_rough.png == 1
+expect exists.lib/Unpacked/Canvas/.textures/RedRough/tex_rough.png == 1
 wait 5
 uishot 02_after

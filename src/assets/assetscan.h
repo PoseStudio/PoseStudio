@@ -15,6 +15,12 @@
  *   The recursive walkers have no cycle protection (QDirIterator doesn't either), and before
  *   this header the tree included such folders while the grid/search/hit walk excluded them,
  *   so a junction showed in the tree but never as a grid folder and painted its parent "empty".
+ * - HIDDEN NAMES are never listed (core/hiddennames.h): a file or a folder whose name begins
+ *   with a dot is not an asset, not a thumbnail, not a folder of the tree or the grid, and a
+ *   hidden folder is never walked into, so nothing in it is found either. That is the whole
+ *   mechanism for keeping something out of a browser; no folder NAME is special. (What the
+ *   operating system marks hidden is left out by the QDir filters themselves, which carry no
+ *   QDir::Hidden.)
  * - Paths compare CASE-INSENSITIVELY everywhere (kPathCase). Stored library paths and scanned
  *   paths come from the same QDir/QFileDialog sources, so the only way they differ by case is
  *   the user retyping one; a case-sensitive compare then silently broke breadcrumbs and
@@ -26,6 +32,8 @@
 
 #ifndef ASSETSCAN_H
 #define ASSETSCAN_H
+
+#include "hiddennames.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -85,20 +93,14 @@ QStringList pathsWithin(const QStringList& assetPaths, const QStringList& roots)
 /// dirName() is empty. A drive-root library would otherwise render as a nameless tree row.
 QString folderDisplayName(const QString& path);
 
-/// True when `path` has at least one real (non-symlink) subdirectory that is listed (a texture
-/// store is not): decides whether a tree row gets the "..." lazy-load placeholder that makes it
+/// True when `path` has at least one real (non-symlink) subdirectory that is listed (a hidden
+/// one is not): decides whether a tree row gets the "..." lazy-load placeholder that makes it
 /// expandable.
 bool hasSubdirectories(const QString& path);
 
 /// The real subdirectories of `path`, sorted by name, case-insensitive: the order the tree
-/// and the grid list them in. Texture stores (folders named `textures`) are left out.
+/// and the grid list them in. Hidden folders (a name that begins with a dot) are left out.
 QFileInfoList listSubdirectories(const QString& path);
-
-/// True when `path`, below `root`, is a texture store or lies inside one (a folder named
-/// `textures`, assetstore.h): the tree and the grid never list such a folder
-/// (hasSubdirectories / listSubdirectories / classifyFolder leave it out), and the search
-/// passes over what is in it.
-bool inTextureStore(const QString& path, const QString& root);
 
 /// True if any ancestor directory of `path` is present in `set`. Walks up with
 /// QFileInfo::path() so a drive-root ancestor ("D:/") is reached: truncating at the last '/'
@@ -128,7 +130,8 @@ QHash<QString, HitState> classifyFolder(const QString& folderPath,
                                         const QHash<QString, HitState>& known);
 
 /// The assets directly inside `folderPath` (non-recursive), in directory order: each non-image
-/// file paired with the largest same-basename image. Files without an image are not assets.
+/// file paired with the largest same-basename image. Files without an image are not assets,
+/// and neither is a hidden file (nor is a hidden image a thumbnail).
 QList<AssetHit> scanFolderAssets(const QString& folderPath);
 
 /**

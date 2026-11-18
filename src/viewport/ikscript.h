@@ -49,6 +49,10 @@ struct IkScript {
     double      renderSplats = 0.0;  ///< 1 if the last render had the scene's Gaussian splats composited into it
     QImage      renderImage;         ///< The last render's picture (the `probe`'s reading)
     QImage      shotImage;           ///< The last `shot`'s picture (`shot.darkest`, `shot.below.<n>`)
+    QImage      shotReference;       ///< The shot kept by `shotref`: what `shot.fromref` / `shot.likeref` measure the last shot against
+    QImage      shotBase;            ///< … and the shot kept by `shotbase`: the picture WITHOUT the thing compared (`shot.likeref`)
+    QImage      renderReference;     ///< The same for renders: `renderref` (`render.fromref`, `render.likeref`)
+    QImage      renderBase;          ///< … and `renderbase`
     // The last `savematerial` / `applymaterial` (a `.psm` material file and its ball icon).
     double      matFileOk = 0.0;       ///< 1 if the file was written / applied
     double      matFileEmbedded = 0.0; ///< maps the save left out (images without a file, when it may not write one)

@@ -510,6 +510,9 @@ add_executable(
     src/viewport/scene/model.cpp         # one imported model: meshes + armature + per-frame pose data
     src/viewport/scene/model.h
     src/viewport/scene/modelbake.cpp     # Model::bakePosedMesh: the vertex stage on the CPU, for a render engine
+    src/viewport/scene/posedmesh.h       # … and what it fills
+    src/viewport/scene/meshdisplace.cpp  # DISPLACEMENT: a posed mesh subdivided and moved by its displacement map, for a render
+    src/viewport/scene/meshdisplace.h
     src/viewport/scene/scenelight.h      # a light object (point / spot / area / sun) and its shared rules
     src/viewport/scene/renderexport.cpp  # material / camera / lighting translated for a render engine
     src/viewport/scene/renderexport.h
@@ -619,6 +622,7 @@ add_executable(
     src/core/assetlibraries.h
     src/core/librarypaths.cpp             # resolves the per-user "My PoseStudio Library" (+ hdri/)
     src/core/librarypaths.h
+    src/core/hiddennames.h                  # THE rule for what a library browser does not show: a name that begins with a dot
     src/core/importformats.h                # which extensions take which import route (menu, Asset Manager, command line, viewport)
     src/core/preferencesmanager.cpp
     src/core/preferencesmanager.h
@@ -902,6 +906,45 @@ target_compile_definitions(PoseStudioSmoothingCheck PRIVATE
 )
 target_link_libraries(PoseStudioSmoothingCheck PRIVATE Vulkan::Headers)
 add_test(NAME smoothing-check COMMAND PoseStudioSmoothingCheck)
+
+# The guard of DISPLACEMENT (tools/displace): scene/meshdisplace alone — a sphere grown by its
+# strength, the mid level, the subdivision's counts and the triangle budget, a UV seam and a
+# box's edges kept closed, a border shared with another zone held, the normals turned by the
+# relief and left alone without any, the material's UV transform. std + GLM; no Qt, no device.
+add_executable(PoseStudioDisplaceCheck
+    tools/displace/check_displace.cpp
+    src/viewport/scene/meshdisplace.cpp
+)
+target_include_directories(PoseStudioDisplaceCheck PRIVATE
+    src/viewport/scene
+    src/viewport/util
+    ${glm_SOURCE_DIR}
+)
+target_compile_definitions(PoseStudioDisplaceCheck PRIVATE
+    GLM_FORCE_RADIANS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+)
+add_test(NAME displace-check COMMAND PoseStudioDisplaceCheck)
+
+# The guard of import/texturegutters (tools/gutters): the import's gutter fill leaves every texel
+# a UV triangle covers and fills the rest — a quad over the WHOLE UV square (corners on 0 and 1:
+# a cube's or a plane's mapping) included, whose second triangle the duplicate test used to drop.
+# That one file; the Vulkan HEADERS only — no Qt, no device.
+add_executable(PoseStudioGutterCheck
+    tools/gutters/check_gutters.cpp
+    src/viewport/import/texturegutters.cpp
+)
+target_include_directories(PoseStudioGutterCheck PRIVATE
+    src/viewport/import
+    src/viewport/util
+    ${glm_SOURCE_DIR}
+)
+target_compile_definitions(PoseStudioGutterCheck PRIVATE
+    GLM_FORCE_RADIANS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+)
+target_link_libraries(PoseStudioGutterCheck PRIVATE Vulkan::Headers)
+add_test(NAME gutter-check COMMAND PoseStudioGutterCheck)
 
 # The saved material's guard (tools/materialfile): the .psm codec as text — a round trip, the
 # overlays left out, every way a text is not a material — and the ball a material is pictured

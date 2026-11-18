@@ -25,11 +25,13 @@
  * share of the zone's Metallic value, and no share of 0 is metal — so a zone whose overlays are
  * metallic binds its ABSOLUTE metalness (the value × the map, the overlays' metal painted on) and
  * the mesh takes the value as 1 (Mesh::setMetalBaked). The value it was baked for is recorded on
- * the mesh; syncOverlayMetal re-bakes when the value moves.
+ * the mesh; syncOverlayBakes re-bakes when the value moves (and binds the normal image again
+ * when the zone's Flip Normal moves under overlays painted into it).
  */
 
 #include "vulkanwindow.h"
 
+#include "model.h" // Mesh::material / normalFlipBaked (the overlays under a flipped normal map)
 #include "modeldata.h"
 #include "modelimportservice.h"
 #include "overlaycompositor.h"
@@ -72,6 +74,16 @@ std::shared_ptr<DecodedImage> channelAsMask(const DecodedImage& image, int chann
         const uint8_t v = image.pixels[i + c];
         out->pixels[i] = out->pixels[i + 1] = out->pixels[i + 2] = v;
         out->pixels[i + 3] = 255;
+    }
+    return out;
+}
+
+/// A normal image with its GREEN turned over: from OpenGL's convention (green = up the image)
+/// to the mesh frame's own (the bitangent runs down it, which is DirectX's) and back.
+std::shared_ptr<DecodedImage> greenFlipped(const DecodedImage& image) {
+    auto out = std::make_shared<DecodedImage>(image);
+    for (std::size_t i = 1; i < out->pixels.size(); i += 4) {
+        out->pixels[i] = static_cast<uint8_t>(255 - out->pixels[i]);
     }
     return out;
 }
@@ -192,16 +204,28 @@ std::shared_ptr<const DecodedImage> VulkanWindow::overlaid(int model, int mesh, 
     }
     char scale[40];
     std::snprintf(scale, sizeof(scale), "%a", static_cast<double>(baseScale));
+    // THE NORMAL MAP'S CONVENTION (MaterialParams::flipNormal): the overlays are painted in the
+    // compositor's own convention (y down the image: DirectX's), while the zone's normal map —
+    // unless it is marked DirectX-style — is OpenGL's, and is read as OpenGL's by the viewport's
+    // shader and the render engine alike. So such a map is turned to the compositor's
+    // convention, painted, and turned back: its readers then right the map and its overlays
+    // together. (A zone with no normal map of its own too: its canvas is read the same way.)
+    const Model* owner = model >= 0 ? scene().modelAt(static_cast<std::size_t>(model)) : nullptr;
+    const bool   flipped = map == MaterialMap::Normal && owner != nullptr && mesh >= 0 && static_cast<std::size_t>(mesh) < owner->meshCount() &&
+                         !owner->mesh(static_cast<std::size_t>(mesh)).material().flipNormal;
     const std::string key = std::string(materialMapName(map)) + (forRenderer ? "@render#" : "#") + pointerKey(base.get()) + "#" +
-                            std::to_string(channel) + "#" + scale + "#" + signature;
+                            std::to_string(channel) + "#" + scale + (flipped ? "#gl#" : "#") + signature;
     if (const auto it = bake.images.find(key); it != bake.images.end()) {
         return it->second;
     }
+    const std::shared_ptr<const DecodedImage> canvas = flipped && base ? greenFlipped(*base) : base;
     std::shared_ptr<const DecodedImage> painted = compositeOverlays(
-        map, base, channel, overlays, [this](const std::string& path, OverlayImageKind kind) { return overlayImage(QString::fromStdString(path), kind); },
+        map, canvas, channel, overlays, [this](const std::string& path, OverlayImageKind kind) { return overlayImage(QString::fromStdString(path), kind); },
         bumpAsNormal, baseScale);
     if (!painted) {
         painted = base; // (every image missing: the map as it is)
+    } else if (flipped) {
+        painted = greenFlipped(*painted); // (back to the map's own convention, OpenGL's)
     }
     bake.images.emplace(key, painted);
     return painted;
@@ -217,6 +241,7 @@ bool VulkanWindow::bindSlot(int model, int mesh, MaterialMap map, const std::sha
     // normal images, and their bump images as slopes); the rest bind their plain image as it is.
     std::shared_ptr<const DecodedImage> bound;
     bool                                parameterMap = false; // the binding is the parameter map: its metal record follows
+    bool                                normalSlot = false;   // the binding is the normal image: its Flip Normal record follows
     float                               metalBaked = -1.0f;   // the Metallic value the metalness was baked for (< 0: not baked)
     // A partner slot's current plain image and channel — or this one's new image where it IS the slot.
     const auto partner = [&](MaterialMap other, int* otherChannel) -> std::shared_ptr<const DecodedImage> {
@@ -295,6 +320,7 @@ bool VulkanWindow::bindSlot(int model, int mesh, MaterialMap map, const std::sha
         break;
     case MaterialMap::Normal:
         bound = overlaid(model, mesh, map, plain, 0, bake);
+        normalSlot = true;
         break;
     default:
         bound = materialMapIsRendered(map) ? plain : nullptr; // (a stored-only slot binds nothing)
@@ -306,19 +332,34 @@ bool VulkanWindow::bindSlot(int model, int mesh, MaterialMap map, const std::sha
     if (parameterMap) {
         scene().setMeshMetalBaked(model, mesh, metalBaked);
     }
+    if (normalSlot) {
+        // (Overlays painted into it: painted for the zone's Flip Normal as it stands — see overlaid.)
+        if (Model* owner = model >= 0 ? scene().modelAt(static_cast<std::size_t>(model)) : nullptr;
+            owner != nullptr && mesh >= 0 && static_cast<std::size_t>(mesh) < owner->meshCount()) {
+            const bool flip = owner->mesh(static_cast<std::size_t>(mesh)).material().flipNormal;
+            owner->setMeshNormalFlipBaked(static_cast<std::size_t>(mesh), bound != plain ? (flip ? 1 : 0) : -1);
+        }
+    }
     return applied;
 }
 
-void VulkanWindow::syncOverlayMetal(int model) {
+void VulkanWindow::syncOverlayBakes(int model) {
     if (!m_renderer || model < 0) {
         return;
     }
+    const Model*                      owner = scene().modelAt(static_cast<std::size_t>(model));
     const std::vector<MaterialParams> now = scene().captureMaterials(model);
     OverlayBake                       bake;
     for (std::size_t mesh = 0; mesh < now.size(); ++mesh) {
+        // The overlays' METAL is baked for the zone's Metallic value …
         const float baked = scene().meshMetalBaked(model, static_cast<int>(mesh));
         if (baked >= 0.0f && baked != now[mesh].metalness) {
             rebindSlot(model, static_cast<int>(mesh), MaterialMap::Metalness, bake);
+        }
+        // … and their relief is painted for its Flip Normal.
+        const int flipBaked = owner != nullptr && mesh < owner->meshCount() ? owner->mesh(mesh).normalFlipBaked() : -1;
+        if (flipBaked >= 0 && (flipBaked == 1) != now[mesh].flipNormal) {
+            rebindSlot(model, static_cast<int>(mesh), MaterialMap::Normal, bake);
         }
     }
 }
@@ -374,7 +415,12 @@ std::shared_ptr<const OverlayImage> VulkanWindow::overlayImage(const QString& pa
     }
     std::shared_ptr<const OverlayImage> image;
     if (modified >= 0) {
-        if (const std::shared_ptr<DecodedImage> decoded = decodeTextureFile(path.toStdString())) {
+        if (std::shared_ptr<DecodedImage> decoded = decodeTextureFile(path.toStdString())) {
+            if (kind == OverlayImageKind::Normal) {
+                // (An overlay's normal image is OpenGL-style, as every normal map is taken to be:
+                // turned here to the convention the compositor paints in.)
+                decoded = greenFlipped(*decoded);
+            }
             image = makeOverlayImage(*decoded, kind);
         }
     }

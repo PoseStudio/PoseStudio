@@ -64,27 +64,37 @@ void rasterizeCoverage(const std::vector<Vertex>& vertices, const std::vector<ui
     // space contribute nothing after the first — and fibermesh-style meshes map THOUSANDS of
     // strands onto the same tiny UV strip (a 150k-triangle brow follower re-marked the same texels
     // ~3 s per map before this). Deduplicate first; ordinary atlas meshes pass through unchanged.
+    //
+    // THE FOLD MOVES A TRIANGLE AS A WHOLE (2026-11-14): its three corners are shifted by the same
+    // whole number of tiles — the tile its least corner lies in — so tiled copies still collide
+    // and a triangle keeps its own shape. Folded corner by corner, as it was, a UV of exactly 1
+    // became 0: the two triangles of a quad that fills the whole UV square — (0,0) (1,0) (1,1)
+    // and (0,0) (1,1) (0,1), a cube's or a plane's default mapping — both read (0,0) (0,0) (0,0),
+    // the second was dropped as a copy of the first, half the map counted as background and the
+    // fill flooded it: an imported texture came out wiped along a staircase diagonal on every
+    // such face.
     std::vector<int> uniqueTris;
     uniqueTris.reserve(static_cast<std::size_t>(triCount));
     {
         std::unordered_set<uint64_t> seen;
         seen.reserve(static_cast<std::size_t>(triCount));
-        const auto quantize = [&](const glm::vec2& uv) -> uint64_t {
-            // Quarter-texel grid, folded by the sampler's REPEAT wrap so tiled copies collide too.
-            // The rounding + fold run in 64-bit: the multi-tile gate tests UV *span*, not
-            // magnitude, so a mesh parked at |uv| ~ 1e6 reaches here and ×(4·4096) would
-            // overflow a 32-bit long (lround's return on Windows).
-            const long long qw = 4LL * w, qh = 4LL * h;
-            const long long lx = std::llround(static_cast<double>(uv.x) * scale.x * 4.0);
-            const long long ly = std::llround(static_cast<double>(uv.y) * scale.y * 4.0);
-            const uint64_t qx = static_cast<uint64_t>(((lx % qw) + qw) % qw);
-            const uint64_t qy = static_cast<uint64_t>(((ly % qh) + qh) % qh);
-            return (qx << 32) | qy;
-        };
+        // Quarter-texel grid. The rounding + fold run in 64-bit: the multi-tile gate tests UV
+        // *span*, not magnitude, so a mesh parked at |uv| ~ 1e6 reaches here and ×(4·4096) would
+        // overflow a 32-bit long (lround's return on Windows).
+        const long long qw = 4LL * w, qh = 4LL * h;
+        const auto floorTile = [](long long v, long long tile) { return (v >= 0 ? v / tile : -((-v + tile - 1) / tile)) * tile; };
         for (int t = 0; t < triCount; ++t) {
+            long long lx[3], ly[3];
+            for (int c = 0; c < 3; ++c) {
+                const glm::vec2& uv = vertices[indices[3 * t + c]].uv;
+                lx[c] = std::llround(static_cast<double>(uv.x) * scale.x * 4.0);
+                ly[c] = std::llround(static_cast<double>(uv.y) * scale.y * 4.0);
+            }
+            const long long shiftX = floorTile(std::min({lx[0], lx[1], lx[2]}), qw);
+            const long long shiftY = floorTile(std::min({ly[0], ly[1], ly[2]}), qh);
             uint64_t key = 1469598103934665603ull; // FNV-1a over the three quantized corners
             for (int c = 0; c < 3; ++c) {
-                key ^= quantize(vertices[indices[3 * t + c]].uv);
+                key ^= (static_cast<uint64_t>(lx[c] - shiftX) << 32) | static_cast<uint64_t>(ly[c] - shiftY);
                 key *= 1099511628211ull;
             }
             if (seen.insert(key).second) {
@@ -122,10 +132,12 @@ void rasterizeCoverage(const std::vector<Vertex>& vertices, const std::vector<ui
             int x1 = clampedTexel(std::ceil(static_cast<double>(std::max({a.x, b.x, c.x})) - 0.5));
             int y0 = clampedTexel(std::floor(static_cast<double>(std::min({a.y, b.y, c.y})) - 0.5));
             int y1 = clampedTexel(std::ceil(static_cast<double>(std::max({a.y, b.y, c.y})) - 0.5));
-            // A triangle spanning a full wrap already touches every column/row once wrapped —
-            // cap the walk so a heavily tiled material can't multiply the raster cost.
-            if (x1 - x0 >= w) { x0 = 0; x1 = w - 1; }
-            if (y1 - y0 >= h) { y0 = 0; y1 = h - 1; }
+            // (The walk is in the triangle's OWN tile and wraps texel by texel below; a row's
+            // interval is cut at one full wrap there. Until 2026-11-14 a bbox a tile wide was
+            // reset to the base tile's [0, w-1] here — right for a triangle that fills the base
+            // tile, and wrong for one a tile over or straddling the edge, whose edge equations
+            // then met none of the walked texels. The tile-span gate keeps a mesh's UVs within
+            // two tiles, so the walk is bounded without it.)
 
             constexpr float kEps = 1e-3f; // texel-space tolerance so shared-edge centres are kept
             // Scanline walk: per row the covered texels form one contiguous interval, and each
@@ -192,7 +204,8 @@ void rasterizeCoverage(const std::vector<Vertex>& vertices, const std::vector<ui
                     continue;
                 }
                 const int xs = std::max(x0, static_cast<int>(std::ceil(xLo - 0.5f)));
-                const int xe = std::min(x1, static_cast<int>(std::floor(xHi - 0.5f)));
+                // (One full wrap of a row marks every column of it: no further.)
+                const int xe = std::min({x1, static_cast<int>(std::floor(xHi - 0.5f)), xs + w - 1});
                 for (int x = xs; x <= xe; ++x) {
                     const int wx = ((x % w) + w) % w;
                     covered[static_cast<std::size_t>(wy) * w + wx].store(1, std::memory_order_relaxed);

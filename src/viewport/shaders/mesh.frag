@@ -376,6 +376,11 @@ void shade() {
     float detailStrength = fract(surf.material.y) * 8.0;
     if (nm == 1) {
         vec3 mapN = texture(uDetail, vUv).xyz * 2.0 - 1.0;
+        // THE MAP'S CONVENTION: the frame's bitangent runs DOWN the image (the baked tangents'
+        // handedness: dP/dv, v down), and an OpenGL-style normal map's green says how the surface
+        // leans UP it — so the green is negated (material3.z = -1, the default). A DirectX-style
+        // map (the material's Flip Normal: +1) says "down" and is read as it is.
+        mapN.y *= surf.material3.z;
         mapN.xy *= detailStrength; // authored strength steepens/flattens the mapped slope
         n = normalize(tangentFrame(n, vWorldPos, vUv, tangent) * mapN);
         // A bump map CARRIED BESIDE the normal map (extra.w = 1 when one is bound, emission.w its
@@ -399,6 +404,7 @@ void shade() {
         vec2  detailTiles = surf.detail.xy;
         float detailWeight = fract(detailPacked);
         vec3 dn = texture(uMicroNormal, vUv * detailTiles + surf.detail.zw).xyz * 2.0 - 1.0;
+        dn.y = -dn.y; // (an OpenGL-style map, as above: green up the image, the bitangent down it)
         dn.xy *= detailWeight;
         n = normalize(tangentFrame(n, vWorldPos, vUv, tangent) * normalize(dn));
     }

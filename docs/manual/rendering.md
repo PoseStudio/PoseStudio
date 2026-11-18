@@ -67,7 +67,8 @@ A path tracer has no shortcuts to turn up or down, so a few of the viewport's di
 - The **Rim** light is not rendered.
 - The backdrop is drawn sharp — the **Blur** dial does not apply — and **Dome** mode renders as **Environment**.
 - **Glass and the eyes' clear surfaces** refract and reflect for real, where the viewport only tints what is behind them.
-- **Displacement** and the **Detail** layer of a material are not rendered yet.
+- **Displacement** is rendered: a zone with a displacement map is subdivided and really moved by it ([the Displacement section](materials.md#displacement) says how far and how finely). The viewport's other modes do not displace, so a displaced surface's outline differs between PBR Shaded and a render; the Rendered mode shows it.
+- The **Detail** layer of a material is not rendered yet.
 - **Gaussian splat scenes** are not path traced — a capture is a recorded picture, not surfaces a ray can be traced against — but they are *in* the render: see [Gaussian splat scenes in a render](#gaussian-splat-scenes-in-a-render) below.
 - The selection outline, the joint highlight, pins, the skeleton, the light markers and the grid are the viewport's own and never appear in a render.
 

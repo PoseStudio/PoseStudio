@@ -21,7 +21,17 @@ PoseStudio does not know your file formats; it knows thumbnails. **A file is an 
 
 Most character content is delivered this way — every preset comes with its own preview — so a content folder added as a library is browsable at once.
 
-A folder named `textures` is never listed, in the tree or in the grid: it is where a saved material keeps the pictures it uses ([Where the textures go](materials.md#where-the-textures-go)), not a place that holds assets. Do not give a category folder that name.
+## Hiding files and folders
+
+**Anything whose name begins with a dot is hidden.** Rename a folder to `.drafts`, or a file to `.Old Chrome.psm`, in your file manager, and the library no longer shows it: not in the tree, not in the grid, not in a search. A hidden folder hides everything in it. Take the dot away and it is back at the next **Refresh**.
+
+- It works the same for everything a library holds — folders, assets, pictures — and in every library browser: the Asset Manager, the Materials Library, and the HDRI menu of the Environment tab.
+- No folder *name* is special. A folder called `textures`, as many content packs have, is an ordinary folder.
+- Hiding is only about what the browsers list. A hidden file stays where it is and is still used by whatever refers to it: PoseStudio itself keeps a saved material's pictures in a hidden `.textures` folder beside the material ([Where the textures go](materials.md#where-the-textures-go)).
+- A folder you added as a library is shown whatever it is called.
+- The library's **Rename…** does not accept a name that begins with a dot — the material would vanish from the list you renamed it in. Hide and unhide in your file manager.
+
+Dot names are the convention macOS and Linux use for hidden files, so their file managers hide such names too (in the macOS Finder, `Cmd+Shift+.` shows them); Windows Explorer shows them like any other name. What the operating system itself marks as hidden is not listed either.
 
 ## Browsing
 
@@ -85,12 +95,13 @@ The Materials folder is part of *My PoseStudio Library*, which is one of the Ass
 
 ## Working with saved materials
 
-A material saved by PoseStudio (`.psm`) is three things on disk — the file, its icon, and its texture files in the `textures` folder beside it ([Where the textures go](materials.md#where-the-textures-go)) — and the library moves them together, so you never have to do it by hand in a file manager. Right-click a saved material, in the Materials Library or the Asset Manager:
+A material saved by PoseStudio (`.psm`) is three things on disk — the file, its icon, and its texture files in the `.textures` folder beside it ([Where the textures go](materials.md#where-the-textures-go)) — and the library moves them together, so you never have to do it by hand in a file manager. Right-click a saved material, in the Materials Library or the Asset Manager:
 
 - **Rename…** gives the material and its icon a new name. Its textures stay where they are, and the material finds them as before.
-- **Duplicate** makes "*name* copy" beside it, with a copy of the icon. The copy uses the same texture files; nothing is copied in `textures`.
-- **Move To Folder…** moves the material and its icon to the folder you choose, and takes its textures along into that folder's `textures` (a file that folder already has is not copied again). What the old folder's `textures` then holds for no material is removed; a file another material there still uses stays.
-- **Delete** asks, then moves the material and its icon to the trash, together with the texture files that no other material in the folder uses.
+- **Duplicate** makes "*name* copy" beside it, with a copy of the icon. The copy uses the same texture files; nothing is copied in `.textures`.
+- **Move To Folder…** moves the material and its icon to the folder you choose, and takes the textures it uses along into that folder's `.textures` (a file that folder already has is not copied again). A file another material in the old folder still uses stays there.
+- **Delete** asks, then moves the material and its icon to the trash, together with the texture files it uses — unless another material in the folder uses them too.
+- **A texture no material uses is never removed** — not by a move, not by a delete, not by a save. A map you took out of a slot and left in `.textures`, or a file you put there yourself, stays until you clear it out in a file manager.
 - **Export Package…** packs it for sharing — see below.
 
 Favorites and collections follow a material that was renamed or moved, and drop one that was deleted.

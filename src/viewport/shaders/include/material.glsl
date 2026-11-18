@@ -17,9 +17,10 @@ struct MaterialGpu {
                             //   w specular (F0) weight (1 = the standard 4% dielectric)
     vec4 material2;         // x lobe-1 roughness, y lobe-2 roughness, z lobe ratio (1 = one lobe),
                             //   w translucency (subsurface) weight
-    vec4 material3;         // x top-coat weight, y top-coat roughness, z unused (the draw kind
-                            //   rides the push block now), w micro-detail packed as
-                            //   floor(tiles) + fract(weight) (0 = none)
+    vec4 material3;         // x top-coat weight, y top-coat roughness, z the sign the normal
+                            //   map's green is read with (-1: an OpenGL-style map, green up the
+                            //   image, the default; +1: a DirectX-style one — Flip Normal),
+                            //   w micro-detail packed as floor(tiles) + fract(weight) (0 = none)
     vec4 emission;          // rgb emission radiance factor (linear color × luminance), w the
                             //   BUMP strength of a bump map carried beside a normal map
     vec4 uvTransform;       // xy tiling, zw offset (applied to the UVs in the vertex stage)

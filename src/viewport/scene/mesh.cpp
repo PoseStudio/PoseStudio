@@ -342,7 +342,10 @@ void Mesh::packGpu() {
         (m_slotTexture[idx(MaterialMap::PoreDetail)] && m.detailTiles >= 1.0f && m.detailWeight > 0.0f && m.detailEnabled)
             ? std::floor(m.detailTiles) + std::min(m.detailWeight, 0.99f)
             : 0.0f;
-    g.material3 = glm::vec4(m.topCoatEnabled ? m.topCoat : 0.0f, m.topCoatRoughness, 0.0f, detailPacked);
+    // material3.z: the sign the normal map's GREEN is read with. The mesh's bitangent runs down
+    // the image; an OpenGL-style map's green says "up" — the default — and is negated; a
+    // DirectX-style one (the material's Flip Normal) says "down" and is read as it is.
+    g.material3 = glm::vec4(m.topCoatEnabled ? m.topCoat : 0.0f, m.topCoatRoughness, m.flipNormal ? 1.0f : -1.0f, detailPacked);
     // The canonical material's further channels (material.glsl).
     g.emission = glm::vec4(m.emissionColor * (m.emissionEnabled ? m.emission : 0.0f), m.geometryEnabled ? m.bumpStrength : 0.0f);
     g.uvTransform = m.tilingEnabled ? glm::vec4(m.uvTiling, m.uvOffset) : glm::vec4(1.0f, 1.0f, 0.0f, 0.0f); // (Tiling off: as painted)

@@ -249,6 +249,14 @@ public:
     void  setMetalBaked(float scalar);
     float metalBaked() const { return m_metalBaked; }
 
+    /// THE OVERLAYS AND THE NORMAL MAP'S CONVENTION: the normal image this mesh binds has the
+    /// zone's overlays painted in FOR the Flip Normal value @p flip (1 / 0) — in the convention
+    /// the map itself is in, so the reader's handling of the map rights its overlays with it.
+    /// -1 = the binding does not depend on the flag (no overlay touches it). A record only: the
+    /// caller binds the slot again when the zone's Flip Normal moves off it.
+    void setNormalFlipBaked(int flip) { m_normalFlipBaked = flip; }
+    int  normalFlipBaked() const { return m_normalFlipBaked; }
+
     /// Bind-pose centroid (local space) — the transparent pass's back-to-front sort key, carried
     /// through the dominant joint's pose by Model::posedCentroid.
     const glm::vec3& centroid() const { return m_centroid; }
@@ -333,6 +341,7 @@ private:
     bool                           m_hasOpacityMask = false;
     bool                           m_transmissive = false; // see isTransmissive (set by packGpu)
     float                          m_metalBaked = -1.0f;   // see setMetalBaked: the Metallic value baked into the bound map, < 0 = none
+    int                            m_normalFlipBaked = -1; // see setNormalFlipBaked: the Flip Normal value the bound normal image's overlays were painted for, -1 = none
     // The material as packed for the GPU (see gpu()) and this mesh's index in its model's
     // material buffer, which record() pushes.
     MaterialGpu                    m_gpu{};

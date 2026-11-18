@@ -79,7 +79,8 @@ ui set render.samples 0 64
 ui click render.start 0
 wait 12
 uishot 10_rendering
-wait 400
+# (Long enough for a laptop card: the window renders at its own sample count, 20 to 30 s there.)
+wait 2400
 uishot 11_done
 expect uienabled.render.save.0 == 1
 expect uienabled.render.stop.0 == 0

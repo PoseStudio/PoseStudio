@@ -7,6 +7,7 @@
 
 #include "assetlibraries.h"
 #include "constants.h"
+#include "hiddennames.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -123,6 +124,9 @@ QList<LibraryPaths::HdriEntry> LibraryPaths::hdriEntries() {
     while (it.hasNext()) {
         const QString path = it.next();
         const QString relative = root.relativeFilePath(path);
+        if (HiddenNames::inHiddenPath(path, root.path())) {
+            continue; // a dot name, or inside a folder with one: hidden (hiddennames.h)
+        }
         Scanned s;
         s.entry.path = path;
         // The category: the folder path relative to the hdri root — "" for uncategorized root

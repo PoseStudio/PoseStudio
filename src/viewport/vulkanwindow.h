@@ -89,6 +89,7 @@ struct Material;
 struct RenderMaterialContext; // what of a model's import says how its materials are read (scene/renderexport.h)
 struct VrInput;
 struct DecodedImage;
+struct DisplaceSettings;     // how a zone displaces in a render (scene/meshdisplace.h)
 struct OverlayImage;         // a decoded overlay image, cropped (scene/overlaycompositor.h)
 enum class OverlayImageKind; // … and what it is read as
 class Scene;
@@ -277,7 +278,7 @@ public:
     /// A SAVED MATERIAL (scene/materialfile.h; vulkanwindow_materialfile.cpp). saveMaterialFile
     /// writes the selected zone's material — its values and the files of its maps — to the `.psm`
     /// file @p path. With @p copyTextures the maps are COLLECTED beside it (assets/assetstore.h:
-    /// a file not already beside the material is copied into `textures/<name>/`, an image that
+    /// a file not already beside the material is copied into `.textures/<name>/`, an image that
     /// has no file of its own is written there), so the material's folder is all it needs;
     /// without, each map is named where it is and an image without a file is left out.
     /// @p report says what was done with the maps. renderMaterialIcon pictures that material on a ball under a fixed studio
@@ -590,7 +591,7 @@ private:
     /// for the zone's Metallic VALUE (Mesh::setMetalBaked). Re-bakes every zone of @p model whose
     /// value has moved off the one its map was baked for — after anything that sets material
     /// values: a slider, a reset, an undo.
-    void syncOverlayMetal(int model);
+    void syncOverlayBakes(int model);
     /// Gives mesh @p mesh the stack @p overlays and rebinds the slots whose composite it changes.
     void applyZoneOverlays(int model, int mesh, const std::vector<MaterialOverlay>& overlays, OverlayBake& bake);
     /// The project load's overlays: (mesh, stack) pairs of model @p model applied as one edit's
@@ -682,6 +683,18 @@ private:
     /// @p modelIndex. @p withOverlays paints the zone's overlays into the maps they touch, as a
     /// render of the scene shows them; without, the surface alone (a saved material's ball).
     /// Shared by captureRenderScene and the material ball's scene, so the two cannot differ.
+    /// DISPLACEMENT (scene/meshdisplace.h): whether zone @p meshIndex of model @p modelIndex
+    /// displaces in a render — its Displacement layer on, a strength, and a height to read: its
+    /// displacement map with (@p withOverlays) the overlays' displacement images painted in, or
+    /// those alone on a level canvas — and with what: @p image (kept alive by the caller while
+    /// it is read), the @p channel the height rides in, and @p settings.
+    bool zoneDisplacement(OverlayBake& bake, int modelIndex, int meshIndex, bool withOverlays,
+                          std::shared_ptr<const DecodedImage>& image, int& channel, DisplaceSettings& settings);
+    /// … and one model's captured zones displaced: @p zones are (index into snapshot.geometry,
+    /// mesh index) pairs — ALL of the model's captured zones, since a displaced zone holds the
+    /// borders it shares with the others still.
+    void displaceCapturedZones(RenderSnapshot& snapshot, OverlayBake& bake, int modelIndex,
+                               const std::vector<std::pair<std::size_t, int>>& zones);
     renderapi::Material captureZoneMaterial(RenderSnapshot& snapshot, OverlayBake& bake, int modelIndex, int meshIndex,
                                             const char* name, const RenderMaterialContext& context, bool withOverlays);
     /// The scene's Gaussian splats as a render's layers, drawn now at @p width × @p height

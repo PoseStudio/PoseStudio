@@ -66,12 +66,17 @@ struct SmoothedMesh {
 /// for a mesh that did not ask).
 std::vector<SmoothedMesh> smoothByAngle(const std::vector<SmoothMesh>& meshes);
 
-/// Whether the mesh's normals say nothing about smoothing: every triangle carries its own face
-/// normal at its three corners (a faceted export). A mesh with no real triangle is not one.
+/// Whether the mesh's normals say nothing about smoothing — a faceted export, ONE NORMAL PER
+/// FACE: every triangle (with an area) carries one and the same normal at its three corners, and
+/// that normal is its face's (to 30 degrees, either side, for 95 % of them: a polygon that is not
+/// quite flat is cut into triangles that each stand a little off the polygon's normal, and a
+/// sliver's own normal is noise). One triangle whose corners differ and the file has smoothed
+/// something: its normals are its author's. A mesh with no real triangle is not faceted.
 bool hasOnlyFaceNormals(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
 
-/// The share of the mesh's triangles (those with an area) whose three corners carry the
-/// triangle's own normal: 1 = faceted throughout, 0 = no faceted triangle (0 for an empty mesh).
+/// The share of the mesh's triangles (those with an area) that are faceted in that sense — the
+/// three corners one normal, the face's: 1 = faceted throughout, 0 = no faceted triangle (0 for
+/// an empty mesh).
 float facetedShare(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
 
 /// THE IMPORT'S DEFAULT: each mesh whose file brings no smoothing of its own — only face

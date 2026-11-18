@@ -235,11 +235,14 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
             if (auto* box = qobject_cast<QCheckBox*>(target); box != nullptr && box->isEnabled()) {
                 box->setChecked(value >= 0.5);
             }
-        } else if (verb == QLatin1String("call")) {
+        } else if (verb == QLatin1String("call") || verb == QLatin1String("post")) {
             // One of the widget's own slots / invokables taking an int — what a context menu's
-            // entry runs (a menu's exec() cannot be driven from here): "<method> [int]".
+            // entry runs (a menu's exec() cannot be driven from here): "<method> [int]". `post`
+            // runs it from the event loop instead of here and now: for a slot that opens a MODAL
+            // dialog, whose exec() would otherwise hold the script that is to look at it.
             const QStringList part = text.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-            if (!part.isEmpty() && !QMetaObject::invokeMethod(target, part[0].toLatin1().constData(), Qt::DirectConnection,
+            const auto        how = verb == QLatin1String("post") ? Qt::QueuedConnection : Qt::DirectConnection;
+            if (!part.isEmpty() && !QMetaObject::invokeMethod(target, part[0].toLatin1().constData(), how,
                                                               Q_ARG(int, part.size() > 1 ? part[1].toInt() : 0))) {
                 qWarning().noquote() << "[ui] no slot" << part[0] << "on" << id;
             }

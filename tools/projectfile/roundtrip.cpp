@@ -82,6 +82,7 @@ ProjectDocument makeDoc() {
     torso.params.transmission = 0.3f;
     torso.params.transmissionColor = glm::vec3(0.2f, 0.9f, 0.3f);
     torso.params.thinWalled = true;
+    torso.params.flipNormal = true; // (a DirectX-style normal map: read flipped)
     torso.params.transmissionRoughness = 0.125f;
     torso.params.subsurfaceRadius = 2.5f;
     torso.params.sheen = 0.4f;
@@ -231,6 +232,8 @@ void checkRoundTrip() {
 
     check(b.materials.size() == 1 && b.materials[0].hasSmoothing && b.materials[0].params.smoothByAngle && b.materials[0].params.smoothAngle == 42.5f,
           "f1 smoothing (by angle, 42.5 degrees — and the file SAYS so)");
+    check(b.materials.size() == 1 && b.materials[0].params.flipNormal && !pose::MaterialParams().flipNormal,
+          "f1 Flip Normal rides the round trip (and is off where a file does not say)");
 
     const ProjectFigure& c = out.figures[1];
     check(c.source == path("model.obj") && c.pose.empty() && c.pins.empty() && c.materials.empty() &&

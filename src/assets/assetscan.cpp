@@ -5,8 +5,6 @@
 
 #include "assetscan.h"
 
-#include "assetstore.h"
-
 #include <QDirIterator>
 #include <QFileInfo>
 
@@ -36,7 +34,7 @@ AssetScan::HitState classifyInto(const QString& folderPath,
 
     QSet<QString> images, nonImages;
     for (const QFileInfo& f : entries) {
-        if (f.isDir()) continue;
+        if (f.isDir() || HiddenNames::isHidden(f.fileName())) continue;
         const QString suffix = f.suffix().toLower();
         if (kIgnoredAssetExtensions.contains(suffix)) continue; // sidecar file, not an asset
         const QString base = f.baseName();
@@ -51,7 +49,7 @@ AssetScan::HitState classifyInto(const QString& folderPath,
 
     for (const QFileInfo& sub : entries) {
         if (!sub.isDir()) continue;
-        if (AssetStore::isTextureStore(sub.fileName())) continue; // an asset's textures: never assets
+        if (HiddenNames::isHidden(sub.fileName())) continue; // a hidden folder: nothing in it is listed
         if (classifyInto(sub.absoluteFilePath(), known, out) != HitState::NoHit) {
             out.insert(folderPath, HitState::IndirectHit);
             return HitState::IndirectHit;
@@ -103,26 +101,17 @@ bool hasSubdirectories(const QString& path) {
     QDirIterator it(path, kSubdirFilter, QDirIterator::NoIteratorFlags);
     while (it.hasNext()) {
         it.next();
-        if (!AssetStore::isTextureStore(it.fileName())) return true;
+        if (!HiddenNames::isHidden(it.fileName())) return true;
     }
     return false;
 }
 
 QFileInfoList listSubdirectories(const QString& path) {
     QFileInfoList folders = QDir(path).entryInfoList(kSubdirFilter, QDir::Name | QDir::IgnoreCase);
-    // A `textures` folder is an asset's texture store (assetstore.h): the pictures the assets
-    // beside it sample, never assets. It is not a place to browse.
-    folders.removeIf([](const QFileInfo& folder) { return AssetStore::isTextureStore(folder.fileName()); });
+    // A folder whose name begins with a dot is hidden (core/hiddennames.h): not a place to
+    // browse. (An asset's texture store, `.textures`, is one: assetstore.h.)
+    folders.removeIf([](const QFileInfo& folder) { return HiddenNames::isHidden(folder.fileName()); });
     return folders;
-}
-
-bool inTextureStore(const QString& path, const QString& root) {
-    const QString relative = QDir(root).relativeFilePath(path);
-    const QStringList parts = relative.split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    for (const QString& part : parts) {
-        if (AssetStore::isTextureStore(part)) return true;
-    }
-    return false;
 }
 
 bool hasAncestorIn(const QString& path, const QSet<QString>& set) {
@@ -149,6 +138,7 @@ bool folderHasDirectAssetHit(const QString& folderPath) {
 
     QSet<QString> images, nonImages;
     for (const QFileInfo& f : files) {
+        if (HiddenNames::isHidden(f.fileName())) continue;
         const QString suffix = f.suffix().toLower();
         if (kIgnoredAssetExtensions.contains(suffix)) continue; // sidecar file, not an asset
         const QString base = f.baseName();
@@ -184,6 +174,7 @@ QList<AssetHit> scanFolderAssets(const QString& folderPath) {
     groups.reserve(files.size());
 
     for (const QFileInfo& fi : files) {
+        if (HiddenNames::isHidden(fi.fileName())) continue; // hidden: neither an asset nor a thumbnail
         const QString suffix = fi.suffix().toLower();
         if (kIgnoredAssetExtensions.contains(suffix)) continue; // sidecar file (e.g. .mtl), not a listable asset
         const QString base = fi.baseName();

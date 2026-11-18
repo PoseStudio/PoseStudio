@@ -4,7 +4,7 @@ PoseStudio reads three kinds of content today: static models in the Wavefront `.
 
 There are four ways to import, and they all do the same thing:
 
-- **File → Import → .OBJ (Wavefront)**, **File → Import → .DUF (DUF File)**, **File → Import → .FBX (FBX File)**, **File → Import → .GLB (GL Transmission Format .glTF)**, **File → Import → .USD (Universal Scene Description)** or **File → Import → .VRM (VRM Avatar)** — a file dialog, opening in the folder you imported from last time. (**File → Import → .MTLX (MaterialX Material)** is the one entry that does not add an object: it puts a material on one — see [MaterialX materials](#materialx-materials-mtlx).)
+- **File → Import → .OBJ (Wavefront)**, **File → Import → .DUF (DUF File)**, **File → Import → .FBX (FBX File)**, **File → Import → .GLB (GL Transmission Format .glTF)**, **File → Import → .USD (Universal Scene Description)** or **File → Import → .VRM (VRM Avatar)** — a file dialog, opening in the folder you imported from last time. (A MaterialX material is not imported from this menu: it does not add an object, it goes on one — see [MaterialX materials](#materialx-materials-mtlx).)
 - **Double-click** an `.obj`, `.duf`, `.dsf`, `.fbx`, `.glb`, `.gltf`, `.vrm`, `.usd`, `.usda`, `.usdc` or `.usdz` asset in the [Asset Manager](asset-manager.md) grid.
 - **Open with** PoseStudio, or **drag files onto** `PoseStudio.exe`: every model or figure file on the command line is imported in order, and a `.pose` file after a figure is applied to it.
 
@@ -108,7 +108,7 @@ PoseStudio renders one material model — **metallic / roughness with a specular
 MaterialX is the format material libraries are published in: a small text file that describes a surface — its values, and the image files it uses — in a way many applications read. A `.mtlx` file is not a model, so it does not add an object to the scene: **its material is put on an object you already have**, exactly as a [saved material](materials.md#saving-and-reusing-a-material) is.
 
 1. Select the object and click the surface you want; the Materials tab shows which zone that is.
-2. Choose **File → Import → .MTLX (MaterialX Material)** and pick the file — or double-click a `.mtlx` in the [Asset Manager](asset-manager.md) or the Materials Library (it is listed there when a picture of the same name lies beside it, which is how most material packs come).
+2. Click **Import**, at the top right of the Materials tab beside **Save**, and pick the file — or double-click a `.mtlx` in the [Asset Manager](asset-manager.md) or the Materials Library (it is listed there when a picture of the same name lies beside it, which is how most material packs come).
 3. If the file holds several materials, a list asks which one.
 
 The zone takes the material as one undo step: its values, and its images in their texture slots. A slot the material has no image for is emptied; the zone's overlays stay. From there it is a material like any other — adjust it in the Materials tab, and **Save** it to keep it in your library, which also copies its images in beside it ([Where the textures go](materials.md#where-the-textures-go)).

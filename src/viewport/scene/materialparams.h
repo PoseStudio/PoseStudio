@@ -263,6 +263,18 @@ struct MaterialParams {
     // --- Geometry ---
     float     opacity = 1.0f;       ///< < 1 draws the zone in the alpha-blended pass.
     float     normalStrength = 1.0f; ///< The normal map's strength; nothing without a map.
+    /// FLIP NORMAL — the normal map's CONVENTION. A tangent-space normal map's green channel says
+    /// how the surface leans up or down the image, and there are two ways round: OpenGL's (green
+    /// = up the image: what glTF, USD and MaterialX specify, what the figure format's own content
+    /// is made in, and what a material library's "GL" download is) and DirectX's (green = down).
+    /// false: the map is OpenGL's, the default for every map. true: it is DirectX's.
+    /// In the VIEWPORT the mesh's bitangent runs DOWN the image (tangentgen: dP/dv with v down),
+    /// so mesh.frag negates an OpenGL map's green (Mesh::packGpu's material3.z = -1) and reads a
+    /// DirectX one as it is; the render engine is told a DirectX map by a flag
+    /// (renderapi::kMaterialFlipNormalY) and reads an unflagged one as OpenGL's. (Until
+    /// 2026-11-14 the viewport read every map the DirectX way — an OpenGL map's relief lit from
+    /// the wrong side top to bottom, and unlike the render of the same scene.) Nothing without a map.
+    bool      flipNormal = false;
     float     bumpStrength = 1.0f;  ///< The bump map's strength; nothing without a map.
     // --- The DETAIL layer: a tiled micro-detail normal (pores, weave, grain) over the surface ---
     float     detailWeight = 0.0f;  ///< Its strength (0 = none; < 1). Rendered.
@@ -360,7 +372,7 @@ struct MaterialParams {
                sheenRoughness == o.sheenRoughness && topCoat == o.topCoat && topCoatRoughness == o.topCoatRoughness &&
                coatColor == o.coatColor && coatIor == o.coatIor && coatBumpStrength == o.coatBumpStrength && thinFilm == o.thinFilm &&
                coatAnisotropy == o.coatAnisotropy && coatAnisotropyRotation == o.coatAnisotropyRotation && uvRotation == o.uvRotation &&
-               doubleSided == o.doubleSided && topCoatEnabled == o.topCoatEnabled && sheenEnabled == o.sheenEnabled && thinFilmEnabled == o.thinFilmEnabled && transmissionEnabled == o.transmissionEnabled && subsurfaceEnabled == o.subsurfaceEnabled && emissionEnabled == o.emissionEnabled && displacementEnabled == o.displacementEnabled && detailEnabled == o.detailEnabled && baseEnabled == o.baseEnabled && specularEnabled == o.specularEnabled && geometryEnabled == o.geometryEnabled && tilingEnabled == o.tilingEnabled &&
+               doubleSided == o.doubleSided && flipNormal == o.flipNormal && topCoatEnabled == o.topCoatEnabled && sheenEnabled == o.sheenEnabled && thinFilmEnabled == o.thinFilmEnabled && transmissionEnabled == o.transmissionEnabled && subsurfaceEnabled == o.subsurfaceEnabled && emissionEnabled == o.emissionEnabled && displacementEnabled == o.displacementEnabled && detailEnabled == o.detailEnabled && baseEnabled == o.baseEnabled && specularEnabled == o.specularEnabled && geometryEnabled == o.geometryEnabled && tilingEnabled == o.tilingEnabled &&
                smoothByAngle == o.smoothByAngle && smoothAngle == o.smoothAngle &&
                thinFilmThickness == o.thinFilmThickness && thinFilmIor == o.thinFilmIor && emissionColor == o.emissionColor &&
                emission == o.emission && opacity == o.opacity && normalStrength == o.normalStrength &&
@@ -394,7 +406,7 @@ struct MaterialParams {
                close(sheenRoughness, o.sheenRoughness) && close(topCoat, o.topCoat) && close(topCoatRoughness, o.topCoatRoughness) &&
                close3(coatColor, o.coatColor) && close(coatIor, o.coatIor) && close(coatBumpStrength, o.coatBumpStrength) &&
                close(coatAnisotropy, o.coatAnisotropy) && close(coatAnisotropyRotation, o.coatAnisotropyRotation) &&
-               close(uvRotation, o.uvRotation) && doubleSided == o.doubleSided && topCoatEnabled == o.topCoatEnabled && sheenEnabled == o.sheenEnabled && thinFilmEnabled == o.thinFilmEnabled && transmissionEnabled == o.transmissionEnabled && subsurfaceEnabled == o.subsurfaceEnabled && emissionEnabled == o.emissionEnabled && displacementEnabled == o.displacementEnabled && detailEnabled == o.detailEnabled && baseEnabled == o.baseEnabled && specularEnabled == o.specularEnabled && geometryEnabled == o.geometryEnabled && tilingEnabled == o.tilingEnabled &&
+               close(uvRotation, o.uvRotation) && doubleSided == o.doubleSided && flipNormal == o.flipNormal && topCoatEnabled == o.topCoatEnabled && sheenEnabled == o.sheenEnabled && thinFilmEnabled == o.thinFilmEnabled && transmissionEnabled == o.transmissionEnabled && subsurfaceEnabled == o.subsurfaceEnabled && emissionEnabled == o.emissionEnabled && displacementEnabled == o.displacementEnabled && detailEnabled == o.detailEnabled && baseEnabled == o.baseEnabled && specularEnabled == o.specularEnabled && geometryEnabled == o.geometryEnabled && tilingEnabled == o.tilingEnabled &&
                close(thinFilm, o.thinFilm) &&
                close(thinFilmThickness, o.thinFilmThickness) && close(thinFilmIor, o.thinFilmIor) &&
                close3(emissionColor, o.emissionColor) && close(emission, o.emission) && close(opacity, o.opacity) &&
@@ -601,6 +613,7 @@ enum class MaterialField {
     GeometryEnabled,
     TilingEnabled,
     ThinWalled, ///< 0 / 1: the Transmission section's Thin Walled box (a sheet, not a solid)
+    FlipNormal, ///< 0 / 1: the Geometry section's Flip Normal box (a DirectX-style normal map)
     SmoothByAngle, ///< 0 / 1: the Geometry section's Smooth by Angle box (THE SMOOTHING)
     SmoothAngle,   ///< … and its angle, degrees
     Count
@@ -668,6 +681,7 @@ inline float materialFieldValue(const MaterialParams& p, MaterialField field) {
     case MaterialField::GeometryEnabled: return p.geometryEnabled ? 1.0f : 0.0f;
     case MaterialField::TilingEnabled: return p.tilingEnabled ? 1.0f : 0.0f;
     case MaterialField::ThinWalled: return p.thinWalled ? 1.0f : 0.0f;
+    case MaterialField::FlipNormal: return p.flipNormal ? 1.0f : 0.0f;
     case MaterialField::SmoothByAngle: return p.smoothByAngle ? 1.0f : 0.0f;
     case MaterialField::SmoothAngle: return p.smoothAngle;
     default: return 0.0f;
@@ -739,6 +753,7 @@ inline void setMaterialField(MaterialParams& p, MaterialField field, float v) {
     case MaterialField::GeometryEnabled: p.geometryEnabled = v >= 0.5f; break;
     case MaterialField::TilingEnabled: p.tilingEnabled = v >= 0.5f; break;
     case MaterialField::ThinWalled: p.thinWalled = v >= 0.5f; break;
+    case MaterialField::FlipNormal: p.flipNormal = v >= 0.5f; break;
     case MaterialField::SmoothByAngle: p.smoothByAngle = v >= 0.5f; break;
     case MaterialField::SmoothAngle: p.smoothAngle = std::clamp(v, 0.0f, 180.0f); break;
     default: break;
@@ -807,6 +822,7 @@ inline const char* materialFieldName(MaterialField field) {
     case MaterialField::GeometryEnabled: return "geometryenabled";
     case MaterialField::TilingEnabled: return "tilingenabled";
     case MaterialField::ThinWalled: return "thinwalled";
+    case MaterialField::FlipNormal: return "flipnormal";
     case MaterialField::SmoothByAngle: return "smooth";
     case MaterialField::SmoothAngle: return "smoothangle";
     default: return "";
@@ -874,7 +890,7 @@ struct MaterialMaps {
 };
 
 /// What saving a material did with the zone's texture maps (VulkanWindow::saveMaterialFile; the
-/// standard is assets/assetstore.h: an asset's textures lie in a `textures` folder beside it).
+/// standard is assets/assetstore.h: an asset's textures lie in a `.textures` folder beside it).
 struct MaterialSaveReport {
     int copied = 0;    ///< Files copied into the material's texture folder.
     int reused = 0;    ///< … not copied: a file with the same bytes was in the folder's store already.

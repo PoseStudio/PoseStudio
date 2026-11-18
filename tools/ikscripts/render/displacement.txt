@@ -1,0 +1,92 @@
+# DISPLACEMENT IN A RENDER (scene/meshdisplace.h; the Materials tab's Displacement section).
+#
+# Needs a build with the render engine. NOT run by run_all.sh (the subfolder). On the six-sphere
+# scene and the loose maps of tools/materials/make_test_assets.py:
+#
+#   python tools/materials/make_test_assets.py <assets>
+#   POSESTUDIO_TEST_FIGURE=<assets>/showcase.gltf tools/ikscripts/run.sh \
+#       tools/ikscripts/render/displacement.txt <out> POSESTUDIO_IK_SCRIPT_ASSETS=<assets> \
+#       POSESTUDIO_RENDER_TRACE=1
+# (POSESTUDIO_RENDER_TRACE prints what each displacement did: the levels, the triangles, how far
+# the surface moved and how long it took.)
+#
+# The Chalk sphere (half a metre in radius) is given a displacement map and rendered: a zone
+# with a map, a strength and its layer on is subdivided and MOVED on its way to the engine —
+# real geometry, with a silhouette. render.covered is the share of the picture that is not the
+# backdrop (the floor's shadows are off, so it is the spheres' silhouette): a surface displaced
+# outward covers more, inward less. The gates are the numbers measured (plain 43.6, domes 44.4,
+# blocks raised 47.0, sunk 42.9). LOOK at render/: 01 raised domes that stand out of the
+# outline, 02 raised blocks with crisp sides, 03 the same blocks sunk, 04 what the sphere's own
+# vertices alone make of the map, 05 the plain sphere again — and the two viewport shots: the
+# Rendered mode shows the blocks, the PBR mode does not (the rasterized modes do not displace).
+
+wait 10
+light shadows 0
+select 0
+zone Chalk
+lookat 2.75 0.5 0 0.62
+wait 3
+
+# --- 0. The plain sphere -------------------------------------------------------------------------
+render 00_plain 48
+expect render.ok == 1
+renderref
+expect render.covered > 42.6
+expect render.covered < 44.6
+
+# --- 1. Domes on a mid-grey map: the surface stands out where the map is brighter than the mid level
+texture displacement overlay_bump.png
+expect mattex.displacement == 2
+material displacement 3
+material displacementmid 50
+material displacementsubd 4
+expect mat.displacement == 3
+expect mat.displacementsubd == 4
+render 01_domes_displaced 48
+expect render.ok == 1
+# (The domes on the outline stand out of it: a little more of the picture is covered.)
+expect render.covered > 44.1
+expect render.fromref > 0.5
+
+# --- 2. A black / white checker from a mid level of 0: the white squares rise 4 cm ----------------
+texture displacement tex_mask.png
+material displacement 4
+material displacementmid 0
+render 02_checker_raised 48
+expect render.ok == 1
+expect render.covered > 46
+
+# --- 3. A negative strength sinks them instead ----------------------------------------------------
+material displacement -4
+expect mat.displacement == -4
+render 03_checker_sunk 48
+expect render.ok == 1
+expect render.covered < 43.2
+
+# --- 4. Without subdivision the mesh's own vertices are all there is to move ----------------------
+material displacement 4
+material displacementsubd 0
+render 04_checker_no_subdivision 48
+expect render.ok == 1
+expect render.covered > 44.6
+
+# --- 5. The layer switched off: the sphere as it was ----------------------------------------------
+material displacementsubd 4
+material displacementenabled 0
+render 05_layer_off 48
+expect render.ok == 1
+expect render.covered > 43.3
+expect render.covered < 43.9
+expect render.fromref < 0.6
+material displacementenabled 1
+
+# --- 6. The Rendered viewport mode shows the displacement; the rasterized modes do not ------------
+shade 1
+tracedwait
+expect traced.done == 1
+shot 06_rendered_mode_displaced
+shotref
+shade 0
+wait 3
+shot 07_pbr_mode_not_displaced
+expect shot.fromref > 1

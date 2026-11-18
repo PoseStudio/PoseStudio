@@ -2,9 +2,9 @@
 
 The **Materials** tab on the side panel edits the surfaces of the selected object: a figure's skin, eyes, mouth and nails, an imported prop's materials. Every object imports with the materials its file describes, and this tab lets you change them with sliders, color swatches and texture slots — glossier skin, a metallic prop, a color tint, a see-through surface, a different map — without writing a shader. It is also where images are layered over the skin: [tattoos, marks and makeup](#overlays-tattoos-marks-and-makeup).
 
-The **Save** button at the top of the tab saves the material you are looking at to a file, and the tab below it, **Materials Library**, lists the materials you have saved — see [Saving and reusing a material](#saving-and-reusing-a-material).
+The **Import** button at the top of the tab puts a material from a file on the zone you are looking at — a MaterialX material (`.mtlx`) or a saved one (`.psm`) — and **Save** beside it saves the material you are looking at to a file, and the tab below it, **Materials Library**, lists the materials you have saved — see [Saving and reusing a material](#saving-and-reusing-a-material).
 
-PoseStudio has **one material model**: a physically based surface in the metallic / roughness convention, the parameter set the industry's renderers share (the base layer, a coat, transmission, subsurface, sheen, emission, a thin film, and the maps that paint them). The viewport's PBR shading draws nearly all of it — the base layer, the coat, sheen, the thin film, transmission, emission, the detail layer and the maps that paint them; what it cannot (displacement, the subsurface's scattering color and distance) is kept with the material for the rendering engines to come, and the tab says which is which. There is no node editor and no second workflow to choose: files authored in the older specular / glossiness convention are converted when they are imported (see [Importing Content](importing.md#materials-and-the-specular--glossiness-conversion)).
+PoseStudio has **one material model**: a physically based surface in the metallic / roughness convention, the parameter set the industry's renderers share (the base layer, a coat, transmission, subsurface, sheen, emission, a thin film, and the maps that paint them). The viewport's PBR shading draws nearly all of it — the base layer, the coat, sheen, the thin film, transmission, emission, the detail layer and the maps that paint them; what it cannot (the subsurface's scattering color and distance) is kept with the material for a render, and the tab says which is which; displacement — a map that really moves the surface — shows in the Rendered mode and in a render. There is no node editor and no second workflow to choose: files authored in the older specular / glossiness convention are converted when they are imported (see [Importing Content](importing.md#materials-and-the-specular--glossiness-conversion)).
 
 ## Selecting an object and a zone
 
@@ -67,7 +67,7 @@ Below the top line are the overlay's controls; each is one undo step and has a b
 | **Opacity** | 0 – 100 | How much of the overlay's **color** shows. The small square is its map — the overlay's **mask**: see *Masks: the Opacity's map* below. The relief — Bump, Normal, Displacement — follows neither the value nor the map: it has its own images and strengths. |
 | **Bump** | −400 – 400 | An image of its own, grayscale, for relief: a scar's ridge, raised ink, a groove. Mid grey is no change, lighter rises, darker sinks; where the image is transparent it does nothing. The number is its strength; a negative strength turns the relief inside out. |
 | **Normal** | 0 – 400 | A tangent-space normal image for the same purpose, blended over the zone's normal map, with its strength. |
-| **Displacement** | −400 – 400 | A grayscale height image for a renderer's displacement. Stored for rendering engines; the viewport does not displace. |
+| **Displacement** | −400 – 400 | A grayscale height image that really moves the surface — a scar that stands out of the skin's outline — in a render and in the Rendered viewport mode. It is added to the zone's own displacement map (mid grey is no change), and the zone's **Displacement** section says how far and how finely: its Strength must be more than 0 for anything to move. The other viewport modes do not displace. |
 | **Offset X** | −100 – 100 | Moves the whole overlay sideways across the texture map, in percent of the map's width: positive to the right. See *Placing an overlay* below. |
 | **Offset Y** | −100 – 100 | Moves it up (positive) or down the map, in percent of the map's height. |
 | **Rotation** | −180 – 180° | Turns the whole overlay about its own centre: positive is clockwise. |
@@ -149,7 +149,7 @@ A zone carries as many overlays as you like. The cards are listed in the order t
 
 - An overlay is moved, turned and scaled **on the texture map**, not on the body: it cannot cross from one piece of the body to another in one piece, and where the map is laid out tighter or looser on the skin it shrinks or stretches with it. An image is still made for one figure's UV layout; a figure of another generation has another layout and needs images made for it.
 - An overlay's Bump and Normal images are drawn in the viewport through the zone's normal map, so **Normal Strength** under Geometry scales them along with the zone's own normal map.
-- Displacement images are stored for rendering engines, like the material's own displacement.
+- An overlay's Displacement image moves the surface only in a render and in the Rendered viewport mode, like the material's own displacement map, and by the zone's Displacement Strength.
 
 ## The sections
 
@@ -248,6 +248,7 @@ Light passing *through* the material — glass, water, gems. The viewport shows 
 | --- | --- | --- |
 | **Opacity** | 0 – 100 | 100 is solid. Anything less is drawn see-through, blended over what is behind it — the eyes' cornea and moisture import this way. A cutout mask in the zone's Cutout slot still applies. |
 | **Normal Strength** | 0 – 400 | How strongly the zone's normal map perturbs the surface: 100 is the map as painted, 0 flattens it, more exaggerates it. Greyed when the zone has no normal map and no overlay with a Bump or Normal image (the viewport draws an overlay's relief through the normal map). |
+| **Flip Normal** | on / off | Tick it for a normal map made the **DirectX** way — see [Normal maps: OpenGL and DirectX](#normal-maps-opengl-and-directx) below. Greyed without a normal map. |
 | **Bump Strength** | 0 – 400 | The same for a bump (height) map. Greyed without one. |
 | **Ambient Occlusion** | 0 – 100 | How much a baked ambient-occlusion map (the Ambient Occlusion slot: grayscale, white is open) darkens the crevices. Greyed without one. The viewport applies it, over the occlusion it bakes per vertex at import, to the environment's light — a prop's authored occlusion where the vertex bake is coarse. |
 | **Double Sided** | on / off | Render the back faces too — a leaf, a cloth card, an open shell. Stored for rendering engines; the viewport always lights both sides. |
@@ -269,15 +270,34 @@ PoseStudio therefore **smooths a model as it imports it when the file carries no
 - Figures import with smooth normals of their own and are left as they are; a zone of one can still be switched to Smooth by Angle.
 - Smoothing changes how light falls on a surface, not its shape: the **outline** of a coarse model stays polygonal.
 
+### Normal maps: OpenGL and DirectX
+
+A normal map says, texel by texel, which way the surface leans, and its **green** channel can be written two ways round: lean *up* the image (the **OpenGL** convention) or *down* it (the **DirectX** convention). A map read the wrong way round is lit upside down: what should stand out looks pressed in, as if the light came from below.
+
+PoseStudio reads a normal map as **OpenGL-style** — what glTF, USD and MaterialX files carry, what figure content is made in, and what a material library offers as its "GL" download (a file named `..._nor_gl`). For a map made the other way — a "DX" download, a map exported for a game engine that wants DirectX — tick **Flip Normal** in the Geometry section, and it is read the other way up. The viewport and a render follow the same switch.
+
+- If you cannot tell which kind a file is: light the surface from above and look at a feature you know stands out (a brick, a rivet). Bright on top, dark underneath is right; the reverse wants the box ticked.
+- Flip Normal belongs to the material: it is saved with it, in the library and in a project, and Undo steps over it.
+- It turns the zone's own normal map only. The overlays on the zone and the Detail Normal Map are always read as OpenGL-style.
+
 ### Displacement
 
-A height map a renderer pushes the surface by, after subdividing it. Stored for rendering engines; the viewport does not displace. Opens by itself for a zone with a displacement map.
+A displacement map is a height: where it is lighter than the **Mid Level** the surface stands out, where it is darker it sinks in. Unlike a bump or a normal map, which only change how light falls on the surface, displacement **really moves it** — the outline changes, and the relief throws shadows of its own.
+
+It is shown **in a render and in the Rendered viewport mode**; the other viewport modes do not displace, so switch to Rendered to see what a setting does. The section opens by itself for a zone with a displacement map, and its switch turns the displacement off without losing the values.
 
 | Row | Range | What it does |
 | --- | --- | --- |
-| **Strength** | −100 – 100 cm | How far the Displacement map pushes the surface, from the map's black to its white; negative inverts it. Greyed without a map. Stored for rendering engines, which subdivide and displace the mesh — the viewport does not. A `.duf` preset's Minimum / Maximum Displacement import as this strength and the mid level below. |
-| **Mid Level** | 0 – 100 | The map value that leaves the surface where it is: at 50 black sinks and white rises by half the strength each. Stored for rendering engines. |
-| **Subdivision** | 0 – 5 | How many times a renderer subdivides the mesh before displacing it. Stored for rendering engines. |
+| **Strength** | −100 – 100 cm | How far the map moves the surface, in **centimetres** from the map's black to its white; negative inverts it. The joints of a brick wall are about 1, deep stonework 3 to 5 — a value like 100 is a metre, and tears an ordinary object apart. A drag across the field covers 10 cm; type a larger value. Greyed without a map. A `.duf` preset's Minimum / Maximum Displacement import as this strength and the mid level below; a MaterialX material's displacement scale as this strength. |
+| **Mid Level** | 0 – 100 | The map value that leaves the surface where it is: at 50 black sinks and white rises by half the strength each; at 0 the map only rises. |
+| **Subdivision** | 0 – 5 | How many times every triangle is cut in four before the surface is moved. Displacement can only move the mesh's points, so a coarse object needs more of them: at 0 the object's own points are all there is, and a brick pattern on a plain ball comes out as lumps; 3 to 5 gives crisp relief. Each level is four times the triangles and takes longer to prepare (a ball of four thousand triangles at level 4 is a million, about a fifth of a second; at level 5 four million, under a second); a level is dropped where the mesh would pass five million triangles. |
+
+- Subdivision adds points for the displacement to move; it does not round the shape. A coarse ball keeps its polygonal outline under the relief.
+- The map follows the material's **Tiling**: tile a brick map four times across and the bricks, and their relief, are a quarter the size.
+- Where a displaced zone meets **another zone** of the same object, the shared edge stays where it is, so nothing tears between them; a free edge (the rim of a plane) moves with the rest.
+- A seam in the UV layout does not open: the two sides of it move together.
+- Displacement is prepared again whenever the scene is sent to the renderer — in the Rendered mode after every change of pose or material — so a high Subdivision on a large object makes each update slower.
+- The icon of a saved material shows the material without its displacement.
 
 ### Detail
 
@@ -313,7 +333,7 @@ Every thumbnail works the same way:
 
 The slots, by section: Base Color, Roughness, Metalness and Diffuse Roughness in Base; Specular Mask, Specular Color, Anisotropy, Anisotropy Rotation, Lobe 2 Roughness and Lobe Ratio in Specular (Lobe 1's map is the Roughness slot); the Top Coat's Weight, Color, Roughness, Reflectivity, Bump, Anisotropy and Anisotropy Rotation; Transmission and Transmission Color; Translucency Weight and Translucency Color in Subsurface; Sheen, Sheen Color and Sheen Roughness; Emission; Thin Film and Thin Film Thickness; Cutout, Normal, Bump, Displacement and Ambient Occlusion in Geometry; the Detail Normal Map, Detail Weight Mask and Detail Roughness in Detail.
 
-A base color, emission or tint map is read as a color image (sRGB); a normal map as data; a roughness, metalness, diffuse roughness, specular mask or cutout file as a grayscale map — a color file's red channel is used. The viewport samples the Base Color, Normal, Bump, Roughness, Metalness, Specular Mask, Translucency Color, Emission, Detail Normal Map and Cutout slots, and since the viewport round the Ambient Occlusion, Transmission, Top Coat Weight, Top Coat Roughness, Sheen, Sheen Color and Thin Film Thickness maps too (packed two to a texture behind the scenes, so a 4K map of each costs no more than before). The Diffuse Roughness, Specular Color, Anisotropy, Anisotropy Rotation, Lobe 2 Roughness, Lobe Ratio, Translucency Weight, Detail Weight Mask, Detail Roughness, Displacement, Transmission Color, Sheen Roughness, Thin Film weight and the Top Coat's Color, Reflectivity, Bump and Anisotropy maps are stored for rendering engines: the tab shows them and the project keeps them, the viewport does not sample them. A cutout mask is black where the surface is cut away and white where it is kept; a zone with a cutout is drawn in the see-through pass, as the eyelashes are.
+A base color, emission or tint map is read as a color image (sRGB); a normal map as data, in the OpenGL convention unless the zone's **Flip Normal** is ticked; a roughness, metalness, diffuse roughness, specular mask or cutout file as a grayscale map — a color file's red channel is used. The viewport samples the Base Color, Normal, Bump, Roughness, Metalness, Specular Mask, Translucency Color, Emission, Detail Normal Map and Cutout slots, and since the viewport round the Ambient Occlusion, Transmission, Top Coat Weight, Top Coat Roughness, Sheen, Sheen Color and Thin Film Thickness maps too (packed two to a texture behind the scenes, so a 4K map of each costs no more than before). The Diffuse Roughness, Specular Color, Anisotropy, Anisotropy Rotation, Lobe 2 Roughness, Lobe Ratio, Translucency Weight, Detail Weight Mask, Detail Roughness, Displacement, Transmission Color, Sheen Roughness, Thin Film weight and the Top Coat's Color, Reflectivity, Bump and Anisotropy maps are stored for rendering engines: the tab shows them and the project keeps them, the viewport does not sample them. A cutout mask is black where the surface is cut away and white where it is kept; a zone with a cutout is drawn in the see-through pass, as the eyelashes are.
 
 The sliders scale the maps — Roughness multiplies a roughness map, Metallic a metalness map, the Base Color swatch tints the base color map — so the map's own variation is kept.
 
@@ -344,13 +364,13 @@ What a saved material does not hold:
 
 ### Where the textures go
 
-A saved material takes its texture files with it. They are copied into a `textures` folder beside the material, in a subfolder named after it, and the material refers to them by paths relative to itself:
+A saved material takes its texture files with it. They are copied into a `.textures` folder beside the material, in a subfolder named after it, and the material refers to them by paths relative to itself:
 
 ```
 Materials/Fabric/
     Denim.psm
     Denim.png
-    textures/
+    .textures/
         Denim/
             denim_color.jpg
             denim_normal.png
@@ -359,10 +379,10 @@ Materials/Fabric/
 So a material's folder is all the material needs. Move the folder, copy it to another computer, keep your library in a synced folder, zip it and send it to someone: the materials in it still find their maps. There is no central texture folder that has to be kept in step with your materials, and nothing to "install".
 
 - **A file is stored once.** A second material saved into the same folder that uses the same image — a color variant that shares its normal map — refers to the file that is already there, whatever it is called; nothing is copied twice. A *different* image that happens to have the same name is given a name of its own (`color_2.png`), never written over the first.
-- **A map that is already in place stays there**: one that lies right beside the material, or in that folder's `textures`.
+- **A map that is already in place stays there**: one that lies right beside the material, or in that folder's `.textures`.
 - **An image that has no file of its own is written out** as a PNG named after the material and the slot (`Denim_roughness.png`): an image that lives inside a model's file (a `.glb`'s), and a map that is one channel of a packed image (a glTF file keeps roughness and metalness in one picture). Such an image is saved as PoseStudio holds it, which is at most 4096 pixels on a side.
-- **Saving a material again under its own name** with other maps removes the copies it no longer uses (they go to the trash) — unless another material in the folder still uses them.
-- The library browsers do not list `textures` folders: they hold pictures, not materials.
+- **Saving never removes a texture file.** A material saved again under its own name with other maps gets the new ones copied in, and the maps it used before stay where they are: a map taken out of a slot is not a map you are done with. A texture that no material uses any more is never removed by PoseStudio — deleting a material takes only the textures that material itself uses. Clearing out the ones you no longer want is yours to do, in a file manager (the folder is `.textures`, beside the material).
+- The folder's name begins with a dot, and that is all that keeps it out of the library browsers: [anything named that way is hidden](asset-manager.md#hiding-files-and-folders). It holds pictures, not materials. Windows Explorer shows the folder like any other; the macOS Finder and most Linux file managers hide dot names until told to show them (`Cmd+Shift+.` in the Finder).
 
 If you would rather have no copies — you keep your textures in one place and never move them — turn off **Copy texture files when saving a material** in [Preferences → Assets](preferences.md#assets). A material then refers to each file where it is, stops finding it if it moves, and will not work on another computer; and an image that has no file of its own is left out of the saved material (the save says how many).
 
@@ -377,10 +397,10 @@ Select an object, click the surface you want — the Materials tab shows which z
 - It is **one undo step**: `Ctrl+Z` gives the zone back exactly as it was.
 - Only the zone shown is changed, whatever *Edit matching zones together* says: a material is put on one surface at a time.
 - With nothing selected, a message says so and nothing happens.
-- A map that is not where the material says is **looked for**: beside the material, in its `textures` folder, and then by its file name anywhere in the library the material lies in (the nearest one, if there are several). Only a map that is found nowhere leaves its slot empty, and a message says how many were missing.
+- A map that is not where the material says is **looked for**: beside the material, in its `.textures` folder, and then by its file name anywhere in the library the material lies in (the nearest one, if there are several). Only a map that is found nowhere leaves its slot empty, and a message says how many were missing.
 - **Reset Zone** still returns the zone to what its own file imported with.
 
-**MaterialX materials** (`.mtlx`, the format material libraries are published in) are applied the same way — double-click one in a library, or use **File → Import → .MTLX (MaterialX Material)**: see [MaterialX materials](importing.md#materialx-materials-mtlx). Save one after applying it and it becomes a material of your own library, with its images copied in beside it.
+**MaterialX materials** (`.mtlx`, the format material libraries are published in) are applied the same way — double-click one in a library, or click **Import** at the top of the tab: see [MaterialX materials](importing.md#materialx-materials-mtlx). Save one after applying it and it becomes a material of your own library, with its images copied in beside it.
 
 A material file is plain text (JSON) and can be read, compared or kept under version control.
 
@@ -393,5 +413,5 @@ A [project file](project-files.md) saves the zones whose material differs from t
 ## What the tab does not do
 
 - It edits one object at a time. Two figures with the same skin are edited one after the other.
-- The viewport draws the base layer (its reflectance from Specular, IOR and Specular Color, its anisotropy, its diffuse roughness), the coat (with its color, index and anisotropy), sheen, the thin film, transmission (the frame behind the surface through it, tinted — not bent, not blurred), the subsurface weight, emission, opacity, the detail layer (its map, weight, roughness multiplier, tiling and offsets), a bump map beside a normal map, and the UV tiling, offset and rotation. Displacement, the subsurface's color, scattering color, distance and direction, transmission depth and dispersion, and the maps listed above as stored are saved for rendering engines but not shown. Double Sided changes nothing in the viewport, which always lights both sides.
+- The viewport draws the base layer (its reflectance from Specular, IOR and Specular Color, its anisotropy, its diffuse roughness), the coat (with its color, index and anisotropy), sheen, the thin film, transmission (the frame behind the surface through it, tinted — not bent, not blurred), the subsurface weight, emission, opacity, the detail layer (its map, weight, roughness multiplier, tiling and offsets), a bump map beside a normal map, and the UV tiling, offset and rotation. **Displacement** is shown in the Rendered mode and in a render only. The subsurface's color, scattering color, distance and direction, transmission depth and dispersion, and the maps listed above as stored are saved for rendering engines but not shown. Double Sided changes nothing in the viewport, which always lights both sides.
 - The simpler shading modes show what they can of a material: the textured modes show the base color and the roughness, the matcap and clay modes show none of it. The **PBR Shaded** mode shows everything the viewport renders, and the data views (Albedo, Roughness Map, Specular Only) show one value at a time — see [Shading and Display](shading.md).

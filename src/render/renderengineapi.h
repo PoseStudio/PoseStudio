@@ -109,6 +109,9 @@ constexpr int kMapSlotCount = static_cast<int>(MapSlot::Count);
 enum MaterialFlags : uint32_t {
     kMaterialThinWalled = 1u << 0,    ///< a sheet, not a solid (a pane, a leaf, a lash card)
     kMaterialShadowCatcher = 1u << 1, ///< shows only the shadows cast on it (the floor)
+    /// The normal map is DirectX-style (green = down the image). Unflagged, a normal map is
+    /// OpenGL-style (green = up), which is what the engine is to read it as.
+    kMaterialFlipNormalY = 1u << 2,
 };
 
 struct Material {

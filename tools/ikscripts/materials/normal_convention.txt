@@ -1,0 +1,126 @@
+# THE NORMAL MAP'S CONVENTION, AND FLIP NORMAL (MaterialParams::flipNormal; the Materials tab's
+# Geometry section): a normal map is read as OpenGL-style — green = up the image — unless the
+# zone's Flip Normal says it is DirectX-style (green = down). THE VIEWPORT's half: no render
+# engine needed (render/normal_convention.txt checks the same against real displaced geometry).
+#
+# NOT run by run_all.sh (the subfolder). On the wall and the loose maps of
+# tools/materials/make_test_assets.py:
+#
+#   python tools/materials/make_test_assets.py <assets>
+#   POSESTUDIO_TEST_FIGURE=<assets>/wall.obj tools/ikscripts/run.sh \
+#       tools/ikscripts/materials/normal_convention.txt <out> POSESTUDIO_IK_SCRIPT_ASSETS=<assets> \
+#       POSESTUDIO_TAB=Materials
+#
+# A flat wall faces the camera, lit by the key light alone, from ABOVE: a dome on it is bright on
+# top and dark below, a dent the other way round — nothing else is in the picture.
+# THE GROUND TRUTH is a HEIGHT: the domes as an overlay's BUMP image, which the viewport draws as
+# the slope of the height it adds — there is no convention in a height to get wrong. A reading of
+# the domes' NORMAL MAP is right when it shades the wall the way the height does: shot.likeref is
+# the correlation of what the shot and the reference each ADD to the plain wall (shotbase) — near
+# +1 for the same relief lit the same way, whatever its strength, and NEGATIVE with the relief
+# turned over. overlay_normal.png is the OpenGL-style file, overlay_normal_dx.png the same domes
+# DirectX-style. LOOK at the sheet: 01, 02, 05, 06, 08 and 09 show domes bright on top; 03 and 04
+# show them dark on top.
+
+wait 10
+light shadows 0
+light diffuse 0
+light ambient 0
+light azimuth 0
+light elevation 55
+view front
+select 0
+lookat 0 0.7 0 0.75
+wait 3
+expect zones == 1
+expect mattex.normal == 0
+expect mat.flipnormal == 0
+# (No normal map: nothing to flip — the box is greyed.)
+expect uienabled.materials.flipnormal.0 == 0
+
+# --- 1. The plain wall, and the reference: the domes as a height ---------------------------------
+shot 00_plain
+shotbase
+overlay add
+overlay 0 map bump overlay_bump.png
+overlay 0 bumpstrength 150
+wait 3
+shot 01_height_reference
+shotref
+overlay remove 0
+expect overlays == 0
+
+# --- 2. The OpenGL-style map is read as it is ----------------------------------------------------
+texture normal overlay_normal.png
+expect mattex.normal == 2
+expect mat.flipnormal == 0
+expect uienabled.materials.flipnormal.0 == 1
+wait 3
+shot 02_gl_map_as_it_is
+expect shot.likeref > 0.6
+
+# --- 3. … and flipped by mistake, its relief is turned over ---------------------------------------
+material flipnormal 1
+expect mat.flipnormal == 1
+wait 3
+shot 03_gl_map_flipped
+expect shot.likeref < -0.3
+undo
+expect mat.flipnormal == 0
+
+# --- 4. The DirectX-style file: wrong as it is, right with Flip Normal ticked (through the tab) ---
+texture normal overlay_normal_dx.png
+wait 3
+shot 04_dx_map_as_it_is
+expect shot.likeref < -0.3
+ui check materials.flipnormal 0 1
+expect mat.flipnormal == 1
+wait 3
+shot 05_dx_map_flipped
+expect shot.likeref > 0.6
+uishot 05_tab
+
+# --- 5. Overlays over the map are painted the right way up under either convention ---------------
+# (The overlay's domes sit ON the map's domes: painted the wrong way up they would cancel them.)
+overlay add
+overlay 0 map bump overlay_bump.png
+overlay 0 bumpstrength 150
+wait 3
+shot 06_dx_map_flipped_with_overlay
+expect shot.likeref > 0.6
+# … and the flag moved under the overlay binds the map again: the DirectX file read as OpenGL's
+# is turned over, the overlay's height on it still the right way up.
+material flipnormal 0
+wait 3
+shot 07_dx_map_unflipped_with_overlay
+expect shot.likeref < 0
+material flipnormal 1
+texture normal overlay_normal.png
+material flipnormal 0
+wait 3
+shot 08_gl_map_with_overlay
+expect shot.likeref > 0.6
+overlay remove 0
+
+# --- 6. The flag is part of the material: saved, applied, and in a project ------------------------
+texture normal overlay_normal_dx.png
+material flipnormal 1
+savematerial flipped.psm noicon
+expect matfile.ok == 1
+material flipnormal 0
+expect mat.flipnormal == 0
+applymaterial flipped.psm
+expect matfile.ok == 1
+expect mat.flipnormal == 1
+expect mattex.normal == 2
+saveproject flip.pss
+material flipnormal 0
+openproject flip.pss
+wait 20
+select 0
+expect mat.flipnormal == 1
+view front
+lookat 0 0.7 0 0.75
+wait 3
+shot 09_after_project
+expect shot.likeref > 0.6

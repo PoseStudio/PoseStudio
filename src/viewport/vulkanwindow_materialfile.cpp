@@ -6,10 +6,10 @@
  *        (A TU of VulkanWindow — see vulkanwindow.h for the class and its other TUs.)
  *
  * SAVING (saveMaterialFile) writes the zone's values and, for every slot that holds a map, the
- * map's file — by THE STANDARD of assets/assetstore.h: an asset's textures lie in a `textures`
+ * map's file — by THE STANDARD of assets/assetstore.h: an asset's textures lie in a `.textures`
  * folder beside it and are named by paths relative to it, so the material's folder is all the
  * material needs. A map that already lies beside the material (or in its folder's store) is
- * named where it is; any other file is COPIED into `textures/<material>/`, unless the same
+ * named where it is; any other file is COPIED into `.textures/<material>/`, unless the same
  * bytes are in the store already; an image that has no file of its own — one that lives inside
  * the model's file (a GLB's), or ONE CHANNEL of a packed map (a glTF roughness in the green of
  * its metallic-roughness image: a chosen file is read from its red) — is WRITTEN there as a
@@ -254,21 +254,16 @@ bool VulkanWindow::saveMaterialFile(const QString& path, bool copyTextures, QStr
         *report = counts;
     }
 
-    // (A material saved OVER itself: what the old file named in the store, for the tidying below.)
-    const QStringList before = file.exists() ? AssetStore::materialOwnFiles(file.absoluteFilePath()) : QStringList();
-
     const std::string text = materialFileText(doc);
     QSaveFile         out(path); // (written whole or not at all: a failed save leaves the old file)
     if (!out.open(QIODevice::WriteOnly) || out.write(text.data(), static_cast<qint64>(text.size())) != static_cast<qint64>(text.size()) ||
         !out.commit()) {
         return fail(tr("The file could not be written:\n%1").arg(out.errorString()));
     }
-    // The texture files the old version brought and nothing in the folder names any more go (to
-    // the trash; a scripted run's, for good): a material saved again with other maps does not
-    // leave its old ones behind.
-    if (!before.isEmpty()) {
-        AssetStore::removeUnnamed(folder.absolutePath(), before, /*permanently=*/m_script != nullptr);
-    }
+    // NOTHING IS TIDIED: a material saved over itself with other maps leaves the files its old
+    // version named where they are. (Until 2026-11-14 a save moved them to the trash when no
+    // material of the folder named them any more — and took maps the user still wanted: a map
+    // out of a slot is not a map out of use. The files are the user's to manage.)
     return true;
 }
 

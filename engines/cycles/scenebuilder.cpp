@@ -14,9 +14,18 @@
  *             in-memory loader hands rows over unflipped (memoryimage.h), so the same UV finds
  *             the same texel and neither side converts.
  *   NORMALS   The application's own vertex normals and UV tangents (with their handedness) are
- *             given as attributes: a normal map is then perturbed in the very frame the viewport
- *             perturbs it in — T, sign · (N × T), N — and the seams of a mesh split at its UV
- *             borders stay smooth (Cycles's own normals would crease every split vertex).
+ *             given as attributes: a normal map is then perturbed in the mesh's own tangent
+ *             frame, and the seams of a mesh split at its UV borders stay smooth (Cycles's own
+ *             normals would crease every split vertex). THE MAP'S CONVENTION: the application's
+ *             v runs DOWN the image, so the frame's bitangent does too, and a normal map's green
+ *             is read along it — which is DirectX's convention. A normal map is OpenGL-style
+ *             (green = up the image) unless the material says otherwise (kMaterialFlipNormalY),
+ *             so the OpenGL map's green is the one negated: the node's "DirectX" setting, used
+ *             here for what it DOES, not for what it is called. MEASURED, not assumed
+ *             (2026-11-14, tools/ikscripts/render/displacement.txt: a wall of domes as real
+ *             displaced geometry, lit from above, against the same domes as a normal map) — and
+ *             the sign of the tangent attribute handed over makes no difference to the result
+ *             (negated, the renders were identical): the frame is as Cycles derives it.
  *   WINDING   Cycles derives a triangle's front side from its winding and flips the shading
  *             normal of a back side; imported winding is not reliable (the viewport lights two-
  *             sided), so each triangle is wound to agree with its vertex normals.
@@ -400,6 +409,12 @@ std::unique_ptr<ccl::ShaderGraph> MaterialGraph::build() {
         auto* normalMap = m_graph->create_node<ccl::NormalMapNode>();
         normalMap->set_space(ccl::NODE_NORMAL_MAP_TANGENT);
         normalMap->set_strength(m_m.normalStrength);
+        // THE MAP'S CONVENTION (see NORMALS in the file comment): the frame's bitangent runs
+        // DOWN the image here, so it is the OpenGL-style map — the default — whose green has to
+        // be turned, which is what the node's "DirectX" setting does (it negates the green); a
+        // map the material marks DirectX-style already says "down" and is read as it is.
+        normalMap->set_convention((m_m.flags & kMaterialFlipNormalY) != 0 ? ccl::NODE_NORMAL_MAP_CONVENTION_OPENGL
+                                                                          : ccl::NODE_NORMAL_MAP_CONVENTION_DIRECTX);
         m_graph->connect(colorOf(map(MapSlot::Normal)), normalMap->input("Color"));
         normal = normalMap->output("Normal");
     }

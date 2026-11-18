@@ -7,7 +7,10 @@
 #include "appproxystyle.h"
 
 #include <QApplication>
+#include <QAbstractButton>
 #include <QDebug>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QEvent>
 #include <QFile>
 #include <QIcon>
@@ -61,6 +64,48 @@ protected:
 };
 
 /**
+ * @brief Keeps a dialog's buttons as wide as their labels.
+ *
+ * global.qss gives every dialog button a `min-width` (so "OK" is not a sliver). Qt's style sheet
+ * engine applies a declared min-width as the widget's EXPLICIT minimum width, and an explicit
+ * minimum replaces the minimum size hint a layout otherwise honours — so a layout may squeeze a
+ * button down to that width whatever its label needs. QMessageBox does exactly that: it fixes
+ * its own width from the layout's MINIMUM width, and a box with a short message and three
+ * custom buttons came out with "Keep Existing Icon" cut off at both ends.
+ *
+ * When a dialog is shown (its children are polished by then: the style sheet's font is in their
+ * size hints) each button of its button boxes is given its size hint's width as its minimum.
+ * The filter sees the Show event before the dialog does, so QMessageBox sizes itself — in its
+ * show event — with the buttons at their real widths.
+ */
+class DialogButtonFilter : public QObject {
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event->type() != QEvent::Show) {
+            return QObject::eventFilter(watched, event);
+        }
+        auto* dialog = qobject_cast<QDialog*>(watched);
+        if (!dialog) {
+            return QObject::eventFilter(watched, event);
+        }
+        const QList<QDialogButtonBox*> boxes = dialog->findChildren<QDialogButtonBox*>();
+        for (const QDialogButtonBox* box : boxes) {
+            const QList<QAbstractButton*> buttons = box->buttons();
+            for (QAbstractButton* button : buttons) {
+                const int wanted = button->sizeHint().width();
+                if (wanted > button->minimumWidth()) {
+                    button->setMinimumWidth(wanted);
+                }
+            }
+        }
+        return QObject::eventFilter(watched, event);
+    }
+};
+
+/**
  * @brief Concatenates the app's QSS modules into one stylesheet, in cascade order
  *        (later files can override rules from earlier ones).
  */
@@ -108,4 +153,6 @@ void AppTheme::install(QApplication& app) {
     // Strip the native drop shadow from every popup menu app-wide, keeping their rounded corners
     // (see MenuShadowFilter). Parented to the app so it lives for the whole session.
     app.installEventFilter(new MenuShadowFilter(&app));
+    // … and keep every dialog's buttons as wide as their labels (see DialogButtonFilter).
+    app.installEventFilter(new DialogButtonFilter(&app));
 }

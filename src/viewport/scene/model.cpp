@@ -714,6 +714,12 @@ void Model::setMeshMetalBaked(std::size_t i, float scalar) {
     ++m_materialRevision;
 }
 
+void Model::setMeshNormalFlipBaked(std::size_t i, int flip) {
+    if (i < m_meshes.size()) {
+        m_meshes[i].setNormalFlipBaked(flip); // (a record: the binding itself changed through setMeshTexture)
+    }
+}
+
 bool Model::setMeshOverlays(std::size_t i, const std::vector<MaterialOverlay>& overlays) {
     if (i >= m_meshes.size() || !m_meshes[i].setOverlays(overlays)) {
         return false;

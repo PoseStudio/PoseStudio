@@ -8,7 +8,7 @@ Every dial is a **scrub field**: drag left or right across it to change the valu
 
 ## Choosing an HDRI
 
-The **HDRI** button shows the name of the current panorama. Click it for a menu of every `.hdr` and `.exr` file in your library's `hdri` folder, each with a thumbnail. **Subfolders are categories**: put panoramas into `Outdoor`, `Studio`, `Night` and they appear under those headings, files in the root of `hdri` first. The menu is rebuilt each time it opens, so files you add while PoseStudio runs appear at once. **Open HDRI Folder…** at the bottom of the menu opens the folder in Explorer.
+The **HDRI** button shows the name of the current panorama. Click it for a menu of every `.hdr` and `.exr` file in your library's `hdri` folder, each with a thumbnail. **Subfolders are categories**: put panoramas into `Outdoor`, `Studio`, `Night` and they appear under those headings, files in the root of `hdri` first. A file or a folder whose name begins with a dot is [hidden](asset-manager.md#hiding-files-and-folders) and left out. The menu is rebuilt each time it opens, so files you add while PoseStudio runs appear at once. **Open HDRI Folder…** at the bottom of the menu opens the folder in Explorer.
 
 A thumbnail is any image with the same file name as the panorama in the same folder (`beach.hdr` + `beach.jpg`); PoseStudio prefers webp, then png, jpg, jpeg, bmp, gif and tif. The installer's starter set comes with previews.
 

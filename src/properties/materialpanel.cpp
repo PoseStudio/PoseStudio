@@ -157,13 +157,23 @@ void MaterialPanel::buildUi() {
     col->setContentsMargins(12, 12, 12, 12);
     col->setSpacing(10);
 
-    // The heading: the object's name, and across from it the Save button.
+    setProperty("testId", QStringLiteral("materials.panel")); // (the scripted `ui call` / `ui post`: the panel's own slots)
+
+    // The heading: the object's name, and across from it the Import and Save buttons.
     auto* heading = new QHBoxLayout;
     heading->setContentsMargins(0, 0, 0, 0);
     heading->setSpacing(8);
     m_objectName = new QLabel;
     m_objectName->setObjectName(QStringLiteral("MaterialObjectName"));
     heading->addWidget(m_objectName, 1);
+    m_import = new QPushButton(tr("Import"));
+    m_import->setObjectName(QStringLiteral("PropertyResetButton")); // (Save's look)
+    m_import->setCursor(Qt::ArrowCursor);
+    m_import->setToolTip(tr("Puts a material from a file on this zone: a MaterialX material (.mtlx), the format material "
+                            "libraries are published in, or a material saved by PoseStudio (.psm). One undo step."));
+    m_import->setProperty("testId", QStringLiteral("materials.import"));
+    connect(m_import, &QPushButton::clicked, this, &MaterialPanel::importMaterial);
+    heading->addWidget(m_import, 0, Qt::AlignTop);
     m_save = new QPushButton(tr("Save"));
     m_save->setObjectName(QStringLiteral("PropertyResetButton")); // (the side panel's one plain-button look)
     m_save->setCursor(Qt::ArrowCursor);
@@ -373,6 +383,20 @@ void MaterialPanel::buildUi() {
     addRow(geometry, MaterialField::NormalStrength, tr("Normal Strength"),
            tr("How strongly the zone's normal map perturbs the surface: 100 is the map as painted, 0 flat, more exaggerates it. Greyed without one."), 0.0,
            400.0, 5.0, 0, 100.0);
+    m_flipNormal = new QCheckBox(tr("Flip Normal"));
+    m_flipNormal->setToolTip(tr("Reads the normal map the other way up: tick it for a map made for DirectX (often named \"DX\"), whose green channel "
+                                "points down. PoseStudio reads the OpenGL kind (\"GL\") as it is. A map of the wrong kind looks pressed in where it "
+                                "should stand out, as if lit from below. Greyed without a normal map."));
+    m_flipNormal->setProperty("testId", QStringLiteral("materials.flipnormal"));
+    connect(m_flipNormal, &QCheckBox::toggled, this, &MaterialPanel::setFlipNormal);
+    m_flipNormalRestore = propertyrows::makeRestoreButton();
+    m_flipNormalRestore->setToolTip(tr("Back to what the file imported with"));
+    connect(m_flipNormalRestore, &QToolButton::clicked, this, [this]() {
+        if (m_view.valid) {
+            setFlipNormal(m_view.imported.flipNormal);
+        }
+    });
+    geometry->addRow(QString(), propertyrows::rowWithRestore(m_flipNormal, m_flipNormalRestore));
     addRow(geometry, MaterialField::BumpStrength, tr("Bump Strength"),
            tr("How strongly the zone's bump (height) map perturbs the surface: 100 is the map as painted. Greyed without one."), 0.0, 400.0, 5.0, 0,
            100.0);
@@ -413,19 +437,24 @@ void MaterialPanel::buildUi() {
               "60 rounds a sphere and keeps a cube's edges; 0 is faceted; 180 smooths everything. Greyed while Smooth by Angle is off."),
            0.0, 180.0, 1.0, 0);
 
-    // --- Displacement: a renderer's tessellated displacement (stored) ---
+    // --- Displacement: the surface really moved by a height map — in a render and the Rendered
+    // viewport mode (scene/meshdisplace.h); the rasterized modes do not displace ---
     QFormLayout* displacement = addSection(col, tr("Displacement"), /*expanded=*/false,
                                            [](const MaterialView& v) { return v.maps.has(MaterialMap::Displacement); }, MaterialLayer::Displacement);
     addRow(displacement, MaterialField::DisplacementStrength, tr("Strength"),
-           tr("How far the displacement map pushes the surface, in centimetres from the map's black to its white (negative inverts it). "
-              "Greyed without a map. Stored for rendering engines, which subdivide and displace the mesh; the viewport does not."),
+           tr("How far the displacement map moves the surface, in CENTIMETRES from the map's black to its white (negative inverts it): "
+              "a brick wall's joints are about 1, deep stonework 3 to 5. Greyed without a map. Shown in a render and in the "
+              "Rendered viewport mode; the other viewport modes do not displace."),
            -100.0, 100.0, 0.05, 2);
+    // (A sweep of the box is ten centimetres: the range is there for the odd giant, typed.)
+    m_rows[at(MaterialField::DisplacementStrength)].box->setScrubSpan(10.0);
     addRow(displacement, MaterialField::DisplacementMidLevel, tr("Mid Level"),
-           tr("The map value that leaves the surface where it is: at 50 black sinks and white rises by half the strength each; at 0 the map only rises. "
-              "Stored for rendering engines."),
+           tr("The map value that leaves the surface where it is: at 50 black sinks and white rises by half the strength each; at 0 the map only rises."),
            0.0, 100.0, 1.0, 0, 50.0);
     addRow(displacement, MaterialField::DisplacementSubdiv, tr("Subdivision"),
-           tr("How many times a renderer subdivides the mesh before displacing it (0 none, 2-3 for fine detail). Stored for rendering engines."),
+           tr("How many times every triangle is cut in four before the surface is displaced: a displacement can only move the mesh's "
+              "points, so a coarse mesh needs more of them. 0 moves the mesh as it is; each level is four times the triangles "
+              "(a level is dropped where the mesh would pass five million). The shape itself is not rounded."),
            0.0, 5.0, 1.0, 0);
     m_rows[at(MaterialField::DisplacementSubdiv)].box->setFineStep(0.0); // a count of levels: no fine scrub
 
@@ -490,7 +519,8 @@ void MaterialPanel::buildUi() {
     defineSlot(MaterialMap::AmbientOcclusion, tr("Ambient Occlusion"),
                   tr("A baked ambient-occlusion map (grayscale, white = open), applied by its weight over the occlusion the viewport bakes."));
     defineSlot(MaterialMap::Displacement, tr("Displacement"),
-                  tr("A grayscale height map a renderer displaces the mesh by: Displacement Strength and Mid Level scale it. Stored for rendering engines."));
+                  tr("A grayscale height map the surface is displaced by in a render and in the Rendered viewport mode: its Strength, Mid Level "
+                     "and Subdivision say how."));
     defineSlot(MaterialMap::DetailRoughness, tr("Detail Roughness"),
                   tr("A grayscale map of the detail layer's roughness multiplier, tiled with it. Stored for rendering engines."));
     defineSlot(MaterialMap::Opacity, tr("Cutout"),
@@ -969,6 +999,17 @@ void MaterialPanel::setThinWalled(bool on) {
     refresh();
 }
 
+void MaterialPanel::setFlipNormal(bool on) {
+    if (!m_viewport || !m_view.valid || !m_viewport->beginMaterialEdit()) {
+        return;
+    }
+    MaterialParams p = m_viewport->materialView().params;
+    p.flipNormal = on;
+    m_viewport->setSelectedMaterial(p, linked());
+    m_viewport->endMaterialEdit();
+    refresh();
+}
+
 void MaterialPanel::setDoubleSided(bool on) {
     if (!m_viewport || !m_view.valid || !m_viewport->beginMaterialEdit()) {
         return;
@@ -1058,21 +1099,14 @@ void MaterialPanel::saveMaterial() {
     const QString iconPath = file.absoluteDir().filePath(file.completeBaseName() + QStringLiteral(".png"));
     bool          makeIcon = true;
     if (QFileInfo::exists(iconPath)) {
-        QMessageBox box(QMessageBox::Question, tr("Save Material"),
-                        tr("\"%1\" already has an icon.").arg(file.completeBaseName()), QMessageBox::NoButton, this);
-        box.setInformativeText(tr("Recreate the icon from the material as it is now, and overwrite the old one?"));
-        QPushButton* recreate = box.addButton(tr("Recreate Icon"), QMessageBox::YesRole);
-        box.addButton(tr("Keep Existing Icon"), QMessageBox::NoRole);
-        QPushButton* cancel = box.addButton(QMessageBox::Cancel);
-        box.setDefaultButton(recreate);
-        box.exec();
-        if (box.clickedButton() == cancel || box.clickedButton() == nullptr) {
+        const IconChoice choice = askIconOverwrite(file.completeBaseName());
+        if (choice == IconChoice::Cancel) {
             return; // nothing is saved
         }
-        makeIcon = box.clickedButton() == recreate;
+        makeIcon = choice == IconChoice::Recreate;
     }
 
-    // The textures go WITH the material — copied into a `textures` folder beside it — unless
+    // The textures go WITH the material — copied into a `.textures` folder beside it — unless
     // Preferences > Assets says to name them where they are (assets/assetstore.h).
     const bool         copyTextures = prefs.getValue(QString::fromLatin1(Constants::PREF_MATERIAL_COPY_TEXTURES), true).toBool();
     QString            error;
@@ -1104,7 +1138,7 @@ void MaterialPanel::saveMaterial() {
                     "(an image named like the file, beside it).");
     }
     if (report.notCopied > 0) {
-        notes << tr("%n texture file(s) could not be copied into the material's \"textures\" folder. The material refers to "
+        notes << tr("%n texture file(s) could not be copied into the material's \".textures\" folder. The material refers to "
                     "them where they are, and will not find them on another computer.", nullptr, report.notCopied);
     }
     if (report.leftOut > 0) {
@@ -1120,6 +1154,47 @@ void MaterialPanel::saveMaterial() {
                                  tr("The material was saved as \"%1\".").arg(file.fileName()) + QStringLiteral("\n\n") +
                                      notes.join(QStringLiteral("\n\n")));
     }
+}
+
+MaterialPanel::IconChoice MaterialPanel::askIconOverwrite(const QString& name) {
+    QMessageBox box(QMessageBox::Question, tr("Save Material"), tr("\"%1\" already has an icon.").arg(name), QMessageBox::NoButton, this);
+    box.setInformativeText(tr("Recreate the icon from the material as it is now, and overwrite the old one?"));
+    QPushButton* recreate = box.addButton(tr("Recreate Icon"), QMessageBox::YesRole);
+    QPushButton* keep = box.addButton(tr("Keep Existing Icon"), QMessageBox::NoRole);
+    QPushButton* cancel = box.addButton(QMessageBox::Cancel);
+    for (QPushButton* button : {recreate, keep, cancel}) {
+        button->setProperty("testId", QStringLiteral("materials.iconquestion")); // (0 recreate, 1 keep, 2 cancel)
+    }
+    box.setDefaultButton(recreate);
+    box.exec();
+    if (box.clickedButton() == recreate) {
+        return IconChoice::Recreate;
+    }
+    return box.clickedButton() == keep ? IconChoice::Keep : IconChoice::Cancel; // (closed by Esc or its corner: nothing is saved)
+}
+
+void MaterialPanel::previewIconQuestion(int) {
+    askIconOverwrite(m_view.valid && m_view.zone >= 0 && m_view.zone < static_cast<int>(m_view.zones.size())
+                         ? QString::fromStdString(m_view.zones[static_cast<std::size_t>(m_view.zone)])
+                         : tr("Material"));
+}
+
+void MaterialPanel::importMaterial() {
+    if (!m_viewport || !m_view.valid || m_view.zone < 0) {
+        return;
+    }
+    // (The folder a material was imported from last: material packs are downloaded and unpacked
+    // into one place, and imported from there one after another.)
+    PreferencesManager& prefs = PreferencesManager::instance();
+    const QString       key = QString::fromLatin1(Constants::PREF_LAST_MATERIALX_DIR);
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Import Material"), prefs.rememberedDirectory(key, QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)),
+        tr("Material Files (*.mtlx *.psm);;MaterialX Files (*.mtlx);;PoseStudio Materials (*.psm)"));
+    if (path.isEmpty()) {
+        return; // cancelled
+    }
+    prefs.setValue(key, QFileInfo(path).absolutePath());
+    applyMaterialFile(path);
 }
 
 void MaterialPanel::applyMaterialFile(const QString& path) {
@@ -1181,6 +1256,7 @@ void MaterialPanel::refresh() {
 
     m_objectName->setText(view.valid ? QString::fromStdString(view.modelName) : tr("No object selected"));
     m_save->setEnabled(view.valid && view.zone >= 0);
+    m_import->setEnabled(view.valid && view.zone >= 0);
     m_hint->setVisible(!view.valid);
 
     // The zone picker: rebuilt only when the zone list changed (a rebuild closes an open menu).
@@ -1251,7 +1327,13 @@ void MaterialPanel::refresh() {
         } else if (field == MaterialField::CoatBumpStrength) {
             on = on && view.maps.has(MaterialMap::CoatBump);
         } else if (field == MaterialField::DisplacementStrength || field == MaterialField::DisplacementMidLevel || field == MaterialField::DisplacementSubdiv) {
-            on = on && view.maps.has(MaterialMap::Displacement);
+            // (A displacement map — or an overlay's displacement image, whose height the zone's
+            // Strength scales with the map's.)
+            bool overlayHeight = false;
+            for (const MaterialOverlay& overlay : view.params.overlays) {
+                overlayHeight = overlayHeight || (overlay.enabled && !overlay.displacement.empty());
+            }
+            on = on && (view.maps.has(MaterialMap::Displacement) || overlayHeight);
         } else if (field == MaterialField::AmbientOcclusion) {
             on = on && view.maps.has(MaterialMap::AmbientOcclusion);
         } else if (field == MaterialField::SmoothAngle) {
@@ -1294,6 +1376,14 @@ void MaterialPanel::refresh() {
     }
     m_doubleSided->setEnabled(view.valid);
     m_doubleSidedRestore->setEnabled(view.valid);
+    {
+        const QSignalBlocker blocker(m_flipNormal);
+        m_flipNormal->setChecked(view.valid && view.params.flipNormal);
+    }
+    // (Greyed without a normal map, as Normal Strength is: there is nothing to flip.)
+    const bool hasNormalMap = view.valid && !view.params.maps[static_cast<std::size_t>(MaterialMap::Normal)].source.empty();
+    m_flipNormal->setEnabled(hasNormalMap);
+    m_flipNormalRestore->setEnabled(hasNormalMap);
     {
         const QSignalBlocker blocker(m_smoothByAngle);
         m_smoothByAngle->setChecked(view.valid && view.params.smoothByAngle);

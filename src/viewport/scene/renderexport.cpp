@@ -134,6 +134,9 @@ renderapi::Material renderMaterial(const MaterialParams& m, const MaterialParams
 
     // --- The surface maps' strengths and the UV transform ---
     out.normalStrength = m.geometryEnabled ? std::max(m.normalStrength, 0.0f) : 0.0f;
+    if (m.flipNormal) {
+        out.flags |= renderapi::kMaterialFlipNormalY;
+    }
     out.bumpStrength = m.geometryEnabled ? m.bumpStrength : 0.0f;
     if (m.detailEnabled && m.detailWeight > 0.0f && m.detailTiles >= 1.0f) {
         out.detailWeight = std::clamp(m.detailWeight, 0.0f, 1.0f);

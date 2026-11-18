@@ -5,7 +5,9 @@
  *        import's rule for which meshes get it.
  *
  * On meshes made here: a sphere with a normal per face (a modelling package's default export), a
- * cube, a hexagonal prism, a capped cylinder. No Qt, no device (the Vulkan HEADERS only: the
+ * cube, a hexagonal prism, a capped cylinder — and a sphere of quads that are NOT FLAT, each with
+ * its polygon's one normal (what a subdivided or sculpted surface exports as: the file that came
+ * in faceted on 2026-11-14, its triangles up to two degrees off their quads' normals). No Qt, no device (the Vulkan HEADERS only: the
  * vertex layout names them). CTest: smoothing-check.
  */
 
@@ -445,6 +447,125 @@ MeshData meshOf(const Shape& s, const char* name) {
     return mesh;
 }
 
+/// Adds a polygon that need not be flat, as a fan, every corner a vertex of its own carrying the
+/// POLYGON's normal (the sum of the fan's triangle normals: what a modelling package writes for a
+/// face) — or @p normal, when given.
+void addPolygonWithOneNormal(Shape& s, const std::vector<glm::vec3>& corners, const glm::vec3* normal = nullptr) {
+    glm::vec3 n(0.0f);
+    for (std::size_t i = 1; i + 1 < corners.size(); ++i) {
+        n += glm::cross(corners[i] - corners[0], corners[i + 1] - corners[0]);
+    }
+    n = normal != nullptr ? *normal : glm::normalize(n);
+    const uint32_t first = static_cast<uint32_t>(s.vertices.size());
+    for (const glm::vec3& corner : corners) {
+        Vertex v;
+        v.pos = corner;
+        v.normal = n;
+        s.vertices.push_back(v);
+    }
+    for (uint32_t i = 1; i + 1 < corners.size(); ++i) {
+        s.indices.insert(s.indices.end(), {first, first + i, first + i + 1});
+    }
+}
+
+/// A sphere whose quads are saddles: every other point of the grid stands a little further out.
+/// One normal per quad, the quad's own.
+Shape warpedSphere(float bump, int around = 32, int down = 16) {
+    Shape      s;
+    const auto point = [&](int i, int j) {
+        const glm::vec3 p = spherePoint(i, j, around, down);
+        const bool      pole = j == 0 || j == down;
+        return pole ? p : p * (1.0f + ((i % around + j) % 2 == 0 ? bump : -bump));
+    };
+    for (int j = 0; j < down; ++j) {
+        for (int i = 0; i < around; ++i) {
+            const glm::vec3 a = point(i, j), b = point(i + 1, j), c = point(i + 1, j + 1), d = point(i, j + 1);
+            if (j == 0) {
+                addPolygonWithOneNormal(s, {a, d, c});
+            } else if (j == down - 1) {
+                addPolygonWithOneNormal(s, {a, d, b});
+            } else {
+                addPolygonWithOneNormal(s, {a, d, c, b});
+            }
+        }
+    }
+    return s;
+}
+
+/// The furthest a triangle's own normal stands from the normal its corners carry, in degrees.
+float worstOffFace(const Shape& s) {
+    float worst = 1.0f;
+    for (std::size_t t = 0; t < s.indices.size() / 3; ++t) {
+        worst = std::min(worst, std::abs(glm::dot(faceNormal(s, t), glm::normalize(s.vertices[s.indices[t * 3]].normal))));
+    }
+    return glm::degrees(std::acos(std::min(worst, 1.0f)));
+}
+
+void checkFacetedFiles() {
+    std::printf("-- what reads as a file with a normal per face\n");
+    // THE FILE OF 2026-11-14: quads that are not flat, each with its own one normal. Its
+    // triangles stand off those normals, and it is a faceted file all the same.
+    const Shape warped = warpedSphere(0.0007f);
+    const float off = worstOffFace(warped);
+    std::printf("     (a sphere of warped quads: a triangle stands up to %.2f degrees off its quad's normal)\n", off);
+    check(off > 1.5f && off < 20.0f, "the test sphere's quads are warped past the old one-degree reading");
+    check(pose::hasOnlyFaceNormals(warped.vertices, warped.indices) && pose::facetedShare(warped.vertices, warped.indices) == 1.0f,
+          "a sphere of quads that are not flat, one normal a quad, is a faceted file");
+    const Shape round = shapeOf(smoothOne(warped, 60.0f)[0]);
+    const float radial = worstAgainst(round, [](const Vertex& v) { return v.pos; });
+    std::printf("     (smoothed: %zu vertices of %zu; the normal furthest from radial is %.2f degrees off)\n", round.vertices.size(),
+                warped.vertices.size(), glm::degrees(std::acos(std::min(radial, 1.0f))));
+    check(round.vertices.size() == 32u * 15u + 2u && radial > 0.99f && !pose::hasOnlyFaceNormals(round.vertices, round.indices),
+          "... and smoothed it is round: one vertex a point, the normals the sphere's");
+    ModelData model;
+    model.meshes.push_back(meshOf(warped, "warped"));
+    check(pose::applyImportSmoothing(model) == 1 && model.meshes[0].smoothByAngle && model.meshes[0].fileVertices.size() == warped.vertices.size(),
+          "... so the import smooths it");
+    const Shape strongly = warpedSphere(0.004f);
+    std::printf("     (warped harder: up to %.2f degrees)\n", worstOffFace(strongly));
+    check(pose::hasOnlyFaceNormals(strongly.vertices, strongly.indices), "quads warped by ten degrees and more are still faces with one normal each");
+
+    // A DENSE mesh with smooth normals: every corner's normal lies within a degree of its small
+    // triangle's own, and they are the author's all the same — the corners differ.
+    Shape dense = flatSphere(256, 128);
+    for (Vertex& v : dense.vertices) {
+        v.normal = glm::normalize(v.pos);
+    }
+    check(!pose::hasOnlyFaceNormals(dense.vertices, dense.indices) && pose::facetedShare(dense.vertices, dense.indices) < 0.02f,
+          "a dense sphere with smooth normals is not faceted, however near its normals are to its faces'");
+
+    // Normals that are one per face but have nothing to do with the faces: an author's.
+    Shape           cards;
+    const glm::vec3 up(0.0f, 1.0f, 0.0f);
+    for (int i = 0; i < 12; ++i) {
+        const float x = static_cast<float>(i);
+        addPolygonWithOneNormal(cards, {{x, 0, 0}, {x + 0.5f, 0, 0}, {x + 0.5f, 1, 0}, {x, 1, 0}}, &up);
+    }
+    check(!pose::hasOnlyFaceNormals(cards.vertices, cards.indices) && pose::facetedShare(cards.vertices, cards.indices) == 0.0f,
+          "upright cards whose normals all point up are not a faceted export");
+
+    // A few triangles whose own normal is noise (slivers) do not decide for the mesh ...
+    Shape           slivers = flatSphere();
+    const glm::vec3 aside(1.0f, 0.0f, 0.0f);
+    for (int i = 0; i < 6; ++i) {
+        const float y = 3.0f + static_cast<float>(i);
+        addPolygonWithOneNormal(slivers, {{0, y, 0}, {1, y, 0}, {0.5f, y, 1.0e-4f}}, &aside);
+    }
+    check(pose::hasOnlyFaceNormals(slivers.vertices, slivers.indices), "six triangles of 966 with a normal off their face: still a faceted file");
+    // ... a third of them do.
+    Shape mixed = flatCube();
+    for (int i = 0; i < 6; ++i) {
+        const float x = 5.0f + static_cast<float>(i);
+        addPolygonWithOneNormal(mixed, {{x, 0, 0}, {x + 0.5f, 0, 0}, {x + 0.5f, 1, 0}}, &up);
+    }
+    check(!pose::hasOnlyFaceNormals(mixed.vertices, mixed.indices), "a third of the triangles with a normal off their face: not one");
+
+    // One smoothed triangle among faceted ones: the file smoothed something.
+    Shape touched = flatSphere();
+    touched.vertices[touched.indices[300]].normal = glm::normalize(touched.vertices[touched.indices[300]].pos);
+    check(!pose::hasOnlyFaceNormals(touched.vertices, touched.indices), "one corner with a normal of its own and the normals are the author's");
+}
+
 void checkImport() {
     std::printf("-- the import's rule\n");
     // A sphere whose file has smooth normals: the author's.
@@ -503,6 +624,7 @@ int main() {
     checkEdges();
     checkZones();
     checkAttributes();
+    checkFacetedFiles();
     checkImport();
     std::printf("%d failed\n", failures);
     return failures;

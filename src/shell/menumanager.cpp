@@ -114,7 +114,6 @@ void MenuManager::setupMenus() {
         {".DUF (DUF File)",                   &MenuManager::importFigureFile},
         {".FBX (FBX File)",                   &MenuManager::importFbxFile},
         {".GLB (GL Transmission Format .glTF)", &MenuManager::importGltfFile},
-        {".MTLX (MaterialX Material)",        &MenuManager::importMaterialXFile},
         {".OBJ (Wavefront)",                  &MenuManager::importObjFile},
         {".PLY / .SPLAT / .SPZ (Gaussian Splat)",    &MenuManager::importSplatFile},
         {".USD (Universal Scene Description)", &MenuManager::importUsdFile},
@@ -669,20 +668,6 @@ void MenuManager::importUsdFile() {
 void MenuManager::importVrmFile() {
     // A VRM avatar: a GLB with a humanoid bone map, read by the glTF reader through the same route.
     importRiggedFile(tr("Import VRM Avatar"), tr("VRM Avatars (*.vrm)"));
-}
-
-void MenuManager::importMaterialXFile() {
-    // A MaterialX document is not a model: one of its materials is put on the selected object's
-    // zone (the Materials tab's), exactly as a saved material is. The Materials panel does it
-    // (it asks which material where the file holds several) — main.cpp wires the signal.
-    const QString path = QFileDialog::getOpenFileName(
-        mainWindow, tr("Import MaterialX Material"), rememberedStartDir(Constants::PREF_LAST_MATERIALX_DIR),
-        tr("MaterialX Files (*.mtlx)"));
-    if (path.isEmpty()) return; // user cancelled
-
-    PreferencesManager::instance().setValue(Constants::PREF_LAST_MATERIALX_DIR,
-                                            QFileInfo(path).absolutePath());
-    emit materialFileChosen(path);
 }
 
 void MenuManager::importSplatFile() {

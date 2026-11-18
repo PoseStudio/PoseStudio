@@ -144,7 +144,8 @@ bool materialFromJson(const json& entry, MaterialParams& params, std::vector<Pro
     if (!flag("smoothByAngle", params.smoothByAngle) || !number("smoothAngle", params.smoothAngle)) {
         return false;
     }
-    if (!flag("thinWalled", params.thinWalled) || !flag("doubleSided", params.doubleSided) || !pair2("uvTiling", params.uvTiling) ||
+    if (!flag("thinWalled", params.thinWalled) || !flag("doubleSided", params.doubleSided) || !flag("flipNormal", params.flipNormal) ||
+        !pair2("uvTiling", params.uvTiling) ||
         !pair2("uvOffset", params.uvOffset) ||
         !flag("topCoatEnabled", params.topCoatEnabled) ||
         !flag("sheenEnabled", params.sheenEnabled) ||
@@ -278,6 +279,7 @@ json materialToJson(const MaterialParams& p, const std::vector<ProjectTexture>& 
         {"dispersion", p.dispersion},
         {"thinWalled", p.thinWalled},
         {"doubleSided", p.doubleSided},
+        {"flipNormal", p.flipNormal},
         {"smoothByAngle", p.smoothByAngle},
         {"smoothAngle", p.smoothAngle},
         {"topCoatEnabled", p.topCoatEnabled},

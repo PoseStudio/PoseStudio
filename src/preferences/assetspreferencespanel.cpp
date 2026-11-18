@@ -70,7 +70,7 @@ AssetsPreferencesPanel::AssetsPreferencesPanel(QWidget* parent)
     copyTextures->setChecked(PreferencesManager::instance().getValue(Constants::PREF_MATERIAL_COPY_TEXTURES, true).toBool());
     contentLayout()->addWidget(copyTextures);
     addDescription(
-        tr("When on, saving a material copies the texture files it uses into a \"textures\" folder beside it "
+        tr("When on, saving a material copies the texture files it uses into a \".textures\" folder beside it "
            "(a file that is already there is not copied twice), so the material keeps working when its folder is "
            "moved, shared or opened on another computer. When off, the material refers to the files where they "
            "are, and stops finding them if they move."));

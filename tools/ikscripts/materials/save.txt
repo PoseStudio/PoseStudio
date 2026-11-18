@@ -64,7 +64,7 @@ expect mat.anisotropy == 90
 undo
 
 # --- 3. A material with maps: the files go WITH it, and come back -----------------------------------
-# (Copied into <out>/textures/mapped/ — the texture store, tools/ikscripts/materials/store.txt.)
+# (Copied into <out>/.textures/mapped/ — the texture store, tools/ikscripts/materials/store.txt.)
 texture basecolor tex_red.png
 texture roughness tex_rough.png
 expect mattex.basecolor == 2

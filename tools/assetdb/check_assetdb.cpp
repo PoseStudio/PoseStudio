@@ -19,6 +19,10 @@
  *   (AssetScan::pathsWithin) — and reordering that part leaves every other favorite in its
  *   place, where numbering the part alone would have shuffled it in among the others.
  * - favoritesRevision() counts the changes a browser on display has to catch up with.
+ * - HIDDEN NAMES (core/hiddennames.h), on folders made in the OS temp directory: a file or a
+ *   folder whose name begins with a dot is in no listing the browsers are built from — not a
+ *   folder of the tree, not an asset, not a thumbnail, not a reason to call its parent a hit —
+ *   and a folder named `textures` is an ordinary folder.
  *
  * Exit code = number of failed checks (0 = green).
  */
@@ -28,11 +32,14 @@
 #include "database.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStringList>
+#include <QTemporaryDir>
 
 #include <cstdio>
 
@@ -296,6 +303,82 @@ void checkFavorites() {
           "an asset that is filed nowhere is followed and forgotten without complaint");
 }
 
+bool touch(const QString& path) {
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile out(path);
+    return out.open(QIODevice::WriteOnly) && out.write("x") == 1;
+}
+
+QStringList namesOf(const QFileInfoList& entries) {
+    QStringList names;
+    for (const QFileInfo& entry : entries) names.append(entry.fileName());
+    return names;
+}
+
+/// THE HIDDEN-NAME RULE in the scans every browser is built from (assetscan.h).
+void checkHiddenNames() {
+    std::printf("-- a name that begins with a dot is hidden from the library browsers\n");
+    QTemporaryDir temp;
+    if (!temp.isValid()) {
+        check(false, "a temporary folder for the hidden-name checks");
+        return;
+    }
+    // (The library's own folder has a dot name: a root is shown whatever it is called.)
+    const QString lib = temp.path() + QStringLiteral("/.lib");
+    bool          made = true;
+    for (const char* file : {"Visible/a.psm", "Visible/a.png",
+                             "textures/t.psm", "textures/t.png",                 // an ordinary folder now
+                             ".hidden/h.psm", ".hidden/h.png",                   // a hidden folder with an asset in it
+                             "Visible/.textures/Denim/color.png",                // an asset's texture store
+                             "OnlyHidden/.inner/i.psm", "OnlyHidden/.inner/i.png",
+                             "Mixed/shown.psm", "Mixed/shown.png", "Mixed/.shown.jpg",
+                             "Mixed/.secret.psm", "Mixed/.secret.png",           // a hidden asset with its hidden icon
+                             "Mixed/.lonely.psm", "Mixed/lonely.png",
+                             "Secret/.only.psm", "Secret/.only.png"}) {
+        made = touch(lib + QLatin1Char('/') + QLatin1String(file)) && made;
+    }
+    check(made, "the test library is written");
+
+    check(HiddenNames::isHidden(QStringLiteral(".textures")) && HiddenNames::isHidden(QStringLiteral(".a.psm")) &&
+              !HiddenNames::isHidden(QStringLiteral("textures")) && !HiddenNames::isHidden(QStringLiteral("a.b.psm")) &&
+              !HiddenNames::isHidden(QStringLiteral(".")) && !HiddenNames::isHidden(QStringLiteral("..")) && !HiddenNames::isHidden(QString()),
+          "a name is hidden when it begins with a dot (\".\" and \"..\" are no names)");
+    check(HiddenNames::inHiddenPath(lib + QStringLiteral("/.hidden/h.psm"), lib) && HiddenNames::inHiddenPath(lib + QStringLiteral("/.hidden"), lib) &&
+              HiddenNames::inHiddenPath(lib + QStringLiteral("/Visible/.textures/Denim/color.png"), lib) &&
+              HiddenNames::inHiddenPath(lib + QStringLiteral("/Mixed/.secret.psm"), lib),
+          "a path is hidden when any of its segments below the library's root is");
+    check(!HiddenNames::inHiddenPath(lib + QStringLiteral("/Visible/a.psm"), lib) && !HiddenNames::inHiddenPath(lib, lib) &&
+              !HiddenNames::inHiddenPath(lib + QStringLiteral("/textures/t.psm"), lib),
+          "… and the root's own dot name hides nothing in it");
+
+    check(namesOf(AssetScan::listSubdirectories(lib)) ==
+              QStringList({QStringLiteral("Mixed"), QStringLiteral("OnlyHidden"), QStringLiteral("Secret"), QStringLiteral("textures"), QStringLiteral("Visible")}),
+          "the folders listed: every one but the hidden one — `textures` among them");
+    check(namesOf(AssetScan::listSubdirectories(lib + QStringLiteral("/Visible"))).isEmpty() && !AssetScan::hasSubdirectories(lib + QStringLiteral("/Visible")),
+          "a folder whose only subfolder is its texture store lists none, and is not expandable");
+    check(!AssetScan::hasSubdirectories(lib + QStringLiteral("/OnlyHidden")) && AssetScan::hasSubdirectories(lib),
+          "… nor is one whose only subfolder is hidden");
+
+    const QList<AssetScan::AssetHit> mixed = AssetScan::scanFolderAssets(lib + QStringLiteral("/Mixed"));
+    check(mixed.size() == 1 && mixed.first().assetFileName == QLatin1String("shown.psm") && mixed.first().bestImage == QLatin1String("shown.png"),
+          "a folder's assets: the hidden asset is not one, and a hidden picture is nobody's thumbnail");
+    check(AssetScan::scanFolderAssets(lib + QStringLiteral("/Secret")).isEmpty() && !AssetScan::folderHasDirectAssetHit(lib + QStringLiteral("/Secret")) &&
+              AssetScan::folderHasDirectAssetHit(lib + QStringLiteral("/Mixed")) && AssetScan::folderHasDirectAssetHit(lib + QStringLiteral("/textures")),
+          "a folder that holds only hidden assets holds none; one named `textures` holds its own");
+
+    using AssetScan::HitState;
+    const QHash<QString, HitState> states = AssetScan::classifyFolder(lib, {});
+    bool                            walkedHidden = false;
+    for (auto it = states.cbegin(); it != states.cend(); ++it) walkedHidden = walkedHidden || HiddenNames::inHiddenPath(it.key(), lib);
+    check(states.value(lib) == HitState::IndirectHit && !walkedHidden, "classifying the library never walks into a hidden folder");
+    check(AssetScan::classifyFolder(lib + QStringLiteral("/OnlyHidden"), {}).value(lib + QStringLiteral("/OnlyHidden")) == HitState::NoHit &&
+              AssetScan::classifyFolder(lib + QStringLiteral("/Secret"), {}).value(lib + QStringLiteral("/Secret")) == HitState::NoHit,
+          "a folder whose assets are all hidden, or all in a hidden folder, is no hit (greyed in the tree)");
+    check(AssetScan::classifyFolder(lib + QStringLiteral("/Visible"), {}).value(lib + QStringLiteral("/Visible")) == HitState::DirectHit &&
+              AssetScan::classifyFolder(lib + QStringLiteral("/textures"), {}).value(lib + QStringLiteral("/textures")) == HitState::DirectHit,
+          "a folder with an asset is a hit, its hidden texture store beside the point — and so is one named `textures`");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -309,6 +392,7 @@ int main(int argc, char** argv) {
     checkFreshSchema(QStringLiteral(POSESTUDIO_SCHEMA_FILE));
     checkCollections();
     checkFavorites();
+    checkHiddenNames();
 
     // The connection must be gone before the application object is.
     QSqlDatabase::database(QLatin1String(kDatabaseConnectionName)).close();

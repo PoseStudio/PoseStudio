@@ -1,0 +1,91 @@
+# THE NORMAL MAP'S CONVENTION AGAINST REAL GEOMETRY — in a render, and in the viewport beside it.
+#
+# Needs a build with the render engine. NOT run by run_all.sh (the subfolder). On the wall and the
+# loose maps of tools/materials/make_test_assets.py:
+#
+#   python tools/materials/make_test_assets.py <assets>
+#   POSESTUDIO_TEST_FIGURE=<assets>/wall.obj tools/ikscripts/run.sh \
+#       tools/ikscripts/render/normal_convention.txt <out> POSESTUDIO_IK_SCRIPT_ASSETS=<assets> \
+#       POSESTUDIO_RENDER_TRACE=1
+#
+# A flat wall faces the camera, lit by the key light alone, from above. THE GROUND TRUTH IS
+# GEOMETRY: the domes of overlay_bump.png as a DISPLACEMENT — the wall's surface really moved,
+# and lit by the path tracer: bright on top, dark below. The same domes as a normal map must be
+# lit the same way: render.likeref is the correlation of what the render and the reference each
+# ADD to the plain wall (renderbase) — near +1 for the same relief, NEGATIVE for the relief
+# turned over. Read as OpenGL-style (the default) overlay_normal.png must match and its
+# DirectX-style twin must not; with Flip Normal on, the other way round. The viewport is held to
+# the same pictures (shot.likeref against the overlay's height, which it draws as a slope) — so
+# the viewport and a render cannot disagree about which way up a map is.
+# (Until 2026-11-14 both read a map the DirectX way: an OpenGL-style map — the kind glTF, the
+# figure format and a material library's "GL" download carry — was lit from below.)
+# LOOK at render/: 01 real domes, 02 and 05 the same from a normal map, 03 and 04 dents.
+
+wait 10
+light shadows 0
+light diffuse 0
+light ambient 0
+light azimuth 0
+light elevation 55
+view front
+select 0
+lookat 0 0.7 0 0.75
+wait 3
+
+# --- 0. The plain wall ----------------------------------------------------------------------------
+shot 00_plain
+shotbase
+render 00_plain 48
+expect render.ok == 1
+renderbase
+
+# --- 1. The truth: the domes displaced ------------------------------------------------------------
+texture displacement overlay_bump.png
+material displacement 1.5
+material displacementmid 50
+material displacementsubd 3
+render 01_domes_displaced 48
+expect render.ok == 1
+renderref
+texture displacement none
+# (… and the viewport's: the domes as an overlay's height.)
+overlay add
+overlay 0 map bump overlay_bump.png
+overlay 0 bumpstrength 150
+wait 3
+shot 01_height_reference
+shotref
+overlay remove 0
+
+# --- 2. The OpenGL-style map, as it is: lit as the geometry is ------------------------------------
+texture normal overlay_normal.png
+expect mat.flipnormal == 0
+wait 3
+shot 02_gl_map_as_it_is
+expect shot.likeref > 0.6
+render 02_gl_map_as_it_is 48
+expect render.ok == 1
+expect render.likeref > 0.6
+
+# --- 3. … flipped by mistake: turned over ---------------------------------------------------------
+material flipnormal 1
+wait 3
+shot 03_gl_map_flipped
+expect shot.likeref < -0.3
+render 03_gl_map_flipped 48
+expect render.likeref < -0.3
+
+# --- 4. The DirectX-style file: turned over as it is, right with Flip Normal ----------------------
+texture normal overlay_normal_dx.png
+material flipnormal 0
+wait 3
+shot 04_dx_map_as_it_is
+expect shot.likeref < -0.3
+render 04_dx_map_as_it_is 48
+expect render.likeref < -0.3
+material flipnormal 1
+wait 3
+shot 05_dx_map_flipped
+expect shot.likeref > 0.6
+render 05_dx_map_flipped 48
+expect render.likeref > 0.6

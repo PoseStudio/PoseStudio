@@ -27,8 +27,69 @@ constexpr uint32_t kNone = 0xFFFFFFFFu;
 /// has it (a scan of several million faces: the file's geometry is kept beside the smoothed one).
 constexpr std::size_t kImportSmoothingVertexCap = 4000000;
 
-/// A corner's file normal this close to its face's (about a degree) is the face's.
-constexpr float kFaceNormalCos = 0.9998f;
+// WHAT A FACETED FILE LOOKS LIKE (2026-11-14). A modelling package's flat export writes ONE
+// NORMAL PER FACE: every corner of a polygon names the same normal. That — the three corners of a
+// triangle carrying one and the same normal — is the signal, and it is exact: the corners of an
+// OBJ face name one `vn`, the other formats write the same numbers per corner. A normal that was
+// smoothed differs from corner to corner by as much as the surface turns across the triangle.
+//
+// It is NOT "each corner's normal is its triangle's own", which is what this read until then,
+// to about a degree: a polygon's normal is the POLYGON's, and a quad that is not quite flat — any
+// quad of a subdivided or sculpted surface — is cut into two triangles that each stand a little
+// off it. A sphere of 1,984 such quads had 384 triangles between 1.15 and 2.1 degrees from their
+// quads' normals, so the file read as carrying authored normals and came in faceted. (And the
+// other way round, a dense SMOOTH mesh's corner normals all lie within a degree of their small
+// triangles' own.)
+
+/// Two corners carry the same normal when their unit normals differ by no more than this
+/// (0.02 degrees: what a reader's arithmetic may leave of two equal normals, and a hundred times
+/// under what a smooth mesh of a million triangles turns across one of them).
+constexpr float kSameNormalDistance = 3.5e-4f;
+
+/// A face's one normal still has to be a normal OF THAT FACE: within this of the triangle's own
+/// (cos 30 degrees — a warped polygon's triangles stand a few degrees off it), either side.
+/// Normals that have nothing to do with the faces (foliage cards all pointing up) say something
+/// their author meant, and are not a faceted export.
+constexpr float kFaceSideCos = 0.866f;
+
+/// ... for at least this share of the mesh's triangles: a sliver's own normal is noise (the
+/// triangles a reader cuts an n-gon with a point on a straight edge into), and one of them must
+/// not decide for a whole mesh.
+constexpr float kFaceSideShare = 0.95f;
+
+/// What one triangle's corners say.
+struct CornerNormals {
+    bool real = false;    ///< the triangle has an area (one without says nothing either way)
+    bool uniform = false; ///< its three corners carry one and the same normal
+    bool ofFace = false;  ///< ... and that normal is the face's, to kFaceSideCos, either side
+};
+
+CornerNormals cornerNormals(const std::vector<Vertex>& vertices, const uint32_t v[3]) {
+    CornerNormals out;
+    if (v[0] >= vertices.size() || v[1] >= vertices.size() || v[2] >= vertices.size()) {
+        return out;
+    }
+    const glm::vec3 n = glm::cross(vertices[v[1]].pos - vertices[v[0]].pos, vertices[v[2]].pos - vertices[v[0]].pos);
+    const float     length = glm::length(n);
+    if (!(length > 0.0f) || !std::isfinite(length)) {
+        return out;
+    }
+    out.real = true;
+    glm::vec3 unit[3];
+    for (int c = 0; c < 3; ++c) {
+        const glm::vec3& normal = vertices[v[c]].normal;
+        const float      l = glm::length(normal);
+        if (!(l > 1.0e-6f) || !std::isfinite(l)) {
+            return out; // no normal at all: neither uniform nor the face's
+        }
+        unit[c] = normal / l;
+    }
+    out.uniform = glm::distance(unit[0], unit[1]) <= kSameNormalDistance && glm::distance(unit[0], unit[2]) <= kSameNormalDistance &&
+                  glm::distance(unit[1], unit[2]) <= kSameNormalDistance;
+    // (Either side: a file's normals may face against its winding.)
+    out.ofFace = out.uniform && std::abs(glm::dot(unit[0], n)) >= kFaceSideCos * length;
+    return out;
+}
 
 uint32_t bitsOf(float f) {
     if (f == 0.0f) {
@@ -342,50 +403,32 @@ std::vector<SmoothedMesh> smoothByAngle(const std::vector<SmoothMesh>& meshes) {
 }
 
 bool hasOnlyFaceNormals(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices) {
-    bool any = false;
+    std::size_t real = 0, ofFace = 0;
     for (std::size_t i = 0; i + 2 < indices.size(); i += 3) {
-        const uint32_t v[3] = {indices[i], indices[i + 1], indices[i + 2]};
-        if (v[0] >= vertices.size() || v[1] >= vertices.size() || v[2] >= vertices.size()) {
-            continue;
-        }
-        const glm::vec3 n = glm::cross(vertices[v[1]].pos - vertices[v[0]].pos, vertices[v[2]].pos - vertices[v[0]].pos);
-        const float     length = glm::length(n);
-        if (!(length > 0.0f) || !std::isfinite(length)) {
+        const uint32_t      v[3] = {indices[i], indices[i + 1], indices[i + 2]};
+        const CornerNormals corners = cornerNormals(vertices, v);
+        if (!corners.real) {
             continue; // no area: it says nothing either way
         }
-        for (const uint32_t index : v) {
-            const glm::vec3& normal = vertices[index].normal;
-            const float      l = glm::length(normal);
-            // (Either side: a file's normals may face against its winding.)
-            if (!(l > 1.0e-6f) || std::abs(glm::dot(normal, n)) < kFaceNormalCos * l * length) {
-                return false;
-            }
+        if (!corners.uniform) {
+            return false; // a triangle whose corners differ: the file smoothed something
         }
-        any = true;
+        ++real;
+        ofFace += corners.ofFace ? 1 : 0;
     }
-    return any;
+    return real > 0 && static_cast<float>(ofFace) >= kFaceSideShare * static_cast<float>(real);
 }
 
 float facetedShare(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices) {
     std::size_t real = 0, faceted = 0;
     for (std::size_t i = 0; i + 2 < indices.size(); i += 3) {
-        const uint32_t v[3] = {indices[i], indices[i + 1], indices[i + 2]};
-        if (v[0] >= vertices.size() || v[1] >= vertices.size() || v[2] >= vertices.size()) {
-            continue;
-        }
-        const glm::vec3 n = glm::cross(vertices[v[1]].pos - vertices[v[0]].pos, vertices[v[2]].pos - vertices[v[0]].pos);
-        const float     length = glm::length(n);
-        if (!(length > 0.0f) || !std::isfinite(length)) {
+        const uint32_t      v[3] = {indices[i], indices[i + 1], indices[i + 2]};
+        const CornerNormals corners = cornerNormals(vertices, v);
+        if (!corners.real) {
             continue;
         }
         ++real;
-        bool flat = true;
-        for (const uint32_t index : v) {
-            const glm::vec3& normal = vertices[index].normal;
-            const float      l = glm::length(normal);
-            flat = flat && l > 1.0e-6f && std::abs(glm::dot(normal, n)) >= kFaceNormalCos * l * length;
-        }
-        faceted += flat ? 1 : 0;
+        faceted += corners.ofFace ? 1 : 0;
     }
     return real > 0 ? static_cast<float>(faceted) / static_cast<float>(real) : 0.0f;
 }

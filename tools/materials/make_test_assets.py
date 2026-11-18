@@ -17,7 +17,10 @@ Writes into the folder given as argv[1]:
   overlay_dots.png   THE OVERLAYS' images (tools/ikscripts/materials/overlays.txt): dark blue discs
   overlay_mask.png   on transparency, a white makeup mask (diagonal bands in its alpha), and an
   overlay_bump.png   opaque height and an opaque normal map of domes — each a pattern over the
-  overlay_normal.png whole UV square, so it shows on any zone of any figure
+  overlay_normal.png whole UV square, so it shows on any zone of any figure. The normal map is
+  overlay_normal_dx.png  OpenGL-style (green up the image); the _dx one is the same DirectX-style
+  wall.obj           a flat wall facing the viewer, finely cut: what a normal map's convention and
+                     a displacement are checked on (render/normal_convention.txt)
   ext_cube.gltf      the KHR material extensions (emissive strength, ior, specular, clearcoat,
                      sheen, iridescence, anisotropy, transmission + volume, texture transform)
                      on two materials — the wider material's import (materials/ext_cube.txt)
@@ -218,16 +221,18 @@ open(os.path.join(out, "tex_rough.png"), "wb").write(png(size, size, ramp_rows))
 #   overlay_dots.png    a transparent image with dark blue discs on a grid (the "ink")
 #   overlay_mask.png    a WHITE image whose alpha is diagonal bands (a makeup mask: takes a tint)
 #   overlay_bump.png    an opaque mid-grey height with a raised dome per grid cell
-#   overlay_normal.png  an opaque flat normal map with the same domes as normals
+#   overlay_normal.png  an opaque flat normal map with the same domes as normals — OpenGL-style
+#                       (green = up the image), as a normal map is taken to be; and
+#   overlay_normal_dx.png  the same domes DirectX-style (green = down): the Flip Normal test's
 osize, period, radius = 512, 64, 18.0
 def disc(x, y, offset):
     """Distance from (x, y) to the nearest grid cell centre (the grid shifted by `offset`), in texels."""
     dx = ((x - offset) % period) - period / 2
     dy = ((y - offset) % period) - period / 2
     return math.hypot(dx, dy), dx, dy
-dots, mask, bump, normal = [], [], [], []
+dots, mask, bump, normal, normal_dx = [], [], [], [], []
 for y in range(osize):
-    drow, mrow, brow, nrow = [], [], [], []
+    drow, mrow, brow, nrow, xrow = [], [], [], [], []
     for x in range(osize):
         d, _, _ = disc(x, y, 0)
         a = max(0.0, min(1.0, radius - d))                      # a one-texel feathered edge
@@ -241,16 +246,40 @@ for y in range(osize):
         h = 128 + int(127 * dome) if t < 1.0 else 128
         brow += [h, h, h, 255]
         if t < 1.0:
-            nx, ny = dx / (radius * 1.2), dy / (radius * 1.2)   # the hemisphere's normal
+            nx, ny = dx / (radius * 1.2), dy / (radius * 1.2)   # the hemisphere's normal (y DOWN the image)
             nz = math.sqrt(max(0.0, 1.0 - nx * nx - ny * ny))
-            nrow += [int(127.5 + 127.5 * nx), int(127.5 + 127.5 * ny), int(127.5 + 127.5 * nz), 255]
+            # DirectX: green is the lean DOWN the image (+ny); OpenGL: up it — the same byte turned over.
+            xrow += [int(127.5 + 127.5 * nx), int(127.5 + 127.5 * ny), int(127.5 + 127.5 * nz), 255]
+            nrow += [xrow[-4], 255 - xrow[-3], xrow[-2], 255]
         else:
-            nrow += [128, 128, 255, 255]
-    dots.append(drow); mask.append(mrow); bump.append(brow); normal.append(nrow)
+            xrow += [128, 128, 255, 255]
+            nrow += [128, 127, 255, 255]  # (255 - 128: the flat texel turned over with the rest)
+    dots.append(drow); mask.append(mrow); bump.append(brow); normal.append(nrow); normal_dx.append(xrow)
 open(os.path.join(out, "overlay_dots.png"), "wb").write(png(osize, osize, dots))
 open(os.path.join(out, "overlay_mask.png"), "wb").write(png(osize, osize, mask))
 open(os.path.join(out, "overlay_bump.png"), "wb").write(png(osize, osize, bump))
 open(os.path.join(out, "overlay_normal.png"), "wb").write(png(osize, osize, normal))
+open(os.path.join(out, "overlay_normal_dx.png"), "wb").write(png(osize, osize, normal_dx))
+
+# wall.obj: a vertical square a metre on a side, facing +z, standing 20 cm over the floor, 64 x 64
+# quads; u runs to the viewer's right and v up the wall, so an image shows on it upright. What a
+# normal map's CONVENTION is checked on (tools/ikscripts/render/normal_convention.txt): lit from
+# above, a dome reads as a dome or as a dent, and nothing about a flat wall is ambiguous.
+wall_cells = 64
+with open(os.path.join(out, "wall.obj"), "w") as f:
+    f.write("o Wall\n")
+    for j in range(wall_cells + 1):
+        for i in range(wall_cells + 1):
+            f.write("v %.6f %.6f 0.0\n" % (i / wall_cells - 0.5, j / wall_cells + 0.2))
+    for j in range(wall_cells + 1):
+        for i in range(wall_cells + 1):
+            f.write("vt %.6f %.6f\n" % (i / wall_cells, j / wall_cells))
+    f.write("vn 0 0 1\n")
+    for j in range(wall_cells):
+        for i in range(wall_cells):
+            a = j * (wall_cells + 1) + i + 1
+            b, c, d = a + 1, a + wall_cells + 2, a + wall_cells + 1
+            f.write("f %d/%d/1 %d/%d/1 %d/%d/1 %d/%d/1\n" % (a, a, b, b, c, c, d, d))
 
 # ext_cube: the KHR material extensions the glTF reader fills the wider material from — a glowing,
 # coated, sheened, iridescent, anisotropic dielectric with a specular tint (Glow), and a tinted

@@ -9,7 +9,8 @@
  *     images, shared, with the zone's OVERLAYS painted into the maps they touch exactly as the
  *     viewport's bindings carry them (overlaid(): the same compositor, the same cache), except
  *     that an overlay's bump stays in the bump map (the viewport alone folds it into its normal
- *     map);
+ *     map); and a zone with a DISPLACEMENT map subdivided and displaced by it here
+ *     (scene/meshdisplace.h: the engine is handed the displaced surface as a plain mesh);
  *   - the camera as framed, the key light as a sun, the environment — the panorama's FILE where
  *     one lights the scene (the engine reads it at full resolution) with the factor the viewport
  *     normalized it by, else the procedural studio's pixels — and the backdrop;
@@ -24,6 +25,7 @@
 #include "importformats.h"
 #include "lightingsettings.h"
 #include "materialparams.h"
+#include "meshdisplace.h"
 #include "model.h"
 #include "ikscript.h" // the scripted test's `render`
 #include "renderexport.h"
@@ -36,6 +38,7 @@
 #include "parallelfor.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QImage>
@@ -291,6 +294,81 @@ renderapi::Material VulkanWindow::captureZoneMaterial(RenderSnapshot& snapshot, 
     return material;
 }
 
+bool VulkanWindow::zoneDisplacement(OverlayBake& bake, int modelIndex, int meshIndex, bool withOverlays,
+                                    std::shared_ptr<const DecodedImage>& image, int& channel, DisplaceSettings& settings) {
+    const Mesh&           mesh = scene().modelAt(static_cast<std::size_t>(modelIndex))->mesh(static_cast<std::size_t>(meshIndex));
+    const MaterialParams& m = mesh.material();
+    if (!m.displacementEnabled || m.displacementStrength == 0.0f) {
+        return false;
+    }
+    const std::shared_ptr<const DecodedImage> plain = mesh.slotImage(MaterialMap::Displacement);
+    channel = plain ? mesh.slotChannel(MaterialMap::Displacement) : 0;
+    image = withOverlays ? overlaid(modelIndex, meshIndex, MaterialMap::Displacement, plain, channel, bake, 1.0f, /*forRenderer=*/true) : plain;
+    if (!image || image->pixels.empty() || image->width == 0 || image->height == 0) {
+        return false; // (no height to read: a strength alone moves nothing)
+    }
+    settings = DisplaceSettings();
+    settings.scale = m.displacementStrength * 0.01f; // centimetres -> the world's metres
+    settings.midLevel = m.displacementMidLevel;
+    settings.levels = static_cast<int>(std::lround(m.displacementSubdiv));
+    if (m.tilingEnabled) { // (Mesh::packGpu's rule: Tiling off = the maps as painted)
+        settings.uvTiling = m.uvTiling;
+        settings.uvOffset = m.uvOffset;
+        settings.uvRotation = glm::radians(m.uvRotation);
+    }
+    return true;
+}
+
+void VulkanWindow::displaceCapturedZones(RenderSnapshot& snapshot, OverlayBake& bake, int modelIndex,
+                                         const std::vector<std::pair<std::size_t, int>>& zones) {
+    struct Job {
+        std::size_t                         geometry = 0;
+        int                                 mesh = 0;
+        std::shared_ptr<const DecodedImage> image;
+        int                                 channel = 0;
+        DisplaceSettings                    settings;
+    };
+    std::vector<Job> jobs;
+    for (const auto& [geometry, mesh] : zones) {
+        Job job;
+        job.geometry = geometry;
+        job.mesh = mesh;
+        if (zoneDisplacement(bake, modelIndex, mesh, /*withOverlays=*/true, job.image, job.channel, job.settings)) {
+            jobs.push_back(std::move(job));
+        }
+    }
+    if (jobs.empty()) {
+        return;
+    }
+    // The places the object's zones share, read before any of them moves: a displaced zone
+    // holds a border it shares with another still (meshdisplace.h, step 5).
+    SharedPositions shared;
+    if (zones.size() > 1) {
+        for (const auto& [geometry, mesh] : zones) {
+            shared.addMesh(snapshot.geometry[geometry].positions);
+        }
+    }
+    static const bool trace = qEnvironmentVariableIsSet("POSESTUDIO_RENDER_TRACE");
+    for (const Job& job : jobs) {
+        QElapsedTimer clock;
+        clock.start();
+        HeightMap map;
+        map.pixels = job.image->pixels.data();
+        map.width = static_cast<int>(job.image->width);
+        map.height = static_cast<int>(job.image->height);
+        map.channel = job.channel;
+        const DisplaceReport report = displaceMesh(snapshot.geometry[job.geometry], map, job.settings, zones.size() > 1 ? &shared : nullptr);
+        if (trace && report.displaced) {
+            std::fprintf(stderr,
+                         "[render] displaced zone %d of model %d: %d of %d subdivision levels, %zu triangles, %zu vertices (%zu points, "
+                         "%zu held on shared borders), map halved %d times, moved up to %.2f mm, in %lld ms\n",
+                         job.mesh, modelIndex, report.levels, job.settings.levels, report.triangles, report.vertices, report.points,
+                         report.pinned, report.mipLevel, report.maxOffset * 1000.0f, static_cast<long long>(clock.elapsed()));
+            std::fflush(stderr);
+        }
+    }
+}
+
 std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
     if (!m_renderer) {
         return nullptr;
@@ -315,6 +393,7 @@ std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
         context.subsurfaceDial = lighting.subsurface;
         context.translucencyAuthored = ImportFormats::isNativeFigureFile(QString::fromStdString(model->sourcePath()));
         const int modelIndex = static_cast<int>(mi);
+        std::vector<std::pair<std::size_t, int>> captured; // (its place in snapshot->geometry, the mesh): this model's zones
 
         for (std::size_t k = 0; k < model->meshCount(); ++k) {
             const Mesh& mesh = model->mesh(k);
@@ -324,6 +403,7 @@ std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
                 snapshot->geometry.pop_back();
                 continue;
             }
+            captured.emplace_back(snapshot->geometry.size() - 1, meshIndex);
             snapshot->names.push_back(mesh.name().empty() ? ("Zone " + std::to_string(k + 1)) : mesh.name());
             const char* name = snapshot->names.back().c_str();
 
@@ -336,6 +416,9 @@ std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
             snapshot->materials.push_back(material);
             snapshot->meshes.push_back(out);
         }
+        // DISPLACEMENT: the zones with a displacement map, subdivided and moved by it — the
+        // surface a render traces (the rasterized viewport modes do not displace).
+        displaceCapturedZones(*snapshot, bake, modelIndex, captured);
     }
 
     captureRenderLighting(*snapshot); // the environment, the key light, the light objects, the floor
@@ -386,6 +469,16 @@ std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
                          m.normalStrength, m.bumpStrength, map(m, MapSlot::BaseColor), map(m, MapSlot::Opacity),
                          map(m, MapSlot::Roughness), map(m, MapSlot::Metallic), map(m, MapSlot::Specular),
                          map(m, MapSlot::Normal), map(m, MapSlot::Bump), map(m, MapSlot::Subsurface));
+            // (The tangent frame a normal map is read in: the bitangents' handedness, and the
+            // map's convention as the engine is told it.)
+            std::size_t right = 0;
+            std::size_t left = 0;
+            for (const glm::vec4& t : snapshot->geometry[i].tangents) {
+                right += t.w > 0.5f ? 1u : 0u;
+                left += t.w < -0.5f ? 1u : 0u;
+            }
+            std::fprintf(stderr, "[render] %-22s tangent handedness +1: %zu, -1: %zu; normal map read as %s\n", "", right, left,
+                         (m.flags & renderapi::kMaterialFlipNormalY) != 0 ? "DirectX-style" : "OpenGL-style");
         }
         for (const renderapi::Light& light : snapshot->lights) {
             static const char* const kKinds[] = {"sun", "point", "spot", "area"};

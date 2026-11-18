@@ -107,16 +107,30 @@ public slots:
     /// background, which is what lists the file in the Materials Library. A file that already has
     /// an icon asks first whether to render it again. See scene/materialfile.h.
     void saveMaterial();
+    /// The heading's Import button: a file dialog for a MaterialX document (`.mtlx`) — or a
+    /// saved material (`.psm`) from anywhere on disk — whose material is put on the zone this
+    /// tab shows, through applyMaterialFile. (It was File > Import > .MTLX until 2026-11-14: a
+    /// material is not a model, and the tab that shows the zone is where it is put on one.)
+    void importMaterial();
     /// A saved material (`.psm`) put on the zone this tab shows — one undoable edit — with a
     /// message where it cannot be (nothing selected, not a material file) or where some of its
     /// maps are no longer on disk. What a double-click on one in a library tab runs.
     void applyMaterialFile(const QString& path);
+    /// The Save button's icon question alone, with nothing saved: how the box is LOOKED AT under
+    /// a script (`ui post materials.panel 0 previewIconQuestion`, then `uishot`; its buttons
+    /// carry the id `materials.iconquestion`). The int is the `ui` hook's and unused.
+    void previewIconQuestion(int unused = 0);
 
 signals:
     /// A material was saved (file and, unless kept, icon): the Materials Library re-reads.
     void materialSaved(const QString& path);
 
 private:
+    /// What the icon question was answered with.
+    enum class IconChoice { Recreate, Keep, Cancel };
+    /// "<name> already has an icon": make it again, keep it, or save nothing.
+    IconChoice askIconOverwrite(const QString& name);
+
     /// The thumbnail cache entry: by the decoded image's identity (the images are shared and
     /// immutable; the weak pointer says when one is gone), with the channel it was read through.
     struct Thumb {
@@ -208,6 +222,7 @@ private:
     /// The Thin Walled checkbox (one bracket).
     void setThinWalled(bool on);
     void setDoubleSided(bool on);
+    void setFlipNormal(bool on);
     void setSmoothByAngle(bool on);
     /// The Textures group: a file dialog for slot @p map, then setTexture.
     void chooseTexture(MaterialMap map);
@@ -227,6 +242,7 @@ private:
     ViewportWidget*   m_viewport = nullptr;
     QScrollArea*      m_scroll = nullptr;    // the tab's scroll area
     QLabel*           m_objectName = nullptr; // the selected object's file name, or "No object selected"
+    QPushButton*      m_import = nullptr;     // left of Save: puts a material from a file (.mtlx / .psm) on the shown zone
     QPushButton*      m_save = nullptr;       // across from the name: saves the shown zone's material to a file
     QLabel*           m_hint = nullptr;       // how to get an object selected (shown while none is)
     MenuPickerButton* m_zonePicker = nullptr; // the object's zones
@@ -244,6 +260,8 @@ private:
     QToolButton*      m_thinWalledRestore = nullptr;
     QCheckBox*        m_doubleSided = nullptr;
     QToolButton*      m_doubleSidedRestore = nullptr;
+    QCheckBox*        m_flipNormal = nullptr;
+    QToolButton*      m_flipNormalRestore = nullptr;
     QCheckBox*        m_smoothByAngle = nullptr;        // THE SMOOTHING (import/smoothnormals.h)
     QToolButton*      m_smoothByAngleRestore = nullptr;
     std::vector<Section> m_sections;

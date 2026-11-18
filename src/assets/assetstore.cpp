@@ -176,7 +176,7 @@ QString sourceOf(const json& entry) {
     return QString::fromStdString(entry["source"].get<std::string>());
 }
 
-/// A source as a path of THIS system: a file written on Windows may name `textures\a.png`.
+/// A source as a path of THIS system: a file written on Windows may name `.textures\a.png`.
 QString portable(const QString& source) {
     QString s = source;
     s.replace(QLatin1Char('\\'), QLatin1Char('/'));
@@ -186,6 +186,22 @@ QString portable(const QString& source) {
 QString storeRoot(const QString& folder) {
     return clean(folder) + QLatin1Char('/') + AssetStore::texturesFolderName();
 }
+
+/// True when @p folder is a texture store or lies inside one, anywhere up its path.
+bool inAStore(const QString& folder) {
+    const QStringList parts = clean(folder).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    for (const QString& part : parts) {
+        if (AssetStore::isTextureStore(part)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// The files of a walk that must see EVERYTHING below its root, hidden names included: the
+/// texture stores are hidden folders (`.textures`), and on macOS and Linux Qt neither lists
+/// nor enters a dot name unless the filter says so.
+constexpr QDir::Filters kEveryFile = QDir::Files | QDir::NoSymLinks | QDir::Hidden;
 
 /// Every store file the OTHER own assets of @p folder name (keys), so that a texture is removed
 /// only when nobody is left to name it.
@@ -364,7 +380,7 @@ void TextureCollector::indexStore() {
         return;
     }
     m_indexed = true;
-    QDirIterator it(storeRoot(m_folder), QDir::Files | QDir::NoSymLinks, QDirIterator::Subdirectories);
+    QDirIterator it(storeRoot(m_folder), kEveryFile, QDirIterator::Subdirectories);
     while (it.hasNext()) {
         it.next();
         m_bySize[it.fileInfo().size()].append(clean(it.filePath()));
@@ -488,7 +504,7 @@ QString findByName(const QString& root, const QString& name, const QString& near
     const QStringList nearParts = key(near).split(QLatin1Char('/'));
     QString           best;
     int               bestShared = -1;
-    QDirIterator      it(root, QDir::Files | QDir::NoSymLinks, QDirIterator::Subdirectories);
+    QDirIterator      it(root, kEveryFile, QDirIterator::Subdirectories); // (the stores are hidden folders)
     while (it.hasNext() && budget > 0) {
         it.next();
         --budget;
@@ -642,6 +658,9 @@ bool validAssetName(const QString& name, QString* why) {
     if (name.endsWith(QLatin1Char('.')) || name.endsWith(QLatin1Char(' '))) {
         return no(QObject::tr("A name cannot end with a dot or a space."));
     }
+    if (name.startsWith(QLatin1Char('.'))) {
+        return no(QObject::tr("A name cannot begin with a dot: the library does not show files and folders whose names do."));
+    }
     return true;
 }
 
@@ -761,8 +780,8 @@ Result moveAsset(const QString& assetPath, const QString& destinationFolder) {
         r.path = clean(info.absoluteFilePath());
         return r;
     }
-    if (isTextureStore(destination.dirName()) || within(destination.path(), storeRoot(folder))) {
-        return failed(QObject::tr("A \"textures\" folder holds the pictures assets use, not assets. Choose another folder."));
+    if (inAStore(destination.path())) {
+        return failed(QObject::tr("A \"%1\" folder holds the pictures assets use, not assets. Choose another folder.").arg(texturesFolderName()));
     }
     const QString target = destination.filePath(info.fileName());
     if (QFileInfo::exists(target)) {
@@ -867,22 +886,6 @@ Result deleteAsset(const QString& assetPath, bool permanently) {
     return r;
 }
 
-int removeUnnamed(const QString& folder, const QStringList& files, bool permanently) {
-    const QString       store = storeRoot(folder);
-    const QSet<QString> named = namedByOthers(folder, QString());
-    int                 removed = 0;
-    for (const QString& file : files) {
-        if (!within(file, store) || named.contains(key(file)) || !QFileInfo(file).isFile()) {
-            continue;
-        }
-        if (removeFile(file, permanently)) {
-            ++removed;
-            pruneEmptyFolders(file, store);
-        }
-    }
-    return removed;
-}
-
 // ============================================================================
 // PACKAGES
 // ============================================================================
@@ -909,7 +912,9 @@ Result exportPackage(const QStringList& items, const QString& zipPath) {
     for (const QString& item : items) {
         const QFileInfo info(clean(item));
         if (info.isDir()) {
-            QDirIterator it(info.absoluteFilePath(), QDir::Files | QDir::NoSymLinks, QDirIterator::Subdirectories);
+            // (Everything, hidden names too: the folder's texture store is one, and a package
+            // is the folder as it lies on disk, not as a browser shows it.)
+            QDirIterator it(info.absoluteFilePath(), kEveryFile, QDirIterator::Subdirectories);
             while (it.hasNext()) {
                 it.next();
                 add(it.filePath());

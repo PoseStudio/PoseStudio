@@ -57,12 +57,12 @@ namespace Constants {
     /// — while it is still inside the library's Materials folder, where the dialog starts
     /// otherwise.
     inline constexpr const char* PREF_LAST_MATERIAL_DIR = "LastMaterialDir";
-    /// Where a MaterialX document was last imported from (File > Import > .MTLX).
+    /// Where a material file was last imported from (the Materials tab's Import button: .mtlx / .psm).
     inline constexpr const char* PREF_LAST_MATERIALX_DIR = "LastMaterialXDir";
     /// Where a package (.zip) was last exported to or installed from (the library's Export
     /// Package / Install Package).
     inline constexpr const char* PREF_LAST_PACKAGE_DIR = "LastPackageDir";
-    /// Saving a material copies the texture files it uses into a `textures` folder beside it
+    /// Saving a material copies the texture files it uses into a `.textures` folder beside it
     /// ("1", the default when absent) or names them where they are ("0"). Preferences > Assets.
     inline constexpr const char* PREF_MATERIAL_COPY_TEXTURES = "MaterialCopyTextures";
     /// A saved material's icon — the picture of it on a ball beside its file — in pixels, square.

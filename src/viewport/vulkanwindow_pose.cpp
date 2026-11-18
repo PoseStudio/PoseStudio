@@ -372,7 +372,7 @@ void VulkanWindow::setSelectedMaterial(const MaterialParams& params, bool linked
         }
     }
     if (scene().setSelectedZoneMaterial(params, linked)) {
-        syncOverlayMetal(m_materialEditModel); // (a Metallic value moved under an overlay's baked metal)
+        syncOverlayBakes(m_materialEditModel); // (a Metallic value moved under an overlay's baked metal)
         requestUpdate(); // the values ride the push block: the next frame shows them
     }
 }
@@ -414,7 +414,7 @@ void VulkanWindow::resetSelectedMaterial(bool linked, bool allZones) {
         return;
     }
     scene().resetZoneMaterials(allZones, linked);
-    syncOverlayMetal(m_materialEditModel);
+    syncOverlayBakes(m_materialEditModel);
     endMaterialEdit(); // registers no entry if nothing differed from the imported values
 }
 
@@ -807,7 +807,7 @@ void VulkanWindow::swapUndoEntry(std::vector<UndoEntry>& from, std::vector<UndoE
         counter.materials = scene().captureMaterials(entry.figure);
         applyMaterialTextures(entry.figure, entry.materials); // the slots first: the values keep the mesh's maps
         scene().applyMaterials(entry.figure, entry.materials);
-        syncOverlayMetal(entry.figure); // (the values just applied: an overlay's metal is baked for the zone's Metallic)
+        syncOverlayBakes(entry.figure); // (the values just applied: an overlay's metal is baked for the zone's Metallic)
         scene().setSelectedModel(entry.figure);
     } else if (entry.kind == UndoEntry::Kind::Lights) {
         // The light objects back to the snapshot (the frame's notify tells the Lights tab).

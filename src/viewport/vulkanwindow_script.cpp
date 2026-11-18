@@ -111,6 +111,58 @@ std::vector<glm::vec3> jointPositions(const Armature* arm) {
 }
 
 /// How far @p bone has moved since the press (mm), 0 for a bone the press did not record.
+/// How far two pictures of one size are apart: the mean difference of their channels, 0-255.
+/// -1 where either is missing or their sizes differ.
+double meanDifference(const QImage& a, const QImage& b) {
+    if (a.isNull() || b.isNull() || a.size() != b.size()) {
+        return -1.0;
+    }
+    const QImage x = a.convertToFormat(QImage::Format_RGB888);
+    const QImage y = b.convertToFormat(QImage::Format_RGB888);
+    double       total = 0.0;
+    for (int row = 0; row < x.height(); ++row) {
+        const uchar* p = x.constScanLine(row);
+        const uchar* q = y.constScanLine(row);
+        for (int i = 0; i < 3 * x.width(); ++i) {
+            total += std::abs(static_cast<int>(p[i]) - static_cast<int>(q[i]));
+        }
+    }
+    return total / (3.0 * static_cast<double>(x.width()) * static_cast<double>(x.height()));
+}
+
+/// How ALIKE two pictures' changes are: the correlation, -1..1, of (a - base) with (b - base)
+/// over the brightness of every pixel — what two pictures of one view ADD to a third. Where a
+/// relief is shaded, +1 is the same relief lit the same way and -1 the relief turned over,
+/// whatever their strengths. 0 where a picture is missing, sizes differ, or nothing changed.
+double changeCorrelation(const QImage& a, const QImage& b, const QImage& base) {
+    if (a.isNull() || b.isNull() || base.isNull() || a.size() != b.size() || a.size() != base.size()) {
+        return 0.0;
+    }
+    const QImage x = a.convertToFormat(QImage::Format_RGB888);
+    const QImage y = b.convertToFormat(QImage::Format_RGB888);
+    const QImage z = base.convertToFormat(QImage::Format_RGB888);
+    double       sx = 0.0, sy = 0.0, sxx = 0.0, syy = 0.0, sxy = 0.0, n = 0.0;
+    for (int row = 0; row < x.height(); ++row) {
+        const uchar* p = x.constScanLine(row);
+        const uchar* q = y.constScanLine(row);
+        const uchar* r = z.constScanLine(row);
+        for (int i = 0; i < x.width(); ++i) {
+            const double zero = r[3 * i] + r[3 * i + 1] + r[3 * i + 2];
+            const double u = p[3 * i] + p[3 * i + 1] + p[3 * i + 2] - zero;
+            const double v = q[3 * i] + q[3 * i + 1] + q[3 * i + 2] - zero;
+            sx += u;
+            sy += v;
+            sxx += u * u;
+            syy += v * v;
+            sxy += u * v;
+            n += 1.0;
+        }
+    }
+    const double cov = sxy - sx * sy / n;
+    const double var = (sxx - sx * sx / n) * (syy - sy * sy / n);
+    return var > 0.0 ? cov / std::sqrt(var) : 0.0;
+}
+
 double movedSincePress(const Armature& arm, const IkScript& s, int bone) {
     return bone >= 0 && static_cast<std::size_t>(bone) < s.pressPositions.size()
                ? glm::length(arm.boneWorldPosition(static_cast<std::size_t>(bone)) -
@@ -458,7 +510,8 @@ void VulkanWindow::scriptStep() {
             notifyJointTransform();
             notifyMaterialView();
             // (Also: ui call <id> <n> <slot> [int] — one of the widget's own slots or invokables
-            // taking an int; ui type <id> <n> <text…> — a line edit's text; ui key <id> <n>
+            // taking an int (ui post: the same from the event loop, for a slot that opens a modal
+            // dialog); ui type <id> <n> <text…> — a line edit's text; ui key <id> <n>
             // <enter|esc> — that key to the widget. What opens, fills and closes an inline editor.
             // And: ui scrub <id> <n> <% of its width> [shift] — a press, a drag that far and a
             // release on a scrub field, through its own mouse handlers; `shift` holds Shift (the
@@ -572,6 +625,23 @@ void VulkanWindow::scriptStep() {
             // with `start`, as Render → Render Image does (from the event loop: `wait` before
             // driving it with `ui`; `uienabled.render.stop.0` reads 1 while its render runs).
             emit renderWindowRequested(w.size() > 1 && w[1].compare(QLatin1String("start"), Qt::CaseInsensitive) == 0);
+        } else if (cmd == QLatin1String("shotref")) {
+            // shotref / renderref: the last `shot` (the last `render`) is kept as THE REFERENCE —
+            // `shot.fromref` (`render.fromref`) then reads how far a later one is from it: the
+            // mean difference of their channels, 0-255. For "this picture is nearer to that one
+            // than to the other" — which of two readings of a normal map shows the relief a
+            // height map of the same relief shows.
+            s.shotReference = s.shotImage;
+        } else if (cmd == QLatin1String("renderref")) {
+            s.renderReference = s.renderImage;
+        } else if (cmd == QLatin1String("shotbase")) {
+            // shotbase / renderbase: the last shot (render) is kept as THE BASE — the view WITHOUT
+            // the thing being compared. `shot.likeref` (`render.likeref`) is then how alike the
+            // last picture's and the reference's CHANGES from the base are: +1 the same relief lit
+            // the same way, -1 the relief turned over, whatever their strengths.
+            s.shotBase = s.shotImage;
+        } else if (cmd == QLatin1String("renderbase")) {
+            s.renderBase = s.renderImage;
         } else if (cmd == QLatin1String("probe") && w.size() > 3) {
             // probe <x> <y> <z>: a WORLD point (metres) — `render.probe.<r|g|b|a|lum>` then reads the
             // last render's picture where that point is seen (through the viewport's camera as
@@ -840,9 +910,11 @@ void VulkanWindow::scriptStep() {
         } else if (cmd == QLatin1String("tracedwait")) {
             // tracedwait [<max ticks>]: waits until the Rendered mode shows its FINISHED picture —
             // every sample of the scene, the lighting and the camera as they stand — or the tick
-            // budget runs out (900, a quarter of a minute, by default: the first render on a
-            // device loads its kernels). `expect traced.done == 1` says which.
-            s.waitTicks = w.size() > 1 ? std::max(1, static_cast<int>(num(1))) : 900;
+            // budget runs out (2400, forty seconds, by default: the first render on a device
+            // loads its kernels, and a slower card needs a thousand ticks for a picture a fast
+            // one finishes in two hundred — 900, the first default, ran out on one by a few
+            // ticks). `expect traced.done == 1` says which.
+            s.waitTicks = w.size() > 1 ? std::max(1, static_cast<int>(num(1))) : 2400;
             s.waitForTraced = true;
             s.waitedTicks = 0;
             QTimer::singleShot(16, this, &VulkanWindow::scriptWaitTick);
@@ -1199,6 +1271,14 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
     // the Gaussian splats behind it: tools/ikscripts/splats/edge.txt). -1 before any shot.
     if (name.startsWith(QLatin1String("shot."), Qt::CaseInsensitive)) {
         const QString what = name.mid(5).toLower();
+        if (what == QLatin1String("fromref")) {
+            value = meanDifference(s.shotImage, s.shotReference); // (see `shotref`)
+            return true;
+        }
+        if (what == QLatin1String("likeref")) {
+            value = changeCorrelation(s.shotImage, s.shotReference, s.shotBase); // (see `shotbase`)
+            return true;
+        }
         const bool    darkest = what == QLatin1String("darkest");
         bool          numbered = false;
         const double  limit = what.startsWith(QLatin1String("below.")) ? what.mid(6).toDouble(&numbered) : 0.0;
@@ -1270,6 +1350,10 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
             value = s.renderCovered;
         } else if (what == QLatin1String("splats")) {
             value = s.renderSplats;
+        } else if (what == QLatin1String("fromref")) {
+            value = meanDifference(s.renderImage, s.renderReference); // (see `shotref`)
+        } else if (what == QLatin1String("likeref")) {
+            value = changeCorrelation(s.renderImage, s.renderReference, s.renderBase); // (see `shotbase`)
         } else if (what.startsWith(QLatin1String("probe."))) {
             // The last render where the probe's world point is seen: the mean of a 5 x 5 block,
             // as 8-bit display values (lum: the three channels' mean). -1 off the picture.
@@ -1406,7 +1490,7 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
     }
     if (name.startsWith(QLatin1String("matstore."), Qt::CaseInsensitive)) {
         // matstore.<slot>: 1 when the slot's file lies in a TEXTURE STORE of this run's folder (a
-        // `textures` folder beside a material `savematerial` wrote: assets/assetstore.h) — what
+        // `.textures` folder beside a material `savematerial` wrote: assets/assetstore.h) — what
         // an applied material's map must be, not the file the material was saved from.
         const MaterialView view = materialView();
         MaterialMap        map = MaterialMap::BaseColor;
@@ -1415,7 +1499,7 @@ bool VulkanWindow::scriptMetric(const QString& name, double& value) {
         }
         const QString path = QDir::cleanPath(QString::fromStdString(view.mapPaths[static_cast<std::size_t>(map)]));
         const QString run = QDir::cleanPath(s.outDir);
-        value = !path.isEmpty() && path.startsWith(run, Qt::CaseInsensitive) && path.contains(QLatin1String("/textures/"), Qt::CaseInsensitive) ? 1.0 : 0.0;
+        value = !path.isEmpty() && path.startsWith(run, Qt::CaseInsensitive) && path.contains(QLatin1String("/.textures/"), Qt::CaseInsensitive) ? 1.0 : 0.0;
         return true;
     }
     // THE WIDGETS' metrics (the `ui` command's): `uicount.<id>` (how many widgets carry that

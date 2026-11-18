@@ -224,9 +224,6 @@ int main(int argc, char *argv[]) {
     // renamed, moved, deleted or installed are read again by the other.
     QObject::connect(assetsTab, &AssetManagerWidget::assetFilesChanged, materialsLibraryTab, &AssetManagerWidget::refreshAssetManager);
     QObject::connect(materialsLibraryTab, &AssetManagerWidget::assetFilesChanged, assetsTab, &AssetManagerWidget::refreshAssetManager);
-    // File > Import > .MTLX: a MaterialX material is applied to the selected zone, as a
-    // double-click on one in a library is.
-    QObject::connect(menuManager, &MenuManager::materialFileChosen, materialsTab, &pose::MaterialPanel::applyMaterialFile);
     // (The scripted in-app test's `asset` command: the Materials Library's file operations.)
     QObject::connect(viewport, &pose::ViewportWidget::libraryOperationRequested, materialsLibraryTab, &AssetManagerWidget::runFileOperation);
     // A material saved from the Materials tab appears in the Materials Library at once.

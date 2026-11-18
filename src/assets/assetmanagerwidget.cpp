@@ -770,8 +770,9 @@ void AssetManagerWidget::runSearch(const QString& query) {
             it.next();
             const QFileInfo fi = it.fileInfo();
             if (!fi.fileName().contains(query, Qt::CaseInsensitive)) continue;
-            // (An asset's texture files are not what a search is for: assetstore.h.)
-            if (AssetScan::inTextureStore(fi.absoluteFilePath(), libPath)) continue;
+            // (What is hidden — a dot name, or anything inside a folder with one — is not found:
+            // core/hiddennames.h. An asset's texture store, `.textures`, is such a folder.)
+            if (HiddenNames::inHiddenPath(fi.absoluteFilePath(), libPath)) continue;
 
             const QString folderMatch = fi.isDir() ? fi.absoluteFilePath() : fi.absolutePath();
 

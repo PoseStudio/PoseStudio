@@ -21,6 +21,7 @@
 #include "correctiveset.h" // the GPU-blended pose correctives
 #include "groundsampler.h" // the ground button's posed lowest-point scan
 #include "mesh.h"
+#include "posedmesh.h"     // PosedMesh: a mesh as posed, for a render engine
 #include "vulkanbuffer.h"
 #include "vulkancommon.h"  // kMaxFramesInFlight (per-frame pose buffers)
 #include "vulkanhandles.h" // UniqueDescriptorPool
@@ -157,6 +158,9 @@ public:
     /// Mesh @p i's metalness as BAKED into its bound parameter map for the Metallic value
     /// @p scalar (Mesh::setMetalBaked; negative = not baked); bumps materialRevision().
     void setMeshMetalBaked(std::size_t i, float scalar);
+    /// Mesh @p i's record of the Flip Normal value its bound normal image's overlays were painted
+    /// for (Mesh::setNormalFlipBaked; -1 = none).
+    void setMeshNormalFlipBaked(std::size_t i, int flip);
     /// The zones an overlay on mesh @p i is painted on: @p i and every other mesh imported with
     /// the same base-color map, in mesh order (MaterialView::overlayZones).
     std::vector<int> overlayZones(std::size_t i) const;
@@ -359,13 +363,8 @@ public:
     /// dual-quaternion or linear skin, then the model transform), computed on the CPU for a
     /// RENDER ENGINE. Per vertex: position, unit normal, UV and the UV tangent with its
     /// handedness (w = 0 where none was baked); the indices are the mesh's own.
-    struct PosedMesh {
-        std::vector<glm::vec3> positions;
-        std::vector<glm::vec3> normals;
-        std::vector<glm::vec2> uvs;
-        std::vector<glm::vec4> tangents;
-        std::vector<uint32_t>  indices;
-    };
+    /// (The struct itself is posedmesh.h's, free of Vulkan: scene/meshdisplace.h works on it.)
+    using PosedMesh = ::pose::PosedMesh;
     /// Fills @p out with mesh @p i as the pose stands (the corrective weights are re-evaluated
     /// first). False for a bad index or a model without meshes.
     bool bakePosedMesh(std::size_t i, PosedMesh& out);

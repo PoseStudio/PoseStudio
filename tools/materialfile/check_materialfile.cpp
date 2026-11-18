@@ -89,6 +89,7 @@ void checkFile() {
     p.transmissionDepth = 0.02f;
     p.transmissionRoughness = 0.05f;
     p.thinWalled = true;
+    p.flipNormal = true; // (how the material's normal map is read: part of the surface, saved with it)
     p.sheen = 0.3f;
     p.sheenColor = glm::vec3(0.8f, 0.2f, 0.4f);
     p.emission = 2.0f;
@@ -113,6 +114,7 @@ void checkFile() {
     check(back.name == "Brushed Gold", "its name comes back");
     check(back.params.sameValues(doc.params), "every value comes back equal");
     check(approx(back.params.anisotropy, 0.6f) && approx(back.params.transmissionRoughness, 0.05f) && back.params.thinWalled &&
+              back.params.flipNormal &&
               !back.params.subsurfaceEnabled && !back.params.detailEnabled && approx(back.params.uvTiling.x, 3.0f) &&
               approx(back.params.uvOffset.y, 0.5f) && approx(back.params.emissionColor.y, 0.5f),
           "… a value, a flag, a pair and a color among them, each as written");
