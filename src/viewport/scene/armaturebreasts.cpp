@@ -82,12 +82,14 @@
  */
 
 #include "armature.h"
+#include "armaturesoftbodyshared.h" // the env levers' reader, the trace switches, "still moving"
 
 #include "ikmath.h" // normalizedFrame
 #include "ikrig.h"
 #include "rigroles.h"
 #include "softbodysettings.h"
 
+#include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
@@ -159,31 +161,27 @@ constexpr float kBreastPressMax = 0.65f;            // (0.40 until the same look
 constexpr float kBreastSpreadOnBackDefault = 0.030f;  // (0.018 until the same look)
 
 /// A/B levers for the look (mm per g: POSESTUDIO_BREAST_DOWN, _SIDE, _HANG; _SPLAY share; _LEVER mm; _CAP and _CAPMAX mm; _WALL, _FLOOR and _FLOOR_DAMPING; _HZ; _DAMPING): read once.
-float envOrF(const char* name, float fallback) {
-    const char* v = std::getenv(name);
-    return v && *v ? static_cast<float>(std::atof(v)) : fallback;
-}
-const float kBreastDown = envOrF("POSESTUDIO_BREAST_DOWN", kBreastDownDefault * 1000.0f) / 1000.0f;
-const float kBreastSide = envOrF("POSESTUDIO_BREAST_SIDE", kBreastSideDefault * 1000.0f) / 1000.0f;
-const float kBreastHangOut = envOrF("POSESTUDIO_BREAST_HANG", kBreastHangOutDefault * 1000.0f) / 1000.0f;
-const float kBreastSplay = envOrF("POSESTUDIO_BREAST_SPLAY", kBreastSplayDefault);
-const float kBreastTiltShare = envOrF("POSESTUDIO_BREAST_TILT", kBreastTiltShareDefault);
-const float kBreastTiltShareSide = envOrF("POSESTUDIO_BREAST_TILT_SIDE", kBreastTiltShareSideDefault);
-const float kBreastSpreadOnBack = envOrF("POSESTUDIO_BREAST_SPREAD", kBreastSpreadOnBackDefault * 1000.0f) / 1000.0f;
-const float kBreastAcross = envOrF("POSESTUDIO_BREAST_ACROSS", kBreastAcrossDefault * 1000.0f) / 1000.0f;
-const float kBreastLever = envOrF("POSESTUDIO_BREAST_LEVER", kBreastLeverDefault * 1000.0f) / 1000.0f;
-const float kBreastBounceCap = envOrF("POSESTUDIO_BREAST_CAP", kBreastBounceCapDefault * 1000.0f) / 1000.0f;
-const float kBreastJiggleCapMax = envOrF("POSESTUDIO_BREAST_CAPMAX", kBreastJiggleCapMaxDefault * 1000.0f) / 1000.0f;
-const float kBreastWallStiffen = envOrF("POSESTUDIO_BREAST_WALL", kBreastWallStiffenDefault);
-const float kBreastFloorStiffen = envOrF("POSESTUDIO_BREAST_FLOOR", kBreastFloorStiffenDefault);
-const float kBreastFloorDamping = envOrF("POSESTUDIO_BREAST_FLOOR_DAMPING", kBreastFloorDampingDefault);
-const float kBreastHz = envOrF("POSESTUDIO_BREAST_HZ", kBreastHzDefault);
-const float kBreastDamping = envOrF("POSESTUDIO_BREAST_DAMPING", kBreastDampingDefault);
-const float kBreastJoltShare = envOrF("POSESTUDIO_BREAST_JOLT", kBreastJoltShareDefault);
-const float kBreastJoltGainG = envOrF("POSESTUDIO_BREAST_JOLT_GAIN", kBreastJoltGainGDefault);
-const float kBreastVelSmooth = envOrF("POSESTUDIO_BREAST_VEL_SMOOTH", kBreastVelSmoothDefault);
-const float kBreastAccelSmooth = envOrF("POSESTUDIO_BREAST_ACCEL_SMOOTH", kBreastAccelSmoothDefault);
-const float kBreastAccelDeadG = envOrF("POSESTUDIO_BREAST_DEAD_G", kBreastAccelDeadGDefault);
+const float kBreastDown = softBodyEnv("POSESTUDIO_BREAST_DOWN", kBreastDownDefault * 1000.0f) / 1000.0f;
+const float kBreastSide = softBodyEnv("POSESTUDIO_BREAST_SIDE", kBreastSideDefault * 1000.0f) / 1000.0f;
+const float kBreastHangOut = softBodyEnv("POSESTUDIO_BREAST_HANG", kBreastHangOutDefault * 1000.0f) / 1000.0f;
+const float kBreastSplay = softBodyEnv("POSESTUDIO_BREAST_SPLAY", kBreastSplayDefault);
+const float kBreastTiltShare = softBodyEnv("POSESTUDIO_BREAST_TILT", kBreastTiltShareDefault);
+const float kBreastTiltShareSide = softBodyEnv("POSESTUDIO_BREAST_TILT_SIDE", kBreastTiltShareSideDefault);
+const float kBreastSpreadOnBack = softBodyEnv("POSESTUDIO_BREAST_SPREAD", kBreastSpreadOnBackDefault * 1000.0f) / 1000.0f;
+const float kBreastAcross = softBodyEnv("POSESTUDIO_BREAST_ACROSS", kBreastAcrossDefault * 1000.0f) / 1000.0f;
+const float kBreastLever = softBodyEnv("POSESTUDIO_BREAST_LEVER", kBreastLeverDefault * 1000.0f) / 1000.0f;
+const float kBreastBounceCap = softBodyEnv("POSESTUDIO_BREAST_CAP", kBreastBounceCapDefault * 1000.0f) / 1000.0f;
+const float kBreastJiggleCapMax = softBodyEnv("POSESTUDIO_BREAST_CAPMAX", kBreastJiggleCapMaxDefault * 1000.0f) / 1000.0f;
+const float kBreastWallStiffen = softBodyEnv("POSESTUDIO_BREAST_WALL", kBreastWallStiffenDefault);
+const float kBreastFloorStiffen = softBodyEnv("POSESTUDIO_BREAST_FLOOR", kBreastFloorStiffenDefault);
+const float kBreastFloorDamping = softBodyEnv("POSESTUDIO_BREAST_FLOOR_DAMPING", kBreastFloorDampingDefault);
+const float kBreastHz = softBodyEnv("POSESTUDIO_BREAST_HZ", kBreastHzDefault);
+const float kBreastDamping = softBodyEnv("POSESTUDIO_BREAST_DAMPING", kBreastDampingDefault);
+const float kBreastJoltShare = softBodyEnv("POSESTUDIO_BREAST_JOLT", kBreastJoltShareDefault);
+const float kBreastJoltGainG = softBodyEnv("POSESTUDIO_BREAST_JOLT_GAIN", kBreastJoltGainGDefault);
+const float kBreastVelSmooth = softBodyEnv("POSESTUDIO_BREAST_VEL_SMOOTH", kBreastVelSmoothDefault);
+const float kBreastAccelSmooth = softBodyEnv("POSESTUDIO_BREAST_ACCEL_SMOOTH", kBreastAccelSmoothDefault);
+const float kBreastAccelDeadG = softBodyEnv("POSESTUDIO_BREAST_DEAD_G", kBreastAccelDeadGDefault);
 
 /// The weight a breast's motion is scaled by: its fullness (0 flat .. 1 the base female .. 3) to kBreastFullnessPower.
 float breastWeight(float fullness) {
@@ -198,7 +196,6 @@ void Armature::setupBreasts() {
     if (!m_ikRig || !m_ikRig->roles().built() || m_bones.empty()) {
         return;
     }
-    static const bool kTrace = std::getenv("POSESTUDIO_BREAST_TRACE") != nullptr;
     const RigRoles& roles = m_ikRig->roles();
     const float     scale = m_ikRig->sizeScale() > 0.0f ? m_ikRig->sizeScale() : 1.0f;
     // A BONELESS BREAST'S FIELD (armaturebreastfield.cpp) is read with the model's vertex data at
@@ -206,7 +203,7 @@ void Armature::setupBreasts() {
     if (!m_breastFieldsReady) {
         setupBreastFields();
     }
-    const std::vector<glm::vec3> bind = bindJointPositions(); // (model space; binds are translation-only)
+    const std::vector<glm::vec3>& bind = m_ikBindPos; // (model space; binds are translation-only)
     // ONE READING PER CANDIDATE, THE CHOICE AFTER. A side may carry more than one Pectoral-role
     // bone (a game rig's rib twist beside its breast bone), and the breast is the one with the
     // BIGGEST PATCH of skin — 175 points against the twist's 17 on one character-creation rig,
@@ -372,7 +369,7 @@ void Armature::setupBreasts() {
                     }
                 }
             }
-            if (kTrace) {
+            if (kSoftBodyTrace) {
                 const float beyondWall = r.wallPoints > 0 ? std::max(0.0f, zMax - r.wallZ) : 0.0f;
                 std::fprintf(stderr, "[breast] %s %-24s bottom row %s: profile %.1f cm2, overhang %.1f mm (bottom row %.1f forward of the wall), depth %.1f, beyond the wall %.1f (%s), %d points, scale %.2f\n",
                              side == RigSide::Left ? "L" : "R", m_boneNames[static_cast<std::size_t>(bone)].c_str(), r.flush ? "flush with the ribs" : "forward of the wall",
@@ -418,7 +415,7 @@ void Armature::setupBreasts() {
             b.pivotTopBind = glm::vec3(field.apexBind.x, field.apexBind.y + kBreastLever * scale, field.wallZ);
             b.lever = std::sqrt(kBreastLever * scale * kBreastLever * scale + b.protrusion * b.protrusion);
             b.side = sideIndex == 0 ? 1.0f : -1.0f;
-            if (kTrace) {
+            if (kSoftBodyTrace) {
                 std::fprintf(stderr, "[breast] %s boneless: the chest's own skin on %s, moved as a field -> fullness %.2f (weight %.2f); the wall %.1f mm behind the apex\n",
                              sideIndex == 0 ? "L" : "R", b.parent >= 0 ? m_boneNames[static_cast<std::size_t>(b.parent)].c_str() : "-", b.size,
                              breastWeight(b.size), b.protrusion * 1000.0f);
@@ -453,7 +450,7 @@ void Armature::setupBreasts() {
         best.pivotTopBind = glm::vec3(r.xTip, r.yTip + kBreastLever * scale, wallDepth);
         best.lever = std::sqrt(kBreastLever * scale * kBreastLever * scale + best.protrusion * best.protrusion);
         best.side = &r == &chosen[0] ? 1.0f : -1.0f; // (+x is the figure's left: outward for the left breast)
-        if (kTrace) {
+        if (kSoftBodyTrace) {
             std::fprintf(stderr, "[breast] %s chosen %-24s %s -> fullness %.2f (weight %.2f); base %.1f mm behind the nipple (%s), the swing's pivot %.1f mm over it\n", &r == &chosen[0] ? "L" : "R",
                          m_boneNames[static_cast<std::size_t>(r.bone)].c_str(), holdsFold ? "reaches the ribs: the profile" : "the dome alone: its depth", best.size, breastWeight(best.size),
                          best.protrusion * 1000.0f, r.basePoints > 0 ? "the ribs under the fold" : "the fold / the sternum", kBreastLever * scale * 1000.0f);
@@ -468,25 +465,11 @@ void Armature::setupBreasts() {
     m_breastGravity = glm::vec3(0.0f, -1.0f, 0.0f);
 }
 
-void Armature::applySoftBodySettings() {
-    if (softbody::breastMotion()) {
-        if (!m_breastsReady && !m_bodyMesh.empty() && ensureIkRig()) {
-            setupBreasts();
-        }
-    }
-    settleBreasts(); // (the spring, its reader and the effective gravity at rest: a dial turned mid-bounce otherwise drew the rest pose with a stale jolt)
-    settleButtocks(); // (the buttocks' field exists from the import; off, its weights read 0)
-    computeSkinMatrices(); // (on: the resting swing; off: the bind's pectorals again)
-}
-
 glm::vec3 Armature::breastGravityInChest(const Breast& b, bool effective) const {
     // Gravity (in g) in the chest's frame — EFFECTIVE (g less the chest's acceleration, smoothed)
     // or the pose's own; the chest's rotation is its world rotation away from the bind (binds are
     // translation-only), the model transform taken off first.
-    const glm::mat3 toModel = glm::inverse(glm::mat3(m_transform));
-    const glm::vec3 gModel = toModel * (effective ? m_breastGravity : glm::vec3(0.0f, -1.0f, 0.0f));
-    const glm::mat3 chest = normalizedFrame(m_poseGlobal[static_cast<std::size_t>(b.parent)]);
-    return glm::transpose(chest) * gModel;
+    return worldInBoneFrame(b.parent, effective ? m_breastGravity : glm::vec3(0.0f, -1.0f, 0.0f));
 }
 
 glm::vec3 Armature::breastRestDisplacement(const Breast& b, bool effective) const {
@@ -517,7 +500,7 @@ glm::vec3 Armature::breastRestDisplacement(const Breast& b, bool effective) cons
 
 glm::mat4 Armature::breastSwingMatrix(const Breast& b) const {
     const glm::vec3 rest = breastRestDisplacement(b, false); // (the POSE's: the tilt is the static hang's, never a jolt's — tilted up by a jolt about the attachment the nipple swung FORWARD, the ninth look)
-    const glm::vec3 d = m_breastDynamic ? b.disp : breastRestDisplacement(b);
+    const glm::vec3 d = breastDisplacement(b);
     const glm::vec3 across(d.x, d.y, 0.0f); // (the mass's displacement across the tether)
     const float     acrossLen = glm::length(across);
     if ((acrossLen < 1e-5f && std::abs(d.z) < 1e-5f) || b.parent < 0) {
@@ -542,55 +525,6 @@ glm::mat4 Armature::breastSwingMatrix(const Breast& b) const {
     const float     angle = std::atan2(tiltLen, b.lever);
     const glm::vec3 axis = chest * glm::normalize(glm::cross(glm::vec3(0.0f, 0.0f, 1.0f), tiltPart / tiltLen)); // (in the chest's frame: a turned chest carries it)
     return glm::translate(glm::mat4(1.0f), pivot + shift) * glm::rotate(glm::mat4(1.0f), angle, axis) * glm::translate(glm::mat4(1.0f), -pivot);
-}
-
-bool Armature::tickSoftBody(float dt) {
-    // ONE TICK OF THE SOFT BODY: the breasts (here) and the buttocks (armaturebuttocks.cpp), then
-    // the skin matrices once — the breasts' skin transform, and the version bump the corrective
-    // weights (the buttocks' field) are re-read on at the next recorded frame.
-    dt = glm::clamp(dt, 1.0f / 240.0f, 1.0f / 20.0f);
-    const bool breasts = softbody::breastMotion() && m_breastsReady && !m_breasts.empty();
-    const bool buttocks = softbody::buttockMotion() && m_buttocksReady && !m_buttocks.empty();
-    if (!breasts && !buttocks) {
-        return false;
-    }
-    bool moving = false;
-    if (breasts) {
-        tickBreasts(dt, moving);
-    }
-    if (buttocks) {
-        tickButtocks(dt, moving);
-    }
-    computeSkinMatrices();
-    return moving;
-}
-
-glm::vec3 Armature::SoftBodyAccelReader::sample(const glm::vec3& p, float dt, float velSmooth, float accelSmooth, float deadG,
-                                                float maxG, float& magOut) {
-    glm::vec3 raw(0.0f);
-    if (samples >= 1) {
-        const glm::vec3 velRaw = (p - pos) / dt;
-        const glm::vec3 v = samples >= 2 ? glm::mix(vel, velRaw, velSmooth) : velRaw;
-        if (samples >= 2) {
-            raw = (v - vel) / dt;
-        }
-        vel = v;
-    }
-    pos = p;
-    ++samples;
-    constexpr float g = 9.81f;
-    accel = glm::mix(accel, raw / g, accelSmooth);
-    glm::vec3 felt = accel;
-    float     mag = glm::length(felt);
-    if (mag < deadG) {
-        felt = glm::vec3(0.0f);
-        mag = 0.0f;
-    } else if (mag > maxG) {
-        felt *= maxG / mag;
-        mag = maxG;
-    }
-    magOut = mag;
-    return felt;
 }
 
 void Armature::tickBreasts(float dt, bool& movingOut) {
@@ -621,7 +555,7 @@ void Armature::tickBreasts(float dt, bool& movingOut) {
     float traceFloor = 0.0f, traceOverCap = 0.0f;
     for (Breast& b : m_breasts) {
         const float     w = std::max(0.05f, breastWeight(b.size));
-        const float     omega = 2.0f * 3.14159265f * kBreastHz / std::pow(w, 0.25f) * (b.side < 0.0f ? kBreastDetune : 1.0f);
+        const float     omega = glm::two_pi<float>() * kBreastHz / std::pow(w, 0.25f) * (b.side < 0.0f ? kBreastDetune : 1.0f);
         // THE JIGGLE'S CEILING: the wall's radius about the POSE's rest — kBreastBounceCap by the square
         // root of the weight, and never more than kBreastJiggleCapMax (the upper limit for a very large
         // bust, the tenth look).
@@ -691,18 +625,24 @@ void Armature::tickBreasts(float dt, bool& movingOut) {
         }
         if (!std::isfinite(b.disp.x + b.disp.y + b.disp.z + b.vel.x + b.vel.y + b.vel.z)) {
             // Never on a finite rest with the substeps above; the guard keeps a figure whose numbers
-            // went wrong (a NaN bone, a zero-length chest axis) from carrying it into the skin.
-            b.disp = restEffective;
+            // went wrong (a NaN bone, a zero-length chest axis) from carrying it into the skin. With
+            // such a bone the REST is not finite either, nor what the reader has taken in: the mass
+            // goes back to the sculpt and the reader starts afresh.
+            const bool restFinite = std::isfinite(restEffective.x + restEffective.y + restEffective.z);
+            b.disp = restFinite ? restEffective : glm::vec3(0.0f);
             b.vel = glm::vec3(0.0f);
+            if (!restFinite) {
+                m_breastReader.reset();
+                m_breastGravity = glm::vec3(0.0f, -1.0f, 0.0f);
+            }
         }
-        if (glm::length(rest - b.disp) > 0.0003f || glm::length(b.vel) > 0.003f) {
+        if (glm::length(rest - b.disp) > kSoftBodyRestDistance || glm::length(b.vel) > kSoftBodyRestSpeed) {
             moving = true;
         }
     }
     m_breastDynamic = true;
     movingOut = movingOut || moving;
-    static const bool kTickTrace = std::getenv("POSESTUDIO_BREAST_TRACE") && std::getenv("POSESTUDIO_BREAST_TRACE")[0] == '2';
-    if (kTickTrace && !m_breasts.empty()) {
+    if (kSoftBodyTickTrace && !m_breasts.empty()) {
         // POSESTUDIO_BREAST_TRACE=2: the first breast per tick — the chest's acceleration (g), the
         // displacement (mm, chest frame: sideways / along the chest / out) and its rest — to read a
         // quick move's bounce against a slow one, a landing's drop.
@@ -712,11 +652,6 @@ void Armature::tickBreasts(float dt, bool& movingOut) {
                      b.disp.x * 1000.0f, b.disp.y * 1000.0f, b.disp.z * 1000.0f, rest.x * 1000.0f, rest.y * 1000.0f, rest.z * 1000.0f,
                      traceFloor * 1000.0f, traceOverCap * 1000.0f);
     }
-}
-
-void Armature::kickSoftBody(float impactSpeed) {
-    kickBreasts(impactSpeed);
-    kickButtocks(impactSpeed);
 }
 
 void Armature::kickBreasts(float impactSpeed) {
@@ -737,30 +672,18 @@ void Armature::kickBreasts(float impactSpeed) {
     // 30) and the float's weightlessness ends with the impact.
     m_breastReader.reset();
     m_breastGravity = glm::vec3(0.0f, -1.0f, 0.0f);
-    static const float kShare = envOrF("POSESTUDIO_BREAST_IMPACT", kBreastImpactShare);
-    const glm::mat3    toModel = glm::inverse(glm::mat3(m_transform));
-    const glm::vec3    downModel = toModel * glm::vec3(0.0f, -1.0f, 0.0f);
+    static const float kShare = softBodyEnv("POSESTUDIO_BREAST_IMPACT", kBreastImpactShare);
     for (Breast& b : m_breasts) {
         if (b.parent < 0 || static_cast<std::size_t>(b.parent) >= m_poseGlobal.size()) {
             continue;
         }
-        const glm::mat3 chest = normalizedFrame(m_poseGlobal[static_cast<std::size_t>(b.parent)]);
         // By the breast's weight (to its square root, up to kBreastKickSizeMax): a kick is a
         // velocity, and resolved in substeps at one and the same for every bust it dropped a modest
         // bust (weight 0.15) 20 mm against a large one's 36 — "none for very small" is the user's
         // rule — and bounced a full bust no higher than the base female's; a fuller breast bounces
         // more, the wall its ceiling.
         const float bySize = std::min(kBreastKickSizeMax, std::sqrt(std::max(0.0f, breastWeight(b.size))));
-        b.vel += glm::transpose(chest) * downModel * (impactSpeed * kShare * bySize * softbody::breastStrength() * softbody::breastBounce());
-    }
-}
-
-void Armature::settleSoftBody() {
-    const bool was = m_breastDynamic || m_buttockDynamic;
-    settleBreasts();
-    settleButtocks();
-    if (was) {
-        computeSkinMatrices(); // (the resting displacement; the buttocks' weights back to 0)
+        b.vel += worldInBoneFrame(b.parent, glm::vec3(0.0f, -1.0f, 0.0f)) * (impactSpeed * kShare * bySize * softbody::breastStrength() * softbody::breastBounce());
     }
 }
 
@@ -776,71 +699,56 @@ void Armature::settleBreasts() {
     }
 }
 
-bool Armature::softBodyMoving() const {
-    return breastsMoving() || buttocksMoving();
-}
-
 bool Armature::breastsMoving() const {
     if (!m_breastDynamic || !softbody::breastMotion()) {
         return false;
     }
     for (const Breast& b : m_breasts) {
-        if (glm::length(breastRestDisplacement(b) - b.disp) > 0.0003f || glm::length(b.vel) > 0.003f) {
+        if (glm::length(breastRestDisplacement(b) - b.disp) > kSoftBodyRestDistance || glm::length(b.vel) > kSoftBodyRestSpeed) {
             return true;
         }
     }
     return false;
 }
 
-float Armature::breastSwingDeg(int side) const {
+const Armature::Breast* Armature::breastOfSide(int side) const {
     if (!softbody::breastMotion() || !m_breastsReady) {
-        return 0.0f;
+        return nullptr;
     }
     for (const Breast& b : m_breasts) {
         if ((side == 0) == (b.side > 0.0f)) {
-            const glm::vec3 d = m_breastDynamic ? b.disp : breastRestDisplacement(b);
-            return glm::degrees(std::atan2(glm::length(glm::vec2(d.x, d.y)), b.lever));
+            return &b;
         }
     }
-    return 0.0f;
+    return nullptr;
+}
+
+glm::vec3 Armature::breastDisplacement(const Breast& b) const {
+    return m_breastDynamic ? b.disp : breastRestDisplacement(b);
+}
+
+float Armature::breastSwingDeg(int side) const {
+    const Breast* b = breastOfSide(side);
+    if (b == nullptr) {
+        return 0.0f;
+    }
+    const glm::vec3 d = breastDisplacement(*b);
+    return glm::degrees(std::atan2(glm::length(glm::vec2(d.x, d.y)), b->lever));
 }
 
 float Armature::breastSideMm(int side) const {
-    if (!softbody::breastMotion() || !m_breastsReady) {
-        return 0.0f;
-    }
-    for (const Breast& b : m_breasts) {
-        if ((side == 0) == (b.side > 0.0f)) {
-            const glm::vec3 d = m_breastDynamic ? b.disp : breastRestDisplacement(b);
-            return 1000.0f * b.side * d.x; // (+ outward, toward the armpit)
-        }
-    }
-    return 0.0f;
+    const Breast* b = breastOfSide(side);
+    return b != nullptr ? 1000.0f * b->side * breastDisplacement(*b).x : 0.0f; // (+ outward, toward the armpit)
 }
 
 float Armature::breastUpMm(int side) const {
-    if (!softbody::breastMotion() || !m_breastsReady) {
-        return 0.0f;
-    }
-    for (const Breast& b : m_breasts) {
-        if ((side == 0) == (b.side > 0.0f)) {
-            const glm::vec3 d = m_breastDynamic ? b.disp : breastRestDisplacement(b);
-            return 1000.0f * d.y; // (+ up the chest toward the head; below 0 is the floor's give)
-        }
-    }
-    return 0.0f;
+    const Breast* b = breastOfSide(side);
+    return b != nullptr ? 1000.0f * breastDisplacement(*b).y : 0.0f; // (+ up the chest toward the head; below 0 is the floor's give)
 }
 
 float Armature::breastHangMm(int side) const {
-    if (!softbody::breastMotion() || !m_breastsReady) {
-        return 0.0f;
-    }
-    for (const Breast& b : m_breasts) {
-        if ((side == 0) == (b.side > 0.0f)) {
-            return 1000.0f * (m_breastDynamic ? b.disp.z : breastRestDisplacement(b).z);
-        }
-    }
-    return 0.0f;
+    const Breast* b = breastOfSide(side);
+    return b != nullptr ? 1000.0f * breastDisplacement(*b).z : 0.0f;
 }
 
 } // namespace pose

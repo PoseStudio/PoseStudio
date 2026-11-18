@@ -106,9 +106,6 @@ namespace Constants {
     /// new version ("1"/"0", absent = on), and the last version it was decided for.
     inline constexpr const char* PREF_WHATS_NEW_ENABLED = "WhatsNewEnabled";
     inline constexpr const char* PREF_WHATS_NEW_SEEN_VERSION = "WhatsNewSeenVersion";
-    /// VR Mode (src/core/vrsettings.h): whether the headset runtime is consulted at startup
-    /// ("1"/"0", absent = OFF — opt-in, takes a restart), and the per-eye render scale ("1.00",
-    /// a fraction of the headset's recommended resolution, applied when VR Mode next starts).
     /// The Soft Body Physics tab (properties/softbodypanel): the switches (absent = on) and the dials in percent (absent = 100).
     inline constexpr const char* PREF_SOFTBODY_BREASTS = "SoftBodyBreasts";
     inline constexpr const char* PREF_SOFTBODY_BREAST_STRENGTH = "SoftBodyBreastStrength";
@@ -116,6 +113,9 @@ namespace Constants {
     inline constexpr const char* PREF_SOFTBODY_ENABLED = "SoftBodyEnabled";                 // the Soft Body Physics tab's master switch (absent = on)
     inline constexpr const char* PREF_SOFTBODY_BREAST_BOUNCE = "SoftBodyBreastBounce";      // the breasts' Bounce dial, 0-200 (absent = 100)
     inline constexpr const char* PREF_SOFTBODY_BUTTOCK_STRENGTH = "SoftBodyButtockStrength"; // the buttocks' own Softness dial, 0-200 (absent = 100)
+    /// VR Mode (src/core/vrsettings.h): whether the headset runtime is consulted at startup
+    /// ("1"/"0", absent = OFF — opt-in, takes a restart), and the per-eye render scale ("1.00",
+    /// a fraction of the headset's recommended resolution, applied when VR Mode next starts).
     inline constexpr const char* PREF_VR_ENABLED = "VrEnabled";
     inline constexpr const char* PREF_VR_RENDER_SCALE = "VrRenderScale";
     /// "1"/"0", absent = off: skip the subsurface blur and bloom in the headset (a lighter GPU's

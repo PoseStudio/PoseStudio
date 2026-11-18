@@ -43,9 +43,10 @@ struct ShadeMode {
     bool        pathTraced = false;
 };
 
-// mesh.frag's mode numbers (its `cam.params.x` switch). The skin and metal matcaps (3, 4) still
-// exist in the shader but have no picker row.
-inline constexpr int kFragModeTextured   = 0;  // "Rendered": textured Blinn-Phong, analytic 3-point rig
+// mesh.frag's mode numbers (its `cam.params.x` switch). 3 and 4 are vacant (the skin and metal
+// matcaps they were had no picker row and are gone from the shader).
+inline constexpr int kFragModeTextured   = 0;  // "Texture Shaded": textured Blinn-Phong, analytic 3-point rig
+                                               //   (mesh.frag's "Rendered" — not the picker's path-traced row)
 inline constexpr int kFragModePbr        = 1;  // image-based-lit; the HDR post chain (SSS/bloom/ACES) runs here
 inline constexpr int kFragModeMatcap     = 2;  // the studio matcap (procedural, view-space normal)
 inline constexpr int kFragModeToon       = 5;

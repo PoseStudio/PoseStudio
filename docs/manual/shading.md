@@ -14,7 +14,7 @@ The **shading picker** in the viewport strip (its tooltip reads *Viewport shadin
 
 ## The Rendered mode
 
-**Rendered** is the picture a [render](rendering.md) would make, shown in the viewport and kept up to date. Where the PBR Shaded mode draws the scene with a game engine's shortcuts, this mode traces light: every light casts its shadow — the key light, the environment's own lights, each [light](lights.md) you placed, soft or hard by the size of its source — surfaces light each other, skin lets light through, and glass and the eyes' clear surfaces bend what is behind them.
+**Rendered** is the picture a [render](rendering.md) would make, shown in the viewport and kept up to date. Where the PBR Shaded mode draws the scene with a game engine's shortcuts, this mode traces light: every light casts its shadow — the key light, the environment's own lights, each [light](lights.md) you placed, soft or hard by the size of its source — surfaces light each other, skin lets light through, glass bends what is behind it, and the eye is seen through its clear surfaces with their reflections on top.
 
 Choose **Rendered** in the shading picker. The PBR picture stays for a moment while the scene is handed to the renderer, then the traced picture takes its place: coarse and soft at first, sharper and cleaner with every pass. A line under the control strip says where it is — *Rendered: 37 / 128 samples*, then just *Rendered* when the picture is finished.
 
@@ -38,7 +38,7 @@ The selection outline, the light markers, the skeleton overlay and the pins are 
 - In **VR Mode** the headset shows the PBR Shaded picture.
 - **Gaussian splat scenes** are not path traced; the viewport lays them over the traced picture as it lays them over the PBR one, in front of the figure and behind her. A render also drops her shadow onto the capture's floor (see [Gaussian splat scenes in a render](rendering.md#gaussian-splat-scenes-in-a-render)).
 
-Everything else on that list applies here too: the Rendered mode and a render are the same picture, so what a render leaves out of the viewport's dials — the shadow's Intensity and Reach, the Specular dial, the rim light, the backdrop's blur — this mode leaves out as well.
+The Rendered mode and a render are the same picture, so what a render leaves out of the viewport's dials — the shadow's Intensity and Reach, the Specular dial, the rim light, the backdrop's blur — this mode leaves out as well (see [Where a render differs from the viewport](rendering.md#where-a-render-differs-from-the-viewport)).
 
 ## Untextured form studies
 
@@ -58,7 +58,7 @@ Everything else on that list applies here too: the Rendered mode and a render ar
 | **Clay Shaded Wireframe** | The clay surface with its edges drawn over it. |
 | **Texture Shaded Wireframe** | The textured surface with its edges drawn over it. |
 
-Wireframe modes need a graphics driver that supports line rendering (all desktop drivers do); if yours does not, the wire modes show the surface alone.
+Wireframe modes need a graphics driver that supports line rendering (all desktop drivers do); if yours does not, the wire modes show the surface alone — Wireframe and Hidden Line Wireframe draw it as clay.
 
 ## Data views
 
@@ -75,7 +75,7 @@ These show one component of the material or the lighting, for checking content r
 
 ## The selection outline
 
-The selected model wears a blue outline. It is drawn around the object's whole silhouette, so it stays visible through anything in front of it. Selecting is described in [Navigating the Viewport](navigation.md#selecting-objects).
+The selected model wears a blue outline. It is drawn around the object's whole silhouette, so it stays visible through anything in front of it. Selecting is described in [Navigating the Viewport](navigation.md#selecting-objects); the outline's color and opacity, and the joint highlight's, are set in [Preferences → Selection](preferences.md#selection), which the strip's **Selection** button opens.
 
 ## The skeleton overlay
 
@@ -83,4 +83,4 @@ The selected model wears a blue outline. It is drawn around the object's whole s
 
 ## Anti-aliasing and the picture
 
-The viewport renders with multisample anti-aliasing (4× where the graphics card supports it) and in high dynamic range; the PBR mode's picture goes through subsurface scattering for skin, bloom for the brightest highlights and the ACES filmic tone mapper before it reaches the screen. The other modes skip that chain and show their colors directly. Rendering happens only when something changes, so an idle PoseStudio uses no graphics power.
+The viewport renders with multisample anti-aliasing (4× where the graphics card supports it) and in high dynamic range; the PBR mode's picture goes through subsurface scattering for skin, bloom for the brightest highlights and the ACES filmic tone mapper before it reaches the screen. The other modes skip that chain and show their colors directly. Rendering happens only when something changes, so an idle PoseStudio uses no graphics power — except in the **Rendered** mode, whose renderer goes on working until its picture is finished.

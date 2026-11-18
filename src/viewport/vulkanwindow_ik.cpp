@@ -3,14 +3,14 @@
  * @brief VulkanWindow's full-body-IK drag loop and the animated ground fall — the interaction
  *        state machines that run on timers.
  *
- * One of the seven translation units of VulkanWindow — see vulkanwindow.h for the map. The
+ * One of the translation units of VulkanWindow — see vulkanwindow.h for the map. The
  * IK drag is the viewport's posing gesture and its MOTION is engineered, not just its end pose
  * (CLAUDE.md, the FBIK section): the mouse only records a raw target; the 60 Hz timer is the
  * SOLE solve driver, low-pass filtering that target (IkCursorFilter, shared with the harness so
  * the app and the tests run the identical loop) and issuing it once per tick; the release hands
  * off to an ANIMATED settle on the same timer; and everything that must not overlap a settle or
  * a fall lands it first (finishIkSettle / finishGroundFall). The Model/Armature side of the loop
- * lives in scene/meshik.cpp — this file only drives it at the viewport's tick order.
+ * lives in scene/armatureik*.cpp — this file only drives it at the viewport's tick order.
  */
 
 #include "vulkanwindow.h"
@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace pose {
 
@@ -82,13 +83,10 @@ bool VulkanWindow::beginJointGesture(const QPointF& localPos, bool scoped) {
     }
     // IK: drag the grabbed point through a camera-parallel plane anchored at it — the whole body
     // following (a plain press), or with Ctrl the grabbed CHAIN alone (a limb up to the body, the
-    // head and neck to the chest, the spine over a still pelvis, the hips with only their legs),
-    // nothing else moving. (Until 2026-09-26 Ctrl+drag was the single-joint FK rotate; turning
-    // one joint is the Transform dials' job, and the B / S / T mouse mode's.)
-    beginIkDrag(scoped);
-    if (dragInFlight()) {
-        m_preEditPose = scene().capturePose(); // snapshot for undo (committed on release)
-    }
+    // head and neck to the chest, the spine over a still pelvis), nothing else moving — or, by the
+    // hips, the whole figure as she is posed. (Turning ONE joint is the Transform dials' job, and
+    // the B / S / T mouse mode's.)
+    beginIkDrag(scoped); // (takes the undo snapshot itself; committed on release)
     return true;
 }
 
@@ -107,10 +105,7 @@ bool VulkanWindow::beginGroupGesture(const QPointF& localPos) {
     // Released without a move it is a Shift+CLICK: a new joint stays added, a member is removed
     // (mouseReleaseEvent, through m_ik.groupClickBone).
     m_ik.groupClickBone = wasMember ? bone : -1;
-    beginIkDrag(false);
-    if (dragInFlight()) {
-        m_preEditPose = scene().capturePose();
-    } else if (wasMember) {
+    if (!beginIkDrag(false) && wasMember) {
         scene().removeGroupBone(bone); // (no drag could begin: the click's removal, now)
         m_ik.groupClickBone = -1;
     }
@@ -120,14 +115,24 @@ bool VulkanWindow::beginGroupGesture(const QPointF& localPos) {
 bool VulkanWindow::beginIkDrag(bool scoped) {
     // (The plane passes through the point of the bone the user took hold of — the joint itself
     // for a click on the joint — and the targets are where that point should go.)
-    // (Ctrl asks for IkScope::Part, which the armature resolves by what was grabbed: the body
-    // itself -> the whole figure moved as she is posed, off the floor's contacts; a limb, the head
-    // -> its chain alone; a finger or a toe -> its digit.)
+    // (Ctrl asks for IkScope::Part, which the armature resolves by what was grabbed: the hips
+    // -> the whole figure moved as she is posed, off the floor's contacts; a limb, the head, the
+    // spine -> its chain alone; a finger or a toe -> its digit.)
+    // THE UNDO SNAPSHOT IS TAKEN HERE, BEFORE THE ARMATURE BEGINS — its begin can itself pose: a
+    // figure found hovering just over the floor on feet a lift left hanging is SET DOWN at the
+    // press (Armature::beginIkDrag). Taken after it, as every caller used to, the drag's undo
+    // entry returned to the pose after the set-down, never to the one the user saw; and a press
+    // released without a move left her set down with no entry at all. So the pose before the
+    // begin is the bracket's, and whether the begin posed is remembered for a drag that ends
+    // without a settle (abortIkDrag).
+    PoseSnapshot before = scene().capturePose();
     m_ik.dragging = scene().beginBoneIkDrag(scoped ? IkScope::Part : IkScope::Body) &&
                     scene().ikGrabPointWorld(m_ik.planePoint);
     if (m_ik.dragging) {
         m_ik.hasTarget = false;
         m_ik.poseChanged = false;
+        m_ik.posedAtPress = scene().capturePose() != before;
+        m_preEditPose = std::move(before);
         if (m_diag) {
             m_diag->dragBegan();
         }
@@ -150,10 +155,15 @@ void VulkanWindow::abortIkDrag() {
     m_ik.dragging = false;
     m_ik.hasTarget = false;
     m_ikTimer->stop();
-    if (m_ik.poseChanged) {
-        // The drag DID move the pose and no settle will run: the edit stays, so it must be
-        // undoable (a stale drag used to lose its entry).
-        m_ik.poseChanged = false;
+    // The drag DID move the pose — by a solve, or already by its begin (posedAtPress) — and no
+    // settle will run: the edit stays, so it must be undoable (a stale drag used to lose its
+    // entry; a click that set a hovering figure down had none). NOT for a press that changed
+    // nothing: a solve tick under a jittering cursor may write the channels by less than the
+    // "changed" it reports, and committing whatever differs would turn such a click into an entry.
+    const bool edited = m_ik.poseChanged || m_ik.posedAtPress;
+    m_ik.poseChanged = false;
+    m_ik.posedAtPress = false;
+    if (edited) {
         scene().finalizePose();
         commitPoseUndo();
     }
@@ -174,7 +184,12 @@ void VulkanWindow::finishIkSettle() {
     }
 }
 
-bool VulkanWindow::dragPlaneHit(const QPointF& localPos, glm::vec3& outWorld) const {
+// --- The camera-parallel drag plane ------------------------------------------------------------
+// What a drag in the viewport moves its object in: the plane through a point of the object,
+// parallel to the screen — so the object stays under the pointer — which the wheel moves along
+// the view. The joint drag uses the two functions below through dragPlaneHit / stepIkDepth.
+
+bool VulkanWindow::cameraPlaneHit(const QPointF& localPos, const glm::vec3& planePoint, glm::vec3& outWorld) const {
     if (!m_renderer) {
         return false; // (a drag implies a renderer; the guard keeps the invariant explicit)
     }
@@ -185,12 +200,31 @@ bool VulkanWindow::dragPlaneHit(const QPointF& localPos, glm::vec3& outWorld) co
     if (std::abs(denom) <= 1e-4f) {
         return false; // the ray runs along the plane
     }
-    const float t = glm::dot(m_ik.planePoint - ray.origin, planeNormal) / denom;
+    const float t = glm::dot(planePoint - ray.origin, planeNormal) / denom;
     if (t <= 0.0f) {
         return false; // the plane is behind the camera
     }
     outWorld = ray.origin + ray.direction * t;
     return true;
+}
+
+glm::vec3 VulkanWindow::steppedPlanePoint(const glm::vec3& planePoint, float notches) const {
+    Camera&         camera = m_renderer->camera();
+    const glm::mat4 view = camera.view();
+    const glm::vec3 towardCamera(view[0][2], view[1][2], view[2][2]);
+    const float     distance = glm::dot(planePoint - camera.position(), -towardCamera);
+    // The plane may never come closer than 10cm to the camera: pulled through (or behind) it,
+    // the cursor ray could no longer hit it and the drag would go dead. The step is scaled by
+    // the CURRENT distance (floored at the same 10cm so a plane already at the limit can still
+    // be pushed away), and a pull is clamped so the plane stops exactly at the limit.
+    constexpr float kMinPlaneDistance = 0.10f;
+    float push = notches * kIkDepthPerWheelNotch * std::max(distance, kMinPlaneDistance);
+    push = std::max(push, kMinPlaneDistance - distance);
+    return planePoint - towardCamera * push;
+}
+
+bool VulkanWindow::dragPlaneHit(const QPointF& localPos, glm::vec3& outWorld) const {
+    return cameraPlaneHit(localPos, m_ik.planePoint, outWorld);
 }
 
 void VulkanWindow::setIkTarget(const glm::vec3& target) {
@@ -205,18 +239,7 @@ bool VulkanWindow::stepIkDepth(float notches, const QPointF& cursorPos) {
     if (!m_renderer) {
         return false;
     }
-    Camera&         camera = m_renderer->camera();
-    const glm::mat4 view = camera.view();
-    const glm::vec3 towardCamera(view[0][2], view[1][2], view[2][2]);
-    const float     distance = glm::dot(m_ik.planePoint - camera.position(), -towardCamera);
-    // The plane may never come closer than 10cm to the camera: pulled through (or behind) it,
-    // the cursor ray could no longer hit it and the drag would go dead. The step is scaled by
-    // the CURRENT distance (floored at the same 10cm so a plane already at the limit can still
-    // be pushed away), and a pull is clamped so the plane stops exactly at the limit.
-    constexpr float kMinPlaneDistance = 0.10f;
-    float push = notches * kIkDepthPerWheelNotch * std::max(distance, kMinPlaneDistance);
-    push = std::max(push, kMinPlaneDistance - distance);
-    m_ik.planePoint -= towardCamera * push;
+    m_ik.planePoint = steppedPlanePoint(m_ik.planePoint, notches);
     glm::vec3 target;
     if (!dragPlaneHit(cursorPos, target)) {
         return false;
@@ -231,7 +254,10 @@ void VulkanWindow::groundFigure() {
     if (!m_renderer || m_ik.dragging || m_fall.timer->isActive()) {
         return; // no renderer yet, a drag owns the pose, or a fall is already in flight
     }
-    finishIkSettle(); // ground the LANDED pose, not a transient mid-settle frame
+    // Ground the LANDED pose, not a transient mid-settle frame — and close an open dial edit (or
+    // the joint mouse mode) first: the drop takes m_preEditPose for its own bracket below, and
+    // would have overwritten the snapshot under an edit still open.
+    closeSettlingEdits();
     float lowestY = 0.0f;
     if (!scene().figureGroundGap(lowestY)) {
         return; // nothing to ground
@@ -277,8 +303,7 @@ void VulkanWindow::groundFigure() {
         scene().poseHangFeet(figure, 1.0f); // (as they hang again: the fall brings them flat, onFallTick)
     }
     // Hovering: FALL. The timer applies the free-fall curve's increments (onFallTick) to THIS
-    // figure — undo can switch the active figure mid-fall, and the drop must still land on
-    // the one that started falling.
+    // figure: the drop lands on the one that started falling.
     m_fall.figure = figure;
     m_fall.height = lowestY;
     m_fall.dropped = 0.0f;

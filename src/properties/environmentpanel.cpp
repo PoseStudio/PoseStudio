@@ -13,10 +13,7 @@
 
 #include <QCheckBox>
 #include <QFormLayout>
-#include <QIcon>
-#include <QPixmap>
 #include <QPushButton>
-#include <QScrollArea>
 #include <QSignalBlocker>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -97,19 +94,8 @@ QCheckBox* EnvironmentPanel::addToggleRow(QFormLayout* form, const QString& labe
 }
 
 void EnvironmentPanel::buildUi() {
-    auto* outer = new QVBoxLayout(this);
-    outer->setContentsMargins(0, 0, 0, 0);
-
-    auto* scroll = new QScrollArea(this);
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    outer->addWidget(scroll);
-
-    auto* content = new QWidget;
-    content->setObjectName(QStringLiteral("EnvironmentContent"));
-    auto* col = new QVBoxLayout(content);
-    col->setContentsMargins(12, 12, 12, 12);
-    col->setSpacing(12);
+    const propertyrows::ScrollColumn tab = propertyrows::makeScrollColumn(this, QStringLiteral("EnvironmentContent"), 12);
+    QVBoxLayout*                     col = tab.column;
 
     // --- Environment ---
     QFormLayout* env = addGroup(col, tr("Environment"));
@@ -159,7 +145,7 @@ void EnvironmentPanel::buildUi() {
     connect(reset, &QPushButton::clicked, this, &EnvironmentPanel::resetToDefaults);
 
     col->addStretch(1);
-    scroll->setWidget(content);
+    tab.finish();
 }
 
 void EnvironmentPanel::buildEnvironmentRow(QFormLayout* form) {
@@ -183,16 +169,10 @@ void EnvironmentPanel::buildEnvironmentRow(QFormLayout* form) {
 
 void EnvironmentPanel::buildBackdropModeRow(QFormLayout* form) {
     m_backdropMode = new MenuPickerButton;
-    // Deliberately the HDRI selector's object name: the QSS ID selector styles every widget with
-    // the name identically (nothing looks widgets up by it), so the mode picker inherits that
-    // field look for free — including the spacer-icon left inset (see HdriSelector's constructor
-    // for why an icon rather than QSS padding provides it).
-    m_backdropMode->setObjectName(QStringLiteral("EnvironmentHdriButton"));
-    m_backdropMode->setCursor(Qt::PointingHandCursor);
-    QPixmap spacer(10, 10);
-    spacer.fill(Qt::transparent);
-    m_backdropMode->setIcon(QIcon(spacer));
-    m_backdropMode->setIconSize(QSize(10, 10));
+    // The HDRI selector's field look, deliberately: the QSS ID selector styles every widget with
+    // that object name identically (nothing looks widgets up by it), so the mode picker and the
+    // HDRI field above it are one kind of field.
+    propertyrows::stylePickerField(m_backdropMode);
     // Entries in LightingSettings::backdropMode order (0 = Off, 1 = Environment, 2 = Dome); the
     // picker shows the one tooltip (Dome's) because an item carries it.
     m_backdropMode->setItems({

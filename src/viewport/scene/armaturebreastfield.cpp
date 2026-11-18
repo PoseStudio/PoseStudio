@@ -67,6 +67,7 @@
  */
 
 #include "armature.h"
+#include "armaturesoftbodyshared.h" // the env levers' reader, the trace switch
 
 #include "ikrig.h"
 #include "rigroles.h"
@@ -109,19 +110,14 @@ constexpr float kFieldCarriedShare = 0.25f;   ///< ... (a native pectoral owns a
 constexpr float kFieldReachMin = 0.04f;       ///< No reach under this (m, figure-scaled) ...
 constexpr float kFieldReachMax = 0.14f;       ///< ... or over this.
 
-float fieldEnv(const char* name, float fallback) {
-    const char* v = std::getenv(name);
-    return v && *v ? static_cast<float>(std::atof(v)) : fallback;
-}
-const float kFieldReachOut = fieldEnv("POSESTUDIO_BREAST_FIELD_OUT", 1.5f);       ///< Its reach toward the armpit, as a share of the apex's distance from the midline (its reach toward the sternum is that distance itself: the two fields meet at nothing).
-const float kFieldReachUp = fieldEnv("POSESTUDIO_BREAST_FIELD_UP", 1.5f);         ///< ... and up the chest.
-const float kFieldReachBelowFold = fieldEnv("POSESTUDIO_BREAST_FIELD_BELOW", 30.0f) / 1000.0f; ///< Its reach down: this far below the fold (m, figure-scaled).
-const float kFieldPlateau = fieldEnv("POSESTUDIO_BREAST_FIELD_PLATEAU", 0.25f);   ///< The share of the reach over which the field is 1: the breast's core moves as one piece.
-const float kFieldDepthFull = fieldEnv("POSESTUDIO_BREAST_FIELD_DEPTH_FULL", 15.0f) / 1000.0f; ///< The field is whole on skin no further than this behind the wall under the fold (m, figure-scaled) ...
-const float kFieldDepthGone = fieldEnv("POSESTUDIO_BREAST_FIELD_DEPTH_GONE", 70.0f) / 1000.0f; ///< ... and gone this far behind it: the chest's front and the breast's side, never the back.
-const float kFieldTravelShare = fieldEnv("POSESTUDIO_BREAST_FIELD_TRAVEL", 0.5f); ///< THE SKIN DOES NOT FOLD OVER ITSELF: the field carries a displacement across the chest only up to this share of the band it falls off over, that way (softly: a rigid patch slides as far as it is asked, a field must stay a one-to-one map of the skin).
+const float kFieldReachOut = softBodyEnv("POSESTUDIO_BREAST_FIELD_OUT", 1.5f);       ///< Its reach toward the armpit, as a share of the apex's distance from the midline (its reach toward the sternum is that distance itself: the two fields meet at nothing).
+const float kFieldReachUp = softBodyEnv("POSESTUDIO_BREAST_FIELD_UP", 1.5f);         ///< ... and up the chest.
+const float kFieldReachBelowFold = softBodyEnv("POSESTUDIO_BREAST_FIELD_BELOW", 30.0f) / 1000.0f; ///< Its reach down: this far below the fold (m, figure-scaled).
+const float kFieldPlateau = softBodyEnv("POSESTUDIO_BREAST_FIELD_PLATEAU", 0.25f);   ///< The share of the reach over which the field is 1: the breast's core moves as one piece.
+const float kFieldDepthFull = softBodyEnv("POSESTUDIO_BREAST_FIELD_DEPTH_FULL", 15.0f) / 1000.0f; ///< The field is whole on skin no further than this behind the wall under the fold (m, figure-scaled) ...
+const float kFieldDepthGone = softBodyEnv("POSESTUDIO_BREAST_FIELD_DEPTH_GONE", 70.0f) / 1000.0f; ///< ... and gone this far behind it: the chest's front and the breast's side, never the back.
+const float kFieldTravelShare = softBodyEnv("POSESTUDIO_BREAST_FIELD_TRAVEL", 0.5f); ///< THE SKIN DOES NOT FOLD OVER ITSELF: the field carries a displacement across the chest only up to this share of the band it falls off over, that way (softly: a rigid patch slides as far as it is asked, a field must stay a one-to-one map of the skin).
 
-const bool kFieldTrace = std::getenv("POSESTUDIO_BREAST_TRACE") != nullptr;
 const bool kFieldAlways = std::getenv("POSESTUDIO_BREAST_AS_FIELD") != nullptr; ///< The A/B: every breast a field, whatever bone carries it (the bone path beside the field's, on one figure).
 
 /// The fullness a profile's bulge reads as (0 flat .. 1 the base female .. kFieldFullnessMax).
@@ -142,15 +138,6 @@ float smooth01(float edge0, float edge1, float x) {
 
 } // namespace
 
-std::vector<glm::vec3> Armature::bindJointPositions() const {
-    std::vector<glm::vec3> bind(m_bones.size(), glm::vec3(0.0f));
-    for (std::size_t i = 0; i < m_bones.size(); ++i) {
-        const Bone& b = m_bones[i];
-        bind[i] = (b.parent >= 0 ? bind[static_cast<std::size_t>(b.parent)] : glm::vec3(0.0f)) + glm::vec3(b.localBind[3]);
-    }
-    return bind;
-}
-
 void Armature::setupBreastFields() {
     m_breastFields[0] = BreastField{};
     m_breastFields[1] = BreastField{};
@@ -166,7 +153,7 @@ void Armature::setupBreastFields() {
     if (root < 0 || static_cast<std::size_t>(root) >= m_bones.size()) {
         return;
     }
-    const std::vector<glm::vec3> bind = bindJointPositions();
+    const std::vector<glm::vec3>& bind = m_ikBindPos; // (model space; binds are translation-only)
     const glm::vec3              hips = bind[static_cast<std::size_t>(root)];
     // THE TRUNK'S SKIN: the spine links', their riders' (a pectoral of either side, a centre leaf),
     // the collars' and the neck's — what a chest's front is made of, on any rig — and that of the
@@ -364,7 +351,7 @@ void Armature::setupBreastFields() {
         }
         boneless[s] = !pectoralSkin;
     }
-    if (kFieldTrace) {
+    if (kSoftBodyTrace) {
         for (int s = 0; s < 2; ++s) {
             const Reading& r = reading[s];
             if (!r.found) {
@@ -429,7 +416,7 @@ void Armature::setupBreastFields() {
         f.radiusUp = glm::clamp(kFieldReachUp * half, least, most);
         f.radiusDown = glm::clamp(down[s] + kFieldReachBelowFold * scale, least, most);
         f.valid = true;
-        if (kFieldTrace) {
+        if (kSoftBodyTrace) {
             std::fprintf(stderr, "[breast-field] %s a field on %s: fullness %.2f; reach %.0f mm in, %.0f out, %.0f up, %.0f down; the wall %.0f mm behind the apex\n",
                          s == 0 ? "L" : "R", m_boneNames[static_cast<std::size_t>(chest)].c_str(), f.size, f.radiusIn * 1000.0f, f.radiusOut * 1000.0f,
                          f.radiusUp * 1000.0f, f.radiusDown * 1000.0f, (f.apexBind.z - f.wallZ) * 1000.0f);
@@ -470,14 +457,14 @@ float Armature::breastFieldMoveMm(int side) const {
 }
 
 float Armature::breastFieldDisplacement(int side, int axis) const {
-    if (!softbody::breastMotion() || !m_breastsReady || axis < 0 || axis > 2) {
-        return 0.0f;
+    if (!softbody::breastMotion() || !m_breastsReady || side < 0 || side > 1 || axis < 0 || axis > 2) {
+        return 0.0f; // (a side of -1 would match every breast a BONE carries, whose field is -1)
     }
     for (const Breast& b : m_breasts) {
         if (b.field != side) {
             continue;
         }
-        const float d = (m_breastDynamic ? b.disp : breastRestDisplacement(b))[axis];
+        const float d = breastDisplacement(b)[axis];
         if (axis == 2) {
             return d; // (out along the tether the skin stretches; in, the mass's own press limit holds)
         }

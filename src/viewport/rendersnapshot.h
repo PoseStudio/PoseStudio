@@ -39,6 +39,14 @@ public:
         return splatSource ? splatSource(width, height) : nullptr;
     }
 
+    /// THE IMAGE IDS an engine tells images apart by (renderapi::Image::id: the same id and pixel
+    /// pointer in a later description is the same image, not loaded again). A scene image's is
+    /// its address shifted with its encoding in the low bit (imageOf) — never one of these two,
+    /// which name the images that are no DecodedImage: the procedural studio environment the
+    /// window keeps for the session, and the studio a material's icon is lit by.
+    static constexpr std::uint64_t kStudioEnvironmentImageId = 1;
+    static constexpr std::uint64_t kIconStudioImageId = 3;
+
     /// An image of the scene as an entry of the description — one per image and encoding, however
     /// many zones sample it. -1 for no image. (Before link(), like everything that fills.)
     int imageOf(const std::shared_ptr<const DecodedImage>& image, renderapi::ColorSpace space, const std::string& label) {

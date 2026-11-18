@@ -1,13 +1,12 @@
 /**
  * @file apptheme.h
  * @brief The one place the application's look is installed: icon, Fusion proxy style, the
- *        concatenated QSS modules, tooltip effects, and the app-wide menu-shadow filter.
+ *        concatenated QSS modules, tooltip effects, and the two app-wide filters (menu shadows,
+ *        dialog button widths).
  *
- * main.cpp used to carry all of this inline (a MenuShadowFilter class, a loadStylesheets()
- * helper and a "Branding & theming" block). Keeping it here leaves main.cpp as pure wiring and
- * gives the theming decisions a single home; nothing in a widget constructor should set the
- * style, the stylesheet, or the tooltip effect flags — call AppTheme::install() once, and only
- * from main().
+ * The theming decisions have a single home here, and main.cpp only calls it: nothing in a
+ * widget constructor should set the style, the stylesheet, or the tooltip effect flags — call
+ * AppTheme::install() once, and only from main().
  */
 
 #ifndef APPTHEME_H
@@ -24,8 +23,9 @@ namespace AppTheme {
  *
  * Installs, in order: the window icon; the tooltip effect toggles; AppProxyStyle over Fusion
  * (never the native OS style — the dark theme must render identically on every platform); the
- * QSS modules in cascade order; and the MenuShadowFilter that strips the native popup shadow
- * from every QMenu while keeping the rounded corners (see apptheme.cpp).
+ * QSS modules in cascade order; the MenuShadowFilter that strips the native popup shadow from
+ * every QMenu while keeping the rounded corners; and the DialogButtonFilter that keeps every
+ * dialog's buttons as wide as their labels (both in apptheme.cpp).
  */
 void install(QApplication& app);
 

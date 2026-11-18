@@ -11,12 +11,16 @@
  * outline over it, and the line overlays (the light objects' markers, the pins, the skeleton)
  * are drawn on top in the same pass.
  *
- * setImage() copies the pixels and returns; the upload happens where the frame is recorded
+ * The picture is handed over IN PLACE — beginImage() gives the caller the buffer to write the
+ * pixels into (a render engine copies its image straight there: a full-size float picture is
+ * tens of megabytes, thirty times a second), commitImage() makes it the picture — and the
+ * upload happens where the frame is recorded
  * (prepare(), before any render pass): through a host-mapped staging buffer PER FRAME IN FLIGHT
  * (a picture arriving while the last frame's copy still executes must not overwrite its source)
  * into one RGBA32F image, sampled with a nearest sampler — the picture is the window's size,
- * texel for pixel; while a resize is catching up it is stretched for a frame or two. A new size
- * re-creates the image and the buffers after a device wait.
+ * texel for pixel (the window shows the rasterized scene while a picture of another size is all
+ * there is: vulkanwindow_traced.cpp). A new size re-creates the image and the buffers after a
+ * device wait.
  *
  * Pure Vulkan + std, no Qt.
  */
@@ -49,10 +53,14 @@ public:
     TracedView(const TracedView&) = delete;
     TracedView& operator=(const TracedView&) = delete;
 
-    /// The picture from now on: @p width × @p height linear RGBA floats, row 0 = top. Copied; it
-    /// is on the GPU from the next recorded frame.
-    void setImage(const float* rgba, uint32_t width, uint32_t height);
-    /// Forgets the picture (hasImage() false until the next setImage).
+    /// The picture from now on, written in place: beginImage returns the buffer for @p width ×
+    /// @p height linear RGBA floats (row 0 = top; null for an empty size) and commitImage makes
+    /// what the caller wrote there the picture — on the GPU from the next recorded frame. A begin
+    /// that is not committed (the source had no picture after all) changes nothing the frame
+    /// draws: the caller must then not have written to the buffer, or must commit.
+    float* beginImage(uint32_t width, uint32_t height);
+    void   commitImage();
+    /// Forgets the picture (hasImage() false until the next commitImage).
     void clear();
     /// Whether there is a picture to draw.
     bool hasImage() const { return m_hasImage; }
@@ -80,10 +88,10 @@ private:
     bool                      m_imageWritten = false; // false while the image is still in its creation layout
     std::vector<VulkanBuffer> m_staging;        // one per frame in flight, the picture's size
 
-    std::vector<float> m_pending; // the picture handed over, until it is uploaded
-    uint32_t           m_pendingWidth = 0;
+    std::vector<float> m_pending; // the picture handed over (beginImage's buffer), until it is uploaded
+    uint32_t           m_pendingWidth = 0; // … and its size: always the buffer's
     uint32_t           m_pendingHeight = 0;
-    bool               m_dirty = false;
+    bool               m_dirty = false; // a committed picture waits for its upload
     bool               m_hasImage = false;
 };
 

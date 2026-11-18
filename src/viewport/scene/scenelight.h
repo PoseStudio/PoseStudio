@@ -56,6 +56,22 @@ inline const char* lightKindName(LightKind kind) {
     }
 }
 
+/// The kind's KEY — its word in a project file and in the scripted test's `lamp` — indexed by
+/// LightKind; and the kind a key names (false, @p out untouched, for a word that is none).
+inline constexpr const char* kLightKindKeys[kLightKindCount] = {"point", "spot", "area", "sun"};
+inline const char* lightKindKey(LightKind kind) {
+    return kLightKindKeys[static_cast<int>(kind) & 3];
+}
+inline bool lightKindFromKey(const std::string& key, LightKind& out) {
+    for (int k = 0; k < kLightKindCount; ++k) {
+        if (key == kLightKindKeys[k]) {
+            out = static_cast<LightKind>(k);
+            return true;
+        }
+    }
+    return false;
+}
+
 /// How many light objects the viewport's PBR mode shades with (the first enabled ones; a render
 /// traces them all). The camera block carries exactly this many (cameraubo.h, camera_ubo.glsl).
 inline constexpr int kMaxViewportLights = 8;
@@ -85,6 +101,14 @@ struct SceneLight {
     }
     bool operator!=(const SceneLight& o) const { return !(*this == o); }
 };
+
+/// The intensity a NEW light of @p kind has, and the one its Intensity row is restored to: the
+/// struct's own for a light whose number is its brightness a metre away, 1 for a Sun, whose
+/// number is its brightness everywhere (see ONE NUMBER FOR BRIGHTNESS) — a sun at a lamp's 4
+/// would light the scene four times over.
+inline float defaultLightIntensity(LightKind kind) {
+    return kind == LightKind::Sun ? 1.0f : SceneLight().intensity;
+}
 
 /// The unit direction @p light SHINES in (a Point light shines every way: its angles only turn
 /// its marker).

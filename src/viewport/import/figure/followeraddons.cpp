@@ -47,9 +47,10 @@ std::vector<AddonRef> findPostLoadAddons(const nlohmann::json& root) {
         return uri;
     };
     for (const auto& block : *extra) {
-        // childOf only FINDS, and extra[] / the addon slots may hold any JSON type: value() on a
-        // non-object throws, and one malformed block must not abort the whole figure.
-        if (!block.is_object() || block.value("type", std::string()) != "scene_post_load_script") {
+        // extra[] and the addon slots may hold any JSON type, and one malformed block must not
+        // abort the whole figure: every read below is a tolerant one (childOf only FINDS, stringOf
+        // returns empty for anything that is no string).
+        if (stringOf(block, "type") != "scene_post_load_script") {
             continue;
         }
         const nlohmann::json* addons =
@@ -63,7 +64,7 @@ std::vector<AddonRef> findPostLoadAddons(const nlohmann::json& root) {
                 continue;
             }
             AddonRef ref;
-            ref.assetUri = rootRelative(v->value("AssetFile", std::string()));
+            ref.assetUri = rootRelative(stringOf(*v, "AssetFile"));
             if (ref.assetUri.size() <= 1) {
                 continue;
             }
@@ -133,8 +134,9 @@ AddonProjection buildAddonProjection(const GeometryData& morphedGeo,
 // a morphed forehead). The format's host projects the parent's active morphs onto conformed
 // followers at load; this approximates that projection per render vertex with the morph delta of
 // the NEAREST PARENT BASE-CAGE VERTEX — the cage is dense (~16k vertices, sub-centimetre spacing
-// on the face), so the quantization is invisible for surface-hugging followers, and a follower's
-// off-surface parts (strand tips) inherit their root's delta, preserving strand shape.
+// on the face), so the quantization is invisible for surface-hugging followers. Every vertex is
+// projected by ITS OWN nearest cage vertex: there is no notion of a strand here, so the tip of a
+// long strand takes the delta of whatever skin lies nearest the tip, not its root's.
 void followParentShape(FigureData& addon, const std::vector<glm::vec3>& baseCage,
                        const std::vector<glm::vec3>& cageDeltas,
                        const std::vector<uint8_t>& eligibleCageVerts) {
@@ -210,7 +212,11 @@ void followParentShape(FigureData& addon, const std::vector<glm::vec3>& baseCage
             if (found) {
                 // One explicit safety shell at radius+1: the first hit may sit just inside its
                 // cell's far boundary, so a vertex one shell further out (but spatially nearer)
-                // could still beat it — scan that shell before accepting the result.
+                // could still beat it — scan that shell before accepting the result. An
+                // APPROXIMATION of the nearest, not a guarantee: a hit in the corner of shell r
+                // can lie (r+1)·√3 cells away while shell r+2 begins (r+1) cells away. On a dense
+                // cage the first hit comes at radius 1 and the difference is a neighbouring
+                // vertex's delta.
                 const int r1 = radius + 1;
                 for (int dz = -r1; dz <= r1; ++dz) {
                     for (int dy = -r1; dy <= r1; ++dy) {
@@ -284,10 +290,11 @@ void mergeAddonFigure(FigureData& parent, FigureData&& addon) {
             mergedIndex[i] = byId->second;
         }
     }
-    // Second pass: append the follower-only bones, assigning every one its merged slot BEFORE any
-    // parent link is resolved — nothing guarantees an addon file lists parents before children,
-    // and resolving links while appending would silently reparent an out-of-order child to the
-    // figure root (its parent's mergedIndex would still be -1 at that point).
+    // Second pass: append the follower-only bones in the addon's order, assigning every one its
+    // merged slot before any parent link is resolved. The addon's list is PARENTS FIRST
+    // (parseSkeleton sees to it), and that order survives the append — an appended bone's parent
+    // is either one of the figure's own bones, all of which lie below the first appended slot, or
+    // a follower-only bone appended before it — so the merged list keeps the engine's contract.
     std::vector<int> appended; // merged indices of the appended bones (parents still addon-space)
     for (int i = 0; i < addonBoneCount; ++i) {
         if (mergedIndex[i] >= 0) {
@@ -328,6 +335,7 @@ void mergeAddonFigure(FigureData& parent, FigureData&& addon) {
     }
     // The merged space now spans the follower's cage too, so a further addon lands past it.
     parent.baseVertexCount += addon.baseVertexCount;
+    parent.skipped.insert(parent.skipped.end(), addon.skipped.begin(), addon.skipped.end());
     // The follower's own correctives (rare, and addressed to ITS base cage) are dropped with `addon`:
     // their delta indices have no meaning in the merged base-vertex space.
 }

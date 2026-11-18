@@ -1,7 +1,8 @@
 /**
  * @file armature.cpp
- * @brief Armature's skeleton construction, forward kinematics, pose snapshots, and the skeleton
- *        dump/load used by the IK harness. The full-body-IK integration lives in armatureik.cpp.
+ * @brief Armature's skeleton construction, forward kinematics, pose snapshots, the reset and
+ *        mirror utilities, and the skeleton dump/load used by the IK harness. The full-body-IK
+ *        integration begins in armatureik.cpp; armature.h has the map of the class's files.
  */
 
 #include "armature.h"
@@ -23,16 +24,13 @@
 
 namespace pose {
 
-namespace {
-
 // Pose-snapshot rows carrying a bone's pose TRANSLATION rather than a rotation are keyed
 // "@trans:<boneName>" — flowing through the existing (name, vec3) snapshot/undo/.pose-file
 // machinery unchanged (bone names never contain '@', and readers ignore unknown names, so old
-// files load and old builds skip the rows). Written by FBIK for the skeleton root: rotations
-// alone can't move it, and a feet-pinned crouch must drop the hip. (The prefixes live in
+// files load and old builds skip the rows). The solve root's is THE FIGURE'S PLACE: rotations
+// alone cannot move the root, so a feet-pinned crouch, a hip walk, the figure move, the Ground
+// button's drop and the Transform tab's Figure group all write it. (The prefixes live in
 // armature.h — shared with the .pss project codec.)
-
-} // namespace
 
 Armature::Armature() = default;
 Armature::~Armature() = default;
@@ -103,6 +101,16 @@ void Armature::build(const std::vector<ArmatureBone>& bones) {
         m_boneIndex.emplace(src.name, static_cast<int>(i));
         m_boneNames.push_back(src.name);
     }
+    // The model-space BIND JOINT POSITIONS every reader of the bind skeleton uses (the rig, the foot
+    // contact model, the dials, the bone classes, the soft body's set-up): each the parent's plus
+    // the bone's local bind offset. (Kept apart from bindGlobal above, whose sums are of the source
+    // translations themselves: the two can differ in the sign of an exact zero.)
+    m_ikBindPos.assign(m_bones.size(), glm::vec3(0.0f));
+    for (std::size_t i = 0; i < m_bones.size(); ++i) {
+        const Bone&     bone = m_bones[i];
+        const glm::vec3 parentBind = bone.parent >= 0 ? m_ikBindPos[static_cast<std::size_t>(bone.parent)] : glm::vec3(0.0f);
+        m_ikBindPos[i] = parentBind + glm::vec3(bone.localBind[3]);
+    }
     m_boneEuler.assign(m_bones.size(), glm::vec3(0.0f));
     m_boneTranslation.assign(m_bones.size(), glm::vec3(0.0f));
     m_boneWorldPos.assign(m_bones.size(), glm::vec3(0.0f));
@@ -120,6 +128,24 @@ void Armature::build(const std::vector<ArmatureBone>& bones) {
         const std::string other = namerules::mirroredName(m_boneNames[i]);
         const int j = other.empty() ? -1 : boneIndex(other);
         m_mirrorBone[i] = j >= 0 ? j : static_cast<int>(i);
+    }
+    // Each bone's SUBTREE SIZE (children follow parents: one reverse pass) and its MAIN CHILD — the
+    // child a limb continues through: the first with the strictly largest subtree.
+    m_subtreeSize.assign(m_bones.size(), 1);
+    for (std::size_t i = m_bones.size(); i-- > 0;) {
+        if (m_bones[i].parent >= 0) {
+            m_subtreeSize[static_cast<std::size_t>(m_bones[i].parent)] += m_subtreeSize[i];
+        }
+    }
+    m_mainChild.assign(m_bones.size(), -1);
+    for (std::size_t i = 0; i < m_bones.size(); ++i) {
+        int bestSize = 0;
+        for (const int c : m_children[i]) {
+            if (m_subtreeSize[static_cast<std::size_t>(c)] > bestSize) {
+                bestSize = m_subtreeSize[static_cast<std::size_t>(c)];
+                m_mainChild[i] = c;
+            }
+        }
     }
 
     // Highlight twins (see m_highlightTwin): a TWIST bone — two locked axes and the free one
@@ -155,6 +181,7 @@ void Armature::build(const std::vector<ArmatureBone>& bones) {
             highest = std::max(highest, p.y);
         }
         const float height = std::max(highest - lowest, 1.0e-3f);
+        m_bindHeight = height;
         const float offPlane = 0.003f * height; // (a centre bone of an asymmetric character: millimetres)
         const float within = 0.02f * height;
         // (And a name's counterpart is not always the bone's twin: the same file's `…Carpal2` is one
@@ -454,7 +481,7 @@ void Armature::recomposePoseLocal(std::size_t index) {
     bone.poseLocal = (e.x == 0.0f && e.y == 0.0f && e.z == 0.0f)
                          ? bone.localBind
                          : bone.localBind * bone.orient * eulerMatrix(e, bone.rotationOrder) * bone.invOrient;
-    // Pose translation adds in the parent frame (only ever non-zero where FBIK moved the root).
+    // Pose translation adds in the parent frame (the solve root's is the figure's place).
     bone.poseLocal[3] += glm::vec4(m_boneTranslation[index], 0.0f);
 }
 
@@ -472,8 +499,9 @@ void Armature::nudgeSelectedBone(const glm::vec3& deltaEulerDegrees) {
 }
 
 void Armature::nudgeBone(int bone, const glm::vec3& deltaEulerDegrees) {
-    if (bone < 0 || bone >= static_cast<int>(m_bones.size())) {
-        return;
+    if (bone < 0 || bone >= static_cast<int>(m_bones.size()) ||
+        !std::isfinite(deltaEulerDegrees.x + deltaEulerDegrees.y + deltaEulerDegrees.z)) {
+        return; // (a non-finite delta would pass the limits' clamp and be the pose)
     }
     const std::size_t sel = static_cast<std::size_t>(bone);
     const glm::vec3 before = m_boneEuler[sel];
@@ -545,6 +573,11 @@ std::vector<std::pair<std::string, glm::vec3>> Armature::capturePose() const {
     return pose;
 }
 
+/// The most a pose translation's component may be (m): a hundred kilometres — a hundred times
+/// what the Transform tab's Figure group can type, and where a float no longer resolves a
+/// centimetre. Only a damaged pose row is beyond it (applyPose).
+constexpr float kPoseTranslationLimit = 1.0e5f;
+
 void Armature::applyPose(const std::vector<std::pair<std::string, glm::vec3>>& pose) {
     clearHangBases(); // (a pose from elsewhere: the arms' swing bases are re-read at the next press)
     for (glm::vec3& e : m_boneEuler) {
@@ -568,16 +601,21 @@ void Armature::applyPose(const std::vector<std::pair<std::string, glm::vec3>>& p
             const int index = boneIndex(name.substr(prefixLen));
             if (index >= 0) {
                 // SANITIZE: unlike rotations (per-channel clamped below), translations have no
-                // authored limits — a hand-edited/corrupt .pose row could tear a bone meters
-                // off the skeleton or stream-parse to NaN, which poisons the skin matrices.
-                // The engine itself only ever writes modest root offsets; a ±1m box per
-                // component is far beyond any legitimate value.
+                // authored limits — a hand-edited or damaged .pose row could stream-parse to NaN,
+                // which poisons the skin matrices, or to a number no scene holds. A non-finite
+                // row reads as zero and a component is held to kPoseTranslationLimit. NOT to a
+                // metre, as it was while the engine wrote only a crouch's root offsets here: the
+                // solve root's translation is THE FIGURE'S PLACE — a figure walked, carried with
+                // Ctrl, lifted, or placed by the Transform tab's Figure group stands metres from
+                // where she was imported — and this is the path every undo, redo, Load Pose and
+                // project Open takes. (Cut to a metre, undoing a knee bend on a figure placed three
+                // metres away brought the knee back and the figure to one metre.)
                 glm::vec3 t = value;
                 if (!std::isfinite(t.x + t.y + t.z)) {
                     t = glm::vec3(0.0f);
                 }
                 m_boneTranslation[static_cast<std::size_t>(index)] =
-                    glm::clamp(t, glm::vec3(-1.0f), glm::vec3(1.0f));
+                    glm::clamp(t, glm::vec3(-kPoseTranslationLimit), glm::vec3(kPoseTranslationLimit));
             }
             continue;
         }
@@ -652,6 +690,11 @@ void Armature::resetPose() {
 }
 
 void Armature::mirrorPose() {
+    // (The hang's memory is per socket and now on the wrong side: forgotten, the next press takes
+    // the found pose to carry its stance's swing — which is what a mirrored pose does. Kept, the
+    // drag after a mirrored stride undid each arm's swing with the OTHER arm's sign, and both arms
+    // swung twice as far.)
+    clearHangBases();
     // Read the whole pose first: a left/right pair writes each other's slot.
     const std::vector<glm::vec3> euler = m_boneEuler;
     const std::vector<glm::vec3> translation = m_boneTranslation;
@@ -667,6 +710,7 @@ bool Armature::mirrorSubtreeToOpposite(int index) {
     if (index < 0 || index >= static_cast<int>(m_bones.size())) {
         return false;
     }
+    clearHangBases(); // (as mirrorPose: an arm mirrored onto the other side carries that side's swing now)
     std::vector<int> bones;
     collectSubtree(index, bones);
     const std::vector<glm::vec3> euler = m_boneEuler;

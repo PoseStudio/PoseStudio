@@ -10,9 +10,9 @@
 #include "parallelfor.h"
 #include "renderenginelibrary.h"
 
-#include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
+#include <QSignalBlocker>
 
 #include <tinyexr.h>
 
@@ -40,22 +40,10 @@ EngineSlot& engineSlot() {
 /// The count of running final renders, announced (RenderSession::activity).
 int g_activeRenders = 0;
 
-/// The viewport's last step for one channel: the ACES fit (color.glsl) when @p tonemap, then the
-/// sRGB curve — as 8 bits.
-struct DisplayCurve {
-    explicit DisplayCurve(bool tonemap) : tonemap(tonemap) {}
-    bool tonemap;
-    unsigned char operator()(float x) const {
-        x = std::isfinite(x) ? std::max(x, 0.0f) : 0.0f;
-        if (tonemap) {
-            const float a = 2.51f, b = 0.03f, c = 2.43f, d = 0.59f, e = 0.14f;
-            x = (x * (a * x + b)) / (x * (c * x + d) + e);
-        }
-        x = std::clamp(x, 0.0f, 1.0f);
-        x = x <= 0.0031308f ? 12.92f * x : 1.055f * std::pow(x, 1.0f / 2.4f) - 0.055f;
-        return static_cast<unsigned char>(std::lround(x * 255.0f));
-    }
-};
+/// The session whose render the process's SHARED engine is running now (null: it is free). An
+/// engine instance renders one thing at a time and its start() ends what it was rendering, so
+/// a second session must not start on it meanwhile (RenderSession::start).
+const RenderSession* g_sharedEngineUser = nullptr;
 
 } // namespace
 
@@ -76,7 +64,15 @@ RenderSession::RenderSession(QObject* parent) : QObject(parent) {
 }
 
 RenderSession::~RenderSession() {
-    stop();
+    // A render still running is ended WITHOUT a word to the session's listeners: they are its
+    // owner's slots, and an owner that holds the session by value is half destroyed by now (its
+    // later members are gone, its QObject base and so the connections are not). Nobody is left
+    // to show a last image either.
+    const QSignalBlocker quiet(this);
+    if (m_running) {
+        m_engine->cancel(); // (returns once the engine no longer reads the scene)
+        finishRun();
+    }
 }
 
 bool RenderSession::engineInstalled() {
@@ -148,7 +144,7 @@ QString RenderSession::defaultDeviceId() {
 }
 
 bool RenderSession::start(std::shared_ptr<RenderSceneHolder> scene, const RenderOptions& options, QString* error) {
-    stop();
+    stop(); // (this session's own render, if one is running)
     renderapi::Engine* e = engine(error);
     if (e == nullptr) {
         return false;
@@ -158,6 +154,25 @@ bool RenderSession::start(std::shared_ptr<RenderSceneHolder> scene, const Render
             *error = tr("There is no scene to render.");
         }
         return false;
+    }
+    // WHICH ENGINE. The shared one while it is free. While ANOTHER session's render is on it — the
+    // Render window's, when a material is saved and its icon rendered meanwhile — an instance of
+    // this session's own: starting on the shared engine would end that render without a word to
+    // its session, which would go on reading this render's status and pixels as its own. A second
+    // instance costs what a render costs anyway (every final render builds its own session inside
+    // the engine); the two share the device for as long as both run.
+    const bool sharedEngineBusy = g_sharedEngineUser != nullptr && g_sharedEngineUser != this;
+    if (sharedEngineBusy) {
+        if (!m_ownEngine) {
+            m_ownEngine = createEngine();
+        }
+        if (!m_ownEngine) {
+            if (error != nullptr) {
+                *error = tr("The render engine is busy with another render and could not start a second one beside it.");
+            }
+            return false;
+        }
+        e = m_ownEngine->get();
     }
     const RenderSceneHolder::View view = scene->view();
     m_scene = std::move(scene);
@@ -208,6 +223,10 @@ bool RenderSession::start(std::shared_ptr<RenderSceneHolder> scene, const Render
         m_scene.reset();
         return false;
     }
+    m_engine = e;
+    if (!sharedEngineBusy) {
+        g_sharedEngineUser = this;
+    }
     m_running = true;
     ++g_activeRenders;
     emit activity()->changed(g_activeRenders);
@@ -221,17 +240,19 @@ void RenderSession::stop() {
     if (!m_running) {
         return;
     }
-    if (renderapi::Engine* e = engine()) {
-        e->cancel(); // (returns once the engine no longer reads the scene)
-        e->status(m_status);
-        refreshImage();
-    }
+    m_engine->cancel(); // (returns once the engine no longer reads the scene)
+    m_engine->status(m_status);
+    refreshImage();
     finishRun();
 }
 
 void RenderSession::finishRun() {
     m_timer.stop();
     m_running = false;
+    m_engine = nullptr; // (the engine's next render is not this session's to read)
+    if (g_sharedEngineUser == this) {
+        g_sharedEngineUser = nullptr;
+    }
     g_activeRenders = std::max(g_activeRenders - 1, 0);
     emit activity()->changed(g_activeRenders);
     m_scene.reset(); // the engine is done with it
@@ -240,7 +261,7 @@ void RenderSession::finishRun() {
 }
 
 void RenderSession::poll() {
-    renderapi::Engine* e = engine();
+    renderapi::Engine* e = m_engine;
     if (e == nullptr || !m_running) {
         return;
     }
@@ -256,7 +277,7 @@ void RenderSession::poll() {
 }
 
 void RenderSession::refreshImage() {
-    renderapi::Engine* e = engine();
+    renderapi::Engine* e = m_engine;
     if (e == nullptr || m_linear.empty()) {
         return;
     }
@@ -276,7 +297,9 @@ void RenderSession::refreshImage() {
         emit imageChanged();
         return;
     }
-    const DisplayCurve curve(m_tonemap);
+    // The viewport's last step, per channel, as 8 bits: splatcomposite.h's displayEncode — ONE
+    // definition of it, so a render with a capture composited in and one without agree to the level.
+    const bool         tonemap = m_tonemap;
     const bool         keepAlpha = m_options.transparent;
     uchar*             bits = m_image.bits();
     const qsizetype    stride = m_image.bytesPerLine();
@@ -289,10 +312,10 @@ void RenderSession::refreshImage() {
             // the 8-bit picture, whose formats store straight alpha.)
             const float alpha = keepAlpha ? std::clamp(in[3], 0.0f, 1.0f) : 1.0f;
             const float inv = (keepAlpha && alpha > 1.0e-4f) ? 1.0f / alpha : 1.0f;
-            out[0] = curve(in[0] * inv);
-            out[1] = curve(in[1] * inv);
-            out[2] = curve(in[2] * inv);
-            out[3] = static_cast<uchar>(std::lround(alpha * 255.0f));
+            out[0] = displayToByte(displayEncode(in[0] * inv, tonemap));
+            out[1] = displayToByte(displayEncode(in[1] * inv, tonemap));
+            out[2] = displayToByte(displayEncode(in[2] * inv, tonemap));
+            out[3] = displayToByte(alpha);
         }
     });
     emit imageChanged();
@@ -326,7 +349,10 @@ bool RenderSession::save(const QString& path, QString* error) const {
         std::free(buffer);
         return written ? true : fail(file.errorString());
     }
-    // A format without alpha (JPEG) gets the picture over black; the rest keep it.
+    // The 8-bit picture has STRAIGHT alpha. A format with alpha (PNG) keeps it; one without
+    // (JPEG) is written by Qt with the alpha dropped — the straight colors as they are, which
+    // for a transparent render is the scene's color where it covers and black only where
+    // nothing does (an edge pixel is NOT darkened by its coverage).
     if (!m_image.save(path)) {
         return fail(tr("The image could not be written to %1.").arg(path));
     }

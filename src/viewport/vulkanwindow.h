@@ -11,32 +11,51 @@
  * QWidget::createWindowContainer(). The Vulkan objects' lifetime is tied to the platform
  * surface: they are torn down on SurfaceAboutToBeDestroyed, before Qt frees the surface.
  *
- * ONE class, SEVEN translation units (the armatureik.cpp pattern): input, IK, pose/undo and the
- * camera all mutate the same private gesture flags and must all call requestUpdate(), so they
- * stay one class with this header as the single contract, split by concern:
- *   - vulkanwindow.cpp             lifecycle: construction, Vulkan init/teardown/device loss,
- *                                  the remembered scene state and the import queue, expose /
- *                                  resize / the event-driven frame.
- *   - vulkanwindow_environment.cpp the HDRI: default path, the off-thread IBL bake, lighting dials.
- *   - vulkanwindow_input.cpp       mouse/wheel/key handlers — pure ROUTING into the gestures below,
- *                                  plus the object context menu and cursor→ray helpers.
- *   - vulkanwindow_camera.cpp      named views, the Blender-convention view hotkeys, projection.
- *   - vulkanwindow_ik.cpp          the full-body-IK drag loop (the 60 Hz tick, the release settle,
- *                                  wheel depth), the animated ground fall.
- *   - vulkanwindow_pose.cpp        pose edits as undo entries: commit, utilities, pins, save/load,
- *                                  delete, the Transform tab's dials and the joint mouse mode
- *                                  (B / S / T), the unified undo/redo stack.
- *   - vulkanwindow_bench.cpp       the POSESTUDIO_IK_PERF / POSESTUDIO_IK_BENCH diagnostics.
- *   - vulkanwindow_vr.cpp          VR Mode: the OpenXR session (vr/) — its state machine, the
- *                                  frame-wait thread, and the per-frame stereo render + mirror.
- * The private declarations below follow the same order.
+ * ONE class, MANY translation units (the armatureik.cpp pattern): input, IK, pose/undo, the
+ * camera and the side tabs' edits all mutate the same private gesture flags and must all call
+ * requestUpdate(), so they stay one class with this header as the single contract, split by
+ * concern:
+ *   - vulkanwindow.cpp              lifecycle: construction, Vulkan init/teardown/device loss,
+ *                                   the remembered scene state and the import queue, expose /
+ *                                   resize / the event-driven frame.
+ *   - vulkanwindow_environment.cpp  the HDRI: default path, the off-thread IBL bake, lighting dials.
+ *   - vulkanwindow_input.cpp        mouse/wheel/key handlers — pure ROUTING into the gestures below,
+ *                                   plus the object context menu and cursor→ray helpers.
+ *   - vulkanwindow_camera.cpp       named views, the Blender-convention view hotkeys, projection.
+ *   - vulkanwindow_ik.cpp           the full-body-IK drag loop (the 60 Hz tick, the release settle,
+ *                                   wheel depth), the animated ground fall.
+ *   - vulkanwindow_pose.cpp         pose edits as undo entries: commit, utilities, pins, save/load,
+ *                                   delete, the Transform tab's dials and the joint mouse mode
+ *                                   (B / S / T), the unified undo/redo stack every edit commits into.
+ *   - vulkanwindow_project.cpp      the document: File → New's scene reset, the .pss project saved
+ *                                   and opened, its path and unsaved flag.
+ *   - vulkanwindow_materials.cpp    the Materials tab: its view, its edit bracket (one undo entry
+ *                                   a gesture), the texture slots and the overlays — decode,
+ *                                   composite, bake, upload.
+ *   - vulkanwindow_materialfile.cpp a material saved (.psm) and applied (.psm, MaterialX), its
+ *                                   ball icon rendered.
+ *   - vulkanwindow_lights.cpp       the light objects: the list as an undoable edit, a marker's drag.
+ *   - vulkanwindow_render.cpp       the scene captured for a render engine (captureRenderScene).
+ *   - vulkanwindow_traced.cpp       the Rendered shade mode: the render engine's picture kept in
+ *                                   step with the camera, the lighting and the scene.
+ *   - vulkanwindow_vr.cpp           VR Mode: the OpenXR session (vr/) — its state machine, the
+ *                                   frame-wait thread, and the per-frame stereo render + mirror.
+ *   - vulkanwindow_bench.cpp        the POSESTUDIO_IK_PERF / POSESTUDIO_IK_BENCH diagnostics.
+ *   - vulkanwindow_script.cpp, vulkanwindow_script_commands.cpp, vulkanwindow_script_metrics.cpp
+ *                                   the scripted in-app test (POSESTUDIO_IK_SCRIPT): the step
+ *                                   driver, what each command does, what each metric reads.
+ * The private section below is grouped under one banner a file. ONE RULE for the scripted test's
+ * commands that drive a single feature (`render`, `savematerial`, `applymaterial`, `lamp`, the
+ * `traced.*` metrics): each is DEFINED in that feature's file, beside what it drives, and
+ * declared under the scripted test's banner.
  *
  * Gesture contracts (each learned from a real failure; see CLAUDE.md's viewport section):
  * rendering is EVENT-DRIVEN — every visual mutation calls requestUpdate(); camera drags gate on
- * m_activeDragButtons (buttons whose press was seen HERE), never on QMouseEvent::buttons(); a
- * plain left drag on a joint is the full-body-IK gesture and Ctrl+drag the single-joint FK
- * rotate; the 60 Hz drag timer is the SOLE IK solve driver (mouse moves only record the target);
- * a left press released within the platform drag distance is a CLICK (model select); a release
+ * m_pointer.activeDragButtons (buttons whose press was seen HERE), never on QMouseEvent::buttons(); a
+ * plain left drag on a joint is the full-body-IK gesture and Ctrl+drag the SCOPED one (the
+ * grabbed chain alone; by the hips, the figure moved as she is posed); the 60 Hz drag timer is
+ * the SOLE IK solve driver (mouse moves only record the target);
+ * a left press that never leaves the platform drag distance is a CLICK (model select); a release
  * hands off to an ANIMATED settle, a ground drop to an animated fall, and every other pose edit
  * closes those first (closeOpenPoseEdits) while a button-held drag REFUSES them (dragInFlight).
  */
@@ -63,6 +82,7 @@
 
 #include <glm/glm.hpp>
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -92,12 +112,14 @@ struct DecodedImage;
 struct DisplaceSettings;     // how a zone displaces in a render (scene/meshdisplace.h)
 struct OverlayImage;         // a decoded overlay image, cropped (scene/overlaycompositor.h)
 enum class OverlayImageKind; // … and what it is read as
+class Model;
 class Scene;
 class VulkanContext;
 class VulkanError;
 class VulkanRenderer;
 struct IkDiagnostics;
 struct IkScript;
+enum class ScriptFlow; // what a script command family answers the step driver (vulkanwindow_script_detail.h)
 
 /**
  * @class VulkanWindow
@@ -126,7 +148,7 @@ public:
     /// importObj; routed to the FigureImportService.
     void importFigure(const QString& path);
 
-    /// Imports a Gaussian splat scene (`.ply` / `.splat`) as a static model. Same queue-until-ready
+    /// Imports a Gaussian splat scene (`.ply` / `.splat` / `.spz`) as a static model. Same queue-until-ready
     /// behaviour; routed to the SplatImportService.
     void importSplat(const QString& path);
 
@@ -139,11 +161,6 @@ public:
     bool savePose(const QString& path);
     bool loadPose(const QString& path);
 
-    /// Gathers the live scene state into a .pss project document (File → Save): every model's
-    /// pose snapshot + world transform, the lighting dials + selected HDRI path, and the camera
-    /// framing. False without a renderer.
-    bool captureProjectDocument(ProjectDocument& out) const;
-
     /// Writes the live scene state to @p path as a .pss project file (File → Save / Save As).
     /// False without a renderer or if the file can't be written.
     bool saveProjectFile(const QString& path);
@@ -153,13 +170,19 @@ public:
     /// figure by its source path and restores pose + transform in document order, and applies
     /// environment + camera. @p recovered maps a missing source path to the caller's re-pointed
     /// replacement (link recovery); any source still absent lands in @p missing and the load is
-    /// refused with the scene untouched. Returns 0 on success, 1 when sources are missing,
-    /// -1 on failure with a human-readable @p error.
+    /// refused with the scene untouched. A source the caller maps to "" in @p recovered is
+    /// SKIPPED — left out of the load — which is what the recovery dialog's Skip means. Returns
+    /// 0 on success, 1 when sources are missing, -1 on failure with a human-readable @p error.
+    /// Past the pre-flight nothing fails: a source whose IMPORT adds nothing (an unreadable file,
+    /// or one with nothing to show) is left out like a skipped one, with a warning in the log.
     int loadProjectFile(const QString& path, const std::map<std::string, std::string>& recovered,
                         std::vector<std::string>& missing, std::string& error);
 
-    /// (loadProjectFile: a source the caller maps to "" in @p recovered is SKIPPED — left out of
-    /// the load — which is what the recovery dialog's Skip means.)
+    /// Whether the renderer exists yet (it is built on the window's first expose). Until it
+    /// does, loadProjectFile can only answer -1 "no renderer yet": a caller that opens a project
+    /// at startup asks this to know that trying again a moment later will help.
+    bool rendererReady() const { return m_renderer != nullptr; }
+
     /// The .pss document this window last saved/opened ("" = unsaved).
     QString projectPath() const;
     void setProjectPath(const QString& path);
@@ -288,7 +311,7 @@ public:
     /// selected zone. applyMaterialFile puts a saved material on the selected zone as ONE
     /// undoable edit — every slot becomes what the file says, then the values; the zone's
     /// overlays stay. A map is looked for where the file says, then by its name beside the
-    /// material and through its library (AssetStore::resolveTexture): @p relocatedMaps counts
+    /// material and through its library (AssetStore::TextureResolver): @p relocatedMaps counts
     /// the maps found that way, @p missingMaps those found nowhere (their slots are left empty).
     /// False with @p error when there is nothing selected or the file is no material.
     bool   saveMaterialFile(const QString& path, bool copyTextures, QString* error = nullptr, MaterialSaveReport* report = nullptr);
@@ -335,7 +358,7 @@ public:
     void confirmJointModal();
     void cancelJointModal();
     /// The dial the mouse is turning (a JointDialKind), or -1 with the mode off.
-    int jointModal() const { return m_modalKind; }
+    int jointModal() const { return m_modal.kind; }
     /// A scripted test owns the input (POSESTUDIO_IK_SCRIPT): real input is ignored meanwhile.
     bool scriptRunning() const { return m_script != nullptr; }
 
@@ -353,10 +376,9 @@ public:
     /// Preferences → Selection (rendering/selectionstyle.h): the outline around the selected
     /// object / the highlight on the flesh a selected joint drives, in @p color (a display
     /// color) at @p opacity (0..1). An application preference, not scene state: remembered
-    /// across the lazy renderer build AND across File → New. selectionStyle() is what stands.
-    void                  setSelectionOutline(const QColor& color, float opacity);
-    void                  setJointHighlight(const QColor& color, float opacity);
-    const SelectionStyle& selectionStyle() const { return m_selectionStyle; }
+    /// across the lazy renderer build AND across File → New.
+    void setSelectionOutline(const QColor& color, float opacity);
+    void setJointHighlight(const QColor& color, float opacity);
 
     /// Restores the camera's default framing (the viewport's Home button). No-op before the
     /// renderer exists — the camera is created with that framing, so there'd be nothing to undo.
@@ -391,10 +413,11 @@ public:
     /// via registerLightingUndo (live scrubbing pushes many intermediate states through here).
     void setLightingSettings(const LightingSettings& settings);
 
-    /// Undoes / redoes the most recent committed edit. Pose changes and Environment-panel lighting
-    /// edits share ONE chronological stack, so Ctrl+Z steps back through both kinds in the order
-    /// they were made. Reachable via Edit → Undo/Redo (any focus) and Ctrl+Z/Ctrl+Y in the
-    /// viewport; no-op while that stack side is empty or the renderer doesn't exist yet.
+    /// Undoes / redoes the most recent committed edit. Pose changes, the Environment tab's
+    /// lighting edits, material edits and the light objects' edits share ONE chronological stack,
+    /// so Ctrl+Z steps back through all of them in the order they were made. Reachable via Edit →
+    /// Undo/Redo (any focus) and Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z in the viewport; no-op while that
+    /// stack side is empty or the renderer doesn't exist yet.
     void undo();
     void redo();
 
@@ -497,6 +520,11 @@ signals:
     /// real change is announced (setShadeMode de-duplicates against m_announcedShadeMode). The
     /// viewport strip mirrors it into its shader picker.
     void shadeModeChanged(int mode);
+    /// Emitted when the WINDOW itself changes the skeleton overlay's visibility — the scene reset
+    /// of File → New and File → Open turns it off (setShowSkeleton announces nothing: its caller
+    /// knows). ViewportWidget re-emits it as skeletonVisibilityChanged, which the View menu's
+    /// entry and the strip's button mirror.
+    void showSkeletonChanged(bool on);
     /// Emitted when the .pss document's state changes (a path was adopted, or the dirty flag
     /// transitioned) — ProjectState de-duplicates, so a pose edit on an already-dirty scene is
     /// not re-announced. ViewportWidget re-emits it for the window-title update.
@@ -530,8 +558,8 @@ private:
     /// off the startup environment bake, and drains the import queue.
     void initializeVulkan();
     /// Tears down renderer + context (the surface stays valid) and resets every interaction
-    /// state machine — a drag, settle, fall, or joint mouse mode dies with the figure it acted on.
-    /// Idempotent.
+    /// state machine — a drag, settle, fall, open edit or joint mouse mode dies with the figure it
+    /// acted on — and, with a scene lost, the undo history and the document's identity. Idempotent.
     void releaseVulkan();
     /// The ONE device-loss path (init, the environment upload, a frame): releases the Vulkan
     /// objects, marks the device failed so nothing retries every expose, and logs @p stage.
@@ -546,61 +574,6 @@ private:
     void syncRendererExtent();
     /// The renderer's scene — every posing/selection call goes through it. Requires m_renderer.
     Scene& scene() const;
-    /// Emits jointTransformChanged if the selected joint's transform differs from the one last
-    /// announced. Called once per rendered frame: rendering is event-driven and EVERY pose or
-    /// selection change requests a frame, so the frame is the one place that sees them all —
-    /// no gesture has to remember the Transform tab.
-    void notifyJointTransform();
-    /// Emits materialViewChanged if what the Materials tab shows differs from what was last
-    /// announced (MaterialView::sameView: the selection, the zone, the zone list, the object's
-    /// material revision). Called where notifyJointTransform is: every rendered frame.
-    void notifyMaterialView();
-    /// Ends a material edit's bracket: pushes the pre-edit zone materials as one undo entry if
-    /// anything changed (and marks the document dirty).
-    void commitMaterialUndo();
-    /// Emits lightsChanged if the scene's light list or light selection moved since it was last
-    /// announced. Called where notifyJointTransform is: every rendered frame.
-    void notifyLights();
-    /// One edit's derived images by what they were made from, so the zones of one map (and the
-    /// partner slots of one binding) are handed the SAME image — which the model then uploads
-    /// once (SlotUploads). Lives for one call: the images are released with it, the textures
-    /// stay. (A render capture uses one too: the zones of one map share one composite.)
-    struct OverlayBake {
-        std::map<std::string, std::shared_ptr<const DecodedImage>> images;
-    };
-    /// Makes mesh @p mesh of model @p model carry in slot @p map what @p source says ("" none,
-    /// kImportedTexture the import's, else a file): decodes, then bindSlot. False when a file
-    /// could not be read.
-    bool applySlotSource(int model, int mesh, MaterialMap map, const std::string& source, OverlayBake* bake = nullptr);
-    /// Binds slot @p map of the mesh to @p plain (+ @p channel, @p source recorded): derives the
-    /// image the binding samples from the slot, its partner slots and the zone's OVERLAYS, and
-    /// applies it through the Scene.
-    bool bindSlot(int model, int mesh, MaterialMap map, const std::shared_ptr<const DecodedImage>& plain, int channel,
-                  const std::string& source, OverlayBake& bake);
-    /// bindSlot with the slot as it stands (the overlays over it changed).
-    void rebindSlot(int model, int mesh, MaterialMap map, OverlayBake& bake);
-    /// @p base with the mesh's overlays that touch slot @p map painted over it (@p base itself
-    /// when none does), made once per edit for the zones that share it.
-    /// @p baseScale is the Metalness slot's: the zone's Metallic value, multiplied into the map
-    /// before the overlays' metal is painted (compositeOverlays).
-    /// @p forRenderer: the map as a RENDER ENGINE is handed it — the overlays' bump images stay
-    /// in the BUMP map (the viewport alone carries them in its normal map: see kOverlaySlots).
-    std::shared_ptr<const DecodedImage> overlaid(int model, int mesh, MaterialMap map, const std::shared_ptr<const DecodedImage>& base,
-                                                 int channel, OverlayBake& bake, float baseScale = 1.0f, bool forRenderer = false);
-    /// THE OVERLAYS' METAL: a zone whose overlays paint its metalness binds a parameter map baked
-    /// for the zone's Metallic VALUE (Mesh::setMetalBaked). Re-bakes every zone of @p model whose
-    /// value has moved off the one its map was baked for — after anything that sets material
-    /// values: a slider, a reset, an undo.
-    void syncOverlayBakes(int model);
-    /// Gives mesh @p mesh the stack @p overlays and rebinds the slots whose composite it changes.
-    void applyZoneOverlays(int model, int mesh, const std::vector<MaterialOverlay>& overlays, OverlayBake& bake);
-    /// The project load's overlays: (mesh, stack) pairs of model @p model applied as one edit's
-    /// worth of composites (no undo entry: the caller's).
-    void setModelOverlays(int model, const std::vector<std::pair<int, std::vector<MaterialOverlay>>>& stacks);
-    /// Every slot of every zone of @p model whose recorded source in @p materials (in mesh order)
-    /// differs from the mesh's, and every slot whose overlays do — the undo swap's and the
-    /// project load's texture half, run before the values are applied.
-    void applyMaterialTextures(int model, const std::vector<MaterialParams>& materials);
 
     /// An import requested before the renderer existed, replayed in request order once it does
     /// (command-line "open with" hands several in a row — the order must survive).
@@ -617,9 +590,9 @@ private:
     void importOrQueue(PendingImport import);
 
     /// Scene state this window remembers on the renderer's behalf: chosen before the renderer
-    /// exists (the picker/panel can be driven while the viewport is still hidden) and re-applied
-    /// after a device loss. applyTo() pushes the live settings; the queues are drained by
-    /// initializeVulkan().
+    /// exists (the picker/panel can be driven while the viewport is still hidden), and applied
+    /// again to a renderer rebuilt on a re-created surface (after a device LOSS nothing is
+    /// rebuilt). applyTo() pushes the live settings; the queues are drained by initializeVulkan().
     struct DeferredSceneState {
         int              shadeMode = kDefaultShadeMode; // picker-table index
         bool             showSkeleton = false;
@@ -673,52 +646,9 @@ private:
     quint64 m_environmentRequestId = 0; // ++ per HDRI request; a slower earlier bake with a stale id is discarded
     // The panorama that LIGHTS the scene now — the last bake applied ("" = the procedural studio)
     // — and the factor its pixels were normalized by: a render engine reads the file itself and
-    // must light by the same amount (captureRenderSnapshot).
+    // must light by the same amount (captureRenderLighting).
     QString m_appliedEnvironmentPath;
     float   m_appliedEnvironmentScale = 1.0f;
-    /// Fills @p snapshot's lighting half (captureRenderScene and captureRenderLightingOnly share it).
-    void captureRenderLighting(RenderSnapshot& snapshot) const;
-    /// ONE ZONE's material as a render engine takes it — the values (renderMaterial) and the
-    /// zone's maps, entered into @p snapshot's images — for mesh @p meshIndex of model
-    /// @p modelIndex. @p withOverlays paints the zone's overlays into the maps they touch, as a
-    /// render of the scene shows them; without, the surface alone (a saved material's ball).
-    /// Shared by captureRenderScene and the material ball's scene, so the two cannot differ.
-    /// DISPLACEMENT (scene/meshdisplace.h): whether zone @p meshIndex of model @p modelIndex
-    /// displaces in a render — its Displacement layer on, a strength, and a height to read: its
-    /// displacement map with (@p withOverlays) the overlays' displacement images painted in, or
-    /// those alone on a level canvas — and with what: @p image (kept alive by the caller while
-    /// it is read), the @p channel the height rides in, and @p settings.
-    bool zoneDisplacement(OverlayBake& bake, int modelIndex, int meshIndex, bool withOverlays,
-                          std::shared_ptr<const DecodedImage>& image, int& channel, DisplaceSettings& settings);
-    /// … and one model's captured zones displaced: @p zones are (index into snapshot.geometry,
-    /// mesh index) pairs — ALL of the model's captured zones, since a displaced zone holds the
-    /// borders it shares with the others still.
-    void displaceCapturedZones(RenderSnapshot& snapshot, OverlayBake& bake, int modelIndex,
-                               const std::vector<std::pair<std::size_t, int>>& zones);
-    renderapi::Material captureZoneMaterial(RenderSnapshot& snapshot, OverlayBake& bake, int modelIndex, int meshIndex,
-                                            const char* name, const RenderMaterialContext& context, bool withOverlays);
-    /// The scene's Gaussian splats as a render's layers, drawn now at @p width × @p height
-    /// (RenderSceneHolder::splatLayers; vulkanwindow_render.cpp). @p environment is the render's
-    /// own description of the backdrop, @p floorShadows whether its floor catches shadows.
-    std::shared_ptr<RenderSplatLayers> captureSplatLayers(int width, int height, const renderapi::Environment& environment,
-                                                          bool floorShadows);
-    // The procedural studio's pixels as a render engine is handed them, made on first need
-    // (RenderSnapshot::environmentPixels says why they are shared) — by studioEnvironmentPixels(),
-    // which every reader goes through.
-    const std::vector<glm::vec3>& studioEnvironmentPixels() const;
-    /// THE LIGHT A MATERIAL'S ICON IS MADE UNDER (renderMaterialIcon): the icon studio of
-    /// scene/materialball.h as a render engine is handed it — never the scene's own environment
-    /// nor a panorama of the library, so every icon is lit alike. Made per icon and let go with
-    /// its render (a tenth of a second against 25 MB kept for the session).
-    struct IconEnvironment {
-        std::shared_ptr<const std::vector<glm::vec3>> pixels;
-        int                                           width = 0;
-        int                                           height = 0;
-    };
-    static IconEnvironment iconEnvironment();
-    mutable std::shared_ptr<const std::vector<glm::vec3>> m_studioEnvironment;
-    mutable int                                           m_studioEnvironmentWidth = 0;
-    mutable int                                           m_studioEnvironmentHeight = 0;
 
     // =========================================================================================
     // Input (vulkanwindow_input.cpp) — the handlers ROUTE; the gestures live in the sections
@@ -739,51 +669,23 @@ private:
     /// the cursor — the one the viewport outlines — or clears the selection on empty space.
     void selectModelAtClick(const QPointF& localPos);
 
-    // --- The light objects' side of the mouse (vulkanwindow_lights.cpp) ---
-    /// The light whose marker is under @p localPos, or -1.
-    int lightAt(const QPointF& localPos) const;
-    /// A left press on a light's marker: selects the light and begins a drag of it in the
-    /// camera-parallel plane through where it stands. False when no marker is under the cursor.
-    bool beginLightGesture(const QPointF& localPos);
-    /// The cursor moved with a light's drag in flight: the light follows (the first move opens
-    /// the edit's bracket). The wheel moves the drag's plane along the view (lightDragDepth).
-    void lightDragMove(const QPointF& localPos);
-    void lightDragDepth(float notches, const QPointF& cursorPos);
-    /// The button is up: the drag's one undo entry (none for a press that never moved).
-    void endLightGesture();
-    /// The cursor's ray through the light drag's plane. False when it misses.
-    bool lightPlaneHit(const QPointF& localPos, glm::vec3& outWorld) const;
-    /// Sets the list in both places it lives: remembered (m_deferred) and the Scene's.
-    void applyLights(std::vector<SceneLight> lights);
-    /// Pushes @p before — the list as an edit found it — as one undo entry; marks the document dirty.
-    void pushLightUndo(const std::vector<SceneLight>& before);
-    /// What a light is aimed at: the subject's upper middle (see lightAimPoint's definition).
-    glm::vec3 lightAimPoint() const;
-
-    struct LightDrag {
-        bool      active = false; // a left press on a light's marker is held
-        bool      moved = false;  // … and has moved the light (its edit is open)
-        int       index = -1;
-        glm::vec3 planePoint{0.0f}; // a point of the camera-parallel plane the light is dragged in
-        glm::vec3 grabOffset{0.0f}; // the light's position less the cursor's point on that plane
-        bool      tracks = false;   // it was aimed at the subject at the press: it stays aimed through the drag
+    /// The mouse as the handlers of vulkanwindow_input.cpp last saw it.
+    struct PointerState {
+        QPointF lastPos; ///< The cursor at the last press or move (window pixels).
+        // Buttons whose drag actually began with a press in this window. We gate camera moves on
+        // this rather than QMouseEvent::buttons() so a modal dialog (e.g. the Import file picker)
+        // can't leak a button-held move to us as it closes and snap the camera.
+        Qt::MouseButtons activeDragButtons = Qt::NoButton;
+        // A left press that hit no joint — the orbit gesture — may still turn out to be a CLICK:
+        // while the pointer has not left the platform's drag distance of the press (leftPressPos)
+        // nothing orbits, and released there it selects the model under the cursor
+        // (Scene::pickModel: its surface) or, on empty space, clears the selection. The first move
+        // beyond that distance makes it an orbit for good. The selected model is the one the
+        // viewport outlines.
+        bool    leftClickCandidate = false;
+        QPointF leftPressPos;
     };
-    LightDrag               m_lightDrag;
-    bool                    m_lightEdit = false; // beginLightEdit .. endLightEdit is open
-    std::vector<SceneLight> m_preEditLights;     // the list as the open edit found it
-    std::uint64_t           m_announcedLightsRevision = 0; // see notifyLights
-
-    QPointF m_lastMousePos;
-    // Buttons whose drag actually began with a press in this window. We gate camera moves on
-    // this rather than QMouseEvent::buttons() so a modal dialog (e.g. the Import file picker)
-    // can't leak a button-held move to us as it closes and snap the camera.
-    Qt::MouseButtons m_activeDragButtons = Qt::NoButton;
-    // A left press that hit no joint — the orbit gesture — may still turn out to be a CLICK:
-    // released within the platform's drag distance of the press, it selects the model under the
-    // cursor (box-level pick) or, on empty space, clears the selection. The selected model is
-    // the one the viewport outlines.
-    bool    m_leftClickCandidate = false;
-    QPointF m_leftPressPos;
+    PointerState m_pointer;
 
     // =========================================================================================
     // Camera (vulkanwindow_camera.cpp)
@@ -824,11 +726,10 @@ private:
     bool issueIkTarget();
     /// A left press on the joint under @p localPos: selects it and begins the gesture — a plain
     /// press the full-body-IK drag, @p scoped (Ctrl) the Ctrl+drag (IkScope::Part, resolved by
-    /// the armature: the SCOPED drag of the grabbed chain alone for a limb or the head and neck,
-    /// the FIGURE MOVE — the whole figure as she is posed, off the floor's contacts — for a grab of
-    /// the body itself, the digit's own drag for a finger or a toe) — and snapshots the pose for
-    /// undo. Returns false when no joint is under the cursor (the press is then the orbit/click
-    /// gesture).
+    /// the armature: the SCOPED drag of the grabbed chain alone for a limb, the head and neck or
+    /// the spine, the FIGURE MOVE — the whole figure as she is posed, off the floor's contacts —
+    /// for a grab of the hips, the digit's own drag for a finger or a toe). Returns false when
+    /// no joint is under the cursor (the press is then the orbit/click gesture).
     bool beginJointGesture(const QPointF& localPos, bool scoped);
     /// A SHIFT + left press on the joint under @p localPos (THE GROUP, 2026-10-27): the joint joins
     /// the selection as its primary — the previous selection becoming the group's secondaries, a
@@ -838,22 +739,30 @@ private:
     /// joint is under the cursor.
     bool beginGroupGesture(const QPointF& localPos);
     /// Begins the IK drag of the selected joint (the drag plane anchored at its grab point) and
-    /// starts the tick — the whole body's, or @p scoped the grabbed chain's alone. Returns false
-    /// without a figure/selection.
+    /// starts the tick — the whole body's, or @p scoped the grabbed chain's alone — having taken
+    /// the drag's UNDO SNAPSHOT (m_preEditPose) of the pose as it stood BEFORE the armature began:
+    /// no caller snapshots. Returns false without a figure/selection (m_preEditPose untouched).
     bool beginIkDrag(bool scoped = false);
     /// Mouse-up of an IK drag that moved the pose: hands off to the ANIMATED settle — the timer
     /// keeps ticking, each tick relaxing the body onto its pins (finishIkSettle then commits).
     void beginIkRelease();
     /// Ends an IK drag WITHOUT a settle: a click on a joint (nothing moved), a stale drag whose
     /// release never reached this window, a delete mid-gesture. Commits the undo entry if the
-    /// drag did move the pose.
+    /// drag did move the pose — by a solve, or by its begin.
     void abortIkDrag();
     /// Completes the post-release IK settle NOW (ends the drag, runs the settled-pose hook,
     /// commits the undo entry). Called by the timer when the animated settle lands, and by any
     /// interaction that must not overlap it (a new press, undo/redo) to cut it short cleanly.
     void finishIkSettle();
-    /// Intersects the cursor ray through @p localPos with the camera-parallel drag plane through
-    /// m_ik.planePoint. True (with @p outWorld) on a hit in front of the camera.
+    /// THE CAMERA-PARALLEL DRAG PLANE, for any drag in the viewport (the joint drag's, below).
+    /// cameraPlaneHit intersects the cursor ray through @p localPos with the plane through
+    /// @p planePoint parallel to the screen: true (with @p outWorld) on a hit in front of the
+    /// camera. steppedPlanePoint is @p planePoint moved along the view by @p notches wheel notches
+    /// (+ = away; kIkDepthPerWheelNotch of its camera distance a notch, never nearer than 10 cm).
+    /// The second requires m_renderer.
+    bool      cameraPlaneHit(const QPointF& localPos, const glm::vec3& planePoint, glm::vec3& outWorld) const;
+    glm::vec3 steppedPlanePoint(const glm::vec3& planePoint, float notches) const;
+    /// cameraPlaneHit for the joint drag's plane (through m_ik.planePoint).
     bool dragPlaneHit(const QPointF& localPos, glm::vec3& outWorld) const;
     /// Records @p target as the raw drag target (seeding the cursor filter at the grab point on
     /// the first one). The tick consumes it.
@@ -887,6 +796,10 @@ private:
         // drag's ground-healed pins, visibly shifting a hovering figure and committing an undo
         // entry for a gesture the user perceived as a click.
         bool      poseChanged = false;
+        // The BEGIN of the drag itself changed the pose (a hovering figure's hanging feet set down
+        // at the press: Armature::beginIkDrag) — an edit even if no solve follows, so a drag that
+        // ends as a click still commits it (abortIkDrag).
+        bool      posedAtPress = false;
         // THE GROUP: a Shift press on a joint that was ALREADY a member (or the primary) — released
         // as a CLICK, with no solve having moved the pose, it REMOVES that joint from the group
         // (beginGroupGesture / mouseReleaseEvent); -1 otherwise.
@@ -911,9 +824,9 @@ private:
     void commitGroundDrop();
 
     /// The animated ground drop (groundFigure): WHICH model falls (the active figure at the
-    /// button press — undo can switch the active figure mid-fall, and the remaining drop must
-    /// still land on the one that started falling), the height still to fall, how much has
-    /// fallen so far, and the real-time clock the free-fall curve is evaluated against.
+    /// button press; whatever could change the active figure lands the fall first, and the index
+    /// keeps the remaining drop on the one that started falling), the height still to fall, how
+    /// much has fallen so far, and the real-time clock the free-fall curve is evaluated against.
     /// ... and THE LANDING BOUNCE that follows a fall onto her feet (Armature::beginLandingBounce:
     /// the legs absorb the landing, deeper the faster she came down): on the same timer and
     /// clock, from the moment of the landing; finishGroundFall ends it like the fall.
@@ -936,7 +849,7 @@ private:
     // =========================================================================================
 
     /// (A light's drag is NOT one of these: it touches no pose.)
-    /// A mouse-button-held pose gesture owns the pose right now (an IK drag, or a Ctrl FK drag):
+    /// A mouse-button-held pose gesture owns the pose right now (an IK drag: plain, Ctrl or Shift):
     /// every other pose edit — undo/redo, utilities, pins, a pose load, the view/delete keys —
     /// is REFUSED until its release. An IK drag in particular solves against pins captured at
     /// drag start, and re-posing underneath it would leave the solve fighting a stale stance.
@@ -950,8 +863,8 @@ private:
     /// so the caller acts on a settled pose (each one commits its own undo entry). Leaves a live
     /// button-held drag alone.
     void closeSettlingEdits();
-    /// closeSettlingEdits() plus the button-held drags: a STALE IK drag (its release never
-    /// reached this window) is aborted, an FK drag ended. Every discrete pose edit (undo/redo,
+    /// closeSettlingEdits() plus the button-held drag: a STALE IK drag (its release never
+    /// reached this window) is aborted. Every discrete pose edit (undo/redo,
     /// utilities, pins, pose load/save, delete, import) starts here so m_preEditPose can't be
     /// overwritten under an open bracket — the cross-figure/mis-bracketed undo entries of old.
     void closeOpenPoseEdits();
@@ -973,10 +886,10 @@ private:
     /// share it): every open edit is closed first, then the undo history is cleared.
     void deleteModel(int index);
 
-    // One committed, undoable edit. A single stack holds both kinds so undo walks pose and
-    // lighting changes together, in the order the user made them. Joint PIN toggles are pose
-    // edits too: the snapshot carries the pins ("@pin:" rows), so undoing a pin or a drag
-    // restores the pins of that moment.
+    // One committed, undoable edit. A single stack holds all four kinds — a pose, the lighting
+    // dials, an object's materials, the light objects — so undo walks them together, in the
+    // order the user made them. Joint PIN toggles are pose edits too: the snapshot carries the
+    // pins ("@pin:" rows), so undoing a pin or a drag restores the pins of that moment.
     struct UndoEntry {
         enum class Kind { Pose, Lighting, Material, Lights };
         Kind             kind = Kind::Pose;
@@ -990,11 +903,18 @@ private:
     /// onto @p to. undo() and redo() are mirror images of each other through it.
     void swapUndoEntry(std::vector<UndoEntry>& from, std::vector<UndoEntry>& to);
 
-    // Undo/redo: each committed edit (a pose drag, or a registered lighting gesture) pushes its
-    // pre-edit state. m_preEditPose snapshots the pose at the start of every bracketed edit.
+    // Undo/redo: each committed edit (a pose edit, a registered lighting gesture, a material
+    // edit, a light edit) pushes its pre-edit state. m_preEditPose snapshots the pose at the
+    // start of every bracketed pose edit.
     PoseSnapshot           m_preEditPose;
     std::vector<UndoEntry> m_undoStack;
     std::vector<UndoEntry> m_redoStack;
+
+    /// Emits jointTransformChanged if the selected joint's transform differs from the one last
+    /// announced. Called once per rendered frame: rendering is event-driven and EVERY pose or
+    /// selection change requests a frame, so the frame is the one place that sees them all —
+    /// no gesture has to remember the Transform tab.
+    void notifyJointTransform();
 
     // The Transform tab's dial edit (beginJointTransformEdit .. endJointTransformEdit): open while
     // true, its pre-edit pose in m_preEditPose like every bracketed edit's. And the joint
@@ -1004,26 +924,13 @@ private:
     // group's other joints turn by the CHANGE in it, not by the change the primary's read-back shows.
     float          m_dialAsked[3] = {0.0f, 0.0f, 0.0f};
     bool           m_dialAskedValid[3] = {false, false, false};
+    // A STATIC model's Figure rows (place, turn, scale) set its model TRANSFORM, which no pose
+    // snapshot holds: the bracket's commit sees no pose change. So the open bracket remembers the
+    // model it found selected (its index; -1: a figure's bracket, or none) and that model's
+    // transform, and its end marks the document changed when the transform has moved.
+    int            m_editStaticModel = -1;
+    glm::mat4      m_preEditStaticTransform{1.0f};
     JointTransform m_announcedJointTransform;
-    // THE MATERIALS TAB's edit (beginMaterialEdit .. endMaterialEdit): open while true, on the
-    // model whose zone materials were snapshotted at the begin; and the view last announced
-    // through materialViewChanged (notifyMaterialView).
-    bool                        m_materialEdit = false;
-    int                         m_materialEditModel = -1;
-    std::vector<MaterialParams> m_preEditMaterials;
-    MaterialView                m_announcedMaterialView;
-    // THE OVERLAYS' decoded images (overlayImage): by kind + path, each cropped to where it does
-    // something, stamped with the file's time and size (re-read when it changes; a null image is
-    // remembered too — an unreadable file is not retried at every scrub step), least recently
-    // used out past a memory budget.
-    struct OverlayCacheEntry {
-        std::shared_ptr<const OverlayImage> image;
-        qint64                              stamp = -1;
-        qint64                              bytes = 0;
-        quint64                             used = 0;
-    };
-    std::unordered_map<std::string, OverlayCacheEntry> m_overlayImages;
-    quint64                                            m_overlayUse = 0;
 
     // THE JOINT MOUSE MODE (Blender's modal transforms): with a joint selected, B / S / T turns
     // on its Bend / Side-Side / Twist dial and MOVING THE MOUSE turns it — the limb goes the way
@@ -1047,11 +954,251 @@ private:
     /// @p direction of a positive turn and the lever in pixels per radian. False with no swing
     /// to read (the mode off, the point behind the camera, a limb that does not move).
     bool jointModalSwing(QPointF& direction, double& leverPx) const;
-    int              m_modalKind = -1;               // the dial the mouse turns, or -1
-    QPointF          m_modalCursor;                  // the cursor at the last move
-    bool             m_modalFollow = false;          // the limb follows the mouse (else left-right turns the dial)
-    QPointF          m_modalDirection{1.0, 0.0};     // the screen direction of "more", as last read
-    Qt::MouseButtons m_modalSwallow = Qt::NoButton;  // presses the mode consumed: their releases are its too
+    struct JointModal {
+        int              kind = -1;              // the dial the mouse turns, or -1
+        QPointF          cursor;                 // the cursor at the last move
+        bool             follow = false;         // the limb follows the mouse (else left-right turns the dial)
+        QPointF          direction{1.0, 0.0};    // the screen direction of "more", as last read
+        Qt::MouseButtons swallow = Qt::NoButton; // presses the mode consumed: their releases are its too
+    };
+    JointModal m_modal;
+
+    // =========================================================================================
+    // The Materials tab (vulkanwindow_materials.cpp): its view and edit bracket, the texture
+    // slots, the overlays
+    // =========================================================================================
+
+    /// Emits materialViewChanged if what the Materials tab shows differs from what was last
+    /// announced (Scene::materialViewKey: the selection, the zone, the zone count, the object's
+    /// material revision — never the view itself, which is costly to build). Called where
+    /// notifyJointTransform is: every rendered frame.
+    void notifyMaterialView();
+    /// Ends a material edit's bracket: pushes the pre-edit zone materials as one undo entry if
+    /// anything changed (and marks the document dirty).
+    void commitMaterialUndo();
+    /// One edit's derived images by what they were made from, so the zones of one map (and the
+    /// partner slots of one binding) are handed the SAME image — which the model then uploads
+    /// once (SlotUploads). Lives for one call: the images are released with it, the textures
+    /// stay. (A render capture uses one too: the zones of one map share one composite.)
+    /// A key names the images a result was made from by their ADDRESS, so an entry keeps those
+    /// images alive with it: while a key stands, the address it names cannot pass to another
+    /// image (an undo that replaces several slots frees images in the middle of its one bake).
+    struct OverlayBake {
+        struct Entry {
+            std::shared_ptr<const DecodedImage>              image;   // what was derived (null: nothing could be)
+            std::vector<std::shared_ptr<const DecodedImage>> sources; // the images its key names, kept alive
+            bool                                             used = true; // asked for since the last beginPass
+        };
+        std::map<std::string, Entry> entries;
+        /// A bake KEPT from one render capture to the next (the Rendered mode's: see
+        /// captureRenderSceneWith). Its keys also carry the overlay FILES' stamps (overlaid):
+        /// nothing else would notice a file saved again between two captures.
+        bool kept = false;
+        /// The image filed under @p key, or null when none has been (a filed image may itself be null).
+        const std::shared_ptr<const DecodedImage>* find(const std::string& key);
+        /// Files @p image under @p key, made from @p sources (the images the key names); returns it.
+        std::shared_ptr<const DecodedImage> put(const std::string& key, std::shared_ptr<const DecodedImage> image,
+                                                std::vector<std::shared_ptr<const DecodedImage>> sources);
+        /// A kept bake's capture: beginPass before it, dropUnused after — what the capture did
+        /// not ask for goes, with the images it kept alive.
+        void beginPass();
+        void dropUnused();
+    };
+    /// Slots of ONE zone that change in the same edit (a saved material applied: every slot at
+    /// once): a partner slot listed here is read as it WILL be, so the slots that share a packed
+    /// binding — the parameter map's four, the layer map's four, the base color and its cutout —
+    /// derive the same image, which is then made and uploaded once for the group.
+    struct PendingSlots {
+        struct Slot {
+            bool                                set = false;
+            std::shared_ptr<const DecodedImage> plain;
+            int                                 channel = 0;
+        };
+        std::array<Slot, kMaterialMapCount> bySlot; // (indexed by MaterialMap)
+    };
+    /// What slot @p map of the mesh is to hold when its source is @p source ("" none,
+    /// kImportedTexture the import's, else a file, which is decoded): @p plain (null = none) and
+    /// the @p channel its value is read from. False when a file could not be read (logged).
+    /// A decoded file is GUTTER-FILLED here, once, against the zone's own UV islands — as the
+    /// import fills each image of its own once (texturedecode.h) — where the viewport samples
+    /// the slot through those UVs and the zone's material leaves them where they are: the
+    /// material it is to carry, @p standing (an edit that sets the values AFTER the slots hands
+    /// it over), else the one it has. Never at a rebind: an overlay's scrub fills nothing.
+    bool decodeSlotSource(int model, int mesh, MaterialMap map, const std::string& source, std::shared_ptr<const DecodedImage>& plain,
+                          int& channel, const MaterialParams* standing = nullptr);
+    /// Makes mesh @p mesh of model @p model carry in slot @p map what @p source says:
+    /// decodeSlotSource, then bindSlot. False when a file could not be read.
+    bool applySlotSource(int model, int mesh, MaterialMap map, const std::string& source, OverlayBake* bake = nullptr);
+    /// Several slots of one zone at once (@p changes: slot and source, as applySlotSource takes
+    /// them), each packed binding made once for all of its slots that change. Returns the slots
+    /// whose file could not be read: they are left as they were.
+    std::vector<MaterialMap> applySlotSources(int model, int mesh, const std::vector<std::pair<MaterialMap, std::string>>& changes,
+                                              OverlayBake& bake, const MaterialParams* standing = nullptr);
+    /// Binds slot @p map of the mesh to @p plain (+ @p channel, @p source recorded): derives the
+    /// image the binding samples from the slot, its partner slots (as @p pending says they will
+    /// be, else as they stand) and the zone's OVERLAYS, and applies it through the Scene.
+    bool bindSlot(int model, int mesh, MaterialMap map, const std::shared_ptr<const DecodedImage>& plain, int channel,
+                  const std::string& source, OverlayBake& bake, const PendingSlots* pending = nullptr);
+    /// bindSlot with the slot as it stands (the overlays over it changed).
+    void rebindSlot(int model, int mesh, MaterialMap map, OverlayBake& bake);
+    /// @p base with the mesh's overlays that touch slot @p map painted over it (@p base itself
+    /// when none does), made once per edit for the zones that share it.
+    /// @p baseScale is the Metalness slot's: the zone's Metallic value, multiplied into the map
+    /// before the overlays' metal is painted (compositeOverlays).
+    /// @p forRenderer: the map as a RENDER ENGINE is handed it — the overlays' bump images stay
+    /// in the BUMP map (the viewport alone carries them in its normal map: see kOverlaySlots).
+    std::shared_ptr<const DecodedImage> overlaid(int model, int mesh, MaterialMap map, const std::shared_ptr<const DecodedImage>& base,
+                                                 int channel, OverlayBake& bake, float baseScale = 1.0f, bool forRenderer = false);
+    /// THE OVERLAYS' METAL: a zone whose overlays paint its metalness binds a parameter map baked
+    /// for the zone's Metallic VALUE (Mesh::setMetalBaked). Re-bakes every zone of @p model whose
+    /// value has moved off the one its map was baked for — after anything that sets material
+    /// values: a slider, a reset, an undo.
+    void syncOverlayBakes(int model);
+    /// THE CHOSEN MAPS' GUTTER FILL follows the Tiling section: a map chosen from a file is
+    /// filled exactly while its zone's material leaves the UVs where they are (decodeSlotSource
+    /// has why). Reads again, by that rule, every chosen map of @p model whose zone has crossed
+    /// the line since it was decoded — once at the crossing, nothing at any other step — after
+    /// anything that sets material values, beside syncOverlayBakes.
+    void syncChosenMapFills(int model);
+    /// Gives mesh @p mesh the stack @p overlays and rebinds the slots whose composite it changes.
+    void applyZoneOverlays(int model, int mesh, const std::vector<MaterialOverlay>& overlays, OverlayBake& bake);
+    /// The project load's overlays: (mesh, stack) pairs of model @p model applied as one edit's
+    /// worth of composites (no undo entry: the caller's).
+    void setModelOverlays(int model, const std::vector<std::pair<int, std::vector<MaterialOverlay>>>& stacks);
+    /// Every slot of every zone of @p model whose recorded source in @p materials (in mesh order)
+    /// differs from the mesh's, and every slot whose overlays do — the undo swap's and the
+    /// project load's texture half, run before the values are applied.
+    void applyMaterialTextures(int model, const std::vector<MaterialParams>& materials);
+
+    // THE MATERIALS TAB's edit (beginMaterialEdit .. endMaterialEdit): open while true, on the
+    // model whose zone materials were snapshotted at the begin; and the key of the view last
+    // announced through materialViewChanged (notifyMaterialView).
+    bool                        m_materialEdit = false;
+    int                         m_materialEditModel = -1;
+    std::vector<MaterialParams> m_preEditMaterials;
+    MaterialViewKey             m_announcedMaterialKey;
+    // THE OVERLAYS' decoded images (overlayImage): by kind + path, each cropped to where it does
+    // something, stamped with the file's time and size (re-read when it changes; a null image is
+    // remembered too — an unreadable file is not retried at every scrub step), least recently
+    // used out past a memory budget.
+    struct OverlayCacheEntry {
+        std::shared_ptr<const OverlayImage> image;
+        qint64                              stamp = -1;
+        qint64                              bytes = 0;
+        quint64                             used = 0;
+    };
+    std::unordered_map<std::string, OverlayCacheEntry> m_overlayImages;
+    quint64                                            m_overlayUse = 0;
+    /// The chosen maps that were gutter-filled at their decode, by address — an entry counts
+    /// while its image lives (syncChosenMapFills asks; the dead ones go at the next decode).
+    std::map<const DecodedImage*, std::weak_ptr<const DecodedImage>> m_gutterFilled;
+
+    // =========================================================================================
+    // A saved material (vulkanwindow_materialfile.cpp)
+    // =========================================================================================
+
+    /// THE LIGHT A MATERIAL'S ICON IS MADE UNDER (renderMaterialIcon): the icon studio of
+    /// scene/materialball.h as a render engine is handed it — never the scene's own environment
+    /// nor a panorama of the library, so every icon is lit alike. Made per icon and let go with
+    /// its render (a tenth of a second against 25 MB kept for the session).
+    struct IconEnvironment {
+        std::shared_ptr<const std::vector<glm::vec3>> pixels;
+        int                                           width = 0;
+        int                                           height = 0;
+    };
+    static IconEnvironment iconEnvironment();
+
+    // =========================================================================================
+    // The light objects (vulkanwindow_lights.cpp): the list, its edit bracket, a marker's drag
+    // =========================================================================================
+
+    /// Emits lightsChanged if the scene's light list or light selection moved since it was last
+    /// announced. Called where notifyJointTransform is: every rendered frame.
+    void notifyLights();
+    /// The light whose marker is under @p localPos, or -1.
+    int lightAt(const QPointF& localPos) const;
+    /// A left press on a light's marker: selects the light and begins a drag of it in the
+    /// camera-parallel plane through where it stands. False when no marker is under the cursor.
+    bool beginLightGesture(const QPointF& localPos);
+    /// The cursor moved with a light's drag in flight: the light follows (the first move opens
+    /// the edit's bracket). The wheel moves the drag's plane along the view (lightDragDepth).
+    void lightDragMove(const QPointF& localPos);
+    void lightDragDepth(float notches, const QPointF& cursorPos);
+    /// The button is up: the drag's one undo entry (none for a press that never moved).
+    void endLightGesture();
+    /// Sets the list in both places it lives: remembered (m_deferred) and the Scene's.
+    void applyLights(std::vector<SceneLight> lights);
+    /// Pushes @p before — the list as an edit found it — as one undo entry; marks the document dirty.
+    void pushLightUndo(const std::vector<SceneLight>& before);
+    /// What a light is aimed at: the subject's upper middle (see lightAimPoint's definition).
+    glm::vec3 lightAimPoint() const;
+
+    struct LightDrag {
+        bool      active = false; // a left press on a light's marker is held
+        bool      moved = false;  // … and has moved the light (its edit is open)
+        int       index = -1;
+        glm::vec3 planePoint{0.0f}; // a point of the camera-parallel plane the light is dragged in
+        glm::vec3 grabOffset{0.0f}; // the light's position less the cursor's point on that plane
+        bool      tracks = false;   // it was aimed at the subject at the press: it stays aimed through the drag
+    };
+    LightDrag               m_lightDrag;
+    bool                    m_lightEdit = false; // beginLightEdit .. endLightEdit is open
+    std::vector<SceneLight> m_preEditLights;     // the list as the open edit found it
+    std::uint64_t           m_announcedLightsRevision = 0; // see notifyLights
+
+    // =========================================================================================
+    // The scene captured for a render engine (vulkanwindow_render.cpp)
+    // =========================================================================================
+
+    /// The device a render this window starts on its own uses (a material's icon, the Rendered
+    /// mode): the one the Render window was last set to, if the engine still lists it, else the
+    /// best there is (RenderSession::defaultDeviceId; "" = the processor).
+    static QString preferredRenderDevice();
+    /// captureRenderScene with the composites of the zones' overlays filed in — and, where
+    /// @p bake is a kept one, taken from — @p bake.
+    std::shared_ptr<RenderSceneHolder> captureRenderSceneWith(OverlayBake& bake);
+    /// Fills @p snapshot's lighting half (captureRenderScene and captureRenderLightingOnly share it).
+    void captureRenderLighting(RenderSnapshot& snapshot) const;
+    /// DISPLACEMENT (scene/meshdisplace.h): whether zone @p meshIndex of model @p modelIndex
+    /// displaces in a render — its Displacement layer on, a strength, and a height to read: its
+    /// displacement map with (@p withOverlays) the overlays' displacement images painted in, or
+    /// those alone on a level canvas — and with what: @p image (kept alive by the caller while
+    /// it is read), the @p channel the height rides in, and @p settings.
+    bool zoneDisplacement(OverlayBake& bake, int modelIndex, int meshIndex, bool withOverlays,
+                          std::shared_ptr<const DecodedImage>& image, int& channel, DisplaceSettings& settings);
+    /// … and one model's captured zones displaced: @p zones are (index into snapshot.geometry,
+    /// mesh index) pairs — ALL of the model's captured zones, since a displaced zone holds the
+    /// borders it shares with the others still.
+    void displaceCapturedZones(RenderSnapshot& snapshot, OverlayBake& bake, int modelIndex,
+                               const std::vector<std::pair<std::size_t, int>>& zones);
+    /// ONE ZONE's material as a render engine takes it — the values (renderMaterial) and the
+    /// zone's maps, entered into @p snapshot's images — for mesh @p meshIndex of model
+    /// @p modelIndex. @p withOverlays paints the zone's overlays into the maps they touch, as a
+    /// render of the scene shows them; without, the surface alone (a saved material's ball).
+    /// Shared by captureRenderScene and the material ball's scene, so the two cannot differ.
+    renderapi::Material captureZoneMaterial(RenderSnapshot& snapshot, OverlayBake& bake, int modelIndex, int meshIndex,
+                                            const char* name, const RenderMaterialContext& context, bool withOverlays);
+    /// The scene's Gaussian splats as a render's layers, drawn now at @p width × @p height
+    /// (RenderSceneHolder::splatLayers; vulkanwindow_render.cpp). @p environment is the render's
+    /// own description of the backdrop, @p floorShadows whether its floor catches shadows.
+    std::shared_ptr<RenderSplatLayers> captureSplatLayers(int width, int height, const renderapi::Environment& environment,
+                                                          bool floorShadows);
+    // The procedural studio's pixels as a render engine is handed them, made on first need
+    // (RenderSnapshot::environmentPixels says why they are shared) — by studioEnvironmentPixels(),
+    // which every reader goes through.
+    const std::vector<glm::vec3>& studioEnvironmentPixels() const;
+    mutable std::shared_ptr<const std::vector<glm::vec3>> m_studioEnvironment;
+    mutable int                                           m_studioEnvironmentWidth = 0;
+    mutable int                                           m_studioEnvironmentHeight = 0;
+
+    // =========================================================================================
+    // The document (vulkanwindow_project.cpp)
+    // =========================================================================================
+
+    /// Gathers the live scene state into a .pss project document (saveProjectFile): every model's
+    /// source path, pose snapshot, world transform and material edits, the lighting dials and the
+    /// chosen HDRI's path, the light objects, and the camera framing. False without a renderer.
+    bool captureProjectDocument(ProjectDocument& out) const;
 
     // =========================================================================================
     // Diagnostics (vulkanwindow_bench.cpp; see ikdiagnostics.h)
@@ -1071,12 +1218,15 @@ private:
     std::unique_ptr<IkDiagnostics> m_diag;
 
     // =========================================================================================
-    // The scripted in-app posing test (vulkanwindow_script.cpp; POSESTUDIO_IK_SCRIPT=<file>, a
-    // figure on the command line): camera views, REAL picks and presses at pixels, cursor drags
-    // in screen space through the real drag plane, releases, pins, FK turns — each through the
-    // window's own gesture functions, with NO desktop input — plus `report` (what a user would
-    // see, as numbers) and `shot` (the rendered frame, read back from the GPU, as a PNG). Then
-    // it exits. m_script is null unless the env var is set; tools/ikscripts/README.md is the reference.
+    // The scripted in-app posing test (POSESTUDIO_IK_SCRIPT=<file>, a figure on the command
+    // line): camera views, REAL picks and presses at pixels, cursor drags in screen space
+    // through the real drag plane, releases, pins, FK turns — each through the window's own
+    // gesture functions, with NO desktop input — plus `report` (what a user would see, as
+    // numbers) and `shot` (the rendered frame, read back from the GPU, as a PNG). Then it exits.
+    // m_script is null unless the env var is set; tools/ikscripts/README.md is the reference.
+    // Three files: vulkanwindow_script.cpp (the step driver), vulkanwindow_script_commands.cpp
+    // (the command families), vulkanwindow_script_metrics.cpp (the metrics and `report`).
+    // =========================================================================================
     void startScript();          ///< The first step, once a posable figure exists (polled).
     void scriptStep();           ///< Runs lines until one must wait for the app; the wait's end re-calls it.
     bool scriptPixelOf(const QString& spec, QPointF& px); ///< "<bone>[@share]" -> the pixel a user would click.
@@ -1084,13 +1234,33 @@ private:
     void scriptDragTick();       ///< One tick of a scripted move (from the IK tick, before its solve).
     void scriptSettled();        ///< A release's settle finished: the `release` line's wait is over.
     void scriptFrameRendered();  ///< A frame was presented after `shot`: save the capture, resume.
-    void scriptReport(const char* label); ///< `report`: what a user would see, as numbers.
+    /// THE COMMAND FAMILIES (vulkanwindow_script_commands.cpp): scriptStep asks each in turn for a
+    /// line that is none of its own (`wait`, `tracedwait`, `expect`, `report`, `quit`). @p cmd is
+    /// the line's first word in lower case, @p words all of them, @p line the line as written (a
+    /// path with spaces is the rest of the line). See ScriptFlow for the answer.
+    ScriptFlow scriptCameraCommand(const QString& cmd, const QStringList& words, const QString& line);
+    ScriptFlow scriptPoseCommand(const QString& cmd, const QStringList& words, const QString& line);
+    ScriptFlow scriptGestureCommand(const QString& cmd, const QStringList& words, const QString& line);
+    ScriptFlow scriptMaterialCommand(const QString& cmd, const QStringList& words, const QString& line);
+    ScriptFlow scriptDocumentCommand(const QString& cmd, const QStringList& words, const QString& line);
+    ScriptFlow scriptUiCommand(const QString& cmd, const QStringList& words, const QString& line);
+    ScriptFlow scriptPictureCommand(const QString& cmd, const QStringList& words, const QString& line);
+    ScriptFlow scriptLightingCommand(const QString& cmd, const QStringList& words, const QString& line);
     void scriptRender(const QStringList& words); ///< `render`: a production render, to its end, saved (vulkanwindow_render.cpp).
     void scriptSaveMaterial(const QStringList& words);  ///< `savematerial`: the zone's material and its icon (vulkanwindow_materialfile.cpp).
     void scriptApplyMaterial(const QStringList& words); ///< `applymaterial`: a saved material onto the selected zone.
     void scriptLamp(const QStringList& words);   ///< `lamp`: the light objects, driven as the Lights tab and the mouse drive them (vulkanwindow_lights.cpp).
     bool scriptLampMetric(const QString& name, double& value) const; ///< `lamps`, `lampselected`, `lamp.<n>.<field>`.
-    bool scriptMetric(const QString& name, double& value); ///< A number `expect` can assert on.
+    /// A number `expect` can assert on (vulkanwindow_script_metrics.cpp): false for a name nothing
+    /// knows. It hands the name to the family that owns it — each sets @p mine false for a name
+    /// that is not its own; the figure's family takes whatever the others left.
+    bool scriptMetric(const QString& name, double& value);
+    bool scriptDocumentMetric(const QString& name, double& value, bool& mine);
+    bool scriptPictureMetric(const QString& name, double& value, bool& mine);
+    bool scriptMaterialMetric(const QString& name, double& value, bool& mine);
+    bool scriptUiMetric(const QString& name, double& value, bool& mine);
+    bool scriptFigureMetric(const QString& name, double& value);
+    void scriptReport(const char* label); ///< `report`: what a user would see, as numbers.
     std::unique_ptr<IkScript> m_script;
 
     // =========================================================================================
@@ -1130,6 +1300,16 @@ private:
     /// Ends a controller-driven IK drag (as the mouse's release would), if one is in flight.
     void endVrDrag();
 
+    // VrState is complete only in vulkanwindow_vr.cpp (it holds the OpenXR session and the wait
+    // thread); the deleter is defined there too, so the other TUs of this class can hold the
+    // pointer without knowing the type.
+    struct VrStateDeleter {
+        void operator()(VrState* state) const;
+    };
+    std::unique_ptr<VrState, VrStateDeleter> m_vr; // null = VR Mode off
+    OpenXrSystem*            m_xr = nullptr;   // borrowed (ViewportWidget); null = no headset
+    uint64_t                 m_vrGeneration = 0; // ++ per start/stop: stale queued frames are ignored
+
     // =========================================================================================
     // The Rendered viewport mode (vulkanwindow_traced.cpp)
     // =========================================================================================
@@ -1149,22 +1329,12 @@ private:
     void tracedTick();
     /// A final render started or ended (RenderSession::activity): this mode's render pauses.
     void onRenderActivity(int running);
-    bool scriptTracedMetric(const QString& name, double& value) const; ///< `traced.<on|shown|done|sample|samples|updates|scenes|lightings|held>`.
+    bool scriptTracedMetric(const QString& name, double& value) const; ///< `traced.<on|shown|done|sample|samples|updates|scenes|lightings|held|width|height>`.
     struct TracedState; // complete only in vulkanwindow_traced.cpp
     struct TracedStateDeleter {
         void operator()(TracedState* state) const;
     };
     std::unique_ptr<TracedState, TracedStateDeleter> m_traced; // null = the mode is off
-
-    // VrState is complete only in vulkanwindow_vr.cpp (it holds the OpenXR session and the wait
-    // thread); the deleter is defined there too, so the other TUs of this class can hold the
-    // pointer without knowing the type.
-    struct VrStateDeleter {
-        void operator()(VrState* state) const;
-    };
-    std::unique_ptr<VrState, VrStateDeleter> m_vr; // null = VR Mode off
-    OpenXrSystem*            m_xr = nullptr;   // borrowed (ViewportWidget); null = no headset
-    uint64_t                 m_vrGeneration = 0; // ++ per start/stop: stale queued frames are ignored
 };
 
 } // namespace pose

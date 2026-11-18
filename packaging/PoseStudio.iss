@@ -61,9 +61,10 @@ UninstallDisplayName=PoseStudio
 
 LicenseFile=..\LICENSE
 WizardStyle=modern
+; The app binaries and the HDR panoramas are large: the strongest compression, solid.
 Compression=lzma2/max
 SolidCompression=yes
-; The HDR panoramas and app binaries are large; show progress meaningfully.
+; One language (English, below): nothing to ask.
 ShowLanguageDialog=no
 
 [Languages]

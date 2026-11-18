@@ -368,8 +368,7 @@ OpenXrSession::Event OpenXrSession::pollEvents() {
         case XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED: {
             const auto& changed = *reinterpret_cast<const XrEventDataSessionStateChanged*>(&buffer);
             if (changed.session == m_session) {
-                m_state = changed.state;
-                switch (m_state) {
+                switch (changed.state) {
                 case XR_SESSION_STATE_READY:        event = Event::Ready; break;
                 case XR_SESSION_STATE_STOPPING:     event = Event::Stopping; break;
                 case XR_SESSION_STATE_EXITING:
@@ -408,10 +407,6 @@ void OpenXrSession::end() {
         xrEndSession(m_session);
         m_running = false;
     }
-}
-
-void OpenXrSession::requestExit() {
-    xrRequestExitSession(m_session);
 }
 
 bool OpenXrSession::waitFrame(int64_t& predictedDisplayTime, bool& shouldRender, int64_t& displayPeriod) {

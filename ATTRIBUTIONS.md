@@ -22,6 +22,11 @@ The application's UI icons are based on [Lucide](https://lucide.dev/), used unde
 > CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE
 > OR PERFORMANCE OF THIS SOFTWARE.
 
+The license as the Lucide project publishes it today — the ISC text under its current copyright
+line, and the MIT license of the icons Lucide inherited from the Feather project — is
+[packaging/licenses/Lucide-LICENSE.txt](packaging/licenses/Lucide-LICENSE.txt), and ships with
+every release in the package's `licenses/` folder: the icons are built into the executable.
+
 ## Stock HDRI Panoramas — Poly Haven
 
 The stock lighting environments (equirectangular HDR panoramas and their preview images) are
@@ -32,9 +37,11 @@ legally required by CC0 — this credit is given with gratitude. Consider
 ## Third-Party Libraries
 
 PoseStudio is built on the libraries below. None of their code is vendored into this
-repository: CMake fetches each one at a pinned version at configure time, and the parts the
-app uses are compiled into the executable. Each is used under its own license, summarized here;
-the authoritative text is the license file in the library's own repository.
+repository: Qt and the Vulkan SDK are installed on the build machine and linked dynamically,
+and CMake fetches every other one at a pinned version at configure time
+(`cmake/Dependencies.cmake`) and compiles the parts the app uses into the executable. Each is
+used under its own license, summarized here; the authoritative text is the license file in the
+library's own repository.
 
 | Library | Used for | License |
 | --- | --- | --- |
@@ -42,13 +49,13 @@ the authoritative text is the license file in the library's own repository.
 | [Vulkan SDK](https://vulkan.lunarg.com/) (Khronos Vulkan loader) | The 3D viewport's graphics API | Apache 2.0 |
 | [GLM](https://github.com/g-truc/glm) | Vector and matrix math | MIT (or the Happy Bunny License) |
 | [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) | GPU memory management | MIT |
-| [OpenXR SDK](https://github.com/KhronosGroup/OpenXR-SDK) | The OpenXR loader behind VR Mode | Apache 2.0 |
+| [OpenXR SDK](https://github.com/KhronosGroup/OpenXR-SDK) | The OpenXR loader behind VR Mode | Apache 2.0; the [JsonCpp](https://github.com/open-source-parsers/jsoncpp) code in the loader MIT or public domain |
 | [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader) | Wavefront `.obj` / `.mtl` import | MIT |
 | [ufbx](https://github.com/ufbx/ufbx) | FBX rigged-character import | MIT or Unlicense (public domain) |
 | [cgltf](https://github.com/jkuhlmann/cgltf) | glTF / GLB / VRM import | MIT |
 | [LightUSD](https://github.com/lighttransport/tinyusdz) (formerly TinyUSDZ) | USD / USDA / USDC / USDZ import | Apache 2.0 |
-| [nlohmann/json](https://github.com/nlohmann/json) | JSON parsing (figure import, project files, VRM metadata) | MIT |
-| [miniz](https://github.com/richgel999/miniz) | gzip / zlib inflate (figure files, `.spz` splats, `.exr`) | MIT |
+| [nlohmann/json](https://github.com/nlohmann/json) | JSON parsing (figure import, project and material files, VRM metadata) | MIT |
+| [miniz](https://github.com/richgel999/miniz) | gzip / zlib inflate (figure files, `.spz` splats, `.exr`) and the material library's `.zip` packages | MIT |
 | [stb_image](https://github.com/nothings/stb) | Radiance `.hdr` panorama decoding | MIT or public domain |
 | [tinyexr](https://github.com/syoyo/tinyexr) | OpenEXR `.exr` panorama decoding | BSD 3-Clause |
 
@@ -72,7 +79,10 @@ Dragonbox, nanoflann, xxHash and MikkTSpace), each under its own permissive lice
 lists them. PoseStudio builds it with every optional feature off, so the parts that come with
 those features (OpenSubdiv, MaterialX) are not in the build.
 
-The release package also ships the Qt runtime, the Microsoft Visual C++ runtime and the Khronos
-Vulkan loader next to the executable. Their license texts, and those of every library above
-(LightUSD's bundled code included), are in the package's `licenses/` folder, indexed by
-`NOTICES.txt`; in the repository they live in [packaging/licenses/](packaging/licenses/).
+The release package also ships the Qt runtime (with the ICU, Mesa software-OpenGL and Direct3D
+shader-compiler libraries Qt's deployment tool puts beside it), the Microsoft Visual C++ runtime
+and the Khronos Vulkan loader next to the executable. Their license texts, those of every library
+compiled into the executable (LightUSD's bundled code and the OpenXR loader's JsonCpp included)
+and the icons' are in the package's `licenses/` folder, indexed by `NOTICES.txt`; in the
+repository they live in [packaging/licenses/](packaging/licenses/). (The release package does not
+carry the render engine yet — docs/RELEASING.md lists what shipping it will add.)

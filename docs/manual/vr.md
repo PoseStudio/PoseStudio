@@ -20,6 +20,8 @@ The Link app, Virtual Desktop or SteamVR does the streaming to the headset; Pose
 2. Connect the headset *before* starting PoseStudio: start Quest Link or Air Link (or Virtual Desktop, or SteamVR), then start PoseStudio. A headset connected after launch needs another restart; **View → VR Mode** offers that too, scene included. The VR page in Preferences shows what the startup found under **Status**.
 3. Choose **View → VR Mode** — or click the **VR** button on the viewport's control strip, right of the view picker, or pick **VR Mode** at the bottom of that picker — and put the headset on. You stand about two metres in front of the figure, facing her. The VR button lights up blue while the headset has the scene.
 
+The restart brings the scene back by saving it and opening it again. If one of its files has moved in the meantime, PoseStudio asks for it as it does when [opening a project](project-files.md#if-a-figure-file-has-moved); a scene that still cannot be brought back is kept as a project file, and a message says where it is. If PoseStudio cannot start itself again, it says so and stays open with your scene.
+
 **View → Recenter VR View** puts you back in front of the figure, facing her, from wherever you have walked to. To leave VR Mode press **Esc** at the desktop, click the lit VR button, or choose **View → VR Mode** again.
 
 ## The controllers

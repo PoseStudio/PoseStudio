@@ -78,8 +78,9 @@ public:
                 }
             } else if (top + 2 <= static_cast<int>(sizeof(stack) / sizeof(stack[0]))) {
                 // A full stack silently drops both children (slight under-occlusion). Safe by
-                // construction: the median split bounds depth at ~2·log2(cap/leafSize) ≈ 35
-                // levels for the 600k-triangle cap — well under the 64-slot stack.
+                // construction: the median split halves a range exactly, so the tree is
+                // ⌈log2(cap/leafSize)⌉ ≈ 18 levels deep at the 600k-triangle cap and the
+                // traversal holds one pending sibling per level — about 19 entries of the 64.
                 stack[top++] = node.left;
                 stack[top++] = node.right;
             }
@@ -180,17 +181,26 @@ std::vector<glm::vec3> cosineHemisphere(int count) {
     return dirs;
 }
 
+/// Whether a mesh blocks light for the bake: opaque, uncut, and not glass. A see-through shell or
+/// a cutout card receives occlusion and never casts it — a clear cornea must not darken the iris
+/// behind it. Clear comes in two spellings: a low opacity (the native figures' eye shells, whose
+/// reader turns a refraction weight above a half into an opacity of 0.05) and a TRANSMISSION
+/// above a half at full opacity (a glTF or FBX glass: spectacle lenses a centimetre in front of
+/// the eyes would cut the environment light behind them almost to nothing).
+bool castsOcclusion(const MeshData& mesh) {
+    return mesh.opacity >= 0.999f && !mesh.hasOpacityMask && !(mesh.transmission > 0.5f);
+}
+
 } // namespace
 
 void bakeVertexAO(ModelData& data) {
-    // Occluders: every OPAQUE triangle across the model (transparent shells/cards receive AO but
-    // must never cast it — a clear cornea darkening the iris would be wrong).
+    // Occluders: every triangle of the meshes that block light (castsOcclusion) across the model.
     //
     // Check the cap BEFORE materializing anything: a 50M-triangle OBJ would otherwise push
     // ~1.8 GB into `tris` only to throw it away at the cap check.
     std::size_t opaqueTriangles = 0;
     for (const MeshData& mesh : data.meshes) {
-        if (mesh.opacity < 0.999f || mesh.hasOpacityMask) {
+        if (!castsOcclusion(mesh)) {
             continue;
         }
         opaqueTriangles += mesh.indices.size() / 3;
@@ -201,7 +211,7 @@ void bakeVertexAO(ModelData& data) {
     std::vector<Triangle> tris;
     tris.reserve(opaqueTriangles);
     for (const MeshData& mesh : data.meshes) {
-        if (mesh.opacity < 0.999f || mesh.hasOpacityMask) {
+        if (!castsOcclusion(mesh)) {
             continue;
         }
         for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {

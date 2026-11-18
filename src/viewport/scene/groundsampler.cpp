@@ -1,6 +1,7 @@
 /**
  * @file groundsampler.cpp
- * @brief The ground-sample store and the posed lowest-point scan. See groundsampler.h.
+ * @brief The sample store, the posed lowest-point scan, and the two surface casts (what a click
+ *        is on; whether the cursor is on the model). See groundsampler.h.
  */
 
 #include "groundsampler.h"
@@ -34,48 +35,63 @@ void GroundSampler::add(const std::vector<Vertex>& vertices, const std::vector<u
             into.push_back({base + indices[i], base + indices[i + 1], base + indices[i + 2], mesh});
         }
     }
+    m_worldValid = false; // (the posed copy is of the samples as they were)
 }
 
-bool GroundSampler::posedSamples(const Armature& armature, const glm::vec3& origin, const glm::vec3& dir,
-                                 std::vector<glm::vec3>& world) const {
+const std::vector<glm::vec3>* GroundSampler::posedSamples(const Armature& armature, const glm::vec3& origin,
+                                                          const glm::vec3& dir) const {
     static const bool kTrace = std::getenv("POSESTUDIO_PICK_TRACE") != nullptr;
-    // The skin as it stands: every sample CPU-skinned with the current pose (as lowestY: linear
-    // blending, which agrees with the GPU's dual quaternions to millimetres — a pick's tolerance).
-    // (A STATIC model — an OBJ, a prop — has no skeleton: its samples go through the transform
-    // alone, so a click can find its material zone as it finds a figure's.)
-    const bool        skinned = armature.hasSkeleton() && armature.boneCount() > 0;
-    const std::size_t boneCount = skinned ? armature.boneCount() : 0;
-    std::vector<glm::mat4> skin(boneCount);
-    for (std::size_t i = 0; i < boneCount; ++i) {
-        skin[i] = armature.transform() * armature.poseGlobal(i) * armature.inverseBind(i);
-    }
-    world.resize(m_samples.size());
-    glm::vec3 lo(std::numeric_limits<float>::max());
-    glm::vec3 hi(std::numeric_limits<float>::lowest());
-    for (std::size_t i = 0; i < m_samples.size(); ++i) {
-        const GroundSample& s = m_samples[i];
-        const glm::vec4 p(s.pos, 1.0f);
-        glm::vec3 posed(0.0f);
-        if (!skinned) {
-            posed = glm::vec3(armature.transform() * p);
+    // ONE SKIN PASS A POSE: the posed positions and their box depend on the pose and the model
+    // transform alone, and a click casts the same figure two to four times (the joint pick, its
+    // fallback's occlusion cast, the model pick, the zone pick). They are kept until either
+    // moves — Armature::skinVersion counts every change of the pose AND of the transform (both
+    // end in computeSkinMatrices); the transform is compared as well, for what it costs.
+    if (!m_worldValid || m_worldSkinVersion != armature.skinVersion() || m_worldTransform != armature.transform()) {
+        // The skin as it stands: every sample CPU-skinned with the current pose (as lowestY: linear
+        // blending, which agrees with the GPU's dual quaternions to millimetres — a pick's tolerance).
+        // (A STATIC model — an OBJ, a prop — has no skeleton: its samples go through the transform
+        // alone, so a click can find its material zone as it finds a figure's.)
+        const bool        skinned = armature.hasSkeleton() && armature.boneCount() > 0;
+        const std::size_t boneCount = skinned ? armature.boneCount() : 0;
+        std::vector<glm::mat4> skin(boneCount);
+        for (std::size_t i = 0; i < boneCount; ++i) {
+            skin[i] = armature.transform() * armature.poseGlobal(i) * armature.inverseBind(i);
         }
-        for (int j = 0; j < 4 && skinned; ++j) {
-            const float w = s.weights[j];
-            if (w > 0.0f && s.joints[j] < skin.size()) {
-                posed += w * glm::vec3(skin[s.joints[j]] * p);
+        m_world.resize(m_samples.size());
+        glm::vec3 lo(std::numeric_limits<float>::max());
+        glm::vec3 hi(std::numeric_limits<float>::lowest());
+        for (std::size_t i = 0; i < m_samples.size(); ++i) {
+            const GroundSample& s = m_samples[i];
+            const glm::vec4 p(s.pos, 1.0f);
+            glm::vec3 posed(0.0f);
+            if (!skinned) {
+                posed = glm::vec3(armature.transform() * p);
             }
+            for (int j = 0; j < 4 && skinned; ++j) {
+                const float w = s.weights[j];
+                if (w > 0.0f && s.joints[j] < skin.size()) {
+                    posed += w * glm::vec3(skin[s.joints[j]] * p);
+                }
+            }
+            m_world[i] = posed;
+            lo = glm::min(lo, posed);
+            hi = glm::max(hi, posed);
         }
-        world[i] = posed;
-        lo = glm::min(lo, posed);
-        hi = glm::max(hi, posed);
+        m_worldLo = lo;
+        m_worldHi = hi;
+        m_worldSkinVersion = armature.skinVersion();
+        m_worldTransform = armature.transform();
+        m_worldValid = true;
     }
+    const glm::vec3& lo = m_worldLo;
+    const glm::vec3& hi = m_worldHi;
     // The posed box first: most of a click's rays miss the figure altogether.
     float tMin = 0.0f;
     float tMax = std::numeric_limits<float>::max();
     for (int axis = 0; axis < 3; ++axis) {
         if (std::abs(dir[axis]) < 1.0e-8f) {
             if (origin[axis] < lo[axis] || origin[axis] > hi[axis]) {
-                return false;
+                return nullptr;
             }
             continue;
         }
@@ -90,10 +106,10 @@ bool GroundSampler::posedSamples(const Armature& armature, const glm::vec3& orig
             if (kTrace) {
                 std::fprintf(stderr, "[pick] box miss: lo(%.3f %.3f %.3f) hi(%.3f %.3f %.3f)\n", lo.x, lo.y, lo.z, hi.x, hi.y, hi.z);
             }
-            return false;
+            return nullptr;
         }
     }
-    return true;
+    return &m_world;
 }
 
 void GroundSampler::nearestTriangle(const std::vector<PickTriangle>& triangles, const std::vector<glm::vec3>& world,
@@ -152,11 +168,12 @@ bool GroundSampler::pickAnySurface(const Armature& armature, const Ray& ray, con
     if (dirLen < 1.0e-9f) {
         return false;
     }
-    const glm::vec3        dir = ray.direction / dirLen;
-    std::vector<glm::vec3> world;
-    if (!posedSamples(armature, ray.origin, dir, world)) {
+    const glm::vec3                     dir = ray.direction / dirLen;
+    const std::vector<glm::vec3>* const posed = posedSamples(armature, ray.origin, dir);
+    if (posed == nullptr) {
         return false;
     }
+    const std::vector<glm::vec3>& world = *posed;
     float opaque = std::numeric_limits<float>::max();
     float soft = std::numeric_limits<float>::max();
     int   tri = -1;
@@ -192,10 +209,11 @@ bool GroundSampler::pickSurface(const Armature& armature, const Ray& ray, float&
     const glm::vec3 dir = ray.direction / dirLen;
     const bool        skinned = armature.hasSkeleton() && armature.boneCount() > 0;
     const std::size_t boneCount = skinned ? armature.boneCount() : 0;
-    std::vector<glm::vec3> world;
-    if (!posedSamples(armature, ray.origin, dir, world)) {
+    const std::vector<glm::vec3>* const posed = posedSamples(armature, ray.origin, dir);
+    if (posed == nullptr) {
         return false;
     }
+    const std::vector<glm::vec3>& world = *posed;
     // The nearest triangle of the pickable skin along the ray.
     float best = std::numeric_limits<float>::max();
     int   bestTri = -1;
@@ -209,6 +227,16 @@ bool GroundSampler::pickSurface(const Armature& armature, const Ray& ray, float&
     }
     if (meshOut != nullptr) {
         *meshOut = m_triangles[static_cast<std::size_t>(bestTri)].mesh;
+    }
+    if (!skinned) {
+        // A STATIC model has no joint to name: the hit itself — where, and on which zone — is
+        // the answer (a click on a prop selects that zone on the Materials tab). Left to the
+        // weight vote below, which no joint of a boneless model can win, the hit was reported
+        // as a miss and the tab stayed on the first zone.
+        tOut = best;
+        hitWorld = ray.origin + dir * best;
+        bone = -1;
+        return true;
     }
     // The bone: the joint that weighs most on the skin at the hit — the corners' weights blended
     // by the hit's barycentric coordinates.

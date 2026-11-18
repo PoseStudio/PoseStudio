@@ -3,11 +3,13 @@
  * @brief The format-neutral CPU-side geometry every model importer produces and the renderer
  *        consumes — a Model made of per-material Meshes.
  *
- * This is the contract between the import/ subsystem and scene/: importers (import/meshimporter.h,
- * import/obj/…, and the figure service's FigureData conversion) fill a ModelData; the Qt-facing
- * ModelImportService::decodeModelTextures decodes its textures; Scene turns it into device buffers
- * (scene/mesh.h). Pure data + std + GLM — no Vulkan, no Qt — so importers stay trivially testable
- * and the type carries no format identity of its own.
+ * This is the contract between the import/ subsystem and scene/: the readers (import/obj/ behind
+ * import/meshimporter.h; the rigged-character readers import/fbx/, gltf/ and usd/; the figure
+ * service's FigureData conversion) fill a ModelData; the Qt-facing decode layer
+ * (viewport/texturedecode.h: decodeModelTextures) decodes its textures; Scene turns it into
+ * device buffers (scene/mesh.h). Pure data + std + GLM — no Qt, and no Vulkan beyond the vertex layout's
+ * description in vertex.h — so importers stay trivially testable and the type carries no format
+ * identity of its own.
  */
 
 #ifndef MODELDATA_H
@@ -25,11 +27,11 @@
 
 namespace pose {
 
-/// Where a mesh's diffuse image comes from. An importer sets exactly one of these (or neither, for
-/// an untextured mesh): an external file that lives on disk (Wavefront .mtl map_Kd, resolved to an
-/// absolute path), or encoded image bytes embedded inside the model file itself (e.g. a texture
-/// packed into a .glb). The Qt layer decodes whichever is present via QImage, so the Qt-free
-/// renderer never needs an image codec regardless of how the source arrived.
+/// Where one of a mesh's texture maps comes from. An importer sets exactly one of these (or
+/// neither, for a slot without a map): an external file that lives on disk (a Wavefront .mtl's
+/// map_Kd, resolved to an absolute path), or encoded image bytes embedded inside the model file
+/// itself (e.g. a texture packed into a .glb). The Qt layer decodes whichever is present via
+/// QImage, so the Qt-free renderer never needs an image codec regardless of how the source arrived.
 struct TextureSource {
     std::string          path;    ///< Resolved external file; empty if embedded/none.
     std::vector<uint8_t> encoded; ///< Embedded encoded image bytes (PNG/JPEG/…); empty if path/none.
@@ -50,8 +52,9 @@ struct DecodedImage {
 };
 using DecodedImagePtr = std::shared_ptr<const DecodedImage>;
 
-/// One material group of an imported model: a self-contained triangle mesh, its diffuse base color,
-/// and (optionally) its diffuse texture.
+/// One material group (zone) of an imported model: a self-contained triangle mesh and its material
+/// as the file gives it — the canonical material's values (scene/materialparams.h has the model)
+/// and, per texture slot, where the map comes from and, once the decode layer has run, its image.
 struct MeshData {
     std::vector<Vertex>   vertices;
     std::vector<uint32_t> indices;
@@ -77,7 +80,7 @@ struct MeshData {
     glm::vec3             baseColor{0.6376f, 0.6376f, 0.6376f};
 
     // Diffuse texture source (an external path or embedded bytes; see TextureSource). The Qt layer
-    // (ModelImportService::decodeModelTextures) decodes each unique source ONCE into a shared
+    // (decodeModelTextures, viewport/texturedecode.h) decodes each unique source ONCE into a shared
     // DecodedImage so the Qt-free renderer never needs an image codec. Null image => untextured.
     // When hasOpacityMask is set, the image's alpha channel carries the baked opacity mask.
     TextureSource         diffuse;
@@ -155,7 +158,7 @@ struct MeshData {
     // Specular parameter maps (both LINEAR, sampled .r): the roughness map multiplies the scalar
     // roughness per texel; the spec-mask map multiplies specularWeight per texel (the decode layer
     // switches specularWeight to the material's undiscounted fold when the mask decodes — see
-    // MaterialRefs::specularWeightWithMap). Null => 1x1 white fallback (scalar behaviour).
+    // specularWeightWithMap below). Null => 1x1 white fallback (scalar behaviour).
     TextureSource         roughnessMap;
     DecodedImagePtr       roughnessImage;
     /// Which channel of the roughness map carries the roughness: 0 red (the native figures' and
@@ -172,12 +175,10 @@ struct MeshData {
     /// USD metalness texture, an MTL's map_Pm. It rides the roughness texture's GREEN channel —
     /// the decode layer builds one parameter image per (roughness map, metalness map) pair with
     /// the roughness in red and the metalness in green (255 where a map is absent, so the
-    /// shader's per-texel multiplies are no-ops) — and sets hasMetalnessMap. `metalness` is the
-    /// factor the texel multiplies (1 with a map and no factor).
+    /// shader's per-texel multiplies are no-ops). `metalness` is the factor the texel multiplies
+    /// (1 with a map and no factor).
     TextureSource         metalnessMap;
     int                   metalnessChannel = 0;
-    bool                  hasMetalnessMap = false; // set by the decode layer: the parameter map carries a metalness
-    bool                  hasRoughnessMap = false; // set by the decode layer: the parameter map carries a roughness (a map, or a baked glossiness)
     /// A SPECULAR / GLOSSINESS source (import/specgloss.h), converted at import: the reader sets
     /// convertSpecGloss with the maps and factors of the older convention — the diffuse map is
     /// `diffuse` above with `diffuseFactor` on it, the specular color map (sRGB) and its factor,
@@ -186,7 +187,7 @@ struct MeshData {
     /// maps present the decode layer bakes the solve per texel into a base-color map and a
     /// metalness map (and a roughness map from a glossiness map) in their place.
     bool                  convertSpecGloss = false;
-    glm::vec4             diffuseFactor{1.0f};        // linear RGB × the diffuse map, alpha × its alpha
+    glm::vec4             diffuseFactor{1.0f};        // linear RGB × the diffuse map (the diffuse itself without one), alpha × its alpha
     TextureSource         specularColorMap;
     glm::vec3             specularColorFactor{1.0f};  // linear, × the specular map (the F0 itself untextured)
     TextureSource         glossinessMap;
@@ -321,9 +322,11 @@ struct CorrectiveKnot {
     float y = 0.0f;
 };
 
-/// One operation of a corrective formula — a tiny stack program evaluated at pose time. The native
-/// base correctives use only this vocabulary: push a driver angle / a constant, a driver spline, and
-/// multiply/add.
+/// One operation of a corrective formula — a tiny stack program evaluated at pose time: push a
+/// driver angle or a constant, run a driver through a spline (smooth, or straight segments), and
+/// multiply / add. It is all the engine evaluates; whatever else a source formula uses (a
+/// reciprocal, a negation, a step spline) is folded to constants by the importer, or the
+/// corrective is refused there.
 struct CorrectiveOp {
     enum class Kind {
         PushRotation, ///< Push driver joint `bone`'s current Euler angle (degrees) about `axis`.
@@ -337,6 +340,7 @@ struct CorrectiveOp {
     int                         axis  = 0;     ///< PushRotation: 0=x, 1=y, 2=z (rotation/{x,y,z}).
     float                       value = 0.0f;  ///< PushConst: the constant.
     std::vector<CorrectiveKnot> knots;         ///< Spline: driver→weight knots (ascending in x).
+    bool                        linear = false; ///< Spline: straight segments (spline_linear), not the smooth spline.
 };
 
 /// One driver formula: a stack program yielding a scalar contribution.

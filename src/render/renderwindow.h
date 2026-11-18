@@ -41,13 +41,9 @@ public:
 
     /// The process's Render window, created on first call (owned by @p owner), shown and raised.
     static RenderWindow* open(QWidget* owner);
-    /// The window if it exists (it may be hidden), else null.
-    static RenderWindow* existing();
 
     /// Where a render's scene comes from. Set once, before the first render.
     void setSceneSource(SceneSource source) { m_source = std::move(source); }
-
-    RenderSession* session() { return &m_session; }
 
 public slots:
     /// Captures the scene and starts a render with the window's settings (a running render is

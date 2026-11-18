@@ -5,8 +5,10 @@
  *
  * Two pipelines against the mask's render pass: the meshes' (shadow.vert's skinned position-only
  * vertex shader, projected by the camera through its push matrix, + outlinemask.frag writing
- * coverage 1) and, since 2026-11-05, the Gaussian splats' (splat.vert + splatmask.frag: the
- * selected cloud's quads as hard coverage over an opacity threshold), so a selected capture wears
+ * coverage 1) and the Gaussian splats' (splat.vert + splatmask.frag: the selected cloud's quads
+ * blended into the mask by their opacity, so the mask ends as the capture's total opacity per
+ * pixel and the composite outlines its half contour — stamped as hard coverage over a threshold,
+ * every hole and island between splats wore an outline of its own), so a selected capture wears
  * the outline like any model. Pure Vulkan + std, no Qt.
  */
 

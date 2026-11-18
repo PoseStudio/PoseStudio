@@ -39,10 +39,8 @@ AssetGridDragController::~AssetGridDragController() {
     // dies mid-drag (widget teardown) must take it down itself, and synchronously (deleteLater
     // needs an event loop that may already be gone).
     if (m_scrollTimer) m_scrollTimer->stop();
-    delete m_dragPreview;
-    m_dragPreview = nullptr;
-    delete m_dropLine;
-    m_dropLine = nullptr;
+    delete m_dragPreview.data();
+    delete m_dropLine.data(); // (null already when the grid went first)
 }
 
 bool AssetGridDragController::handleMouseEvent(QMouseEvent* me) {
@@ -99,6 +97,14 @@ bool AssetGridDragController::handleMouseEvent(QMouseEvent* me) {
         return false;
     }
     case QEvent::MouseMove: {
+        // A move with the left button UP while a drag is live: its release never reached us (a
+        // modal dialog opened over the drag, a popup's grab, the user switched windows). The
+        // drag is over: left alone, the ghost stayed on screen, the grid's hover stayed off and
+        // the edge auto-scroll ran on until the next press.
+        if (m_dragging && !(me->buttons() & Qt::LeftButton)) {
+            cancel();
+            return false;
+        }
         if (!((me->buttons() & Qt::LeftButton) && m_dragItem)) return false;
         if (!m_dragging &&
             (me->pos() - m_dragStartPos).manhattanLength() >= QApplication::startDragDistance()) {

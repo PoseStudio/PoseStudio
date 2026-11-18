@@ -5,6 +5,8 @@
  */
 
 #include "usdfigureimporter.h"
+#include "asciilower.h"
+#include "meshrepair.h"
 #include "specgloss.h"
 
 #include <lightusd.hh>
@@ -17,6 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -111,7 +114,7 @@ public:
         }
         m_packaged = true;
         for (const auto& [name, span] : m_asset.asset_map) {
-            m_byName.emplace(lowerCopy(fs::path(name).filename().string()), name);
+            m_byName.emplace(asciiLower(fs::path(name).filename().string()), name);
         }
     }
 
@@ -126,17 +129,21 @@ public:
         if (m_packaged) {
             auto it = m_asset.asset_map.find(identifier);
             if (it == m_asset.asset_map.end()) {
-                const auto byName = m_byName.find(lowerCopy(fs::path(identifier).filename().string()));
+                const auto byName = m_byName.find(asciiLower(fs::path(identifier).filename().string()));
                 if (byName != m_byName.end()) {
                     it = m_asset.asset_map.find(byName->second);
                 }
             }
             if (it != m_asset.asset_map.end()) {
-                const auto [offset, size] = it->second;
+                // The package's table gives an asset's bytes as where they BEGIN and where they END
+                // (lightusd.hh: "byte begin/end in USDZ data"). Read as a begin and a length, an
+                // image came with every byte that follows it in the package — and one in the
+                // package's second half, whose begin + end runs past the file, was not found at all.
+                const auto [begin, end] = it->second;
                 const uint8_t* base = m_asset.is_mmaped() ? m_asset.addr : m_asset.data.data();
                 const std::size_t total = m_asset.is_mmaped() ? m_asset.size : m_asset.data.size();
-                if (base != nullptr && offset + size <= total && size > 0) {
-                    out.encoded.assign(base + offset, base + offset + size);
+                if (base != nullptr && begin < end && end <= total) {
+                    out.encoded.assign(base + begin, base + end);
                     if (m_info != nullptr) {
                         ++m_info->embeddedTextures;
                     }
@@ -474,6 +481,12 @@ ModelData UsdFigureImporter::load(const std::string& path, RiggedImportInfo* inf
         };
         const std::vector<uint32_t>& fvMap = mesh.triangulatedToOrigFaceVertexIndexMap; // (a facevarying attribute's element for a triangulated corner)
         const auto corner = [&](std::size_t i) { return i < fvMap.size() ? fvMap[i] : static_cast<uint32_t>(i); };
+        std::size_t              fvStart = 0; // (the first face-vertex of each face: faces are consecutive)
+        std::vector<std::size_t> faceStart(faceCount, 0);
+        for (std::size_t f = 0; f < faceCount; ++f) {
+            faceStart[f] = fvStart;
+            fvStart += fvc[f];
+        }
         for (const auto& [materialId, faces] : facesOfMaterial) {
             MeshData                   out;
             const ty::VertexAttribute* uvAttr = uvSlotFor(materialId);
@@ -481,12 +494,6 @@ ModelData UsdFigureImporter::load(const std::string& path, RiggedImportInfo* inf
             const bool                 haveNormals = !nAttr.empty();
             const bool                 haveUv = uvAttr != nullptr && !uvAttr->empty();
             std::unordered_map<CornerKey, uint32_t, CornerKeyHash> corners;
-            std::size_t fvStart = 0; // (the first face-vertex of each face: faces are consecutive)
-            std::vector<std::size_t> faceStart(faceCount, 0);
-            for (std::size_t f = 0; f < faceCount; ++f) {
-                faceStart[f] = fvStart;
-                fvStart += fvc[f];
-            }
             for (const std::size_t f : faces) {
                 const uint32_t count = fvc[f];
                 if (count < 3) {
@@ -495,14 +502,18 @@ ModelData UsdFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                 // (triangulated meshes have three; a non-triangulated one is fanned)
                 for (uint32_t t = 1; t + 1 < count; ++t) {
                     const std::size_t cornerIndices[3] = {faceStart[f], faceStart[f] + t, faceStart[f] + t + 1};
+                    // A corner outside the face-vertex list or the points (a damaged file): the
+                    // triangle is left out WHOLE — one corner skipped alone would shift every
+                    // later triangle of the zone by an index.
+                    bool sound = true;
                     for (const std::size_t ci : cornerIndices) {
-                        if (ci >= fvi.size()) {
-                            continue;
-                        }
+                        sound = sound && ci < fvi.size() && fvi[ci] < np;
+                    }
+                    if (!sound) {
+                        continue;
+                    }
+                    for (const std::size_t ci : cornerIndices) {
                         const uint32_t p = fvi[ci];
-                        if (p >= np) {
-                            continue;
-                        }
                         const uint32_t nIndex = !haveNormals ? 0u : (nAttr.is_facevarying() ? corner(ci) : (nAttr.is_vertex() ? p : 0u));
                         const uint32_t uvIndex = !haveUv ? 0u : (uvAttr->is_facevarying() ? corner(ci) : (uvAttr->is_vertex() ? p : 0u));
                         const CornerKey key{p, nIndex, uvIndex};
@@ -605,6 +616,11 @@ ModelData UsdFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                         const glm::vec3 diffuse = out.diffuse.empty() ? out.baseColor : glm::vec3(0.8f);
                         const MetallicRoughness mr = convertSpecGloss(diffuse, specular, glossiness);
                         out.convertSpecGloss = true;
+                        if (out.diffuse.empty()) {
+                            // (No diffuse map: the per-texel bake a specular map brings takes its
+                            // diffuse from this factor — left at white, the material's color was lost.)
+                            out.diffuseFactor = glm::vec4(diffuse, 1.0f);
+                        }
                         out.specularColorFactor = s.specularColor.is_texture() ? glm::vec3(1.0f) : specular;
                         if (s.specularColor.is_texture()) {
                             out.specularColorMap = textureOf(s.specularColor.texture_id, nullptr);

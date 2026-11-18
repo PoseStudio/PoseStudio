@@ -6,14 +6,13 @@
 #include "splatimportservice.h"
 
 #include "model.h"
-#include "modelimportservice.h" // ImportProgress
+#include "importprogress.h"
 #include "scene.h"
 #include "splatimporter.h"
 #include "vulkanrenderer.h"
 
 #include <QDebug>
 #include <QFileInfo>
-#include <QMessageBox>
 #include <QObject>
 
 #include <exception>
@@ -21,10 +20,11 @@
 namespace pose {
 
 bool SplatImportService::importInto(VulkanRenderer& renderer, const QString& path, bool showProgress) {
-    ModelImportService::ImportProgress progress(showProgress, QObject::tr("Import Gaussian Splat"),
-                                                QObject::tr("Reading the splats…"));
     try {
-        SplatData data = loadSplatFile(path.toStdString());
+        // (The progress dialog lives INSIDE the try: built outside it, as it was, the modal busy
+        // dialog was still up under the failure message.)
+        ImportProgress progress(showProgress, QObject::tr("Import Gaussian Splat"), QObject::tr("Reading the splats…"));
+        SplatData      data = loadSplatFile(path.toStdString());
         progress.parsed();
         if (data.count() == 0) {
             throw std::runtime_error("the file holds no splats");
@@ -49,13 +49,14 @@ bool SplatImportService::importInto(VulkanRenderer& renderer, const QString& pat
                                  .arg(data.shDegree)
                                  .arg(progress.parseMs())
                                  .arg(progress.elapsedMs());
+        if (data.droppedNonFinite > 0) {
+            qInfo().noquote() << QStringLiteral("[splat]   %1 splats with a value that is not a number (NaN or infinity) were left out")
+                                     .arg(static_cast<qulonglong>(data.droppedNonFinite));
+        }
         return true;
     } catch (const std::exception& e) {
         qWarning().noquote() << QStringLiteral("[splat] import failed: %1").arg(QString::fromUtf8(e.what()));
-        if (showProgress) {
-            QMessageBox::warning(nullptr, QObject::tr("Import Gaussian Splat"),
-                                 QObject::tr("The splat scene could not be imported.\n\n%1").arg(QString::fromUtf8(e.what())));
-        }
+        reportImportFailure(showProgress, QObject::tr("Import Gaussian Splat"), path, QString::fromUtf8(e.what()));
         return false;
     }
 }

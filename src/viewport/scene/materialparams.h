@@ -17,6 +17,10 @@
  * A plain-data contract between the scene and the properties panel, like JointTransform: the
  * scene fills a MaterialView from the selected model (Scene::materialView), the viewport hands
  * it out, the panel mirrors it into its rows and sends MaterialParams back. Qt-free.
+ *
+ * This header is the DATA and what is trivial about it; the name tables, the fields' display
+ * values and setters and the comparisons are defined in materialparams.cpp (most of the viewport
+ * includes this header, and a table edited here rebuilt all of it).
  */
 
 #ifndef MATERIALPARAMS_H
@@ -30,7 +34,6 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -55,7 +58,7 @@ enum class MaterialMap {
     // no set-1 binding — EXCEPT the seven materialMapIsRendered names (the coat weight and
     // roughness, the sheen weight and color, the thin-film thickness, the ambient occlusion and
     // the transmission weight), packed into two bindings the same day. Add a slot here (and its
-    // name below, its MeshData field, the importers that carry it, a tab row).
+    // name in materialMapName, its MeshData field, the importers that carry it, a tab row).
     DiffuseRoughness, ///< grayscale: multiplies Diffuse Roughness per texel
     CoatWeight,       ///< grayscale: multiplies the top coat's weight per texel
     CoatColor,        ///< sRGB: the top coat's tint map
@@ -100,34 +103,11 @@ constexpr const char* kImportedTexture = "@imported";
 constexpr const char* kTextureChannelMark = "?channel=";
 
 /// @p path as a slot's source read from @p channel (0 red … 3 alpha): the path itself for 0.
-inline std::string textureSourceWithChannel(const std::string& path, int channel) {
-    if (channel <= 0 || channel > 3 || path.empty() || path == kImportedTexture) {
-        return path;
-    }
-    return path + kTextureChannelMark + "rgba"[channel];
-}
+std::string textureSourceWithChannel(const std::string& path, int channel);
 
 /// The file a slot's source names, without its channel mark; @p channel (when given) is the
 /// channel it names, 0 where it names none.
-inline std::string textureSourcePath(const std::string& source, int* channel = nullptr) {
-    if (channel != nullptr) {
-        *channel = 0;
-    }
-    const std::string mark(kTextureChannelMark);
-    const std::size_t at = source.rfind(mark);
-    if (at == std::string::npos || at + mark.size() + 1 != source.size()) {
-        return source;
-    }
-    const char letter = source.back();
-    const int  index = letter == 'r' ? 0 : letter == 'g' ? 1 : letter == 'b' ? 2 : letter == 'a' ? 3 : -1;
-    if (index < 0) {
-        return source;
-    }
-    if (channel != nullptr) {
-        *channel = index;
-    }
-    return source.substr(0, at);
-}
+std::string textureSourcePath(const std::string& source, int* channel = nullptr);
 
 struct MaterialTextureRef {
     std::string source; ///< "", kImportedTexture, or a file path (which may end in a channel mark: textureSourcePath)
@@ -141,46 +121,30 @@ struct MaterialTextureRef {
 /// anisotropyrotation, lobe2, loberatio, detailweight, detailroughness, displacement, ao, transmissioncolor,
 /// transmissionweight, coatanisotropy, coatanisotropyrotation, sheen, sheencolor, sheenroughness, thinfilm,
 /// thinfilmthickness.
-inline const char* materialMapName(MaterialMap map) {
+const char* materialMapName(MaterialMap map);
+/// Whether a slot's map is ONE VALUE a texel — a weight, a roughness, a height, a mask: read
+/// through one channel of its image, which may be an image that packs several such maps — or a
+/// color or a normal, read whole. (What the enum's comments call "grayscale".) The Materials tab
+/// shows a scalar slot's picture as that channel in grey: the map the zone uses, not the packed
+/// image it rides in.
+inline bool materialMapIsScalar(MaterialMap map) {
     switch (map) {
-    case MaterialMap::BaseColor: return "basecolor";
-    case MaterialMap::Normal: return "normal";
-    case MaterialMap::Bump: return "bump";
-    case MaterialMap::Roughness: return "roughness";
-    case MaterialMap::Metalness: return "metalness";
-    case MaterialMap::SpecularMask: return "specmask";
-    case MaterialMap::Translucency: return "translucency";
-    case MaterialMap::Emission: return "emission";
-    case MaterialMap::PoreDetail: return "pore";
-    case MaterialMap::Opacity: return "cutout";
-    case MaterialMap::DiffuseRoughness: return "diffuseroughness";
-    case MaterialMap::CoatWeight: return "coatweight";
-    case MaterialMap::CoatColor: return "coatcolor";
-    case MaterialMap::CoatRoughness: return "coatroughness";
-    case MaterialMap::CoatReflectivity: return "coatreflectivity";
-    case MaterialMap::CoatBump: return "coatbump";
-    case MaterialMap::TranslucencyWeight: return "translucencyweight";
-    case MaterialMap::SpecularColor: return "specularcolor";
-    case MaterialMap::Anisotropy: return "anisotropy";
-    case MaterialMap::AnisotropyRotation: return "anisotropyrotation";
-    case MaterialMap::Lobe2Roughness: return "lobe2";
-    case MaterialMap::LobeRatio: return "loberatio";
-    case MaterialMap::DetailWeight: return "detailweight";
-    case MaterialMap::DetailRoughness: return "detailroughness";
-    case MaterialMap::Displacement: return "displacement";
-    case MaterialMap::AmbientOcclusion: return "ao";
-    case MaterialMap::TransmissionColor: return "transmissioncolor";
-    case MaterialMap::TransmissionWeight: return "transmissionweight";
-    case MaterialMap::CoatAnisotropy: return "coatanisotropy";
-    case MaterialMap::CoatAnisotropyRotation: return "coatanisotropyrotation";
-    case MaterialMap::SheenWeight: return "sheen";
-    case MaterialMap::SheenColor: return "sheencolor";
-    case MaterialMap::SheenRoughness: return "sheenroughness";
-    case MaterialMap::ThinFilmWeight: return "thinfilm";
-    case MaterialMap::ThinFilmThickness: return "thinfilmthickness";
-    default: return "";
+    case MaterialMap::BaseColor:
+    case MaterialMap::Normal:
+    case MaterialMap::Translucency:
+    case MaterialMap::Emission:
+    case MaterialMap::PoreDetail:
+    case MaterialMap::CoatColor:
+    case MaterialMap::CoatBump:
+    case MaterialMap::SpecularColor:
+    case MaterialMap::TransmissionColor:
+    case MaterialMap::SheenColor:
+        return false;
+    default:
+        return true;
     }
 }
+
 /// Whether the viewport SAMPLES a slot (it has a set-1 binding and an uploaded texture) or only
 /// stores it for a renderer. A stored-only slot is decoded for its thumbnail and nothing else.
 inline bool materialMapIsRendered(MaterialMap map) {
@@ -202,15 +166,8 @@ inline bool materialMapIsRendered(MaterialMap map) {
         return static_cast<int>(map) < static_cast<int>(MaterialMap::DiffuseRoughness); // the stored-only slots follow it
     }
 }
-inline bool materialMapByName(const std::string& name, MaterialMap& out) {
-    for (int i = 0; i < kMaterialMapCount; ++i) {
-        if (name == materialMapName(static_cast<MaterialMap>(i))) {
-            out = static_cast<MaterialMap>(i);
-            return true;
-        }
-    }
-    return false;
-}
+/// The inverse of materialMapName; false for an unknown name.
+bool materialMapByName(const std::string& name, MaterialMap& out);
 
 /// The editable material values of one zone. Colors are LINEAR; weights are 0..1 unless said.
 struct MaterialParams {
@@ -334,112 +291,50 @@ struct MaterialParams {
     /// Sets the roughness the way the tab's slider does: the two lobes of a dual-lobe material
     /// scale with it, so a skin material stays a skin material (its broad and its tight lobe keep
     /// their ratio to the blended value) rather than collapsing to one lobe.
-    void setRoughness(float r) {
-        r = std::clamp(r, 0.0f, 1.0f);
-        if (lobeRatio < 1.0f && roughness > 1.0e-3f) {
-            const float k = r / roughness;
-            lobe1Roughness = std::clamp(lobe1Roughness * k, 0.0f, 1.0f);
-            lobe2Roughness = std::clamp(lobe2Roughness * k, 0.0f, 1.0f);
-        } else {
-            lobe1Roughness = r;
-            lobe2Roughness = r;
-        }
-        roughness = r;
-    }
+    void setRoughness(float r);
 
     /// The single-lobe roughness as the blend of the two lobes by their ratio (the import's own
     /// rule), after a lobe or the ratio is edited directly. A dual-lobe material only.
-    void blendLobes() {
-        if (lobeRatio < 1.0f) {
-            roughness = std::clamp(lobeRatio * lobe1Roughness + (1.0f - lobeRatio) * lobe2Roughness, 0.0f, 1.0f);
-        } else {
-            roughness = lobe1Roughness;
-        }
-    }
+    void blendLobes();
 
-    /// Whether the material has two specular lobes (the skin extension): the tab's lobe rows.
+    /// Whether the material has two specular lobes (the skin extension) — the ONE test of it:
+    /// mesh.frag's own threshold, the tab's lobe rows, and what setRoughness and blendLobes go by.
     bool dualLobe() const { return lobeRatio < 0.999f; }
 
     /// Exact equality of every VALUE (the maps excluded): "has the material been edited".
-    bool sameValues(const MaterialParams& o) const {
-        return baseColor == o.baseColor && metalness == o.metalness && diffuseRoughness == o.diffuseRoughness &&
-               specular == o.specular && specularColor == o.specularColor && roughness == o.roughness && ior == o.ior &&
-               anisotropy == o.anisotropy && anisotropyRotation == o.anisotropyRotation && transmission == o.transmission &&
-               transmissionColor == o.transmissionColor && transmissionDepth == o.transmissionDepth && dispersion == o.dispersion &&
-               transmissionRoughness == o.transmissionRoughness && thinWalled == o.thinWalled && translucency == o.translucency && subsurfaceColor == o.subsurfaceColor &&
-               subsurfaceRadius == o.subsurfaceRadius && subsurfaceRadiusColor == o.subsurfaceRadiusColor &&
-               subsurfaceAnisotropy == o.subsurfaceAnisotropy && sheen == o.sheen && sheenColor == o.sheenColor &&
-               sheenRoughness == o.sheenRoughness && topCoat == o.topCoat && topCoatRoughness == o.topCoatRoughness &&
-               coatColor == o.coatColor && coatIor == o.coatIor && coatBumpStrength == o.coatBumpStrength && thinFilm == o.thinFilm &&
-               coatAnisotropy == o.coatAnisotropy && coatAnisotropyRotation == o.coatAnisotropyRotation && uvRotation == o.uvRotation &&
-               doubleSided == o.doubleSided && flipNormal == o.flipNormal && topCoatEnabled == o.topCoatEnabled && sheenEnabled == o.sheenEnabled && thinFilmEnabled == o.thinFilmEnabled && transmissionEnabled == o.transmissionEnabled && subsurfaceEnabled == o.subsurfaceEnabled && emissionEnabled == o.emissionEnabled && displacementEnabled == o.displacementEnabled && detailEnabled == o.detailEnabled && baseEnabled == o.baseEnabled && specularEnabled == o.specularEnabled && geometryEnabled == o.geometryEnabled && tilingEnabled == o.tilingEnabled &&
-               smoothByAngle == o.smoothByAngle && smoothAngle == o.smoothAngle &&
-               thinFilmThickness == o.thinFilmThickness && thinFilmIor == o.thinFilmIor && emissionColor == o.emissionColor &&
-               emission == o.emission && opacity == o.opacity && normalStrength == o.normalStrength &&
-               bumpStrength == o.bumpStrength && detailWeight == o.detailWeight && detailTiles == o.detailTiles &&
-               detailTilesV == o.detailTilesV && detailOffset == o.detailOffset && detailRoughness == o.detailRoughness &&
-               displacementStrength == o.displacementStrength && displacementMidLevel == o.displacementMidLevel &&
-               displacementSubdiv == o.displacementSubdiv && aoWeight == o.aoWeight &&
-               uvTiling == o.uvTiling && uvOffset == o.uvOffset && lobe1Roughness == o.lobe1Roughness &&
-               lobe2Roughness == o.lobe2Roughness && lobeRatio == o.lobeRatio;
-    }
+    bool sameValues(const MaterialParams& o) const;
     bool operator==(const MaterialParams& o) const { return sameValues(o) && maps == o.maps && overlays == o.overlays; }
     bool operator!=(const MaterialParams& o) const { return !(*this == o); }
 
     /// Equal to within @p eps on every VALUE — "the same material" for the tab's linked zones (a
     /// figure's skin zones carry one preset's values with different maps per zone, its eyes and
     /// mouth other values). The maps are not compared.
-    bool nearlyEqual(const MaterialParams& o, float eps = 1.0e-4f) const {
-        const auto close = [eps](float a, float b) { return std::abs(a - b) <= eps; };
-        const auto close3 = [&](const glm::vec3& a, const glm::vec3& b) {
-            return close(a.x, b.x) && close(a.y, b.y) && close(a.z, b.z);
-        };
-        return close3(baseColor, o.baseColor) && close(metalness, o.metalness) && close(diffuseRoughness, o.diffuseRoughness) &&
-               close(specular, o.specular) && close3(specularColor, o.specularColor) && close(roughness, o.roughness) &&
-               close(ior, o.ior) && close(anisotropy, o.anisotropy) && close(anisotropyRotation, o.anisotropyRotation) &&
-               close(transmission, o.transmission) && close3(transmissionColor, o.transmissionColor) &&
-               close(transmissionDepth, o.transmissionDepth) && close(dispersion, o.dispersion) &&
-               close(transmissionRoughness, o.transmissionRoughness) && thinWalled == o.thinWalled &&
-               close(translucency, o.translucency) && close3(subsurfaceColor, o.subsurfaceColor) &&
-               close(subsurfaceRadius, o.subsurfaceRadius) && close3(subsurfaceRadiusColor, o.subsurfaceRadiusColor) &&
-               close(subsurfaceAnisotropy, o.subsurfaceAnisotropy) && close(sheen, o.sheen) && close3(sheenColor, o.sheenColor) &&
-               close(sheenRoughness, o.sheenRoughness) && close(topCoat, o.topCoat) && close(topCoatRoughness, o.topCoatRoughness) &&
-               close3(coatColor, o.coatColor) && close(coatIor, o.coatIor) && close(coatBumpStrength, o.coatBumpStrength) &&
-               close(coatAnisotropy, o.coatAnisotropy) && close(coatAnisotropyRotation, o.coatAnisotropyRotation) &&
-               close(uvRotation, o.uvRotation) && doubleSided == o.doubleSided && flipNormal == o.flipNormal && topCoatEnabled == o.topCoatEnabled && sheenEnabled == o.sheenEnabled && thinFilmEnabled == o.thinFilmEnabled && transmissionEnabled == o.transmissionEnabled && subsurfaceEnabled == o.subsurfaceEnabled && emissionEnabled == o.emissionEnabled && displacementEnabled == o.displacementEnabled && detailEnabled == o.detailEnabled && baseEnabled == o.baseEnabled && specularEnabled == o.specularEnabled && geometryEnabled == o.geometryEnabled && tilingEnabled == o.tilingEnabled &&
-               close(thinFilm, o.thinFilm) &&
-               close(thinFilmThickness, o.thinFilmThickness) && close(thinFilmIor, o.thinFilmIor) &&
-               close3(emissionColor, o.emissionColor) && close(emission, o.emission) && close(opacity, o.opacity) &&
-               close(normalStrength, o.normalStrength) && close(bumpStrength, o.bumpStrength) && close(detailWeight, o.detailWeight) &&
-               close(detailTiles, o.detailTiles) && close(detailTilesV, o.detailTilesV) && close(detailOffset.x, o.detailOffset.x) &&
-               close(detailOffset.y, o.detailOffset.y) && close(detailRoughness, o.detailRoughness) &&
-               close(displacementStrength, o.displacementStrength) && close(displacementMidLevel, o.displacementMidLevel) &&
-               close(displacementSubdiv, o.displacementSubdiv) && close(aoWeight, o.aoWeight) &&
-               close(uvTiling.x, o.uvTiling.x) && close(uvTiling.y, o.uvTiling.y) &&
-               close(uvOffset.x, o.uvOffset.x) && close(uvOffset.y, o.uvOffset.y) && close(lobe1Roughness, o.lobe1Roughness) &&
-               close(lobe2Roughness, o.lobe2Roughness) && close(lobeRatio, o.lobeRatio);
-    }
+    bool nearlyEqual(const MaterialParams& o, float eps = 1.0e-4f) const;
 };
+
+/// Holds every value of @p p to the range it can take. For a material that comes from a FILE,
+/// whose numbers no row of the tab has clamped: each value is held to what its row allows
+/// (setMaterialField), widened to what an importer or the struct's default legitimately holds
+/// beyond that — a detail layer's tile count of 0 (none), a normal strength of 8, a mirrored
+/// tiling, a transmission roughness of -1 (the surface's own). A value inside its range is left
+/// bit for bit; one that is not a number becomes its range's low end. The colors are held to
+/// 0 and up; the switches, the maps and the overlays are not touched (clampMaterialOverlay).
+void clampMaterialParams(MaterialParams& p);
+
+/// A FILE'S MATERIAL OVER A ZONE'S OWN. A material read from a file is the values the file
+/// NAMES; a value it does not name — the file was written by a build that did not know the value
+/// yet — is not the struct's default but whatever stood before: for a project's zone, the
+/// re-imported zone's own. This is @p base with the values of @p values put over it for the
+/// keys in @p named (the material's JSON keys: "roughness", "ior", "uvTiling", …; a key that
+/// is no value of a material is passed over), the maps and the overlays @p base's.
+/// (Defined in materialjson.cpp: it goes through the material's one codec, so which values a
+/// material HAS is listed nowhere else. A caller links that file.)
+MaterialParams materialWithNamedValues(const MaterialParams& base, const MaterialParams& values, const std::vector<std::string>& named);
 
 /// Whether overlay @p o changes the image the viewport binds for slot @p map — its color the
 /// base color map, its gloss the roughness map, its bump and normal images theirs. (The
 /// displacement image is a renderer's: Displacement answers for an export, nothing is bound.)
-inline bool overlayAffects(const MaterialOverlay& o, MaterialMap map) {
-    if (!o.enabled) {
-        return false;
-    }
-    switch (map) {
-    // (The color is a picture, or a flat Base Color — through an opacity map, or over the whole
-    // map when it is not white; the gloss and the metal go wherever the overlay does.)
-    case MaterialMap::BaseColor: return overlayHasColor(o) && o.opacity > 0.0f;
-    case MaterialMap::Roughness: return o.gloss != 0.0f;
-    case MaterialMap::Metalness: return o.metallic != 0.0f;
-    case MaterialMap::Bump: return !o.bump.empty() && o.bumpStrength != 0.0f;
-    case MaterialMap::Normal: return !o.normal.empty() && o.normalStrength != 0.0f;
-    case MaterialMap::Displacement: return !o.displacement.empty() && o.displacementStrength != 0.0f;
-    default: return false;
-    }
-}
+bool overlayAffects(const MaterialOverlay& o, MaterialMap map);
 
 /// The slots an overlay stack is composited into FOR THE VIEWPORT, in the order they are rebound:
 /// the color map, the roughness map (the gloss), the metalness map (the metal — it shares the
@@ -454,71 +349,7 @@ constexpr std::array<MaterialMap, 4> kOverlaySlots = {MaterialMap::BaseColor, Ma
 /// same base, so a scrub of one control re-composites only the slot it changes (a hue scrub the
 /// color map, never the bump), and the zones of one map share one composite. @p bumpAsNormal
 /// (the viewport's Normal slot): the overlays' bump images count toward the normal map's.
-inline std::string overlaySignature(const std::vector<MaterialOverlay>& overlays, MaterialMap map, bool bumpAsNormal = false) {
-    std::string out;
-    char        buffer[256];
-    char        number[160];
-    for (const MaterialOverlay& o : overlays) {
-        // The overlay's PLACE moves every one of its images: its offset, its rotation, its scale
-        // — and, turned or scaled, the image it does so about (another anchor is another centre).
-        std::snprintf(number, sizeof(number), "@%a,%a,%a,%a", static_cast<double>(o.offset.x), static_cast<double>(o.offset.y),
-                      static_cast<double>(o.rotation), static_cast<double>(o.scale));
-        std::string place = number;
-        if (overlayTransformed(o)) {
-            place += '^';
-            place += overlayAnchorSource(o);
-        }
-        if (bumpAsNormal && map == MaterialMap::Normal && overlayAffects(o, MaterialMap::Bump)) {
-            std::snprintf(buffer, sizeof(buffer), "|bump %a|", static_cast<double>(o.bumpStrength));
-            out += o.bump;
-            out += buffer;
-            out += place;
-        }
-        if (!overlayAffects(o, map)) {
-            continue;
-        }
-        switch (map) {
-        case MaterialMap::BaseColor:
-            std::snprintf(buffer, sizeof(buffer), "|%d;%a;%a;%a;%a;%a;%a;%a;%a;%a|", static_cast<int>(o.blend),
-                          static_cast<double>(o.opacity), static_cast<double>(o.tint.x), static_cast<double>(o.tint.y),
-                          static_cast<double>(o.tint.z), static_cast<double>(o.brightness), static_cast<double>(o.contrast),
-                          static_cast<double>(o.gamma), static_cast<double>(o.hue), static_cast<double>(o.saturation));
-            out += o.color;
-            out += '~'; // (the opacity map: the shape of the color, the gloss and the metal)
-            out += o.opacityMap;
-            break;
-        case MaterialMap::Roughness:
-            std::snprintf(buffer, sizeof(buffer), "|%a|", static_cast<double>(o.gloss));
-            out += o.color;
-            out += '~';
-            out += o.opacityMap;
-            break;
-        case MaterialMap::Metalness:
-            std::snprintf(buffer, sizeof(buffer), "|%a|", static_cast<double>(o.metallic));
-            out += o.color;
-            out += '~';
-            out += o.opacityMap;
-            out += '&';
-            out += o.metallicMap;
-            break;
-        case MaterialMap::Bump:
-            std::snprintf(buffer, sizeof(buffer), "|%a|", static_cast<double>(o.bumpStrength));
-            out += o.bump;
-            break;
-        case MaterialMap::Normal:
-            std::snprintf(buffer, sizeof(buffer), "|%a|", static_cast<double>(o.normalStrength));
-            out += o.normal;
-            break;
-        default:
-            std::snprintf(buffer, sizeof(buffer), "|%a|", static_cast<double>(o.displacementStrength));
-            out += o.displacement;
-            break;
-        }
-        out += buffer;
-        out += place;
-    }
-    return out;
-}
+std::string overlaySignature(const std::vector<MaterialOverlay>& overlays, MaterialMap map, bool bumpAsNormal = false);
 
 /// The layered sections a header switch turns on or off (the switch is a material value: saved,
 /// undoable, linked across matching zones, restorable to the imported state).
@@ -620,225 +451,16 @@ enum class MaterialField {
 };
 
 /// A field's display value off @p p.
-inline float materialFieldValue(const MaterialParams& p, MaterialField field) {
-    switch (field) {
-    case MaterialField::Roughness: return p.roughness * 100.0f;
-    case MaterialField::Metallic: return p.metalness * 100.0f;
-    case MaterialField::Specular: return p.specular * 100.0f;
-    case MaterialField::NormalStrength: return p.normalStrength * 100.0f;
-    case MaterialField::PoreDetail: return p.detailWeight * 100.0f;
-    case MaterialField::PoreTiles: return p.detailTiles;
-    case MaterialField::Opacity: return p.opacity * 100.0f;
-    case MaterialField::Subsurface: return p.translucency * 100.0f;
-    case MaterialField::TopCoat: return p.topCoat * 100.0f;
-    case MaterialField::TopCoatRoughness: return p.topCoatRoughness * 100.0f;
-    case MaterialField::Ior: return p.ior;
-    case MaterialField::Anisotropy: return p.anisotropy * 100.0f;
-    case MaterialField::AnisotropyRotation: return p.anisotropyRotation;
-    case MaterialField::DiffuseRoughness: return p.diffuseRoughness * 100.0f;
-    case MaterialField::Transmission: return p.transmission * 100.0f;
-    case MaterialField::TransmissionDepth: return p.transmissionDepth * 100.0f; // cm
-    case MaterialField::Dispersion: return p.dispersion * 100.0f;
-    case MaterialField::SubsurfaceRadius: return p.subsurfaceRadius; // cm
-    case MaterialField::Sheen: return p.sheen * 100.0f;
-    case MaterialField::SheenRoughness: return p.sheenRoughness * 100.0f;
-    case MaterialField::CoatIor: return p.coatIor;
-    case MaterialField::ThinFilm: return p.thinFilm * 100.0f;
-    case MaterialField::ThinFilmThickness: return p.thinFilmThickness; // nm
-    case MaterialField::ThinFilmIor: return p.thinFilmIor;
-    case MaterialField::Emission: return p.emission;
-    case MaterialField::BumpStrength: return p.bumpStrength * 100.0f;
-    case MaterialField::TilingX: return p.uvTiling.x;
-    case MaterialField::TilingY: return p.uvTiling.y;
-    case MaterialField::OffsetX: return p.uvOffset.x;
-    case MaterialField::OffsetY: return p.uvOffset.y;
-    case MaterialField::CoatBumpStrength: return p.coatBumpStrength * 100.0f;
-    case MaterialField::Lobe1Roughness: return p.lobe1Roughness * 100.0f;
-    case MaterialField::Lobe2Roughness: return p.lobe2Roughness * 100.0f;
-    case MaterialField::LobeRatio: return p.lobeRatio * 100.0f;
-    case MaterialField::DetailRoughness: return p.detailRoughness * 100.0f;
-    case MaterialField::DetailTilesV: return p.detailTilesV;
-    case MaterialField::DetailOffsetU: return p.detailOffset.x;
-    case MaterialField::DetailOffsetV: return p.detailOffset.y;
-    case MaterialField::DisplacementStrength: return p.displacementStrength; // cm
-    case MaterialField::DisplacementMidLevel: return p.displacementMidLevel * 100.0f;
-    case MaterialField::DisplacementSubdiv: return p.displacementSubdiv;
-    case MaterialField::AmbientOcclusion: return p.aoWeight * 100.0f;
-    case MaterialField::SubsurfaceAnisotropy: return p.subsurfaceAnisotropy * 100.0f;
-    case MaterialField::CoatAnisotropy: return p.coatAnisotropy * 100.0f;
-    case MaterialField::CoatAnisotropyRotation: return p.coatAnisotropyRotation;
-    case MaterialField::TilingRotation: return p.uvRotation;
-    case MaterialField::TopCoatEnabled: return p.topCoatEnabled ? 1.0f : 0.0f;
-    case MaterialField::SheenEnabled: return p.sheenEnabled ? 1.0f : 0.0f;
-    case MaterialField::ThinFilmEnabled: return p.thinFilmEnabled ? 1.0f : 0.0f;
-    case MaterialField::TransmissionEnabled: return p.transmissionEnabled ? 1.0f : 0.0f;
-    case MaterialField::SubsurfaceEnabled: return p.subsurfaceEnabled ? 1.0f : 0.0f;
-    case MaterialField::EmissionEnabled: return p.emissionEnabled ? 1.0f : 0.0f;
-    case MaterialField::DisplacementEnabled: return p.displacementEnabled ? 1.0f : 0.0f;
-    case MaterialField::DetailEnabled: return p.detailEnabled ? 1.0f : 0.0f;
-    case MaterialField::BaseEnabled: return p.baseEnabled ? 1.0f : 0.0f;
-    case MaterialField::SpecularEnabled: return p.specularEnabled ? 1.0f : 0.0f;
-    case MaterialField::GeometryEnabled: return p.geometryEnabled ? 1.0f : 0.0f;
-    case MaterialField::TilingEnabled: return p.tilingEnabled ? 1.0f : 0.0f;
-    case MaterialField::ThinWalled: return p.thinWalled ? 1.0f : 0.0f;
-    case MaterialField::FlipNormal: return p.flipNormal ? 1.0f : 0.0f;
-    case MaterialField::SmoothByAngle: return p.smoothByAngle ? 1.0f : 0.0f;
-    case MaterialField::SmoothAngle: return p.smoothAngle;
-    default: return 0.0f;
-    }
-}
+float materialFieldValue(const MaterialParams& p, MaterialField field);
 
 /// The change a display value makes to @p p (clamped to what makes sense).
-inline void setMaterialField(MaterialParams& p, MaterialField field, float v) {
-    switch (field) {
-    case MaterialField::Roughness: p.setRoughness(v / 100.0f); break;
-    case MaterialField::Metallic: p.metalness = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case MaterialField::Specular: p.specular = std::max(0.0f, v / 100.0f); break;
-    case MaterialField::NormalStrength: p.normalStrength = std::clamp(v / 100.0f, 0.0f, 7.9f); break;
-    case MaterialField::PoreDetail: p.detailWeight = std::clamp(v / 100.0f, 0.0f, 0.99f); break;
-    case MaterialField::PoreTiles: p.detailTiles = std::clamp(std::round(v), 1.0f, 64.0f); break;
-    case MaterialField::Opacity: p.opacity = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case MaterialField::Subsurface: p.translucency = std::max(0.0f, v / 100.0f); break;
-    case MaterialField::TopCoat: p.topCoat = std::max(0.0f, v / 100.0f); break;
-    case MaterialField::TopCoatRoughness: p.topCoatRoughness = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case MaterialField::Ior: p.ior = std::clamp(v, 1.0f, 3.0f); break;
-    case MaterialField::Anisotropy: p.anisotropy = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case MaterialField::AnisotropyRotation: p.anisotropyRotation = std::clamp(v, 0.0f, 360.0f); break;
-    case MaterialField::DiffuseRoughness: p.diffuseRoughness = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case MaterialField::Transmission: p.transmission = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case MaterialField::TransmissionDepth: p.transmissionDepth = std::max(0.0f, v / 100.0f); break;
-    case MaterialField::Dispersion: p.dispersion = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case MaterialField::SubsurfaceRadius: p.subsurfaceRadius = std::clamp(v, 0.0f, 100.0f); break;
-    case MaterialField::Sheen: p.sheen = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case MaterialField::SheenRoughness: p.sheenRoughness = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case MaterialField::CoatIor: p.coatIor = std::clamp(v, 1.0f, 3.0f); break;
-    case MaterialField::ThinFilm: p.thinFilm = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case MaterialField::ThinFilmThickness: p.thinFilmThickness = std::clamp(v, 0.0f, 2000.0f); break;
-    case MaterialField::ThinFilmIor: p.thinFilmIor = std::clamp(v, 1.0f, 3.0f); break;
-    case MaterialField::Emission: p.emission = std::max(0.0f, v); break;
-    case MaterialField::BumpStrength: p.bumpStrength = std::clamp(v / 100.0f, 0.0f, 7.9f); break;
-    case MaterialField::TilingX: p.uvTiling.x = std::clamp(v, 0.01f, 1000.0f); break;
-    case MaterialField::TilingY: p.uvTiling.y = std::clamp(v, 0.01f, 1000.0f); break;
-    case MaterialField::OffsetX: p.uvOffset.x = std::clamp(v, -1000.0f, 1000.0f); break;
-    case MaterialField::OffsetY: p.uvOffset.y = std::clamp(v, -1000.0f, 1000.0f); break;
-    case MaterialField::CoatBumpStrength: p.coatBumpStrength = std::clamp(v / 100.0f, 0.0f, 7.9f); break;
-    // A lobe edited directly re-blends the single-lobe roughness the way the import does
-    // (ratio x lobe 1 + (1 - ratio) x lobe 2): the analytic modes, the env mip and the Roughness
-    // Map view read that blend, the PBR mode the lobes themselves.
-    case MaterialField::Lobe1Roughness: p.lobe1Roughness = std::clamp(v / 100.0f, 0.0f, 1.0f); p.blendLobes(); break;
-    case MaterialField::Lobe2Roughness: p.lobe2Roughness = std::clamp(v / 100.0f, 0.0f, 1.0f); p.blendLobes(); break;
-    case MaterialField::LobeRatio: p.lobeRatio = std::clamp(v / 100.0f, 0.0f, 1.0f); p.blendLobes(); break;
-    case MaterialField::DetailRoughness: p.detailRoughness = std::clamp(v / 100.0f, 0.0f, 4.0f); break;
-    case MaterialField::DetailTilesV: p.detailTilesV = std::clamp(std::round(v), 1.0f, 512.0f); break;
-    case MaterialField::DetailOffsetU: p.detailOffset.x = std::clamp(v, -1000.0f, 1000.0f); break;
-    case MaterialField::DetailOffsetV: p.detailOffset.y = std::clamp(v, -1000.0f, 1000.0f); break;
-    case MaterialField::DisplacementStrength: p.displacementStrength = std::clamp(v, -100.0f, 100.0f); break;
-    case MaterialField::DisplacementMidLevel: p.displacementMidLevel = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case MaterialField::DisplacementSubdiv: p.displacementSubdiv = std::clamp(std::round(v), 0.0f, 5.0f); break;
-    case MaterialField::AmbientOcclusion: p.aoWeight = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case MaterialField::SubsurfaceAnisotropy: p.subsurfaceAnisotropy = std::clamp(v / 100.0f, -1.0f, 1.0f); break;
-    case MaterialField::CoatAnisotropy: p.coatAnisotropy = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case MaterialField::CoatAnisotropyRotation: p.coatAnisotropyRotation = std::clamp(v, 0.0f, 360.0f); break;
-    case MaterialField::TilingRotation: p.uvRotation = std::clamp(v, -360.0f, 360.0f); break;
-    case MaterialField::TopCoatEnabled: p.topCoatEnabled = v >= 0.5f; break;
-    case MaterialField::SheenEnabled: p.sheenEnabled = v >= 0.5f; break;
-    case MaterialField::ThinFilmEnabled: p.thinFilmEnabled = v >= 0.5f; break;
-    case MaterialField::TransmissionEnabled: p.transmissionEnabled = v >= 0.5f; break;
-    case MaterialField::SubsurfaceEnabled: p.subsurfaceEnabled = v >= 0.5f; break;
-    case MaterialField::EmissionEnabled: p.emissionEnabled = v >= 0.5f; break;
-    case MaterialField::DisplacementEnabled: p.displacementEnabled = v >= 0.5f; break;
-    case MaterialField::DetailEnabled: p.detailEnabled = v >= 0.5f; break;
-    case MaterialField::BaseEnabled: p.baseEnabled = v >= 0.5f; break;
-    case MaterialField::SpecularEnabled: p.specularEnabled = v >= 0.5f; break;
-    case MaterialField::GeometryEnabled: p.geometryEnabled = v >= 0.5f; break;
-    case MaterialField::TilingEnabled: p.tilingEnabled = v >= 0.5f; break;
-    case MaterialField::ThinWalled: p.thinWalled = v >= 0.5f; break;
-    case MaterialField::FlipNormal: p.flipNormal = v >= 0.5f; break;
-    case MaterialField::SmoothByAngle: p.smoothByAngle = v >= 0.5f; break;
-    case MaterialField::SmoothAngle: p.smoothAngle = std::clamp(v, 0.0f, 180.0f); break;
-    default: break;
-    }
-}
+void setMaterialField(MaterialParams& p, MaterialField field, float v);
 
 /// The field's name in the scripted test (`material <name> <value>`, `mat.<name>`).
-inline const char* materialFieldName(MaterialField field) {
-    switch (field) {
-    case MaterialField::Roughness: return "roughness";
-    case MaterialField::Metallic: return "metallic";
-    case MaterialField::Specular: return "specular";
-    case MaterialField::NormalStrength: return "normal";
-    case MaterialField::PoreDetail: return "pore";
-    case MaterialField::PoreTiles: return "tiles";
-    case MaterialField::Opacity: return "opacity";
-    case MaterialField::Subsurface: return "subsurface";
-    case MaterialField::TopCoat: return "topcoat";
-    case MaterialField::TopCoatRoughness: return "topcoatrough";
-    case MaterialField::Ior: return "ior";
-    case MaterialField::Anisotropy: return "anisotropy";
-    case MaterialField::AnisotropyRotation: return "anisotropyrotation";
-    case MaterialField::DiffuseRoughness: return "diffuserough";
-    case MaterialField::Transmission: return "transmission";
-    case MaterialField::TransmissionDepth: return "transmissiondepth";
-    case MaterialField::Dispersion: return "dispersion";
-    case MaterialField::SubsurfaceRadius: return "subsurfaceradius";
-    case MaterialField::Sheen: return "sheen";
-    case MaterialField::SheenRoughness: return "sheenrough";
-    case MaterialField::CoatIor: return "coatior";
-    case MaterialField::ThinFilm: return "thinfilm";
-    case MaterialField::ThinFilmThickness: return "thinfilmthickness";
-    case MaterialField::ThinFilmIor: return "thinfilmior";
-    case MaterialField::Emission: return "emission";
-    case MaterialField::BumpStrength: return "bump";
-    case MaterialField::TilingX: return "tilingx";
-    case MaterialField::TilingY: return "tilingy";
-    case MaterialField::OffsetX: return "offsetx";
-    case MaterialField::OffsetY: return "offsety";
-    case MaterialField::CoatBumpStrength: return "coatbump";
-    case MaterialField::Lobe1Roughness: return "lobe1";
-    case MaterialField::Lobe2Roughness: return "lobe2";
-    case MaterialField::LobeRatio: return "loberatio";
-    case MaterialField::DetailRoughness: return "detailroughness";
-    case MaterialField::DetailTilesV: return "detailtilesv";
-    case MaterialField::DetailOffsetU: return "detailoffsetu";
-    case MaterialField::DetailOffsetV: return "detailoffsetv";
-    case MaterialField::DisplacementStrength: return "displacement";
-    case MaterialField::DisplacementMidLevel: return "displacementmid";
-    case MaterialField::DisplacementSubdiv: return "displacementsubd";
-    case MaterialField::AmbientOcclusion: return "aoweight";
-    case MaterialField::SubsurfaceAnisotropy: return "sssdirection";
-    case MaterialField::CoatAnisotropy: return "coatanisotropy";
-    case MaterialField::CoatAnisotropyRotation: return "coatanisotropyrotation";
-    case MaterialField::TilingRotation: return "tilingrotation";
-    case MaterialField::TopCoatEnabled: return "topcoatenabled";
-    case MaterialField::SheenEnabled: return "sheenenabled";
-    case MaterialField::ThinFilmEnabled: return "thinfilmenabled";
-    case MaterialField::TransmissionEnabled: return "transmissionenabled";
-    case MaterialField::SubsurfaceEnabled: return "subsurfaceenabled";
-    case MaterialField::EmissionEnabled: return "emissionenabled";
-    case MaterialField::DisplacementEnabled: return "displacementenabled";
-    case MaterialField::DetailEnabled: return "detailenabled";
-    case MaterialField::BaseEnabled: return "baseenabled";
-    case MaterialField::SpecularEnabled: return "specularenabled";
-    case MaterialField::GeometryEnabled: return "geometryenabled";
-    case MaterialField::TilingEnabled: return "tilingenabled";
-    case MaterialField::ThinWalled: return "thinwalled";
-    case MaterialField::FlipNormal: return "flipnormal";
-    case MaterialField::SmoothByAngle: return "smooth";
-    case MaterialField::SmoothAngle: return "smoothangle";
-    default: return "";
-    }
-}
+const char* materialFieldName(MaterialField field);
 
 /// The inverse of materialFieldName; false for an unknown name.
-inline bool materialFieldByName(const std::string& name, MaterialField& out) {
-    for (int i = 0; i < static_cast<int>(MaterialField::Count); ++i) {
-        if (name == materialFieldName(static_cast<MaterialField>(i))) {
-            out = static_cast<MaterialField>(i);
-            return true;
-        }
-    }
-    return false;
-}
+bool materialFieldByName(const std::string& name, MaterialField& out);
 
 /// The tab's COLOR rows (swatches), with the same one-definition treatment.
 enum class MaterialColor { Base, Specular, Transmission, Subsurface, Sheen, Coat, Emission, ScatterColor, Count };
@@ -858,28 +480,9 @@ inline glm::vec3& materialColorRef(MaterialParams& p, MaterialColor which) {
 inline glm::vec3 materialColorValue(const MaterialParams& p, MaterialColor which) {
     return materialColorRef(const_cast<MaterialParams&>(p), which);
 }
-inline const char* materialColorName(MaterialColor which) {
-    switch (which) {
-    case MaterialColor::Base: return "color";
-    case MaterialColor::Specular: return "specularcolor";
-    case MaterialColor::Transmission: return "transmissioncolor";
-    case MaterialColor::Subsurface: return "subsurfacecolor";
-    case MaterialColor::Sheen: return "sheencolor";
-    case MaterialColor::Coat: return "coatcolor";
-    case MaterialColor::Emission: return "emissioncolor";
-    case MaterialColor::ScatterColor: return "scattercolor";
-    default: return "";
-    }
-}
-inline bool materialColorByName(const std::string& name, MaterialColor& out) {
-    for (int i = 0; i < static_cast<int>(MaterialColor::Count); ++i) {
-        if (name == materialColorName(static_cast<MaterialColor>(i))) {
-            out = static_cast<MaterialColor>(i);
-            return true;
-        }
-    }
-    return false;
-}
+/// The color's name in the scripted test (`material <name> r g b`, `mat.<name>.<r|g|b>`), and its inverse.
+const char* materialColorName(MaterialColor which);
+bool materialColorByName(const std::string& name, MaterialColor& out);
 
 /// Which maps a zone carries RIGHT NOW (bound on the GPU) — facts the tab shows beside the
 /// sliders. Indexed by MaterialMap.
@@ -927,6 +530,24 @@ struct MaterialView {
     bool sameView(const MaterialView& o) const {
         return valid == o.valid && model == o.model && zone == o.zone && revision == o.revision && zones.size() == o.zones.size();
     }
+};
+
+/// What decides whether a MaterialView has CHANGED — the selection, the zone, the zone count and
+/// the object's material revision (which stands for every value) — without the view itself
+/// (Scene::materialViewKey). The window asks at every rendered frame whether to tell the Materials
+/// tab; a view is two whole materials, thirty-five map names and paths and a comparison across
+/// every zone, and is built only when the tab re-reads.
+struct MaterialViewKey {
+    bool          valid = false;
+    int           model = -1;
+    int           zone = -1;
+    std::size_t   zoneCount = 0;
+    std::uint64_t revision = 0;
+
+    bool operator==(const MaterialViewKey& o) const {
+        return valid == o.valid && model == o.model && zone == o.zone && zoneCount == o.zoneCount && revision == o.revision;
+    }
+    bool operator!=(const MaterialViewKey& o) const { return !(*this == o); }
 };
 
 } // namespace pose

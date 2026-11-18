@@ -14,7 +14,8 @@
 #ifndef VULKANCOMMANDS_H
 #define VULKANCOMMANDS_H
 
-#include "vulkanbuffer.h" // ImmediateBatch retains staging VulkanBuffers until the GPU completes
+#include "vulkanbuffer.h"  // ImmediateBatch retains staging VulkanBuffers until the GPU completes
+#include "vulkanhandles.h" // UniqueCommandPool
 
 #include <vulkan/vulkan.h>
 
@@ -42,12 +43,15 @@ void submitImmediate(VulkanContext& context, const std::function<void(VkCommandB
  *
  * Staging buffers passed to retain() are kept alive until submitAndWait() completes — the GPU is
  * still reading them until then. Not thread-safe; use on the import (GUI) thread. Qt-free.
+ *
+ * A batch does NOTHING until submitAndWait() is called: one destroyed without it — an exception
+ * unwinding past it — is discarded, never submitted (see the destructor's note in the .cpp).
  */
 class ImmediateBatch {
 public:
     /// Creates a transient command pool and begins a one-time-submit primary command buffer.
     explicit ImmediateBatch(VulkanContext& context);
-    /// submitAndWait()s if the caller hasn't, then frees the pool. Swallows errors (destructor).
+    /// Frees the pool and the retained staging buffers. An unsubmitted batch is discarded.
     ~ImmediateBatch();
 
     ImmediateBatch(const ImmediateBatch&) = delete;
@@ -65,7 +69,7 @@ public:
 
 private:
     VulkanContext*            m_context   = nullptr;
-    VkCommandPool             m_pool      = VK_NULL_HANDLE;
+    UniqueCommandPool         m_pool;                       // freeing it frees m_cmd
     VkCommandBuffer           m_cmd       = VK_NULL_HANDLE;
     std::vector<VulkanBuffer> m_retained; // staging buffers held until the submit completes
     bool                      m_submitted = false;

@@ -2,10 +2,11 @@
  * @file scenematerials.h
  * @brief Applies a preset document's materials onto a figure's assembled zone meshes.
  *
- * materialparser turns one `scene.materials` list into per-zone MaterialRefs with UNRESOLVED
- * texture URIs; this layer does the rest — resolving each zone's URIs to on-disk paths through
- * the content roots and writing the result into FigureMesh::material — and it knows the SECOND
- * form a materials preset comes in. Ordinary presets carry `scene.materials`
+ * materialparser turns one `scene.materials` list into per-zone FigureMaterials whose maps are
+ * still the URIs the file wrote; this layer does the rest — resolving each zone's URIs to on-disk
+ * paths through the content roots and merging the result into FigureMesh::material (a zone can
+ * be given a material more than once: see the two map rules in scenematerials.cpp) — and it
+ * knows the SECOND form a materials preset comes in. Ordinary presets carry `scene.materials`
  * (applySceneMaterials); hierarchical-material presets carry their values as single-key
  * `scene.animations` tracks instead (applyAnimationMaterials), and a stylized character's follower
  * addons only turn their lens/iris shells transparent through that form. Both appliers no-op when

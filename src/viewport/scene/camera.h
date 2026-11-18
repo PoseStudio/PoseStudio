@@ -42,7 +42,8 @@ public:
     void reset();
 
     /// Restores an ABSOLUTE framing (the .pss load path puts back a saved camera): target + orbit
-    /// angles (radians) + distance. Like reset(), the projection is left to setOrthographic().
+    /// angles (radians) + distance. The projection's KIND is left to setOrthographic(); an
+    /// orthographic one's extent follows the new distance.
     void restoreFraming(const glm::vec3& target, float yaw, float pitch, float distance);
 
     /// Orbit around the target by the given yaw/pitch deltas (radians).
@@ -96,9 +97,11 @@ public:
     /// An EXPLICIT view: @p view (world -> eye) and @p projection as given, bypassing the orbit
     /// framing — a VR eye as the headset tracked it (rendering/vreyeview.h), whose off-centre
     /// frustum and pose no orbit state can express. The orbit members are left untouched; the
-    /// object just answers view()/viewProjection()/position() from the given matrices until an
-    /// orbit mutator is called. The renderer makes a throwaway Camera per eye this way, so the
-    /// desktop camera never carries VR state.
+    /// object just answers view()/viewProjection()/position() from the given matrices until
+    /// orbit() is called — the one mutator that returns it to its orbit framing and projection
+    /// (dolly, pan, frame and the axis views move the orbit members under the explicit view,
+    /// unseen). The renderer makes a throwaway Camera per eye this way, so the desktop camera
+    /// never carries VR state.
     void setExplicitView(const glm::mat4& view, const glm::mat4& projection);
 
     glm::mat4 view() const;

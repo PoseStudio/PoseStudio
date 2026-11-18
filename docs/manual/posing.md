@@ -139,7 +139,7 @@ The **Figure** group at the top of the tab moves and turns the active figure as 
 | **Tilt** | Tilts her toward her left (positive) or right, about her own front-back axis. |
 | **Scale** | A static object's size, in percent of the size it was imported at. A figure keeps her own size: the row is off for her. |
 
-The three rotations compose in that order — turn, then tip, then tilt — each about her own axis as she then stands, and all three are about the hip joint, so a turn alone keeps the feet at their heights. The rows are scrub fields like the dials below them, and each scrub or typed value is one undo step. The place and the rotation are part of the pose: a pose file and a project carry them, and **Reset Pose** puts her back where she was imported, upright and facing the way she came. A `Ctrl` drag on the hips moves her the same way with the mouse, and the Ground button drops her to the floor from any height. For a static object the rows read and set its placement directly rather than a pose: those edits are not undoable and a pose file does not carry them (a project does), and Reset Pose leaves the object where it is.
+The three rotations compose in that order — turn, then tip, then tilt — each about her own axis as she then stands, and all three are about the hip joint, so a turn alone keeps the feet at their heights. The rows are scrub fields like the dials below them, and each scrub or typed value is one undo step. The three position rows take any distance: a drag across one covers ten metres, and a longer move is typed. The place and the rotation are part of the pose: a pose file and a project carry them, and **Reset Pose** puts her back where she was imported, upright and facing the way she came. A `Ctrl` drag on the hips moves her the same way with the mouse, and the Ground button drops her to the floor from any height. For a static object the rows read and set its placement directly rather than a pose: those edits are not undoable and a pose file does not carry them, and Reset Pose leaves the object where it is. A project does carry them, so moving, turning or scaling an object counts as an unsaved change.
 
 ### The selected joint
 
@@ -190,16 +190,17 @@ A **pin** holds a joint exactly where it is through every later drag: a hand kep
 
 A pose that bends the knees lifts the feet off the floor, because the hips stayed where they were. The **Ground** button on the viewport strip drops the active figure so the lowest point of its current pose rests on the floor — animated as a real fall (a metre takes about half a second). A figure sunk below the floor is lifted out at once. A figure you lifted off the floor and let go of, her feet still hanging, lands on flat feet: they level out during the fall, and the drop is measured to her soles. Grounding is refused while you are dragging. It is a pose edit like any other: one undo step (`Ctrl+Z` puts her back where she was), saved with the pose in a [pose file](pose-files.md), and taken back by **Reset Pose** along with everything else.
 
-**She lands like a person.** A figure that comes down on her feet absorbs the landing: her knees fold, her hips dip over her planted feet, and she comes back up — all in under half a second. The higher the drop, the deeper the dip: a few centimetres' drop barely bends the knees, a drop from a metre or more is a real knee bend. It is for the eye only. When it is over she stands in exactly the pose you dropped her in: the dip itself leaves no trace, and undoing the drop is the one undo step.
+**She lands like a person.** A figure that comes down on her feet absorbs the landing: her knees fold, her hips dip over her planted feet, and she comes back up — all in under half a second. Arms that hang at her sides swing with the landing: forward as she comes down, the elbows bending a little, then back a little past hanging, settling over a second or two. The higher the drop, the deeper the dip and the wider the swing: a few centimetres' drop barely bends the knees, a drop from a metre or more is a real knee bend. It is for the eye only. When it is over she stands in exactly the pose you dropped her in: the dip and the swing leave no trace, and undoing the drop is the one undo step.
 
 - There is no bounce when she lands on anything but her feet — her knees, her hands, her seat — or when her hips are [pinned](#joint-pins).
-- Clicking, pressing a key or starting any edit while she is still falling or dipping finishes it at once.
+- Only arms that hang swing. An arm you have posed — raised, on a hip, folded at the elbow — stays as you posed it.
+- Clicking, pressing a key or starting any edit while she is still falling, dipping or swinging her arms finishes it at once.
 
 Figures import standing on the floor, so you rarely need this after an IK drag: planted feet keep the figure on the ground.
 
 ## Reset and mirror
 
-The **Edit** menu and the joint context menu offer five utilities, each one undo step:
+The **Edit** menu offers five utilities, each one undo step; the joint's context menu (right-click a joint) offers the three that act on one joint — **Reset Joint**, **Reset Limb** and **Mirror Limb to Other Side**:
 
 | Utility | What it does |
 | --- | --- |
@@ -213,7 +214,7 @@ Pins are left alone by all five.
 
 ## Undo and redo
 
-**Edit → Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Y`) walk one history of everything you changed: each drag, each rotation, each dial change on the Transform tab, each pin toggle, each utility, each drop to the ground and each pose file loaded — and each lighting change on the Environment tab. An entry is recorded when a gesture ends, so a long drag is one step. Deleting an object clears the history.
+**Edit → Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Y`, or `Ctrl+Shift+Z`) walk one history of everything you changed: each drag, each rotation, each dial change on the Transform tab, each pin toggle, each utility, each drop to the ground and each pose file loaded — and each lighting change on the Environment tab, each [material](materials.md#undo-and-projects) edit and each change to a [light](lights.md). An entry is recorded when a gesture ends, so a long drag is one step. Deleting a model clears the history; deleting a light is an undo step like any other change to it.
 
 ## Several figures
 

@@ -1,17 +1,21 @@
 /**
  * @file ikrig_constants.h
  * @brief The IkRig's tuning constants, shared by its translation units (ikrig.cpp,
- *        ikrigdrag.cpp, ikrigpolicy.cpp, ikrigstepping.cpp, ikrigcontacts.cpp). PRIVATE to the
- *        rig — not part of the scene/ik interface, so nothing outside those files may include it.
+ *        ikrigstructure.cpp, ikrigvolumes.cpp, ikrigdrag.cpp, ikrigpolicy.cpp, ikrigstepping.cpp,
+ *        ikrigcontacts.cpp). PRIVATE to the rig — not part of the scene/ik interface, so nothing
+ *        outside those files may include it.
  *
  * Every value here was set by a measured failure in the IK harness (tools/ikharness) and the
  * comment at each definition records which; change one only with the harness re-run. The
- * constants sit in an anonymous namespace so each TU gets its own internal copy, and the
- * function-local trace probes (std::getenv) stay where they are used.
+ * constants sit in an anonymous namespace so each TU gets its own internal copy. An env probe
+ * (std::getenv) read at ONE site stays a function-local static at that site; the two that
+ * several of the rig's TUs read are defined once, at the end of this file.
  */
 
 #ifndef IKRIG_CONSTANTS_H
 #define IKRIG_CONSTANTS_H
+
+#include <cstdlib>
 
 namespace pose {
 
@@ -74,10 +78,23 @@ constexpr float kRealMassThreshold = 0.003f;
 constexpr float kTokenBoneMass = 0.005f;
 constexpr float kTokenLimbMass = 0.01f;
 
-// Low-pass factor for the smoothed balance correction (see m_balanceCorrection in the header):
+// Low-pass factor for the smoothed balance effort (see m_balanceCorrection in the header):
 // the raw need flickers at tick scale as the CoM dances on the polygon's inset boundary, and
-// the engagement blend must never see that flicker.
+// the step trigger must never see that flicker.
 constexpr float kBalanceSmoothing = 0.25f;
+
+/// GROUND HEALING (beginDrag): a contact found within this much of its bind height over the floor
+/// (figure-scaled) is pinned AT that height — a hovering figure is pulled back onto the floor;
+/// one further off it (a kneeling knee, a deliberately airborne pose) keeps its height.
+constexpr float kGroundHealBand = 0.12f;
+/// ... and at a LANDING out of a lift (plantContacts with dragStart false) the ANKLE of a foot that
+/// has come down is healed from further up: a hanging foot touches down toes first, and its ankle
+/// then stands a pointed foot's reach over its standing height — inside the band above on the eight
+/// reference figures (their reports are byte-identical with this one), 12.06cm on a long-footed
+/// heavy character: 0.6mm outside it, so her ankle's pin stayed where the ankle was and she "landed"
+/// standing on tiptoe 12cm up (2026-11-12; the turned landing's harness phase found it on the
+/// character sweep). A foot's length covers a pointed foot.
+constexpr float kLandingHealBand = 0.20f;
 
 // BALANCE-DRIVEN STEPPING (see updateStepping): when the post-solve balance need stays above
 // kStepNeedThreshold for kStepConfirmTicks consecutive ticks — the drag holds the CoM off the
@@ -96,18 +113,6 @@ constexpr float kBalanceSmoothing = 0.25f;
 // pelvis correction fights the imposed lean every tick), and 0.025 restored the steps while
 // every other phase stayed bit-identical. (The strain trigger itself is GONE with the old
 // solver: the joint-space solve never drags a foot off its plant, so the signal was always 0.)
-/// GROUND HEALING (beginDrag): a contact found within this much of its bind height over the floor
-/// (figure-scaled) is pinned AT that height — a hovering figure is pulled back onto the floor;
-/// one further off it (a kneeling knee, a deliberately airborne pose) keeps its height.
-constexpr float kGroundHealBand = 0.12f;
-/// ... and at a LANDING out of a lift (plantContacts with dragStart false) the ANKLE of a foot that
-/// has come down is healed from further up: a hanging foot touches down toes first, and its ankle
-/// then stands a pointed foot's reach over its standing height — inside the band above on the eight
-/// reference figures (their reports are byte-identical with this one), 12.06cm on a long-footed
-/// heavy character: 0.6mm outside it, so her ankle's pin stayed where the ankle was and she "landed"
-/// standing on tiptoe 12cm up (2026-11-12; the turned landing's harness phase found it on the
-/// character sweep). A foot's length covers a pointed foot.
-constexpr float kLandingHealBand = 0.20f;
 constexpr float kStepNeedThreshold = 0.025f;
 constexpr float kStepStanceThreshold = 0.12f; ///< Explicit-anchor drags: stance error that steps.
 constexpr int   kStepConfirmTicks = 12;
@@ -144,9 +149,9 @@ constexpr float kStepClearance = 0.10f; ///< Min XZ distance between a landing a
 // kSuspendConfirmTicks consecutive ticks (~0.25 s) — a deliberate sustained lift, never a fast
 // lateral gesture.
 constexpr float kSuspendStrain = 0.15f;
-// A LIMB's downward drag intent (the crouch drive, the root's vertical yield, the heel lift)
-// needs the limb TAUT toward the target: junction-to-effector reach past this fraction of its
-// rest span. A folded arm below its cursor has yet to unfold (see IkRig::limbDownIntent).
+// A LIMB's downward drag intent (what it drives: IkRig::m_lastDownIntent) needs the limb TAUT
+// toward the target: junction-to-effector reach past this fraction of its rest span. A folded
+// arm below its cursor has yet to unfold (see IkRig::limbDownIntent).
 constexpr float kDownIntentTaut = 0.90f;
 constexpr float kSuspendUpFraction = 0.65f;
 constexpr int   kSuspendConfirmTicks = 15;
@@ -174,6 +179,15 @@ constexpr float kSuspendTautShare = 0.97f;
 constexpr float kAirborneHeight = 0.05f;
 
 } // namespace
+
+// The trace probes that more than one of the rig's TUs read: inline variables, so each is one
+// definition and one read of the environment for the program.
+/// POSESTUDIO_IK_TRACE=1: the rig's events — contacts seeded, planted, slid, lifted off and
+/// landed (ikrigcontacts.cpp), steps begun (ikrigstepping.cpp) — on stderr.
+inline const bool kIkTrace = std::getenv("POSESTUDIO_IK_TRACE") != nullptr;
+/// IK_STEP_TRACE=1: the stance a drag begins with (ikrigdrag.cpp), the step gate
+/// (ikrigpolicy.cpp) and the step trigger (ikrigstepping.cpp), per tick.
+inline const bool kIkStepTrace = std::getenv("IK_STEP_TRACE") != nullptr;
 
 } // namespace pose
 

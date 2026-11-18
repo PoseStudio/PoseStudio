@@ -120,6 +120,15 @@ crash_dumps/
 
 # ------------------------------------------
 # IK harness skeleton dumps (POSESTUDIO_DUMP_SKELETON) are a figure vendor's rig data
-# -- keep them out of the repository (see tools/ikharness/ikharness.cpp)
+# -- keep them out of the repository (see tools/ikharness/ikharness.cpp). A dump is
+# two files: the skeleton and, beside it, the figure's body mesh sample (<dump>.mesh).
 # ------------------------------------------
 *.skel
+*.skel.mesh
+
+# ------------------------------------------
+# The Gaussian-splat test files tools/splat/make_test_scene.py and make_test_capture.py
+# write into the current directory by default (the second is ~150 MB)
+# ------------------------------------------
+/test_scene.ply
+/person_disc.ply

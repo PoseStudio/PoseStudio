@@ -35,12 +35,6 @@ std::size_t idx(MaterialMap map) {
     return static_cast<std::size_t>(map);
 }
 
-/// The file's name without its folders (either separator).
-std::string baseName(const std::string& path) {
-    const std::size_t slash = path.find_last_of("/\\");
-    return slash == std::string::npos ? path : path.substr(slash + 1);
-}
-
 } // namespace
 
 Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout materialSetLayout,
@@ -171,6 +165,10 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
         m_maps.present[idx(MaterialMap::BaseColor)] = false;
         m_material.maps[idx(MaterialMap::BaseColor)].source = "";
     }
+    // … and the other way round: a cutout that IS the base color image's alpha (see
+    // m_importedAlphaCutout) — no Opacity slot holds it.
+    m_importedAlphaCutout = data.hasOpacityMask && data.opacityFromDiffuseAlpha && !data.opacityMaskImage &&
+                            m_importedSlotPlain[idx(MaterialMap::BaseColor)] != nullptr;
 
     // The uploads (or reuses — see TextureUploadCache).
     const std::shared_ptr<VulkanTexture> diffuse = uploadShared(context, uploads, data.diffuseImage, /*srgb=*/true, batch);
@@ -192,7 +190,7 @@ Mesh::Mesh(VulkanContext& context, const MeshData& data, VkDescriptorSetLayout m
     m_slotTexture[idx(MaterialMap::Emission)] = uploadShared(context, uploads, data.emissionImage, /*srgb=*/true, batch);
     // The parameter map carries the ambient occlusion (B) and transmission weight (A) maps too;
     // the LAYER map packs the coat weight, coat roughness, sheen weight and thin-film thickness
-    // (modelimportservice's buildPackedMap); the sheen color map binds on its own.
+    // (texturedecode.cpp's buildPackedMap); the sheen color map binds on its own.
     m_slotTexture[idx(MaterialMap::AmbientOcclusion)] = params;
     m_slotTexture[idx(MaterialMap::TransmissionWeight)] = params;
     const std::shared_ptr<VulkanTexture> layer = uploadShared(context, uploads, data.layerMapImage, /*srgb=*/false, batch);
@@ -471,9 +469,9 @@ std::string Mesh::slotLabel(MaterialMap map) const {
     }
     if (source == kImportedTexture) {
         const std::string& path = m_importedSlotPath[idx(map)];
-        return path.empty() ? std::string("embedded") : baseName(path);
+        return path.empty() ? std::string("embedded") : fileBaseName(path);
     }
-    return baseName(textureSourcePath(source));
+    return fileBaseName(textureSourcePath(source));
 }
 
 std::string Mesh::slotPath(MaterialMap map) const {
@@ -537,9 +535,11 @@ void Mesh::setSlotImage(MaterialMap map, const std::shared_ptr<const DecodedImag
         // One baked image for both: the base color with the cutout in its alpha.
         m_slotTexture[idx(MaterialMap::BaseColor)] = texture;
         m_slotTexture[idx(MaterialMap::Opacity)] = texture;
-        if (map == MaterialMap::Opacity) {
-            m_hasOpacityMask = plain != nullptr;
-        }
+        // Cut out by its Opacity map — or, with none, by the alpha of the base color image it
+        // imported with, for as long as that image is its base color (m_importedAlphaCutout).
+        m_hasOpacityMask = m_slotPlain[idx(MaterialMap::Opacity)] != nullptr ||
+                           (m_importedAlphaCutout && m_slotPlain[idx(MaterialMap::BaseColor)] != nullptr &&
+                            m_slotPlain[idx(MaterialMap::BaseColor)] == m_importedSlotPlain[idx(MaterialMap::BaseColor)]);
         break;
     case MaterialMap::Roughness:
     case MaterialMap::Metalness:

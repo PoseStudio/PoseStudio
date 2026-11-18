@@ -11,13 +11,17 @@
 class QEvent;
 class QMouseEvent;
 class QShowEvent;
+class QWindow;
 
 /**
  * @class SplashOverlay
  * @brief Covers its parent window with the PoseStudio branding image until clicked.
  *
- * Tracks the parent's geometry via an event filter so it always fills the window, and
- * deletes itself on the next click anywhere within it.
+ * Tracks the parent's geometry via an event filter so it always fills the window, and goes on
+ * the next mouse press anywhere in the application. A press on its own area — the artwork, or
+ * the window underneath through its transparent regions — is consumed with its release, so the
+ * dismissing click acts on nothing; a press on a window that came up over it (a dialog) dismisses
+ * it and still reaches that window.
  *
  * It is a frameless, translucent *top-level window* (not a child widget) deliberately: the
  * 3D viewport is hosted in a native child window (QWidget::createWindowContainer), and native
@@ -37,7 +41,7 @@ public:
     explicit SplashOverlay(QWidget *parent);
 
 signals:
-    /// The overlay has been dismissed (the user's first click): what waits for the branding to
+    /// The overlay has been dismissed (the user's first press): what waits for the branding to
     /// clear — the What's New window on the first start of a new version — goes now.
     void dismissed();
 
@@ -47,12 +51,21 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    bool m_dismissed = false;
+    bool            m_dismissed = false;
+    Qt::MouseButton m_swallowButton = Qt::NoButton; ///< The dismissing press's button, while its release is awaited
 
-    /// Tear down the splash exactly once. deleteLater() (not 'delete this') because the click
-    /// event may still be dispatching; the app-wide filter is removed immediately so no
-    /// further events are intercepted while we wait to be deleted.
-    void dismiss();
+    /// Take the splash off the screen, exactly once, and announce it. With @p awaitedRelease
+    /// (the button of a press this consumed) the app-wide filter stays for that button's release
+    /// and the object with it; otherwise it is finished at once.
+    void dismiss(Qt::MouseButton awaitedRelease);
+
+    /// The end: the app-wide filter removed, the object deleted — deleteLater(), not 'delete
+    /// this', because the event that ended it is still dispatching.
+    void finish();
+
+    /// Whether a press that arrived at @p target landed on the splash's own area: its own
+    /// window, or one that lies under it (see eventFilter).
+    bool onOwnArea(const QWindow *target) const;
 
     /// Cover the parent window's client area, in global (screen) coordinates — required now
     /// that this is a top-level window rather than a child positioned in parent-local coords.

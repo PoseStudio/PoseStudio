@@ -51,6 +51,12 @@ struct PosKey {
 /// when they round to the same key. Files written by a modelling package repeat a position's
 /// numbers exactly at a seam; a mesh made by arithmetic may differ in the last digit (a sphere's
 /// seam at 0 and at two pi) — and a displacement that told those apart would open the seam.
+/// THE LIMIT: the key is a ROUNDING GRID (cells of 2^-20 m), not a distance test. Bit-equal
+/// positions always weld; two that differ in the last digit weld unless a cell boundary happens
+/// to fall between them — for coordinates of 0.1 to 1 m a few times in a hundred per coordinate —
+/// and then they stay two points, displaced by heights sampled apart: a pinhole in that seam. No
+/// mesh met so far shows it (a file's seams and their skinned copies are bit-equal); the remedy,
+/// should one turn up, is to look a value near a boundary up in the neighbouring cell as well.
 PosKey keyOf(const glm::vec3& p) {
     const auto snap = [](float v) {
         constexpr double kGrid = 1048576.0; // 2^20 a metre

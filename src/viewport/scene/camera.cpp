@@ -46,13 +46,22 @@ void Camera::restoreFraming(const glm::vec3& target, float yaw, float pitch, flo
     m_yaw = yaw;
     m_pitch = std::clamp(pitch, kMinPitch, kMaxPitch); // a hand-edited file can't tip the camera under the floor
     m_distance = distance > 0.0f ? distance : kDefaultDistance; // guard a zero/negative dolly
+    if (m_orthographic) {
+        rebuildProjection(); // the orthographic extent follows the distance (as dolly() and frame())
+    }
 }
 
 void Camera::orbit(float deltaYaw, float deltaPitch) {
+    const bool wasExplicit = m_explicit;
     m_explicit = false; // an orbit gesture returns the camera to its orbit framing
     m_yaw += deltaYaw;
     m_pitch = std::clamp(m_pitch + deltaPitch, kMinPitch, kMaxPitch);
     setOrthographic(false); // auto perspective: turning an axis view unlocks it
+    if (wasExplicit) {
+        // The explicit projection goes with the explicit view (setOrthographic rebuilds only
+        // on a change, and an explicit camera is usually perspective already).
+        rebuildProjection();
+    }
 }
 
 void Camera::dolly(float amount) {

@@ -21,11 +21,9 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <tuple>
 
 namespace pose {
 
@@ -258,12 +256,10 @@ void Armature::ikChooseUnknowns(IkSolveScratch& s) {
     const float& rising = s.rising;
     // ... and how FAR ALONG the rise is (m_jsRiseProgress): what turns the references home.
     s.risen = kNoUpright ? 0.0f : m_jsRiseProgress;
-    const float& risen = s.risen;
     s.rootTurns = (effector == root || rising > 1.0e-3f) && kRootRot > 0.0;
     const bool& rootTurns = s.rootTurns;
     dofBone[static_cast<std::size_t>(root)] = rootTurns ? 1 : 0;
     s.rootDofMark = static_cast<std::size_t>(root);
-    const std::size_t& rootDofMark = s.rootDofMark;
     // A SCOPED drag (IkScope::Chain — Ctrl+drag, 2026-09-26): the unknowns are the grabbed CHAIN
     // alone — the bones from the effector up to, not including, its limb junction (IkRig's
     // mass-based one, so the chain IS what the plain drag classes as the dragged limb: an arm up
@@ -296,33 +292,11 @@ void Armature::ikChooseUnknowns(IkSolveScratch& s) {
     }
 }
 
-/// The TRUNK's policy for this tick: the trunk follow and the unfold, the hip sway, the hip hinge's balance, and whether the spine chain is among the unknowns.
+/// The TRUNK's policy for this tick, in its parts: the lift-off's re-base, then — unless the drag is a
+/// scoped one — the trunk follow and the unfold, the reach-down hinge, the hip sway, the hip hinge's
+/// balance, and which trunk bones join the unknowns.
 void Armature::ikTrunkPolicy(IkSolveScratch& s) {
-    IkRig& rig = s.rig;
-    const std::size_t n = s.n;
-    const int root = s.root;
-    const int effector = s.effector;
-    const std::vector<IkEffector>& pins = s.pins;
-    const glm::vec3* const dragTarget = s.dragTarget;
-    std::vector<char>& dofBone = s.dofBone;
-    const float& floorModel = s.floorModel;
-    const float& rising = s.rising;
-    const bool& rootTurns = s.rootTurns;
-    const std::size_t& rootDofMark = s.rootDofMark;
-
-    // THE LIFT-OFF RE-BASES THE POSE (2026-11-07): the tick the rig lets the feet go under a drag
-    // of the hips or a trunk joint, every bone's posture reference becomes the pose she stands in.
-    // The drag-start pose was the SIT's or the kneel's fold she had just stood up out of, and with
-    // the pins gone the legs snapped back into it in one tick — a toe 67cm, the sit stood up and
-    // pulled on; the stand-up off all fours ended in a squat 22cm under the cursor. A hand's
-    // lift-off keeps its drag-start references: it begins standing, and its gates are calibrated
-    // on them.
-    if (rig.suspended() && !m_jsWasSuspended && rig.trunkEffector()) {
-        for (std::size_t b = 0; b < n && b < m_ikStartEuler.size() && b < m_boneEuler.size(); ++b) {
-            m_ikStartEuler[b] = m_boneEuler[b];
-        }
-    }
-    m_jsWasSuspended = m_jsWasSuspended || rig.suspended();
+    ikLiftOffRebase(s);
 
     // A SCOPED drag (IkScope::Chain) has no trunk policy: the chain alone answers the cursor — no
     // follow, no hinge, no sway, no reach fold, no unfold — and the root is none of its unknowns
@@ -337,6 +311,45 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
         m_jsTrunkInSolve = false;
         return;
     }
+
+    ikTrunkFollow(s);
+    ikReachHinge(s);
+    ikHipSway(s);
+    ikPelvisBalance(s);
+    ikTrunkUnknowns(s);
+}
+
+/// ikTrunkPolicy's first part — THE LIFT-OFF RE-BASES THE POSE: a mutation of the drag's references, not a
+/// policy of the tick; before the scoped drag's return, which it must not be skipped by.
+void Armature::ikLiftOffRebase(IkSolveScratch& s) {
+    IkRig& rig = s.rig;
+    const std::size_t n = s.n;
+
+    // THE LIFT-OFF RE-BASES THE POSE (2026-11-07): the tick the rig lets the feet go under a drag
+    // of the hips or a trunk joint, every bone's posture reference becomes the pose she stands in.
+    // The drag-start pose was the SIT's or the kneel's fold she had just stood up out of, and with
+    // the pins gone the legs snapped back into it in one tick — a toe 67cm, the sit stood up and
+    // pulled on; the stand-up off all fours ended in a squat 22cm under the cursor. A hand's
+    // lift-off keeps its drag-start references: it begins standing, and its gates are calibrated
+    // on them.
+    if (rig.suspended() && !m_jsWasSuspended && rig.trunkEffector()) {
+        for (std::size_t b = 0; b < n && b < m_ikStartEuler.size() && b < m_boneEuler.size(); ++b) {
+            m_ikStartEuler[b] = m_boneEuler[b];
+        }
+    }
+    m_jsWasSuspended = m_jsWasSuspended || rig.suspended();
+}
+
+/// ... THE TRUNK FOLLOW: an upper-body trunk drag's hinge share (the bow), the lean's balance room, the
+/// bow's arc, the follow that takes the hips along, the counter-hinge, and the unfold.
+void Armature::ikTrunkFollow(IkSolveScratch& s) {
+    IkRig& rig = s.rig;
+    const std::size_t n = s.n;
+    const int root = s.root;
+    const int effector = s.effector;
+    const glm::vec3* const dragTarget = s.dragTarget;
+    const float& floorModel = s.floorModel;
+    const float& rising = s.rising;
 
     // THE TRUNK FOLLOW (see kTrunkLeanFree): an upper-body trunk joint — above the root, no foot
     // below it — dragged across the floor by a figure that began standing. A function of the
@@ -486,9 +499,11 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
                 // two generations stand with their feet together and their weight a little outside
                 // the inset support as posed — the imbalance a drag starts with is the user's, here
                 // as in the solve's own balance row.)
+                // (The stance's inset polygon is built once for the fifteen readings below.)
+                const BalanceController::Inset stanceInset = BalanceController::insetPolygon(stance, rig.balanceMargin());
                 const auto needAt = [&](float t) {
                     const glm::vec2 at = com + way * t;
-                    return glm::length(BalanceController::closestBalancedPoint(stance, at, rig.balanceMargin()) - at);
+                    return glm::length(BalanceController::closestBalancedPoint(stance, stanceInset, at, rig.balanceMargin()) - at);
                 };
                 const float began = stance.empty() ? 0.0f : needAt(0.0f);
                 const auto balancedAt = [&](float t) { return needAt(t) <= began + 0.001f * rig.sizeScale(); };
@@ -517,7 +532,7 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
                 const float tall = glm::clamp(lever + travel.y, 0.0f, reach);
                 const float arcStart = std::sqrt(std::max(0.0f, reach * reach - std::min(lever, reach) * std::min(lever, reach)));
                 const float arcNow = std::sqrt(std::max(0.0f, reach * reach - tall * tall));
-                const glm::vec2 fore(std::sin(m_jsRootHeading), std::cos(m_jsRootHeading));
+                const glm::vec2 fore(s.fore.x, s.fore.z);
                 // (A FOLD is sagittal: taken down and 37 degrees off to one side the chest had to be
                 // reached by side bend and twist instead of a walk, stalled six ticks against the
                 // spine's limits and caught up in one 18cm move.)
@@ -643,6 +658,18 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
             }
         }
     }
+}
+
+/// ... REACHING DOWN: a hand pushed down from a standing start hinges the trunk at the hips; the seat's
+/// rock under a hand drag; and the root's pitch marked an unknown wherever a hinge is on.
+void Armature::ikReachHinge(IkSolveScratch& s) {
+    IkRig& rig = s.rig;
+    const int root = s.root;
+    const int effector = s.effector;
+    const glm::vec3* const dragTarget = s.dragTarget;
+    std::vector<char>& dofBone = s.dofBone;
+    const std::size_t& rootDofMark = s.rootDofMark;
+
     // REACHING DOWN (2026-09-25; IK_JS_NO_REACH_HINGE): a HAND pushed down from a standing start
     // folds the trunk at the hips as well as bending the knees — the bow's hinge (the root's
     // pitch an unknown at kTrunkHingeStiffness, coupled into the spine chain) by how far and how
@@ -684,6 +711,18 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
     if (m_jsTrunkHinge > 1.0e-3f) {
         dofBone[rootDofMark] = 1;
     }
+}
+
+/// ... THE HIP SWAY: a pelvis dragged sideways over its standing feet rolls (swayValid, swayEuler).
+void Armature::ikHipSway(IkSolveScratch& s) {
+    IkRig& rig = s.rig;
+    const int root = s.root;
+    const int effector = s.effector;
+    const std::vector<IkEffector>& pins = s.pins;
+    const glm::vec3* const dragTarget = s.dragTarget;
+    const float& rising = s.rising;
+    const bool& rootTurns = s.rootTurns;
+
     // The HIP SWAY: a pelvis dragged SIDEWAYS over its standing feet rolls — the side it goes
     // toward comes up. Each standing leg says how high its hip socket may sit over its foot
     // (straight: sqrt(length^2 - the socket's horizontal distance from the ankle^2)); a sway
@@ -723,17 +762,8 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
             if (node < 0 || rig.pinIsLive(p) || !rig.isFootClass(node)) {
                 continue; // a standing FOOT's leg
             }
-            const int junction = rig.limbJunction(node);
-            int top = node;
             float length = 0.0f;
-            for (;;) {
-                const int par = m_bones[static_cast<std::size_t>(top)].parent;
-                if (par < 0 || par == junction || par == root) {
-                    break;
-                }
-                length += glm::length(glm::vec3(m_bones[static_cast<std::size_t>(top)].localBind[3]));
-                top = par;
-            }
+            const int top = limbTop(node, length);
             if (top == node || static_cast<std::size_t>(top) >= m_jsStartPos.size()) {
                 continue;
             }
@@ -788,10 +818,18 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
             }
         }
     }
-    // ... and the spine takes the roll up (kSwayChestLevelWeight): the chain from the root to the
-    // CHEST — up through the child with the biggest subtree that has no foot in it, to the first
-    // bone three big branches leave (the neck and the two arms) — joins the unknowns. Nothing
-    // pulls on it but the chest's level row, so it stays where its references put it otherwise.
+}
+
+/// ... THE HIP HINGE's balance under a pelvis drag: its share (pelvisBalance) and the slack it has let go of
+/// (hingeSlack).
+void Armature::ikPelvisBalance(IkSolveScratch& s) {
+    IkRig& rig = s.rig;
+    const int root = s.root;
+    const int effector = s.effector;
+    const glm::vec3* const dragTarget = s.dragTarget;
+    const float& floorModel = s.floorModel;
+    const float& rising = s.rising;
+
     static const bool kNoPelvisBalance = std::getenv("IK_JS_NO_PELVIS_BALANCE") != nullptr; // A/B probe
     s.pelvisBalance = 0.0f;
     float& pelvisBalance = s.pelvisBalance;
@@ -853,6 +891,27 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
             hingeSlack += kPelvisBalanceStanceGain * std::max(0.0f, away - kPelvisBalanceStanceFrom * rig.sizeScale());
         }
     }
+}
+
+/// ... and which TRUNK bones join the unknowns: the hands planted (m_jsHandsPlanted), THE PRONE's share and
+/// its neck (m_jsProneLie, neckLift), a released arm's bones under it (hangArmDof), and the spine chain
+/// with the sway's level chest (m_jsTrunkInSolve, swayChest).
+void Armature::ikTrunkUnknowns(IkSolveScratch& s) {
+    IkRig& rig = s.rig;
+    const std::size_t n = s.n;
+    const int root = s.root;
+    const int effector = s.effector;
+    const std::vector<IkEffector>& pins = s.pins;
+    const glm::vec3* const dragTarget = s.dragTarget;
+    std::vector<char>& dofBone = s.dofBone;
+    const float& rising = s.rising;
+    const bool& swayValid = s.swayValid;
+    const float& pelvisBalance = s.pelvisBalance;
+
+    // The spine takes the hip sway's roll up (kSwayChestLevelWeight): the chain from the root to the
+    // CHEST — up through the child with the biggest subtree that has no foot in it, to the first
+    // bone three big branches leave (the neck and the two arms) — joins the unknowns. Nothing
+    // pulls on it but the chest's level row, so it stays where its references put it otherwise.
     // (Once in, the chain stays in for the drag: taken out again the moment nothing pulled on
     // it — the hips back within centimetres of their stance — its joints froze a few tenths of a
     // degree short of home, and a hinge brought back left the head 3mm from where it began.)
@@ -862,11 +921,13 @@ void Armature::ikTrunkPolicy(IkSolveScratch& s) {
     // references turn home with the rise's progress in ikPostureModel, which needs the chain among
     // the unknowns. Standing up by the hips off all fours or out of a sit-up, the root came upright
     // and the spine kept its fold: she stood bent double with her head down. IK_JS_NO_RISE_TRUNK_HOME.)
-    // (... and only once NO HAND IS PINNED (m_jsHandsPlanted: a live, non-shadow wrist contact): in
-    // the solve while the hands held, the hand rows bent the spine against its references as the
-    // hips rose, and it sprang back the tick the pins went — 271mm at a fingertip, 105 at the brow.
-    // Entering after the lift-off it enters at its references: the spine rode the pelvis rigidly
-    // until then, its channels unchanged.)
+    // (... and by the rise only once NO HAND IS PINNED (m_jsHandsPlanted: a live, non-shadow wrist
+    // contact): in the solve while the hands held, the hand rows bent the spine against its references
+    // as the hips rose, and it sprang back the tick the pins went — 271mm at a fingertip, 105 at the
+    // brow. This term alone does not keep the spine out: it lies on a pinned hand's active path and is
+    // among the unknowns then anyway (ikChooseUnknowns) — which is why the trunk the hands curl is
+    // re-based as their hold fades (rebaseContactArm, ikPinRowLiveContact) and the trunk's home is
+    // frozen meanwhile (m_jsTrunkHomeShare, ikPosturePolicy).)
     m_jsHandsPlanted = false;
     for (std::size_t p = 0; p < pins.size(); ++p) {
         const int node = pins[p].node;
@@ -1019,7 +1080,6 @@ void Armature::ikStiffnessClasses(IkSolveScratch& s) {
     s.homeLimb.assign(n, 0); // a STANDING FOOT's limb: what goes home as the body rises
     std::vector<char>& homeLimb = s.homeLimb;
     s.girdle.assign(n, 0); // under an elbow drag: the bones above the arm's socket (the collar)
-    std::vector<char>& girdle = s.girdle;
     for (std::size_t pinIndex = 0; pinIndex < pins.size(); ++pinIndex) {
         const IkEffector& pin = pins[pinIndex];
         const int junction = rig.limbJunction(pin.node);
@@ -1112,7 +1172,7 @@ void Armature::ikStiffnessClasses(IkSolveScratch& s) {
         const Bone& bone = m_bones[static_cast<std::size_t>(collar)];
         float best = 0.0f;
         for (int a = 0; a < 3; ++a) {
-            if (bone.rotLimited[a] && bone.rotMax[a] - bone.rotMin[a] < kLockedRangeDeg) {
+            if (isLockedChannel(collar, a)) {
                 continue;
             }
             const float along = std::abs(glm::vec3(bone.orient[a]).z);
@@ -1291,7 +1351,6 @@ void Armature::ikKneeDrag(IkSolveScratch& s) {
                 const glm::vec2 across(goalPoint->x - ankle.x, goalPoint->z - ankle.z);
                 const float top = ankle.y + std::sqrt(std::max(0.0f, shin * shin - glm::dot(across, across)));
                 kneeLift = std::max(0.0f, std::min(goalPoint->y - m_jsStartTarget.y, goalPoint->y - top));
-                static const bool kKneeTrace = std::getenv("IK_JS_KNEE_TRACE") != nullptr;
                 if (kKneeTrace) {
                     std::fprintf(stderr, "[knee] goal(%.3f %.3f %.3f) ankle(%.3f %.3f %.3f) top %.3f shin %.3f lift %.4f", goalPoint->x, goalPoint->y, goalPoint->z,
                                  ankle.x, ankle.y, ankle.z, top, shin, kneeLift);
@@ -1328,17 +1387,8 @@ void Armature::ikKneeDrag(IkSolveScratch& s) {
         // thigh flexes, along the figure's heading — out onto the reach: the knee comes up
         // under the cursor's height, as far ahead as the thigh's length puts it.
         if (plant < 1.0f) {
-            const int junction = rig.limbJunction(effector);
-            int top = effector;
             float thigh = 0.0f;
-            for (;;) {
-                const int par = m_bones[static_cast<std::size_t>(top)].parent;
-                if (par < 0 || par == junction || par == root) {
-                    break;
-                }
-                thigh += glm::length(glm::vec3(m_bones[static_cast<std::size_t>(top)].localBind[3]));
-                top = par;
-            }
+            const int top = limbTop(effector, thigh);
             if (top != effector && thigh > 1.0e-4f) {
                 // (The socket as the drag FOUND it: read off the pose, the target followed the
                 // hips it was moving, and a held knee crept forward for seconds.)
@@ -1429,8 +1479,7 @@ void Armature::ikKneeDrag(IkSolveScratch& s) {
                         kneeGoal.y += (1.0f - plant) * std::min(cap, vlen - height);
                     }
                 }
-                static const bool kKneeTrace2 = std::getenv("IK_JS_KNEE_TRACE") != nullptr;
-                if (kKneeTrace2) {
+                if (kKneeTrace) {
                     std::fprintf(stderr, "[knee]   plant %.3f socket(%.3f %.3f %.3f) thigh %.3f inside %.4f lifted(%.3f %.3f %.3f) -> goal(%.3f %.3f %.3f)", plant, socket.x, socket.y, socket.z, thigh, inside, lifted.x, lifted.y, lifted.z, kneeGoal.x, kneeGoal.y, kneeGoal.z);
                     std::fputc(10, stderr);
                 }

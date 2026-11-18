@@ -49,6 +49,8 @@ struct SubdivisionResult {
 /// Subdivides the cage (@p geo positions + faces) and per-base-vertex skin weights @p skins
 /// @p levels times with Catmull-Clark, then assembles per-zone render meshes. @p zoneUvs is the UV
 /// set each material zone's corners are read through, indexed like GeometryData::materialZones
+/// — entry 0 also serves the faces whose material index names no zone, which are assembled into
+/// zone 0 (so pass at least one entry for a geometry that lists no zones)
 /// (a zone past its end, or a null or empty entry, gets (0,0) UVs, as an unmapped cage does); the
 /// sets may be shared between zones and must outlive the call. @p levels == 0 assembles the cage
 /// as-is (no smoothing). @p skins may be empty (an unrigged mesh).

@@ -9,8 +9,9 @@
  * separates "waxy" from grounded; the key light is left alone (it has real shadow mapping).
  *
  * Baked on the FINAL render mesh (post-morph, post-subdivision, all zones together — occlusion is
- * cross-zone: the eyelid occludes the eyeball). Transparent meshes (eye shells, lash/brow cutout
- * cards) receive AO but never occlude — a clear cornea must not darken the iris behind it. Bind
+ * cross-zone: the eyelid occludes the eyeball). See-through meshes (eye shells, glass — a low
+ * opacity or a transmission above a half — and lash/brow cutout cards) receive AO but never
+ * occlude: a clear cornea must not darken the iris behind it. Bind
  * pose only: the bake is static, so a deep pose change won't update it (SSAO later supersedes
  * this dynamically). Pure std + GLM (parallelFor across vertices) — no Qt, no Vulkan.
  */
@@ -23,7 +24,7 @@ namespace pose {
 struct ModelData;
 
 /// Fills every mesh vertex's `ao` in place. Skipped (all vertices stay 1.0) when the model has no
-/// opaque geometry or exceeds the occluder-triangle cap (a huge OBJ shouldn't stall import).
+/// light-blocking geometry or exceeds the occluder-triangle cap (a huge OBJ shouldn't stall import).
 void bakeVertexAO(ModelData& data);
 
 } // namespace pose

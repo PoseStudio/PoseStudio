@@ -18,9 +18,47 @@
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace pose {
+
+namespace {
+
+// HOW A MATERIAL'S MAPS MEET THE ZONE'S EARLIER ONES. A zone can be given a material more than
+// once — a follower's own file, then the materials preset its slot lists — and a later
+// application replaces every VALUE of an earlier one. Its maps follow one of two rules, by slot,
+// and the two tables below ARE the rules (a map member added to FigureMaterial must be listed in
+// one of them, or under the normal / bump / detail cases in applySceneMaterials: a member in
+// none would be left holding a URI where a path belongs):
+using MapMember = std::string FigureMaterial::*;
+
+//  - KEPT where the later material names no map for the slot: a preset that re-colours a zone
+//    without naming its diffuse map leaves the map the zone had.
+const MapMember kMapsKeptWhenAbsent[] = {
+    &FigureMaterial::diffuseMapPath,      &FigureMaterial::opacityMapPath,
+    &FigureMaterial::roughnessMapPath,    &FigureMaterial::specMaskMapPath,
+    &FigureMaterial::translucencyMapPath, &FigureMaterial::translucencyWeightMapPath,
+    &FigureMaterial::emissionMapPath,     &FigureMaterial::diffuseRoughnessMapPath,
+};
+
+//  - REPLACED — the later material's alone, so cleared where it names none. (Which slot follows
+//    which rule is how each was first written, kept as found: making them one rule would change
+//    what a twice-applied zone ends up with, which is a question of behaviour, not of structure.)
+const MapMember kMapsReplaced[] = {
+    &FigureMaterial::coatWeightMapPath,        &FigureMaterial::coatColorMapPath,
+    &FigureMaterial::coatRoughnessMapPath,     &FigureMaterial::coatReflectivityMapPath,
+    &FigureMaterial::coatBumpMapPath,          &FigureMaterial::coatAnisotropyMapPath,
+    &FigureMaterial::coatAnisotropyRotationMapPath,
+    &FigureMaterial::specularColorMapPath,     &FigureMaterial::anisotropyMapPath,
+    &FigureMaterial::anisotropyRotationMapPath, &FigureMaterial::lobe2RoughnessMapPath,
+    &FigureMaterial::lobeRatioMapPath,         &FigureMaterial::displacementMapPath,
+    &FigureMaterial::transmissionColorMapPath, &FigureMaterial::transmissionWeightMapPath,
+    &FigureMaterial::sheenWeightMapPath,       &FigureMaterial::sheenColorMapPath,
+    &FigureMaterial::sheenRoughnessMapPath,    &FigureMaterial::thinFilmThicknessMapPath,
+};
+
+} // namespace
 
 std::unordered_map<std::string, std::string> sceneMaterialUvSets(const nlohmann::json& root,
                                                                  const FigureScope& scope) {
@@ -34,7 +72,7 @@ std::unordered_map<std::string, std::string> sceneMaterialUvSets(const nlohmann:
         return out;
     }
     for (const auto& mat : *materials) {
-        if (!mat.is_object() || !scope.owns(mat.value("geometry", std::string()))) {
+        if (!mat.is_object() || !scope.owns(stringOf(mat, "geometry"))) {
             continue; // another figure's material (its zone may share this figure's zone's name)
         }
         const auto uvSet = mat.find("uv_set");
@@ -70,9 +108,11 @@ void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolve
     // ("/data/.../#<SkinShaderBase>") whose channel defaults would otherwise be lost (the old
     // "roughness falls back to default" limitation). Pre-resolve those here: load the referenced
     // document (cached by the resolver), hand its base material to parseMaterials as an EXTRA
-    // base, and record the scene material's url as the same-file "#fragment" form parseMaterials
-    // handles — without copying the scene materials or the material library (both were once
-    // deep-copied and mutated; the overrides map replaces that).
+    // base, and record for the scene material the key that base is filed under — without copying
+    // the scene materials or the material library (both were once deep-copied and mutated; the
+    // overrides map replaces that). The key is the base's FILE and id together: filed by the id
+    // alone, a cross-file base was shadowed by an entry of the same id in the preset's own
+    // material_library, and two files' bases of one id were taken for each other.
     const nlohmann::json& sceneMaterials = root["scene"]["materials"];
     const nlohmann::json* libraryPtr = &kNoLibrary;
     if (const auto lib = root.find("material_library"); lib != root.end() && lib->is_array()) {
@@ -81,14 +121,14 @@ void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolve
     MaterialBaseOverrides overrides;
     overrides.baseIdsAsWritten = followerPreset; // see scenematerials.h
     std::vector<std::shared_ptr<const FigureDocument>> baseDocs; // keep the referenced documents alive
-    std::unordered_set<std::string> importedBases; // fragments already looked up (found or not)
+    std::unordered_set<std::string> importedBases; // base keys already looked up (found or not)
     if (sceneMaterials.is_array()) {
         for (const auto& mat : sceneMaterials) {
-            if (scope && mat.is_object() && !scope->owns(mat.value("geometry", std::string()))) {
+            if (scope && mat.is_object() && !scope->owns(stringOf(mat, "geometry"))) {
                 overrides.skip.insert(&mat); // another figure's material
                 continue;
             }
-            const std::string url = mat.value("url", std::string());
+            const std::string url = stringOf(mat, "url");
             if (url.size() < 2 || url[0] == '#') {
                 continue; // same-file (or no) base — parseMaterials handles it directly
             }
@@ -97,145 +137,88 @@ void applySceneMaterials(FigureData& fig, const nlohmann::json& root, UriResolve
                 if (!ru.resolved() || ru.fragment.empty()) {
                     continue;
                 }
-                // The FIRST document naming a fragment supplies its base; the fragment counts as
-                // visited even if that load fails, so it isn't retried per material.
-                if (importedBases.insert(ru.fragment).second) {
+                // A base is looked up once; its key counts as visited even if that load fails, so
+                // it isn't retried per material.
+                const std::string key = ru.path + '#' + ru.fragment;
+                if (importedBases.insert(key).second) {
                     const std::shared_ptr<const FigureDocument> baseDoc = resolver.loadDocument(ru);
                     baseDocs.push_back(baseDoc);
                     if (const auto ml = baseDoc->root().find("material_library");
                         ml != baseDoc->root().end() && ml->is_array()) {
                         for (const auto& baseMat : *ml) {
-                            if (baseMat.value("id", std::string()) == ru.fragment) {
-                                overrides.extraBases.emplace(ru.fragment, &baseMat);
+                            if (stringOf(baseMat, "id") == ru.fragment) {
+                                overrides.extraBases.emplace(key, &baseMat);
                                 break;
                             }
                         }
                     }
                 }
-                overrides.urlRewrites.emplace(&mat, "#" + ru.fragment);
+                overrides.crossFileBase.emplace(&mat, key);
             } catch (const std::exception&) {
                 // Unresolvable base: the scene material still parses from its own overrides alone.
             }
         }
     }
 
-    const std::unordered_map<std::string, MaterialRefs> refs =
-        parseMaterials(sceneMaterials, *libraryPtr, imageLibrary, &overrides);
+    const std::unordered_map<std::string, FigureMaterial> parsed =
+        parseMaterials(sceneMaterials, *libraryPtr, imageLibrary, &overrides, &fig.skipped);
     for (FigureMesh& mesh : fig.meshes) {
-        const auto it = refs.find(mesh.materialZone);
-        if (it == refs.end()) {
+        const auto it = parsed.find(mesh.materialZone);
+        if (it == parsed.end()) {
             continue;
         }
-        const MaterialRefs& ref = it->second;
-        mesh.material.baseColor = ref.baseColor;
-        mesh.material.roughness = ref.roughness;
-        mesh.material.specularWeight = ref.specularWeight;
-        mesh.material.specularWeightWithMap = ref.specularWeightWithMap;
-        mesh.material.metallic = ref.metallic;
-        mesh.material.lobe1Roughness = ref.lobe1Roughness;
-        mesh.material.lobe2Roughness = ref.lobe2Roughness;
-        mesh.material.lobeRatio = ref.lobeRatio;
-        mesh.material.topCoatWeight = ref.topCoatWeight;
-        mesh.material.topCoatEnabled = ref.topCoatEnabled;
-        mesh.material.topCoatRoughness = ref.topCoatRoughness;
-        mesh.material.translucencyWeight = ref.translucencyWeight;
-        mesh.material.opacity = ref.opacity;
-        // The canonical material's further channels (materialparser.h).
-        mesh.material.emissionColor = ref.emissionColor;
-        mesh.material.emission = ref.emission;
-        if (!ref.emissionImageUri.empty()) {
-            mesh.material.emissionMapPath = resolver.resolve(ref.emissionImageUri, referringDir).path;
+        // Every VALUE of the parsed material replaces the zone's; its maps arrive as the URIs the
+        // file wrote and are resolved here, each meeting the zone's earlier map by its slot's
+        // rule (see kMapsKeptWhenAbsent / kMapsReplaced).
+        const FigureMaterial& earlier = mesh.material;
+        FigureMaterial        material = it->second;
+        const auto resolveInPlace = [&](MapMember map) {
+            std::string& uri = material.*map;
+            if (!uri.empty()) {
+                uri = resolver.resolve(uri, referringDir).path; // (empty again where nothing on disk matches)
+            }
+        };
+        for (const MapMember map : kMapsReplaced) {
+            resolveInPlace(map);
         }
-        mesh.material.ior = ref.ior;
-        mesh.material.transmission = ref.transmission;
-        mesh.material.transmissionColor = ref.transmissionColor;
-        mesh.material.transmissionDepth = ref.transmissionDepth;
-        mesh.material.transmissionRoughness = ref.transmissionRoughness;
-        mesh.material.thinWalled = ref.thinWalled;
-        mesh.material.subsurfaceColor = ref.subsurfaceColor;
-        mesh.material.subsurfaceRadiusColor = ref.subsurfaceRadiusColor;
-        mesh.material.subsurfaceRadius = ref.subsurfaceRadius;
-        mesh.material.subsurfaceAnisotropy = ref.subsurfaceAnisotropy;
-        mesh.material.anisotropy = ref.anisotropy;
-        mesh.material.anisotropyRotation = ref.anisotropyRotation;
-        mesh.material.diffuseRoughness = ref.diffuseRoughness;
-        if (!ref.diffuseRoughnessImageUri.empty()) {
-            mesh.material.diffuseRoughnessMapPath = resolver.resolve(ref.diffuseRoughnessImageUri, referringDir).path;
+        for (const MapMember map : kMapsKeptWhenAbsent) {
+            if ((material.*map).empty()) {
+                material.*map = earlier.*map;
+            } else {
+                resolveInPlace(map);
+            }
         }
-        mesh.material.coatColor = ref.coatColor;
-        mesh.material.coatIor = ref.coatIor;
-        const auto mapPath = [&](const std::string& uri) { return uri.empty() ? std::string() : resolver.resolve(uri, referringDir).path; };
-        mesh.material.coatWeightMapPath = mapPath(ref.coatWeightImageUri);
-        mesh.material.coatColorMapPath = mapPath(ref.coatColorImageUri);
-        mesh.material.coatRoughnessMapPath = mapPath(ref.coatRoughnessImageUri);
-        mesh.material.coatReflectivityMapPath = mapPath(ref.coatReflectivityImageUri);
-        mesh.material.coatBumpMapPath = mapPath(ref.coatBumpImageUri);
-        mesh.material.coatBumpStrength = ref.coatBumpStrength;
-        mesh.material.specularColorMapPath = mapPath(ref.specularColorImageUri);
-        mesh.material.displacementMapPath = mapPath(ref.displacementImageUri);
-        mesh.material.transmissionColorMapPath = mapPath(ref.transmissionColorImageUri);
-        mesh.material.transmissionWeightMapPath = mapPath(ref.transmissionWeightImageUri);
-        mesh.material.coatAnisotropy = ref.coatAnisotropy;
-        mesh.material.coatAnisotropyRotation = ref.coatAnisotropyRotation;
-        mesh.material.coatAnisotropyMapPath = mapPath(ref.coatAnisotropyImageUri);
-        mesh.material.coatAnisotropyRotationMapPath = mapPath(ref.coatAnisotropyRotationImageUri);
-        mesh.material.sheen = ref.sheen;
-        mesh.material.sheenColor = ref.sheenColor;
-        mesh.material.sheenRoughness = ref.sheenRoughness;
-        mesh.material.sheenWeightMapPath = mapPath(ref.sheenWeightImageUri);
-        mesh.material.sheenColorMapPath = mapPath(ref.sheenColorImageUri);
-        mesh.material.sheenRoughnessMapPath = mapPath(ref.sheenRoughnessImageUri);
-        mesh.material.thinFilm = ref.thinFilm;
-        mesh.material.thinFilmThickness = ref.thinFilmThickness;
-        mesh.material.thinFilmIor = ref.thinFilmIor;
-        mesh.material.thinFilmThicknessMapPath = mapPath(ref.thinFilmThicknessImageUri);
-        mesh.material.displacementStrength = ref.displacementStrength;
-        mesh.material.displacementMidLevel = ref.displacementMidLevel;
-        mesh.material.displacementSubdiv = ref.displacementSubdiv;
-        mesh.material.anisotropyMapPath = mapPath(ref.anisotropyImageUri);
-        mesh.material.anisotropyRotationMapPath = mapPath(ref.anisotropyRotationImageUri);
-        mesh.material.lobe2RoughnessMapPath = mapPath(ref.lobe2RoughnessImageUri);
-        mesh.material.lobeRatioMapPath = mapPath(ref.lobeRatioImageUri);
-        mesh.material.uvTiling = ref.uvTiling;
-        mesh.material.uvOffset = ref.uvOffset;
-        if (!ref.roughnessImageUri.empty()) {
-            mesh.material.roughnessMapPath = resolver.resolve(ref.roughnessImageUri, referringDir).path;
+        // The normal and the bump map are kept likewise, each WITH its strength: a strength
+        // dialed on a channel that carries no map says nothing about the zone's earlier map.
+        if (material.normalMapPath.empty()) {
+            material.normalMapPath = earlier.normalMapPath;
+            material.normalStrength = earlier.normalStrength;
+        } else {
+            resolveInPlace(&FigureMaterial::normalMapPath);
         }
-        if (!ref.specWeightImageUri.empty()) {
-            mesh.material.specMaskMapPath = resolver.resolve(ref.specWeightImageUri, referringDir).path;
+        if (material.bumpMapPath.empty()) {
+            material.bumpMapPath = earlier.bumpMapPath;
+            material.bumpStrength = earlier.bumpStrength;
+        } else {
+            resolveInPlace(&FigureMaterial::bumpMapPath);
         }
-        if (!ref.translucencyImageUri.empty()) {
-            mesh.material.translucencyMapPath =
-                resolver.resolve(ref.translucencyImageUri, referringDir).path;
+        // The detail layer is kept or replaced WHOLE, by whether this material has its normal map
+        // (the parser reads the layer's values only then).
+        if (material.detailNormalMapPath.empty()) {
+            material.detailNormalMapPath = earlier.detailNormalMapPath;
+            material.detailWeight = earlier.detailWeight;
+            material.detailTiles = earlier.detailTiles;
+            material.detailTilesV = earlier.detailTilesV;
+            material.detailOffset = earlier.detailOffset;
+            material.detailRoughness = earlier.detailRoughness;
+            material.detailWeightMapPath = earlier.detailWeightMapPath;
+            material.detailRoughnessMapPath = earlier.detailRoughnessMapPath;
+        } else {
+            resolveInPlace(&FigureMaterial::detailNormalMapPath);
+            resolveInPlace(&FigureMaterial::detailWeightMapPath);
+            resolveInPlace(&FigureMaterial::detailRoughnessMapPath);
         }
-        if (!ref.translucencyWeightImageUri.empty()) {
-            mesh.material.translucencyWeightMapPath = resolver.resolve(ref.translucencyWeightImageUri, referringDir).path;
-        }
-        if (!ref.detailNormalImageUri.empty()) {
-            mesh.material.detailNormalMapPath =
-                resolver.resolve(ref.detailNormalImageUri, referringDir).path;
-            mesh.material.detailWeight = ref.detailWeight;
-            mesh.material.detailTiles = ref.detailTiles;
-            mesh.material.detailTilesV = ref.detailTilesV;
-            mesh.material.detailOffset = ref.detailOffset;
-            mesh.material.detailRoughness = ref.detailRoughness;
-            mesh.material.detailWeightMapPath = mapPath(ref.detailWeightImageUri);
-            mesh.material.detailRoughnessMapPath = mapPath(ref.detailRoughnessImageUri);
-        }
-        if (!ref.diffuseImageUri.empty()) {
-            mesh.material.diffuseMapPath = resolver.resolve(ref.diffuseImageUri, referringDir).path;
-        }
-        if (!ref.normalImageUri.empty()) {
-            mesh.material.normalMapPath = resolver.resolve(ref.normalImageUri, referringDir).path;
-            mesh.material.normalStrength = ref.normalStrength;
-        }
-        if (!ref.bumpImageUri.empty()) {
-            mesh.material.bumpMapPath = resolver.resolve(ref.bumpImageUri, referringDir).path;
-            mesh.material.bumpStrength = ref.bumpStrength;
-        }
-        if (!ref.opacityImageUri.empty()) {
-            mesh.material.opacityMapPath = resolver.resolve(ref.opacityImageUri, referringDir).path;
-        }
+        mesh.material = std::move(material);
     }
 }
 
@@ -268,7 +251,7 @@ void applyAnimationMaterials(FigureData& fig, const nlohmann::json& root, UriRes
     std::unordered_map<std::string, ZoneOverride> zones;
 
     for (const auto& entry : *animations) {
-        const std::string url = entry.value("url", std::string());
+        const std::string url = stringOf(entry, "url");
         const auto keys = entry.find("keys");
         if (keys == entry.end() || !keys->is_array() || keys->empty() || !(*keys)[0].is_array() ||
             (*keys)[0].size() < 2) {
@@ -282,7 +265,7 @@ void applyAnimationMaterials(FigureData& fig, const nlohmann::json& root, UriRes
             continue;
         }
         if (onlyFigureNode) {
-            // The node prefix is the node's id or name, URL-encoded ("Female%208_1%20Tear"); a
+            // The node prefix is the node's id or name, URL-encoded ("Some%20Figure%20Tear"); a
             // selection form ("name://@selection/<node>:") is reduced to the node. A track with
             // no prefix at all is left to the zone match, as before.
             std::string node = urlDecode(url.substr(0, hash));
@@ -311,7 +294,8 @@ void applyAnimationMaterials(FigureData& fig, const nlohmann::json& root, UriRes
         ZoneOverride& zo = zones[zone];
 
         constexpr const char* kChannelsPrefix = "extra/studio_material_channels/channels/";
-        if (prop == "diffuse/value" && value.is_array() && value.size() >= 3) {
+        if (prop == "diffuse/value" && value.is_array() && value.size() >= 3 && value[0].is_number() &&
+            value[1].is_number() && value[2].is_number()) {
             zo.baseColor = glm::vec3(value[0].get<float>(), value[1].get<float>(),
                                      value[2].get<float>());
             zo.hasBaseColor = true;

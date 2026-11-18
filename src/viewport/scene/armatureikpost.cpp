@@ -7,14 +7,14 @@
  * Neither is part of the solve: the arms and the head are turned on the solved pose, at a
  * bounded rate, and stopped at the body volumes and the floor like any FK rotation. Each
  * section's comment says why it is a post-step and what was tried inside the solve first.
+ * (The tick's third post-step, a floating figure's hanging feet, is armaturehangfeet.cpp; the
+ * soft body ticks after all three.)
  * Qt-free (std + GLM).
  */
 
 #include "armature.h"
-#include "armatureiksolvestate.h"
 #include "armatureiksolvetuning.h"
 
-#include "balancecontroller.h"
 #include "ikmath.h"
 #include "ikrig.h"
 #include "jointsolver.h"
@@ -22,12 +22,10 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
-#include <tuple>
 
 namespace pose {
 
@@ -158,17 +156,18 @@ bool Armature::balanceIsBlind() const {
     return false;
 }
 
-std::vector<glm::vec3> Armature::balancePositions() const {
+void Armature::balancePositions(std::vector<glm::vec3>& positions) const {
     const std::size_t n = m_bones.size();
-    std::vector<glm::vec3> positions(n);
+    positions.resize(n);
     for (std::size_t i = 0; i < n; ++i) {
         positions[i] = glm::vec3(m_poseGlobal[i][3]);
     }
     // The joints a post-step turned, put back at the rotation the drag found them with: a hung
     // arm's shoulder, the righted neck's bones. Everything below keeps the local pose it has
     // (children follow parents in the bone order).
-    std::vector<char> putBack(n, 0);
-    bool              any = false;
+    std::vector<char>& putBack = m_jsBalancePutBackBuf; // (kept across ticks, like its two fellows below: no allocation)
+    putBack.assign(n, 0);
+    bool any = false;
     const auto mark = [&](int bone) {
         const std::size_t b = static_cast<std::size_t>(bone);
         if (m_bones[b].parent >= 0 && glm::length(m_boneEuler[b] - m_ikStartEuler[b]) >= 1.0e-3f) {
@@ -213,10 +212,12 @@ std::vector<glm::vec3> Armature::balancePositions() const {
         }
     }
     if (!any) {
-        return positions;
+        return;
     }
-    std::vector<glm::mat4> ride(n);
-    std::vector<char>      rides(n, 0);
+    std::vector<glm::mat4>& ride = m_jsBalanceRideBuf; // (an entry is written before it is read: below a bone that rides)
+    std::vector<char>&      rides = m_jsBalanceRidesBuf;
+    ride.resize(n);
+    rides.assign(n, 0);
     for (std::size_t i = 0; i < n; ++i) {
         const int p = m_bones[i].parent;
         if (p < 0 || (!putBack[i] && !rides[static_cast<std::size_t>(p)])) {
@@ -233,7 +234,6 @@ std::vector<glm::vec3> Armature::balancePositions() const {
         rides[i] = 1;
         positions[i] = glm::vec3(ride[i][3]);
     }
-    return positions;
 }
 
 namespace {
@@ -366,8 +366,7 @@ bool Armature::hangTurnFor(const HangArm& arm, const glm::vec3& wanted, HangTurn
         const int freeCount = freeChannelCount(static_cast<int>(s));
         const int twistAxis = (!kHangTwists && freeCount == 3 && s < m_jsTwistAxis.size()) ? m_jsTwistAxis[s] : -1;
         for (int a = 0; a < 3; ++a) {
-            const Bone& bone = m_bones[s];
-            isFree[a] = !(bone.rotLimited[a] && bone.rotMax[a] - bone.rotMin[a] < kLockedRangeDeg) && a != twistAxis;
+            isFree[a] = !isLockedChannel(static_cast<int>(s), a) && a != twistAxis;
             glm::vec3 nudged = before;
             nudged[a] += 0.5f;
             column[a] = isFree[a] ? (pointsAt(nudged) - pointsAt(before)) / 0.5f : glm::vec3(0.0f);
@@ -463,8 +462,7 @@ void Armature::hangStopFraction(HangTurn& t) {
     const float floorAllow = std::max(t.floorDepthBefore, 0.0f);
     t.fraction = 1.0f;
     hangTurnTo(t, 1.0f);
-    static const bool kStopTrace = std::getenv("IK_ARM_HANG_TRACE") != nullptr;
-    if (kStopTrace) {
+    if (kArmHangTrace) {
         float floorWorst = -1.0e9f;
         int   floorJoint = -1;
         for (std::size_t i = t.s; i < n; ++i) {
@@ -522,13 +520,22 @@ void Armature::findHangArms() {
             if (foldAxis < 0 || static_cast<int>(e) == root) {
                 continue; // an ELBOW: a fold joint ...
             }
-            bool leg = false; // ... with no foot below it (that is a knee)
-            for (std::size_t i = 0; i < n && !leg; ++i) {
-                leg = rig.isFootClass(static_cast<int>(i)) && boneUnder(static_cast<int>(i), static_cast<int>(e));
-            }
             int socket = bone.parent;
             while (socket >= 0 && socket != root && freeChannelCount(socket) < 2) {
                 socket = m_bones[static_cast<std::size_t>(socket)].parent; // (past the upper arm's twist bone)
+            }
+            // (A later tick: an arm already listed is done with — asked before the scan below, which
+            // every fold joint of the skeleton, the fingers' included, would otherwise pay each tick.)
+            bool listed = false;
+            for (std::size_t have = 0; !firstFind && have < m_jsHangArms.size(); ++have) {
+                listed = listed || m_jsHangArms[have].socket == socket;
+            }
+            if (listed) {
+                continue;
+            }
+            bool leg = false; // ... with no foot below it (that is a knee)
+            for (std::size_t i = 0; i < n && !leg; ++i) {
+                leg = rig.isFootClass(static_cast<int>(i)) && boneUnder(static_cast<int>(i), static_cast<int>(e));
             }
             if (leg || socket < 0 || socket == root || m_bones[static_cast<std::size_t>(socket)].parent < 0) {
                 continue;
@@ -548,13 +555,6 @@ void Armature::findHangArms() {
             }
             bool landedNow = false; // (a later tick: the hand is a live contact now — see above)
             if (!firstFind) {
-                bool listed = false;
-                for (const HangArm& have : m_jsHangArms) {
-                    listed = listed || have.socket == socket;
-                }
-                if (listed) {
-                    continue;
-                }
                 for (std::size_t p = 0; p < rig.pins().size(); ++p) {
                     const int node = rig.pins()[p].node;
                     landedNow = landedNow || (rig.pinIsLive(p) && node != static_cast<int>(e) && boneUnder(node, static_cast<int>(e)));
@@ -565,8 +565,7 @@ void Armature::findHangArms() {
             }
             const glm::vec3 offset = m_jsStartPos[e] - m_jsStartPos[static_cast<std::size_t>(socket)];
             const float     length = glm::length(offset);
-            static const bool kFindTrace = std::getenv("IK_ARM_HANG_TRACE") != nullptr;
-            if (kFindTrace) {
+            if (kArmHangTrace) {
                 std::fprintf(stderr, "[hang] candidate %s (socket %s): down share %.2f, elbow %.1f deg",
                              m_boneNames[e].c_str(), m_boneNames[static_cast<std::size_t>(socket)].c_str(),
                              length > 1.0e-4f ? -offset.y / length : 0.0f, m_ikStartEuler[e][foldAxis]);
@@ -627,7 +626,7 @@ void Armature::findHangArms() {
             }
             const bool hungByPose = !((offset.y / length > -kArmHangCone && !nearBind) || std::abs(m_ikStartEuler[e][foldAxis]) > kArmHangElbowDeg);
             const bool hung = hungByPose || (!kBentLandedRides && landedAtPress);
-            if (kFindTrace) {
+            if (kArmHangTrace) {
                 std::fprintf(stderr, "[hang] candidate %s: hungByPose=%d landedAtPress=%d (hand %s, rests on the floor at the press: %d, landed now: %d) -> %s",
                              m_boneNames[e].c_str(), hungByPose ? 1 : 0, landedAtPress ? 1 : 0,
                              handAtPress >= 0 ? m_boneNames[static_cast<std::size_t>(handAtPress)].c_str() : "-",
@@ -658,29 +657,24 @@ void Armature::findHangArms() {
                                 (si < m_hangElbowValid.size() && m_hangElbowValid[si] != 0 &&
                                  std::abs(atPress - m_hangElbowDeg[si]) < kArmIdleElbowUnposedDeg);
             }
-            ensureHandMaps();
-            for (std::size_t i = e + 1; i < n && arm.hand < 0 && m_jsWristOf.size() == n; ++i) {
-                if (m_jsWristOf[i] == static_cast<int>(i) && boneUnder(static_cast<int>(i), static_cast<int>(e))) {
-                    arm.hand = static_cast<int>(i);
-                }
-            }
+            arm.hand = handAtPress; // (the wrist below this elbow, found above)
             if (!hungByPose) {
                 // (Found lying beside a figure on her back, say, or standing on its hand: what it
                 // wants is to hang by her side — down, a little out — as soon as the floor lets it.
                 // Kept as found, a figure sat up from her back held both arms straight out in front
                 // of her.)
                 glm::vec3 out = m_jsStartPos[static_cast<std::size_t>(socket)] - m_jsStartPos[static_cast<std::size_t>(root)];
-                const glm::vec3 lateral(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
+                const glm::vec3 lateral = ikHeadingLateral();
                 out = lateral * (glm::dot(out, lateral) < 0.0f ? -1.0f : 1.0f);
                 arm.wants = glm::normalize(glm::vec3(0.0f, -1.0f, 0.0f) + 0.25f * out);
             }
             {
                 // THE STRIDE SWING's BASE for this arm — the un-swung hang the swing is applied to:
-                // remembered from the last drag that hung it (m_hangBase, carried to this press's
-                // heading), else the found direction LESS the swing the stance it stands in would
+                // the found direction LESS the swing the arm carries — remembered from the last drag
+                // that hung it (m_hangSwingDeg), else the swing the stance it stands in would
                 // give (a loaded stride pose with plumb arms keeps them plumb until the stance
                 // changes; a standing figure's base is the found hang itself).
-                const glm::vec3 lateralStart(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
+                const glm::vec3 lateralStart = ikHeadingLateral();
                 const glm::vec3 foreStart = glm::normalize(glm::cross(lateralStart, glm::vec3(0.0f, 1.0f, 0.0f)));
                 const glm::vec3 side = m_jsStartPos[static_cast<std::size_t>(socket)] - m_jsStartPos[static_cast<std::size_t>(root)];
                 const float     armSide = glm::dot(side, lateralStart) < 0.0f ? -1.0f : 1.0f;
@@ -706,7 +700,6 @@ void Armature::findHangArms() {
 /// THE STRIDE SWING this tick, per hanging arm (degrees, + forward): see the body.
 std::vector<float> Armature::hangArmSwings() const {
     const IkRig&      rig = *m_ikRig;
-    const std::size_t n = m_bones.size();
     const int         root = rig.rootNode();
     // THE STRIDE SWING this tick, per arm: the swing the stance gives it now (degrees, + forward),
     // absolute on the arm's remembered base. The SPLIT is read along the HIPS' heading now — the
@@ -716,10 +709,9 @@ std::vector<float> Armature::hangArmSwings() const {
     // its pixels on a route whose feet never moved). IK_ARM_HANG_NO_SWING is the A/B;
     // IK_ARM_HANG_TRACE prints each arm's split and swing per tick.
     static const bool kNoSwing = std::getenv("IK_ARM_HANG_NO_SWING") != nullptr; // A/B probe
-    static const bool kSwingTrace = std::getenv("IK_ARM_HANG_TRACE") != nullptr;
     std::vector<float> swings(m_jsHangArms.size(), 0.0f);
     {
-        const glm::vec3 lateralStart(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
+        const glm::vec3 lateralStart = ikHeadingLateral();
         const glm::mat3 rootTurned = glm::mat3(m_poseGlobal[static_cast<std::size_t>(root)]) *
                                      glm::transpose(m_jsStartRot[static_cast<std::size_t>(root)]);
         glm::vec3 hipsLateral = rootTurned * lateralStart;
@@ -737,7 +729,7 @@ std::vector<float> Armature::hangArmSwings() const {
             if (hangStanceSplit(glm::dot(side, lateralStart) < 0.0f ? -1.0f : 1.0f, hipsFore, splitNow)) {
                 swings[ai] = hangSwingDegOf(splitNow);
             }
-            if (kSwingTrace) {
+            if (kArmHangTrace) {
                 std::fprintf(stderr, "[hang-swing] %s: split %.4f m -> swing %.3f deg (carried %.3f)\n", m_boneNames[s].c_str(), splitNow,
                              swings[ai], s < m_hangSwingDeg.size() ? m_hangSwingDeg[s] : 0.0f);
             }
@@ -902,7 +894,6 @@ bool Armature::softenHangElbows(const std::vector<float>& swings) {
 
 /// THE WRIST RELAXES once a hand that was on the floor at the press has lifted. True if one turned.
 bool Armature::relaxLiftedWrists() {
-    const IkRig&      rig = *m_ikRig;
     bool changed = false;
     // THE WRIST RELAXES once a hand that was on the floor at the press is unloaded or lifted: its
     // channels ease toward neutral, kWristRelaxStepDeg a tick (within the limits). Left at its
@@ -1067,7 +1058,6 @@ bool Armature::relaxIdleFingers() {
 /// the floor while the seat rolls or the hips go down, tilted by the stride swing — and the turn.
 void Armature::findHangTurns(const std::vector<float>& swings, std::vector<HangTurn>& turns) {
     const IkRig&      rig = *m_ikRig;
-    const std::size_t n = m_bones.size();
     const int         root = rig.rootNode();
     for (const HangArm& arm : m_jsHangArms) {
         const std::size_t s = static_cast<std::size_t>(arm.socket);
@@ -1093,7 +1083,7 @@ void Armature::findHangTurns(const std::vector<float>& swings, std::vector<HangT
         // the press (none of it under 25 degrees, all from 70: a bow keeps the arms as they were,
         // nothing pops at the press, and a drag brought home brings them home).
         static const bool kNoPlumb = std::getenv("IK_ARM_HANG_NO_PLUMB") != nullptr; // A/B probe
-        const glm::vec3 lateralStart(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
+        const glm::vec3 lateralStart = ikHeadingLateral();
         const glm::vec3 side = m_jsStartPos[s] - m_jsStartPos[static_cast<std::size_t>(root)];
         const glm::vec3 out = glm::length(lateral) > 0.2f ? lateral * (glm::dot(side, lateralStart) < 0.0f ? -1.0f : 1.0f) : glm::vec3(0.0f);
         if (!kNoPlumb && glm::length(lateral) > 0.2f) {
@@ -1126,7 +1116,7 @@ void Armature::findHangTurns(const std::vector<float>& swings, std::vector<HangT
                 wanted = glm::normalize(out * outNow + (restLen > 1.0e-5f ? rest * (restWanted / restLen) : glm::vec3(0.0f, -restWanted, 0.0f)));
             }
         }
-        // While THE SEAT ROLLS (solveIk: a figure sitting on the floor, let down onto her back or
+        // While THE SEAT ROLLS (ikPosturePolicy: a figure sitting on the floor, let down onto her back or
         // brought back up) the arm keeps OFF THE FLOOR: its direction is turned from the hang
         // toward the one it would RIDE the chest at — which, as she goes down, is along the floor
         // toward her feet — by just as much as clears it. Left to hang, the hands came down on the
@@ -1155,7 +1145,6 @@ void Armature::findHangTurns(const std::vector<float>& swings, std::vector<HangT
         // never deeper than found — keeps from ratcheting the body up.)
         if ((kFloorAnyDrag || m_jsSeatRolls || hipsDown) && !kNoHangFloor) {
             const glm::vec3 ridesWorld = glm::normalize(parentNow * glm::transpose(m_jsStartRot[par]) * arm.direction);
-            const float     floorAt = -m_transform[3][1];
             const float     margin = kArmHangFloorMargin * rig.sizeScale();
             // (... AND THE VOLUMES, 2026-10-29: a direction that clears the floor but lies inside the
             // hip's capsule is one the stop blocks outright — the lying body's arm, left where the
@@ -1317,7 +1306,6 @@ void Armature::findHangTurns(const std::vector<float>& swings, std::vector<HangT
 }
 
 void Armature::stopHangTurns(std::vector<HangTurn>& turns) {
-    const IkRig&      rig = *m_ikRig;
     // THE STOP: the FK collision stop (as Armature::nudgeSelectedBone), at the body volumes and the
     // FLOOR: a turn in full, else bisected back to the largest fraction that goes no deeper than it
     // was. ORDER-INDEPENDENT: each arm's fraction is measured against a body that is otherwise as
@@ -1411,7 +1399,6 @@ void Armature::stopHangTurns(std::vector<HangTurn>& turns) {
 /// The turns applied as stopped; what each arm now carries of its stride swing is remembered.
 bool Armature::applyHangTurns(const std::vector<HangTurn>& turns) {
     bool changed = false;
-    static const bool kHangTrace = std::getenv("IK_ARM_HANG_TRACE") != nullptr;
     for (const HangTurn& t : turns) {
         const std::size_t s = t.s;
         changed = changed || glm::length(m_boneEuler[s] - t.before) > 1.0e-4f;
@@ -1428,7 +1415,7 @@ bool Armature::applyHangTurns(const std::vector<HangTurn>& turns) {
             const float     carried = sagittalDeg(nowDir, t.fore) - sagittalDeg(t.unswung, t.fore);
             m_hangSwingDeg[s] = glm::clamp(carried, std::min(0.0f, t.swingAsked), std::max(0.0f, t.swingAsked));
         }
-        if (kHangTrace) {
+        if (kArmHangTrace) {
             std::fprintf(stderr, "[hang] %s: wanted step (%.2f %.2f %.2f) applied (%.2f %.2f %.2f) depth %.1f -> %.1f mm",
                          m_boneNames[s].c_str(), t.delta.x, t.delta.y, t.delta.z, m_boneEuler[s].x - t.before.x,
                          m_boneEuler[s].y - t.before.y, m_boneEuler[s].z - t.before.z, t.depthBefore * 1000.0f,
@@ -1449,9 +1436,7 @@ bool Armature::hangIdleArms() {
     if (kNoArmHang || !m_ikRig || !m_ikRig->dragActive()) {
         return false;
     }
-    const IkRig&      rig = *m_ikRig;
     const std::size_t n = m_bones.size();
-    const int         root = rig.rootNode();
     if (m_jsStartPos.size() != n || m_jsStartRot.size() != n) {
         return false;
     }

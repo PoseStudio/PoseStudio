@@ -1,8 +1,8 @@
 /**
  * @file vulkanbuffer.h
- * @brief A thin RAII wrapper over a VMA-allocated buffer, plus the three creation helpers the
- *        mesh path needs (a staged device-local buffer — blocking or batched — and a
- *        persistently-mapped uniform buffer).
+ * @brief A thin RAII wrapper over a VMA-allocated buffer, plus the creation helpers the scene
+ *        needs (a staged device-local buffer — blocking or batched — a persistently-mapped
+ *        uniform buffer, and a zeroed host-mapped storage buffer).
  *
  * Like the rest of rendering/, this is Qt-free (plain Vulkan + VMA + std). VulkanBuffer owns its
  * VkBuffer + VmaAllocation and frees both on destruction; it is move-only so it can live in a
@@ -39,11 +39,9 @@ public:
     VkBuffer     handle() const { return m_buffer; }
 
     /// Non-null only when the buffer was created with a HOST_ACCESS + MAPPED flag (e.g. a UBO).
+    /// Host-access buffers are always HOST_COHERENT (see the constructor), so a write needs no
+    /// flush and a read-back no invalidate.
     void* mappedData() const { return m_mappedData; }
-
-    /// Makes what the GPU wrote visible to the host mapping (a no-op on coherent memory): call
-    /// before reading a read-back buffer.
-    void invalidate() const;
 
 private:
     void destroy();

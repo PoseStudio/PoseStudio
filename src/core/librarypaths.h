@@ -13,9 +13,9 @@
  *
  * Cost model: the library root is looked up in the database ONCE and cached (see
  * invalidateCache); every other function is pure path arithmetic or a directory scan, and the
- * one filesystem write (creating hdri/) is explicit — ensureHdriDirectory() — rather than a side
- * effect of every lookup. The panorama scan returns each file's category and display name
- * precomputed, so callers never re-derive them.
+ * filesystem writes (creating hdri/ and Materials/) are explicit — ensureHdriDirectory(),
+ * ensureMaterialsDirectory() — rather than a side effect of every lookup. The panorama scan
+ * returns each file's category and display name precomputed, so callers never re-derive them.
  */
 
 #ifndef LIBRARYPATHS_H
@@ -35,9 +35,9 @@ namespace LibraryPaths {
 QString userLibraryRoot();
 
 /// Forgets the cached library root so the next userLibraryRoot() re-reads the AssetLibraries
-/// table. Call it after any library is added or removed (Preferences → Assets does; the Asset
-/// Manager's own add/remove-library actions must too) — otherwise a "My PoseStudio Library"
-/// registered mid-session isn't seen until the next launch.
+/// table — otherwise a "My PoseStudio Library" registered mid-session isn't seen until the next
+/// launch. The AssetLibraries repository calls it whenever a library is added or removed
+/// (core/assetlibraries.cpp, the table's one writer), so its callers need not.
 void invalidateCache();
 
 /// The HDRI environments folder inside the user library (<root>/hdri) — a pure path, which may
@@ -83,9 +83,6 @@ struct HdriEntry {
 /// (= category) alphabetically, files alphabetical within — the exact order the Environment
 /// panel's HDRI menu renders, with a heading per subfolder.
 QList<HdriEntry> hdriEntries();
-
-/// Just the paths of hdriEntries(), in the same order — for callers that only walk files.
-QStringList hdriFiles();
 
 /// The startup/default panorama. An explicit override next to the executable wins — <appDir>/
 /// environment.hdr, then environment.exr (a developer/packaging lever for forcing one specific

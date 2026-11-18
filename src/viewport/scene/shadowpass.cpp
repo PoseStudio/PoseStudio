@@ -64,9 +64,19 @@ bool ShadowPass::fit(const std::vector<std::unique_ptr<Model>>& models, const gl
     bool any = false;
     const glm::vec3 dir = keyDir; // TO the light; a shadow ray travels along -dir
     for (const std::unique_ptr<Model>& model : models) {
+        // Only what the pass can draw or the map can shade: a model with meshes (one with
+        // see-through zones alone casts nothing but still receives). A Gaussian splat scene
+        // neither casts nor receives, and its box — an environment capture's is metres across —
+        // spread the map's texels thin over the figure standing in it.
+        if (!model->hasMeshes()) {
+            continue;
+        }
+        // Where the model IS (Model::posedBounds): a figure's bind box goes with her hips. Taken
+        // where she was imported, the frustum spanned both places once she had been moved or
+        // walked, and the map's resolution on her fell with the distance.
         glm::vec3 a;
         glm::vec3 b;
-        if (!model->worldBounds(a, b)) {
+        if (!model->posedBounds(a, b)) {
             continue;
         }
         any = true;

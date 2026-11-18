@@ -5,6 +5,7 @@
 
 #include "materialball.h"
 
+#include "colorcurves.h"
 #include "parallelfor.h"
 
 #include <algorithm>
@@ -14,6 +15,9 @@
 namespace pose {
 
 namespace {
+
+using colorcurves::linearToSrgb;
+using colorcurves::srgbToLinear;
 
 constexpr float kPi = 3.14159265358979f;
 
@@ -158,15 +162,6 @@ Lighting makeLighting(const EnvironmentImage& environment) {
 
 // --- The maps -------------------------------------------------------------------------------
 
-float srgbToLinear(float c) {
-    return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
-}
-
-float linearToSrgb(float c) {
-    c = std::clamp(c, 0.0f, 1.0f);
-    return c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
-}
-
 /// The texel of @p image at @p uv (wrapping), or null where there is no image.
 const std::uint8_t* texel(const std::shared_ptr<const DecodedImage>& image, const glm::vec2& uv) {
     if (!image || image->width == 0 || image->height == 0 || image->pixels.empty()) {
@@ -203,12 +198,6 @@ glm::vec3 environmentBrdf(const glm::vec3& f0, float roughness, float ndv) {
     const float     a004 = std::min(r.x * r.x, std::exp2(-9.28f * ndv)) * r.x + r.y;
     const glm::vec2 ab = glm::vec2(-1.04f, 1.04f) * a004 + glm::vec2(r.z, r.w);
     return f0 * ab.x + glm::vec3(ab.y);
-}
-
-float tonemap(float x) { // (the ACES fit the viewport's PBR mode ends with: color.glsl)
-    const float a = 2.51f, b = 0.03f, c = 2.43f, d = 0.59f, e = 0.14f;
-    x = std::max(x, 0.0f);
-    return std::clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0f, 1.0f);
 }
 
 // --- The icon studio ------------------------------------------------------------------------
@@ -430,11 +419,13 @@ std::vector<std::uint8_t> shadeMaterialBall(const MaterialParams& m, const BallM
     Lighting light = makeLighting(environment);
     light.sharp = &light.mirror;
 
-    // The key light, as the viewport's PBR mode has it (cameraubo.cpp's direction, renderexport's color).
+    // The key light, as the viewport's PBR mode has it. (The direction is keyLightDirection's
+    // formula without the environment's rotation, typed out: cameraubo.cpp is the scene's, and
+    // the tool that checks this shader is built without it.)
     const float     azimuth = glm::radians(lighting.keyAzimuthDeg);
     const float     elevation = glm::radians(lighting.keyElevationDeg);
     const glm::vec3 keyDirection(std::cos(elevation) * std::sin(azimuth), std::sin(elevation), std::cos(elevation) * std::cos(azimuth));
-    const glm::vec3 keyColor = glm::vec3(1.0f, 0.96f, 0.9f) * std::max(lighting.keyIntensity, 0.0f);
+    const glm::vec3 keyColor = glm::vec3(kKeyLightColor[0], kKeyLightColor[1], kKeyLightColor[2]) * std::max(lighting.keyIntensity, 0.0f);
 
     // The material's layers, each as its switch leaves it.
     const bool      tiles = m.tilingEnabled;
@@ -501,7 +492,9 @@ std::vector<std::uint8_t> shadeMaterialBall(const MaterialParams& m, const BallM
             const float reflects = environmentBrdf(glm::vec3(0.04f), coatRoughness, ndv).x * coat;
             color = color * (1.0f - reflects) + light.reflection(reflected, coatRoughness) * reflects * lighting.specularIntensity;
         }
-        return color + emission;
+        // Emission: the color at its strength, through its map where the zone has one (the
+        // viewport's own rule: color x luminance x map).
+        return color + emission * colorAt(maps.emission, uv);
     };
 
     const float pixelToBall = 2.0f / (static_cast<float>(size) * kMaterialBallShare);
@@ -520,7 +513,7 @@ std::vector<std::uint8_t> shadeMaterialBall(const MaterialParams& m, const BallM
                     }
                     const glm::vec3 linear = shade(glm::vec3(px, py, std::sqrt(1.0f - r2))) * lighting.exposure;
                     for (int c = 0; c < 3; ++c) {
-                        sum[c] += linearToSrgb(lighting.tonemap ? tonemap(linear[c]) : linear[c]);
+                        sum[c] += linearToSrgb(lighting.tonemap ? colorcurves::tonemapAces(linear[c]) : linear[c]);
                     }
                     ++covered;
                 }

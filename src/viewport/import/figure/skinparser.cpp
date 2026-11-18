@@ -37,10 +37,8 @@ std::vector<VertexSkin> parseSkinWeights(
 
     if (const auto joints = skin.find("joints"); joints != skin.end() && joints->is_array()) {
         for (const auto& joint : *joints) {
-            std::string node = joint.value("node", std::string());
-            if (!node.empty() && node[0] == '#') {
-                node = urlDecode(node.substr(1)); // the reference is percent-encoded, the bone's id plain
-            }
+            // (the reference is percent-encoded, the bone's id plain)
+            const std::string node = referencedId(stringOf(joint, "node"));
             const auto boneIt = boneNameToIndex.find(node);
             if (boneIt == boneNameToIndex.end()) {
                 continue; // influence from a bone we don't have — skip
@@ -56,7 +54,8 @@ std::vector<VertexSkin> parseSkinWeights(
             }
             if (weightsNode) {
                 for (const auto& entry : valuesArray(*weightsNode)) {
-                    if (!entry.is_array() || entry.size() < 2) {
+                    if (!entry.is_array() || entry.size() < 2 || !entry[0].is_number() ||
+                        !entry[1].is_number()) {
                         continue;
                     }
                     const int v = entry[0].get<int>();
@@ -67,7 +66,7 @@ std::vector<VertexSkin> parseSkinWeights(
                 }
                 continue;
             }
-            // The OLDEST generations' skin binding (the format's earlier "TriAx" weighting)
+            // The OLDEST generations' skin binding (the format's earlier per-axis weighting)
             // carries no general map at all: per joint, three PER-AXIS rotation maps
             // (`local_weights.x/y/z`, each a vertex-weight list — identical on a finger,
             // different on a hip or shoulder, where each axis' bend blends a different region)
@@ -89,7 +88,8 @@ std::vector<VertexSkin> parseSkinWeights(
                 }
                 ++maps;
                 for (const auto& entry : valuesArray(*map)) {
-                    if (!entry.is_array() || entry.size() < 2) {
+                    if (!entry.is_array() || entry.size() < 2 || !entry[0].is_number() ||
+                        !entry[1].is_number()) {
                         continue;
                     }
                     const int v = entry[0].get<int>();

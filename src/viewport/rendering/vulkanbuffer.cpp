@@ -107,12 +107,6 @@ VulkanBuffer createMappedUniformBuffer(VulkanContext& context, VkDeviceSize size
                             VMA_ALLOCATION_CREATE_MAPPED_BIT);
 }
 
-void VulkanBuffer::invalidate() const {
-    if (m_allocator != VK_NULL_HANDLE && m_allocation != VK_NULL_HANDLE) {
-        vmaInvalidateAllocation(m_allocator, m_allocation, 0, VK_WHOLE_SIZE);
-    }
-}
-
 VulkanBuffer makeZeroedHostStorageBuffer(VulkanContext& context, VkDeviceSize bytes) {
     VulkanBuffer buffer(context, bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO,
                         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |

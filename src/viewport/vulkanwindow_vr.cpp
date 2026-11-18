@@ -99,7 +99,7 @@ constexpr float kGlyphStubLength = 0.06f;
 constexpr float kGlyphTickLength = 0.03f;
 /// The ray's colors (linear): at rest, over a joint, and carrying one.
 const glm::vec3 kPointerIdle(0.55f, 0.55f, 0.6f);
-const glm::vec3 kPointerHover(0.1046f, 0.2423f, 0.6038f); // the selection accent (postprocess.h)
+const glm::vec3 kPointerHover(kSelectionAccentLinear[0], kSelectionAccentLinear[1], kSelectionAccentLinear[2]); // the selection accent
 const glm::vec3 kPointerDrag(0.95f, 0.45f, 0.08f);
 
 /// A camera looking down a pointer ray, so the mouse's screen-space pick runs on it unchanged
@@ -789,7 +789,8 @@ void VulkanWindow::applyVrInput(VrState& vr, const VrInput& input, float dt, int
                 // distance (a ray grab), or wherever the joint is relative to the hand (a hand grab).
                 vr.grabOffset = byHand ? glm::inverse(handRotation) * (m_ik.planePoint - origin)
                                        : glm::vec3(0.0f, 0.0f, -std::max(0.05f, glm::dot(m_ik.planePoint - origin, direction)));
-                m_preEditPose = scene().capturePose(); // the undo snapshot (committed when the settle lands)
+                // (The undo snapshot is beginIkDrag's own, taken BEFORE the armature's begin — which
+                // can itself pose: a figure hovering on hanging feet is set down at the press.)
                 vr.session->hapticPulse(h, 0.03f, 0.6f); // the grab, felt
             } else {
                 Ray ray;

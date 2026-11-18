@@ -1,12 +1,15 @@
 /**
  * @file sceneposing.cpp
  * @brief Scene's posing API: thin forwarders to the ACTIVE figure (Scene::figureModel) for
- *        FK/IK posing, pins, the pose utilities, grounding, and the pose snapshot + file.
+ *        FK/IK posing, the transform dials, the Shift+click group, pins, the pose utilities,
+ *        grounding, the soft body, and the pose snapshot + file — and the Transform tab's rows
+ *        for a STATIC model (its place, turn and scale off its model transform).
  *
- * A second translation unit of Scene (no header of its own) so scene.cpp stays the rendering
- * orchestration and this file stays the one-liners. Every function here has the same shape —
- * find the figure, forward, no-op without one — and none of them knows anything the Model /
- * Armature don't; new posing behaviour belongs in the armature, never here (see armature.h).
+ * A translation unit of Scene (no header of its own) so scene.cpp stays the rendering
+ * orchestration and this file stays the one-liners. Nearly every function here has the same
+ * shape — find the figure, forward, no-op without one — and none of them knows anything the
+ * Model / Armature don't; new posing behaviour belongs in the armature, never here (see
+ * armature.h).
  */
 
 #include "scene.h"
@@ -281,16 +284,6 @@ void Scene::setIkGrabOnSegment(float share) {
     }
 }
 
-bool Scene::selectedBoneWorldPosition(glm::vec3& out) const {
-    const Model* fig = figureModel();
-    if (!fig || fig->selectedBone() < 0 ||
-        fig->selectedBone() >= static_cast<int>(fig->boneCount())) {
-        return false;
-    }
-    out = fig->boneWorldPosition(static_cast<std::size_t>(fig->selectedBone()));
-    return true;
-}
-
 bool Scene::figureGroundGap(float& lowestY) const {
     const Model* fig = figureModel();
     return fig != nullptr && fig->groundGap(lowestY);
@@ -462,6 +455,22 @@ bool Scene::loadPose(const std::string& path) {
     }
     fig->applyPose(pose);
     return true;
+}
+
+bool Scene::removeGroupBone(int bone) {
+    Model* fig = figureModel();
+    return fig != nullptr && fig->removeFromGroup(bone);
+}
+
+std::vector<int> Scene::groupBones() const {
+    const Model* fig = figureModel();
+    return fig != nullptr ? fig->groupBones() : std::vector<int>();
+}
+
+void Scene::restoreSelection(int primary, const std::vector<int>& secondaries) {
+    if (Model* fig = figureModel()) {
+        fig->restoreSelection(primary, secondaries);
+    }
 }
 
 } // namespace pose

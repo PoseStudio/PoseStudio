@@ -42,11 +42,14 @@ VulkanContext::VulkanContext(VkInstance instance, VkSurfaceKHR surface, uint32_t
 
     // Pick the MSAA level once: the highest of {4x, 2x} the device supports for BOTH color and depth
     // framebuffers, else single-sample. 4x is the quality/perf sweet spot for a viewport; the HDR
-    // scene pass, the outline mask, and every scene pipeline are built against this count.
+    // scene pass, the outline mask, and every scene pipeline are built against this count. The
+    // scene's multisampled depth is also SAMPLED (the photo pass's resolve reads every sample of
+    // it through a sampler2DMS), so the count must be one the device samples depth at as well.
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(m_physicalDevice, &props);
-    const VkSampleCountFlags counts =
-        props.limits.framebufferColorSampleCounts & props.limits.framebufferDepthSampleCounts;
+    const VkSampleCountFlags counts = props.limits.framebufferColorSampleCounts &
+                                      props.limits.framebufferDepthSampleCounts &
+                                      props.limits.sampledImageDepthSampleCounts;
     for (VkSampleCountFlagBits bit : {VK_SAMPLE_COUNT_4_BIT, VK_SAMPLE_COUNT_2_BIT}) {
         if (counts & bit) {
             m_sampleCount = bit;
@@ -113,11 +116,14 @@ void VulkanContext::pickPhysicalDevice(VkPhysicalDevice preferred) {
     std::vector<VkPhysicalDevice> devices(count);
     vkEnumeratePhysicalDevices(m_instance, &count, devices.data());
 
-    // Prefer a discrete GPU, but accept any device that has a graphics+present queue
-    // family and the required extensions. Score-based selection lets a future "let the
-    // user choose their GPU" preference slot in without reworking the loop. The headset
-    // runtime's device (VulkanContextOptions::preferredDevice) outscores everything when it
-    // qualifies: the headset can only be driven from it.
+    // Prefer a discrete GPU, then an integrated one, then a virtual one, and a CPU rasterizer
+    // last — but accept any device that has a graphics+present queue family and the required
+    // extensions. (Ranked, not "discrete or the first enumerated": on a machine with no discrete
+    // GPU a software device listed first would otherwise draw the viewport on the processor.)
+    // Score-based selection lets a future "let the user choose their GPU" preference slot in
+    // without reworking the loop. The headset runtime's device
+    // (VulkanContextOptions::preferredDevice) outscores everything when it qualifies: the
+    // headset can only be driven from it.
     VkPhysicalDevice best = VK_NULL_HANDLE;
     int bestScore = -1;
     for (VkPhysicalDevice device : devices) {
@@ -141,7 +147,13 @@ void VulkanContext::pickPhysicalDevice(VkPhysicalDevice preferred) {
 
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(device, &props);
-        int score = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) ? 1000 : 0;
+        int score = 0;
+        switch (props.deviceType) {
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   score = 1000; break;
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: score = 500;  break;
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    score = 100;  break;
+        default:                                     score = 0;    break; // CPU, other
+        }
         if (preferred != VK_NULL_HANDLE && device == preferred) {
             score += 10000;
         }

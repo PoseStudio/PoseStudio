@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -304,13 +305,43 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                          bone.position.x, bone.position.y, bone.position.z, own.x, own.y, own.z, bone.hasTip ? " +tip" : "");
         }
     }
+    // The bone a node hangs from — itself, or its nearest ancestor that is one; -1 where there is
+    // none (a part beside the skeleton, which then rides the first bone from where the file has it).
     const auto attachBone = [&](const ufbx_node* node) {
         for (const ufbx_node* n = node; n != nullptr && !n->is_root; n = n->parent) {
             if (const auto it = boneIndexOf.find(n); it != boneIndexOf.end()) {
                 return it->second;
             }
         }
-        return 0;
+        return -1;
+    };
+    // WHERE A RIGID PART STANDS AT THE BIND. The skeleton and the skinned vertices are placed at
+    // the bind (above); a part that only hangs from a bone — eyeballs, teeth, an accessory — has
+    // no bind of its own and stands where the file's CURRENT pose has its node. In a file saved
+    // posed it must be carried with its bone: by the cluster's own definition a thing fixed to
+    // bone b moves from the file's pose to the bind through bind(b) · node_to_world(b)⁻¹ (ufbx:
+    // a skinned vertex is at node_to_world · geometry_to_bone now and bind_to_world ·
+    // geometry_to_bone at the bind). Applied only where that carry is more than rounding, so a
+    // file saved AT its bind — the two matrices then differ in their last bits — reads bit for
+    // bit as it did.
+    const auto geometryAtBind = [&](const ufbx_node* inst, int bone) {
+        const glm::mat4 inFile = toGlm(inst->geometry_to_world);
+        if (bone < 0) {
+            return inFile;
+        }
+        const glm::mat4 carry = boneWorld[static_cast<std::size_t>(bone)] *
+                                glm::inverse(toGlm(boneNodes[static_cast<std::size_t>(bone)]->node_to_world));
+        constexpr float kPosed = 1.0e-4f; // a tenth of a millimetre, six thousandths of a degree
+        bool            posed = false;
+        for (glm::length_t c = 0; c < 4; ++c) {
+            for (glm::length_t r = 0; r < 4; ++r) {
+                if (!std::isfinite(carry[c][r])) {
+                    return inFile; // (a bone node of no size: nothing to carry by)
+                }
+                posed = posed || std::abs(carry[c][r] - (c == r ? 1.0f : 0.0f)) > kPosed;
+            }
+        }
+        return posed ? carry * inFile : inFile;
     };
 
     // ---- THE MESHES.
@@ -330,9 +361,11 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
         // Per logical vertex: the influences (up to four, normalized) and the matrix that puts the
         // geometry at its BIND position in the world (the clusters' bind matrices blended by weight).
         const std::size_t          nv = mesh->num_vertices;
+        const int                  attach = attachBone(inst);
+        const unsigned             rideBone = static_cast<unsigned>(std::max(0, attach));
         std::vector<glm::uvec4>    joints(nv, glm::uvec4(0));
         std::vector<glm::vec4>     weights(nv, glm::vec4(1.0f, 0.0f, 0.0f, 0.0f));
-        std::vector<glm::mat4>     toWorld(nv, toGlm(inst->geometry_to_world));
+        std::vector<glm::mat4>     toWorld(nv, geometryAtBind(inst, attach));
         bool                       skinned = false;
         if (skin != nullptr && boneCount > 0) {
             if (skin->skinning_method == UFBX_SKINNING_METHOD_DUAL_QUATERNION) {
@@ -366,7 +399,7 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                     infl.push_back({clusterBone[sw.cluster_index], static_cast<float>(sw.weight), static_cast<int>(sw.cluster_index)});
                 }
                 if (infl.empty()) {
-                    joints[v] = glm::uvec4(static_cast<unsigned>(attachBone(inst)));
+                    joints[v] = glm::uvec4(rideBone);
                     continue;
                 }
                 std::sort(infl.begin(), infl.end(), [](const Influence& a, const Influence& b) { return a.w > b.w; });
@@ -392,9 +425,8 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
             }
             skinned = true;
         } else if (boneCount > 0) {
-            const unsigned bone = static_cast<unsigned>(attachBone(inst));
             for (std::size_t v = 0; v < nv; ++v) {
-                joints[v] = glm::uvec4(bone);
+                joints[v] = glm::uvec4(rideBone);
             }
         }
         if (info != nullptr) {
@@ -532,6 +564,11 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                     const MetallicRoughness mr = convertSpecGloss(out.diffuse.empty() ? diffuse : glm::vec3(0.8f), specColor * specFactor,
                                                                   1.0f - out.roughness);
                     out.convertSpecGloss = true;
+                    if (out.diffuse.empty()) {
+                        // (No diffuse map: the per-texel bake a specular map brings takes its
+                        // diffuse from this factor — left at white, the material's color was lost.)
+                        out.diffuseFactor = glm::vec4(diffuse, 1.0f);
+                    }
                     out.specularColorFactor = specColor * specFactor;
                     out.specularColorMap = resolveTexture(textures, spec.texture, info);
                     out.glossinessFactor = 1.0f - out.roughness;
@@ -558,6 +595,7 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                     }
                 }
                 float opacity = 1.0f;
+                bool  transparencyFromColor = false; // the factor set aside: the color says how see-through
                 if (mat->pbr.opacity.has_value) {
                     opacity = static_cast<float>(mat->pbr.opacity.value_real);
                 } else if (mat->fbx.transparency_factor.has_value) {
@@ -569,6 +607,7 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                     // the format's own terms transparency is the factor scaled by the colour, so
                     // 0 is opaque whatever the colour says.
                     if (opacity == 0.0f || opacity == 1.0f) {
+                        transparencyFromColor = true;
                         opacity = mat->fbx.transparency_factor.value_real == 1.0f
                                       ? 1.0f - static_cast<float>(mat->fbx.transparency_color.value_vec4.x)
                                       : 1.0f;
@@ -631,6 +670,19 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                     }
                 }
                 pbrReal(mat->pbr.transmission_factor, out.transmission, 0.0f, 1.0f);
+                // A classic material (Lambert, Phong, a shader ufbx does not know) has no
+                // transmission of its own: what ufbx hands over as one IS TransparencyFactor, the
+                // property read as the opacity above (its mapping tables for those three). Where
+                // that reading set the factor aside — 1.0 written for an opaque surface, the real
+                // amount in the color — the same 1.0 is no transmission either: the surface lets
+                // through what the color says, and an opaque one nothing. (Read as glass at full
+                // weight under a black tint, such a model was drawn black, and took no part in its
+                // own occlusion bake.)
+                const bool classicShader = mat->shader_type == UFBX_SHADER_UNKNOWN || mat->shader_type == UFBX_SHADER_FBX_LAMBERT ||
+                                           mat->shader_type == UFBX_SHADER_FBX_PHONG;
+                if (classicShader && transparencyFromColor) {
+                    out.transmission = std::min(out.transmission, 1.0f - out.opacity);
+                }
                 pbrColor(mat->pbr.transmission_color, out.transmissionColor);
                 pbrReal(mat->pbr.transmission_depth, out.transmissionDepth, 0.0f, 1e6f);
                 pbrReal(mat->pbr.transmission_roughness, out.transmissionRoughness, 0.0f, 1.0f); // (its own, where authored)
@@ -666,7 +718,10 @@ ModelData FbxFigureImporter::load(const std::string& path, RiggedImportInfo* inf
                 pbrMap(mat->pbr.transmission_color, out.transmissionColorMap);
                 pbrMap(mat->pbr.transmission_factor, out.transmissionWeightMap);
                 pbrReal(mat->pbr.coat_anisotropy, out.coatAnisotropy, 0.0f, 1.0f);
-                pbrReal(mat->pbr.coat_rotation, out.coatAnisotropyRotation, 0.0f, 360.0f);
+                if (mat->pbr.coat_rotation.has_value) {
+                    // (turns, as the specular rotation above: ufbx hands both over as the file has them)
+                    out.coatAnisotropyRotation = static_cast<float>(mat->pbr.coat_rotation.value_real) * 360.0f;
+                }
                 pbrMap(mat->pbr.coat_anisotropy, out.coatAnisotropyMap);
                 pbrMap(mat->pbr.coat_rotation, out.coatAnisotropyRotationMap);
                 pbrMap(mat->pbr.sheen_factor, out.sheenWeightMap);

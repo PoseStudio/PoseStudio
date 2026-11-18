@@ -18,11 +18,11 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
-#include <fstream>
 #include <memory>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 
 namespace pose {
 
@@ -56,12 +56,13 @@ void collectCorrectiveDirs(const fs::path& morphsRoot, std::vector<std::string>&
 // "point-release" variant figure (its Morphs tree holds only head/FACS content) inherits the
 // previous generation's correctives through the source app's content database. That link is
 // re-created STRUCTURALLY here: a sibling figure directory (same parent as @p baseDir) whose
-// base file's digit-stripped name matches ours (a "…8_1Female" and its "…8Female" sibling both
-// strip to the same stem — the male sibling does not) AND whose base cage has the SAME
-// vertex count is morph-compatible by construction — identical topology means its corrective
-// delta indices land on our vertices verbatim, and the shared bone names drive them. The check
-// parses the sibling's base file (~a second), which is why the caller only attempts it when the
-// figure's own tree yielded nothing. Appends the first matching sibling's pack directories.
+// base file's digit-stripped name matches ours (a point-release file name and its predecessor's
+// differ by digits and an underscore, so both strip to the same stem — a sibling figure of another
+// body does not) AND whose base cage has the SAME vertex count is morph-compatible by
+// construction — identical topology means its corrective delta indices land on our vertices
+// verbatim, and the shared bone names drive them. The check parses the sibling's base file (~a
+// second), which is why the caller only attempts it when the figure's own tree yielded nothing.
+// Appends the first matching sibling's pack directories.
 void siblingBaseMorphsDirs(const std::string& baseDir, const std::string& baseGeometryFile,
                            std::size_t cageVertexCount, std::vector<std::string>& dirs) {
     const auto strippedStem = [](const fs::path& p) {
@@ -110,31 +111,35 @@ void siblingBaseMorphsDirs(const std::string& baseDir, const std::string& baseGe
 std::vector<PoseCorrective> discoverCorrectives(UriResolver& resolver, const std::string& baseDir,
                                                 const std::unordered_set<std::string>& boneNames,
                                                 const std::vector<DialedMorph>& dialed,
+                                                const std::unordered_map<std::string, float>& channelValues,
                                                 const std::string& baseGeometryFile,
-                                                std::size_t cageVertexCount) {
-    // Gate resolver: a value-channel driver resolves to its dialed weight if the preset dials it,
-    // else to the channel's own default (loaded once and cached). This makes base correctives (gated
-    // by a default-on toggle) fire and a non-loaded character's correctives (gated by that character's
-    // shape morph, default 0) drop — uniformly, without any figure-specific knowledge.
+                                                std::size_t cageVertexCount,
+                                                std::vector<std::string>* skipped) {
+    // Gate resolver: a value-channel driver resolves to what the morph walk found that channel to
+    // be for this preset (@p channelValues: its dial, what drives it, its limits — and zero where
+    // the preset turns it off), else to the channel's own default (loaded once and cached). This
+    // makes base correctives (gated by a default-on toggle) fire, a non-loaded character's
+    // correctives (gated by that character's shape morph, default 0) drop, and a toggle the
+    // preset switches OFF drop what it gates — uniformly, without any figure-specific knowledge.
     //
     // Ids are compared URL-DECODED: vendor morph ids commonly contain spaces
-    // ("Some%20Character%20Body%201") and a corrective's gate url must match the dialed morph's
-    // id, which arrives decoded — an encoded mismatch silently resolved the gate to the channel's
-    // default (0 for a character shape) and dropped every one of that character's own correctives.
-    std::unordered_map<std::string, float> dialedWeights;
-    for (const DialedMorph& d : dialed) {
-        dialedWeights[parseChannelRef(d.url).decodedKey] = d.weight;
-    }
-    // Keyed by channel id ALONE (not id + document): a gate id names one channel across the
-    // figure's files in practice, so the first default found stands for every later reference.
+    // ("Some%20Character%20Body%201") and a corrective's gate url must match the walk's id for
+    // the channel, which is decoded — an encoded mismatch silently resolved the gate to the
+    // channel's default (0 for a character shape) and dropped every one of that character's own
+    // correctives.
+    //
+    // The file defaults are keyed by channel id ALONE (not id + document): a gate id names one
+    // channel across the figure's files in practice, so the first default found stands for every
+    // later reference.
     std::unordered_map<std::string, float> gateCache;
 
     CorrectiveContext ctx;
     ctx.boneNames = &boneNames;
+    ctx.cageVertexCount = cageVertexCount;
     ctx.resolveValue = [&](const std::string& url) -> float {
         const ChannelRef ref = parseChannelRef(url);
         const std::string& id = ref.decodedKey;
-        if (const auto it = dialedWeights.find(id); it != dialedWeights.end()) {
+        if (const auto it = channelValues.find(id); it != channelValues.end()) {
             return it->second;
         }
         if (const auto it = gateCache.find(id); it != gateCache.end()) {
@@ -156,7 +161,7 @@ std::vector<PoseCorrective> discoverCorrectives(UriResolver& resolver, const std
             if (gateRoot) {
                 if (const nlohmann::json* m = findModifierById(*gateRoot, id)) {
                     if (const auto ch = m->find("channel"); ch != m->end()) {
-                        def = ch->value("value", 0.0f);
+                        def = floatOf(*ch, "value", 0.0f);
                     }
                 }
             }
@@ -208,6 +213,10 @@ std::vector<PoseCorrective> discoverCorrectives(UriResolver& resolver, const std
 
     std::vector<PoseCorrective> correctives;
     std::unordered_set<std::string> seenIds;
+    // What was refused, by id, in the order met. Said at the end, and only for an id that no
+    // other file supplied after all (a pack's own corrective beside a namesake of another
+    // geometry in a dialed folder is carried, and nothing was left out).
+    std::vector<std::pair<std::string, std::string>> refusals;
     // Bounded chunks keep peak memory at ~a couple of parsed documents per core rather than the
     // whole candidate set at once (a corrective pack's parsed JSON is megabytes each).
     const unsigned hw = std::thread::hardware_concurrency();
@@ -218,14 +227,15 @@ std::vector<PoseCorrective> discoverCorrectives(UriResolver& resolver, const std
         docs.clear();
         docs.resize(n);
         // The dialed morphs' own folders are among the candidate dirs, and every dialed morph
-        // document was just prefetched into the resolver's cache — reuse those instead of
-        // re-reading and re-inflating them. (Serial: the cache isn't touched from the workers.)
+        // document is in the resolver's cache already (the morph walk read it) — reuse those
+        // instead of re-reading and re-inflating them. (Serial: the cache isn't touched from the
+        // workers.)
         for (std::size_t i = 0; i < n; ++i) {
             docs[i] = resolver.cached(files[base + i]);
         }
         parallelFor(static_cast<int>(n), [&](int i) {
             if (docs[static_cast<std::size_t>(i)]) {
-                return; // already parsed by the prefetch
+                return; // already parsed by the morph walk
             }
             try {
                 const std::string& file = files[base + static_cast<std::size_t>(i)];
@@ -236,19 +246,7 @@ std::vector<PoseCorrective> discoverCorrectives(UriResolver& resolver, const std
                 // plain shape morphs; inflating is cheap, but DOM-parsing them all dominated the
                 // corrective scan, and none can ever pass parseCorrective. (A cached document
                 // skips the filter — parseCorrective rejects it just the same, only slower.)
-                std::ifstream in(file, std::ios::binary | std::ios::ate);
-                if (!in) {
-                    return;
-                }
-                const std::streamoff size = in.tellg();
-                if (size <= 0) {
-                    return;
-                }
-                std::vector<uint8_t> bytes(static_cast<std::size_t>(size));
-                in.seekg(0, std::ios::beg);
-                if (!in.read(reinterpret_cast<char*>(bytes.data()), size)) {
-                    return;
-                }
+                std::vector<uint8_t> bytes = readFileBytes(file); // (throws: caught below)
                 if (isGzip(bytes)) {
                     bytes = gunzip(bytes.data(), bytes.size());
                 }
@@ -274,9 +272,14 @@ std::vector<PoseCorrective> discoverCorrectives(UriResolver& resolver, const std
             ctx.ownerDoc = &doc->root(); // for same-file gate references
             for (const auto& mod : *ml) {
                 PoseCorrective pc;
+                std::string refused;
                 try {
-                    if (parseCorrective(mod, ctx, pc) && seenIds.insert(pc.id).second) {
-                        correctives.push_back(std::move(pc));
+                    if (parseCorrective(mod, ctx, pc, &refused)) {
+                        if (seenIds.insert(pc.id).second) {
+                            correctives.push_back(std::move(pc));
+                        }
+                    } else if (!refused.empty()) {
+                        refusals.emplace_back(pc.id, std::move(refused));
                     }
                 } catch (const std::exception&) {
                     // A malformed modifier (non-numeric knot/delta, a numeric "clamped", string
@@ -288,6 +291,14 @@ std::vector<PoseCorrective> discoverCorrectives(UriResolver& resolver, const std
         }
     }
     ctx.ownerDoc = nullptr;
+    if (skipped) {
+        std::unordered_set<std::string> said;
+        for (const auto& [id, why] : refusals) {
+            if (seenIds.find(id) == seenIds.end() && said.insert(id).second) {
+                skipped->push_back("corrective '" + id + "': " + why);
+            }
+        }
+    }
     return correctives;
 }
 

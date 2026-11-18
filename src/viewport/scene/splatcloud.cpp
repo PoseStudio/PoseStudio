@@ -65,7 +65,7 @@ const int kWorkerChunks = envChunks("POSESTUDIO_SPLAT_WORKER_THREADS", 4);
 } // namespace
 
 SplatCloud::SplatCloud(VulkanContext& context, const SplatData& data, VkDescriptorSetLayout setLayout)
-    : m_context(context), m_count(data.count()), m_shDegree(data.shDegree) {
+    : m_count(data.count()), m_shDegree(data.shDegree) {
     const std::size_t n = m_count;
     // The GPU splats: the centre with its opacity, then the covariance Σ = (R S)(R S)ᵀ.
     std::vector<glm::vec4> gpu(n * 3);

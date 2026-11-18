@@ -5,6 +5,7 @@
 
 #include "overlaystack.h"
 
+#include "colorswatch.h"
 #include "constants.h"
 #include "dragnumberbox.h"
 #include "materialthumbbutton.h"
@@ -15,7 +16,6 @@
 #include "viewportwidget.h"
 
 #include <QCheckBox>
-#include <QColorDialog>
 #include <QDesktopServices>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -108,17 +108,8 @@ QList<MenuPickerButton::Item> blendItems() {
     };
 }
 
-/// The swatch's look (the Materials tab's color rows'): its background IS the color.
-void paintSwatch(QPushButton* swatch, const QColor& c, bool enabled) {
-    const bool dark = c.lightnessF() < 0.5;
-    swatch->setText(enabled ? c.name(QColor::HexRgb).toUpper() : QString());
-    swatch->setStyleSheet(QStringLiteral("QPushButton#MaterialColorButton { background-color: %1; color: %2; border: 1px solid #4a4b4d; "
-                                         "border-radius: 4px; min-height: 20px; padding: 2px 8px; }"
-                                         "QPushButton#MaterialColorButton:hover { border-color: #5b87cc; }"
-                                         "QPushButton#MaterialColorButton:disabled { background-color: #2a2b2d; color: #6a6b6e; }")
-                              .arg(c.name(QColor::HexRgb), dark ? QStringLiteral("#e0e0e0") : QStringLiteral("#1b1c1e")));
-}
-
+/// An overlay's tint as a color: it is stored as DISPLAY values (the layers meet in the maps' own
+/// display space), so there is no curve between the two — unlike a material's linear colors.
 QColor tintColor(const glm::vec3& tint) {
     return QColor::fromRgbF(std::clamp(tint.x, 0.0f, 1.0f), std::clamp(tint.y, 0.0f, 1.0f), std::clamp(tint.z, 0.0f, 1.0f));
 }
@@ -175,8 +166,8 @@ OverlayStack::OverlayStack(ViewportWidget* viewport, QWidget* parent) : QWidget(
     addRow->addStretch(1);
     col->addLayout(addRow);
 
-    // The cards, as an image editor lists its layers: the TOP of the stack first (a new overlay
-    // appears right under the button that added it).
+    // The cards, in the stack's own order — the order the overlays are painted in: the first
+    // overlay first, a new one at the bottom, over those above it.
     m_cardColumn = new QVBoxLayout;
     m_cardColumn->setContentsMargins(0, 0, 0, 0);
     m_cardColumn->setSpacing(6);
@@ -188,8 +179,11 @@ OverlayStack::OverlayStack(ViewportWidget* viewport, QWidget* parent) : QWidget(
 }
 
 void OverlayStack::setView(const MaterialView& view) {
-    m_view = view;
-    const std::vector<MaterialOverlay>& overlays = m_view.params.overlays;
+    // (Only what the cards show is kept: the view's two whole materials are not copied a second
+    // time at every refresh.)
+    m_valid = view.valid;
+    m_overlays = view.params.overlays;
+    const std::vector<MaterialOverlay>& overlays = m_overlays;
 
     // The fold state belongs to the zone shown: another zone starts folded (a lone overlay open).
     const std::string shown = view.valid ? view.modelName + "#" + std::to_string(view.zone) : std::string();
@@ -207,10 +201,7 @@ void OverlayStack::setView(const MaterialView& view) {
     if (force || structure != m_structure || m_cards.size() != overlays.size()) {
         // A tint being picked belongs to the overlay it was opened for: with another zone shown
         // or the stack reshuffled under it, the dialog closes and the color stays as picked.
-        if (m_tintDialog != nullptr) {
-            m_tintAbandoned = true;
-            m_tintDialog->close();
-        }
+        m_tint.abandon();
         m_open.resize(overlays.size(), true); // (an overlay that arrived is shown open)
         m_structure = std::move(structure);
         rebuild();
@@ -254,7 +245,7 @@ void OverlayStack::rebuild() {
         card.frame->deleteLater();      // (a card's own button may be the caller: never deleted under it)
     }
     m_cards.clear();
-    const int count = static_cast<int>(m_view.params.overlays.size());
+    const int count = static_cast<int>(m_overlays.size());
     m_cards.reserve(static_cast<std::size_t>(count));
     for (int i = 0; i < count; ++i) {
         m_cards.push_back(buildCard(i));
@@ -268,6 +259,16 @@ void OverlayStack::rebuild() {
 MaterialThumbButton* OverlayStack::makeThumb(int index, OverlayElement element) {
     auto* thumb = new MaterialThumbButton(kThumbSmallPx, kThumbSmallRadiusPx);
     connect(thumb, &QAbstractButton::clicked, this, [this, index, element]() { chooseImage(index, element); });
+    // The hover preview: the element's image as it is when the pointer rests (syncCard names it).
+    thumb->setPreview(
+        [this, index, element]() {
+            if (index < 0 || static_cast<std::size_t>(index) >= m_overlays.size()) {
+                return QPixmap();
+            }
+            return imagePixmap(overlayElementSource(m_overlays[static_cast<std::size_t>(index)], element), kindOf(element), kPreviewPx,
+                               m_previews);
+        },
+        QString());
     thumb->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(thumb, &QWidget::customContextMenuRequested, this,
             [this, index, element, thumb](const QPoint& pos) { showThumbMenu(index, element, thumb->mapToGlobal(pos)); });
@@ -276,15 +277,12 @@ MaterialThumbButton* OverlayStack::makeThumb(int index, OverlayElement element) 
 
 void OverlayStack::addFieldRow(Card& card, QFormLayout* form, int index, OverlayField field, const QString& label, const QString& tip,
                                double min, double max, double step, int decimals, double origin, OverlayElement element) {
-    FieldRow& row = card.rows[at(field)];
-    row.label = new QLabel(label);
-    row.label->setToolTip(tip);
-    row.box = new DragNumberBox;
-    row.box->setRange(min, max);
-    row.box->setSingleStep(step);
-    row.box->setDecimals(decimals);
+    const propertyrows::ScrubRow built = propertyrows::makeScrubRow(label, tip, min, max, step, decimals);
+    FieldRow&                    row = card.rows[at(field)];
+    row.label = built.label;
+    row.box = built.box;
+    row.restore = built.restore;
     row.box->setOrigin(origin);
-    row.box->setToolTip(tip);
     row.box->setProperty("testId", QStringLiteral("overlay.") + QString::fromLatin1(overlayFieldName(field)));
     // One undo entry per completed gesture: the box brackets its scrub or type-in.
     connect(row.box, &DragNumberBox::editingStarted, this, [this]() {
@@ -298,11 +296,10 @@ void OverlayStack::addFieldRow(Card& card, QFormLayout* form, int index, Overlay
         }
     });
     connect(row.box, &DragNumberBox::valueChanged, this, [this, index, field](double value) { setField(index, field, value); });
-    row.restore = propertyrows::makeRestoreButton();
     row.restore->setToolTip(tr("Back to the default"));
     row.restore->setProperty("testId", QStringLiteral("overlay.restore.") + QString::fromLatin1(overlayFieldName(field)));
     connect(row.restore, &QToolButton::clicked, this, [this, index, field]() { restoreField(index, field); });
-    QWidget* fieldWidget = propertyrows::rowWithRestore(row.box, row.restore);
+    QWidget* fieldWidget = built.field;
     if (element != OverlayElement::Count) {
         // The row's own image beside its strength, as the tab's maps sit beside their values.
         MaterialThumbButton* thumb = makeThumb(index, element);
@@ -384,7 +381,9 @@ OverlayStack::Card OverlayStack::buildCard(int index) {
 
     card.blendLabel = new QLabel(tr("Blend"));
     card.blend = new MenuPickerButton;
-    card.blend->setObjectName(QStringLiteral("EnvironmentHdriButton")); // (the tab's one picker look)
+    // (The side panel's picker look by its object name alone — without the caption inset
+    // propertyrows::stylePickerField adds, as the tab's zone picker is.)
+    card.blend->setObjectName(QStringLiteral("EnvironmentHdriButton"));
     card.blend->setItems(blendItems());
     tagged(card.blend, "overlay.blend");
     const QString blendTip = tr("How the image meets the skin under it. Multiply suits ink, bruises and freckles on any skin tone; "
@@ -406,9 +405,7 @@ OverlayStack::Card OverlayStack::buildCard(int index) {
     // BASE COLOR: the overlay's color (the swatch) and its picture (the small square before it),
     // as the tab's own Base Color row has them.
     card.tintLabel = new QLabel(tr("Base Color"));
-    card.tint = new QPushButton;
-    card.tint->setObjectName(QStringLiteral("MaterialColorButton"));
-    card.tint->setCursor(Qt::PointingHandCursor);
+    card.tint = colorswatch::makeSwatch();
     tagged(card.tint, "overlay.basecolor");
     const QString tintTip = tr("The overlay's color, and — the small square — its picture. With a picture the color multiplies it: white "
                                "leaves it as painted, and a white or grey picture takes the color whole. With no picture the overlay is "
@@ -498,9 +495,12 @@ OverlayStack::Card OverlayStack::buildCard(int index) {
                 static_cast<double>(kOverlayScaleMin) * 100.0, static_cast<double>(kOverlayScaleMax) * 100.0, kScaleStepPct, 1, 100.0);
     card.rows[at(OverlayField::Scale)].box->setScrubSpan(kScaleScrubSpanPct);
     col->addWidget(card.body);
-    // The body dims while the overlay is switched off (still editable: its values are kept).
+    // The body dims while the overlay is switched off (still editable: its values are kept). The
+    // effect is ENABLED only then (syncCard): an enabled effect at full opacity draws the same
+    // pixels as none, but every repaint of one box would go through the effect for the whole body.
     card.dim = new QGraphicsOpacityEffect(card.body);
-    card.dim->setOpacity(1.0);
+    card.dim->setOpacity(0.45);
+    card.dim->setEnabled(false);
     card.body->setGraphicsEffect(card.dim);
 
     QToolButton* header = card.header;
@@ -516,7 +516,7 @@ OverlayStack::Card OverlayStack::buildCard(int index) {
 }
 
 void OverlayStack::syncCard(int index) {
-    const std::vector<MaterialOverlay>& overlays = m_view.params.overlays;
+    const std::vector<MaterialOverlay>& overlays = m_overlays;
     if (index < 0 || static_cast<std::size_t>(index) >= overlays.size() || static_cast<std::size_t>(index) >= m_cards.size()) {
         return;
     }
@@ -541,25 +541,19 @@ void OverlayStack::syncCard(int index) {
     }
     card.up->setEnabled(index > 0); // (the list is the stack's order: the first overlay first)
     card.down->setEnabled(index < count - 1);
-    card.dim->setOpacity(o.enabled ? 1.0 : 0.45);
+    card.dim->setEnabled(!o.enabled);
 
-    // The color's controls are always live (with no picture the overlay is a flat Base Color); a
+    // The color's controls — the blend, the Base Color, the adjustments, the gloss, the metal,
+    // the opacity — are always live (with no picture the overlay is a flat Base Color); a
     // relief's strength needs its own image; the place needs any image at all — a flat color over
     // the whole zone has nothing to move.
-    const bool hasColor = true;
     const bool hasImage = !o.color.empty() || !o.opacityMap.empty() || !o.metallicMap.empty() || !o.bump.empty() || !o.normal.empty() ||
                           !o.displacement.empty();
     {
         const QSignalBlocker blocker(card.blend);
         card.blend->setCurrentIndex(static_cast<int>(o.blend));
     }
-    card.blend->setEnabled(hasColor);
-    card.blendLabel->setEnabled(hasColor);
-    card.blendRestore->setEnabled(hasColor);
-    paintSwatch(card.tint, tintColor(o.tint), hasColor);
-    card.tint->setEnabled(hasColor);
-    card.tintLabel->setEnabled(hasColor);
-    card.tintRestore->setEnabled(hasColor);
+    colorswatch::setSwatchColor(card.tint, tintColor(o.tint), true);
     for (std::size_t i = 0; i < card.rows.size(); ++i) {
         FieldRow& row = card.rows[i];
         if (row.box == nullptr) {
@@ -572,7 +566,7 @@ void OverlayStack::syncCard(int index) {
                         : (field == OverlayField::OffsetX || field == OverlayField::OffsetY || field == OverlayField::Rotation ||
                            field == OverlayField::Scale)
                               ? hasImage
-                                                                      : hasColor;
+                                                                      : true;
         {
             const QSignalBlocker blocker(row.box); // mirroring a value must not set it back
             row.box->setValue(static_cast<double>(overlayFieldValue(o, field)));
@@ -591,16 +585,7 @@ void OverlayStack::syncCard(int index) {
         }
         const std::string& path = overlayElementSource(o, element);
         thumb->setImage(path.empty() ? QPixmap() : imagePixmap(path, kindOf(element), kThumbSmallPx, m_thumbs));
-        const QString file = path.empty() ? QString() : QFileInfo(QString::fromStdString(path)).fileName();
-        thumb->setPreview(
-            [this, index, element]() {
-                const std::vector<MaterialOverlay>& now = m_view.params.overlays;
-                if (index < 0 || static_cast<std::size_t>(index) >= now.size()) {
-                    return QPixmap();
-                }
-                return imagePixmap(overlayElementSource(now[static_cast<std::size_t>(index)], element), kindOf(element), kPreviewPx, m_previews);
-            },
-            file);
+        thumb->setCaption(path.empty() ? QString() : QFileInfo(QString::fromStdString(path)).fileName());
         thumb->setToolTip(tr("%1: %2\nClick to choose an image file; right-click to remove it or open its folder.")
                               .arg(elementLabel(element), path.empty() ? tr("none") : QString::fromStdString(path)));
     }
@@ -631,13 +616,14 @@ QString OverlayStack::askImage(const QString& title) {
 }
 
 void OverlayStack::addOverlay() {
-    if (!m_viewport || !m_view.valid) {
+    if (!m_viewport || !m_valid) {
         return;
     }
-    // An EMPTY overlay on top of the stack (one undo entry): what it is — a picture, a color and
-    // a mask, relief — is chosen on its card, which opens unfolded. Empty, it paints nothing.
-    // It is NAMED as it is added — "Overlay 3", one past the highest such name in the stack — and
-    // keeps the name wherever it is moved; the header's Rename… gives it another.
+    // An EMPTY overlay on top of the stack — the last card (one undo entry): what it is — a
+    // picture, a color and a mask, relief — is chosen on its card, which opens unfolded. Empty,
+    // it paints nothing. It is NAMED as it is added — by its place, "Overlay 3" for the third,
+    // or the next number no overlay of the stack carries (nextOverlayNumber) — and keeps the
+    // name wherever it is moved; the header's Rename… gives it another.
     std::vector<MaterialOverlay> overlays = stack();
     MaterialOverlay              added;
     const QString                prefix = tr("Overlay");
@@ -647,7 +633,7 @@ void OverlayStack::addOverlay() {
 }
 
 QString OverlayStack::displayName(int index) const {
-    const std::vector<MaterialOverlay>& overlays = m_view.params.overlays;
+    const std::vector<MaterialOverlay>& overlays = m_overlays;
     if (index < 0 || static_cast<std::size_t>(index) >= overlays.size()) {
         return QString();
     }
@@ -656,15 +642,16 @@ QString OverlayStack::displayName(int index) const {
 }
 
 void OverlayStack::beginRename(int index) {
-    if (index < 0 || static_cast<std::size_t>(index) >= m_view.params.overlays.size() || static_cast<std::size_t>(index) >= m_cards.size()) {
+    if (index < 0 || static_cast<std::size_t>(index) >= m_overlays.size() || static_cast<std::size_t>(index) >= m_cards.size()) {
         return;
     }
     if (m_nameEditor) {
         finishRename(/*commit=*/true); // (one at a time: the open one keeps its text)
     }
     // A line edit over the header's name, in place: Enter or a click elsewhere keeps the text, Esc
-    // drops it (the event filter — a line edit has no cancel signal). `inlineEdit` tells the
-    // application's Esc-deselects filter that this Esc is the editor's.
+    // drops it (the event filter — a line edit has no cancel signal, and says nothing when it loses
+    // the focus untouched). `inlineEdit` tells the application's Esc-deselects filter that this Esc
+    // is the editor's.
     QToolButton* header = m_cards[static_cast<std::size_t>(index)].header;
     auto*        editor = new QLineEdit(header);
     editor->setObjectName(QStringLiteral("OverlayNameEditor"));
@@ -713,10 +700,19 @@ void OverlayStack::setName(int index, const QString& name) {
 }
 
 bool OverlayStack::eventFilter(QObject* watched, QEvent* event) {
-    if (m_nameEditor && watched == m_nameEditor && event->type() == QEvent::KeyPress &&
-        static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape) {
-        finishRename(/*commit=*/false);
-        return true;
+    if (m_nameEditor && watched == m_nameEditor) {
+        if (event->type() == QEvent::KeyPress && static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape) {
+            finishRename(/*commit=*/false);
+            return true;
+        }
+        // THE FOCUS LOST (a click elsewhere, another window): the editor closes. Qt 6 announces a
+        // focus loss as editingFinished only for a text that was EDITED, so an editor opened and
+        // left untouched heard nothing and stayed over the header for good. Closed here — an
+        // edited text kept (the signal that follows finds no editor open), an untouched one being
+        // nothing to keep. Not for the editor's own context menu, which takes the focus for a moment.
+        if (event->type() == QEvent::FocusOut && static_cast<QFocusEvent*>(event)->reason() != Qt::PopupFocusReason) {
+            finishRename(/*commit=*/m_nameEditor->isModified());
+        }
     }
     return QWidget::eventFilter(watched, event);
 }
@@ -767,7 +763,7 @@ void OverlayStack::restoreField(int index, OverlayField field) {
 }
 
 void OverlayStack::chooseImage(int index, OverlayElement element) {
-    if (!m_viewport || !m_view.valid) {
+    if (!m_viewport || !m_valid) {
         return;
     }
     const QString path = askImage(tr("Choose the %1").arg(elementLabel(element)));
@@ -795,7 +791,7 @@ void OverlayStack::setImage(int index, OverlayElement element, const QString& pa
 }
 
 void OverlayStack::showThumbMenu(int index, OverlayElement element, const QPoint& globalPos) {
-    const std::vector<MaterialOverlay>& overlays = m_view.params.overlays;
+    const std::vector<MaterialOverlay>& overlays = m_overlays;
     if (index < 0 || static_cast<std::size_t>(index) >= overlays.size()) {
         return;
     }
@@ -818,42 +814,35 @@ void OverlayStack::showThumbMenu(int index, OverlayElement element, const QPoint
 }
 
 void OverlayStack::pickTint(int index) {
-    const std::vector<MaterialOverlay>& overlays = m_view.params.overlays;
+    const std::vector<MaterialOverlay>& overlays = m_overlays;
     if (!m_viewport || index < 0 || static_cast<std::size_t>(index) >= overlays.size()) {
         return;
     }
-    if (m_tintDialog != nullptr) {
-        m_tintDialog->raise();
-        m_tintDialog->activateWindow();
+    if (m_tint.isOpen()) {
+        m_tint.raise();
         return;
     }
     if (!m_viewport->beginMaterialEdit()) {
         return;
     }
     m_tintIndex = index;
-    m_tintAtOpen = tintColor(overlays[static_cast<std::size_t>(index)].tint);
-    // The app's own themed dialog, non-modal: the tint is judged on the figure while it changes.
-    m_tintDialog = new QColorDialog(m_tintAtOpen, this);
-    m_tintDialog->setOption(QColorDialog::DontUseNativeDialog, true);
-    m_tintDialog->setWindowTitle(tr("Overlay Base Color"));
-    m_tintDialog->setAttribute(Qt::WA_DeleteOnClose);
-    connect(m_tintDialog, &QColorDialog::currentColorChanged, this, [this](const QColor& c) { setTint(m_tintIndex, c); });
-    connect(m_tintDialog, &QColorDialog::finished, this, [this](int result) {
-        const bool abandoned = m_tintAbandoned; // (closed from setView: no restore, no re-entry)
-        m_tintAbandoned = false;
-        if (result != QDialog::Accepted && !abandoned) {
-            setTint(m_tintIndex, m_tintAtOpen); // Cancel: the tint as it was when the dialog opened
-        }
-        if (m_viewport) {
-            m_viewport->endMaterialEdit(); // one undo entry for the whole pick
-        }
-        m_tintDialog = nullptr;
-        m_tintIndex = -1;
-        if (!abandoned) {
-            emit edited();
-        }
-    });
-    m_tintDialog->open();
+    const QColor atOpen = tintColor(overlays[static_cast<std::size_t>(index)].tint);
+    // The tint is judged on the figure, behind the dialog, while it changes (colorswatch.h).
+    m_tint.open(
+        this, tr("Overlay Base Color"), atOpen, [this](const QColor& c) { setTint(m_tintIndex, c); },
+        [this, atOpen](colorswatch::ColorPick::Outcome outcome) {
+            using Outcome = colorswatch::ColorPick::Outcome;
+            if (outcome == Outcome::Cancelled) {
+                setTint(m_tintIndex, atOpen); // Cancel: the tint as it was when the dialog opened
+            }
+            if (m_viewport) {
+                m_viewport->endMaterialEdit(); // one undo entry for the whole pick
+            }
+            m_tintIndex = -1;
+            if (outcome != Outcome::Abandoned) { // (abandoned from setView: no re-entry into it)
+                emit edited();
+            }
+        });
 }
 
 void OverlayStack::setTint(int index, const QColor& color) {

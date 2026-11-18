@@ -7,11 +7,12 @@
  * order and every stage lives in its own module — geometryparser (the cage), morphresolver +
  * morphparser (the character's shape), nodeparser + bonefixups (the skeleton), skinparser (the
  * weights), correctivescan (the pose correctives), uvparser + subdivision (the render mesh),
- * scenematerials (the materials), followeraddons (the followers). Only the dialed-morph bake and
- * the per-addon loop stay here: the bake is the one place the cage is mutated in place, and the
- * addon loop recurses into loadFigureFile itself. One UriResolver serves the whole import,
- * addons included (same roots; the document cache is what keeps a shared base file from being
- * inflated once per addon).
+ * scenematerials (the materials), followeraddons (the followers). Three things stay here, each a
+ * function above loadFigureFile: the dialed-morph bake (bakeDialedMorphs — the one place the cage
+ * is mutated in place), which UV set each material zone reads (resolveZoneUvSets — it joins the
+ * geometry, the scene's materials and the resolver), and the per-addon loop, which recurses into
+ * loadFigureFile itself. One UriResolver serves the whole import, addons included (same roots;
+ * the document cache is what keeps a shared base file from being inflated once per addon).
  */
 
 #include "figureimporter.h"
@@ -33,8 +34,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -61,17 +64,8 @@ ResolvedShape bakeDialedMorphs(const nlohmann::json& presetRoot, UriResolver& re
                                GeometryData& geo, ShapeReport& report) {
     ResolvedShape shape = resolveDialedMorphs(presetRoot, resolver, presetDir, scope);
     report.missing = shape.missing;
-    // Load every reached morph document up front, across cores — a character preset can reach
-    // hundreds of morph files, and their serial read+inflate+parse was a large slice of import
-    // time. The bake loop below then hits the resolver's cache.
-    {
-        std::vector<std::string> morphUris;
-        morphUris.reserve(shape.morphs.size());
-        for (const DialedMorph& dialed : shape.morphs) {
-            morphUris.push_back(dialed.url);
-        }
-        resolver.prefetchDocuments(morphUris, presetDir);
-    }
+    // (Every morph document the loop below asks for is in the resolver's cache already: the walk
+    // read each reached channel's file to find its formulas — across cores, a wave at a time.)
     for (const DialedMorph& dialed : shape.morphs) {
         std::shared_ptr<const FigureDocument> morphDoc; // keeps a morph file alive through its bake
         const nlohmann::json*                 morphRoot = nullptr;
@@ -92,8 +86,16 @@ ResolvedShape bakeDialedMorphs(const nlohmann::json& presetRoot, UriResolver& re
             morphRoot = &morphDoc->root();
             fragment = ru.fragment;
         }
-        std::size_t                   authoredFor = 0;
-        const std::vector<MorphDelta> deltas = parseMorphDeltas(*morphRoot, fragment, &authoredFor);
+        std::size_t             authoredFor = 0;
+        std::vector<MorphDelta> deltas;
+        try {
+            deltas = parseMorphDeltas(*morphRoot, fragment, &authoredFor);
+        } catch (const std::exception&) {
+            // A delta that is no number, a morph block of the wrong type: this one morph is left
+            // out — and said — where it used to take the whole import with it.
+            report.missing.push_back(dialed.id + ": its deltas could not be read");
+            continue;
+        }
         if (deltas.empty()) {
             continue; // a control, a scale
         }
@@ -114,6 +116,84 @@ ResolvedShape bakeDialedMorphs(const nlohmann::json& presetRoot, UriResolver& re
         report.applied.push_back({dialed.id, dialed.weight, deltas.size()});
     }
     return shape;
+}
+
+// The UV set each material zone reads its maps through, and the sets themselves (`perZone` points
+// into this object, which is why it is filled in place and never copied).
+struct ZoneUvSets {
+    UvSet                                                   defaultSet;
+    std::unordered_map<std::string, std::unique_ptr<UvSet>> own;     // by resolved key; null = refused
+    std::vector<const UvSet*>                               perZone; // one per material zone (>= 1)
+    int                                                     zonesOnOwnSet = 0;
+
+    ZoneUvSets() = default;
+    ZoneUvSets(const ZoneUvSets&) = delete;
+    ZoneUvSets& operator=(const ZoneUvSets&) = delete;
+};
+
+// The UV sets. The base geometry names the DEFAULT (resolved relative to the base file, @p baseDir),
+// and each scene material may name the set ITS zone's maps are painted on (`uv_set`, resolved
+// relative to the preset): a newer generation's character commonly keeps the previous
+// generation's skin maps and names that generation's layout for the skin zones while its eyes
+// and nails use the new one. The two layouts differ by a few dozen UVs and seam entries —
+// read through the default alone, every skin feature landed a little off: a crack along the
+// scalp's seam, a patch between the shoulder blades, the throat's notch displaced (found
+// 2026-10-26). Each distinct set is parsed once and shared by the zones that name it; a set
+// authored for another cage (its vertex_count is not this geometry's) is refused — indexed by
+// base vertex, it would scramble the mapping — and the zone keeps the default, as a zone whose
+// set cannot be read does. POSESTUDIO_UV_DEFAULT_ONLY is the A/B: the default for every zone.
+void resolveZoneUvSets(const GeometryData& geo, const nlohmann::json& root, const FigureScope& scope,
+                       UriResolver& resolver, const std::string& baseDir,
+                       const std::string& presetDir, ZoneUvSets& sets) {
+    std::string defaultUvKey; // the resolved "path#fragment": a material naming it shares the parse
+    if (!geo.defaultUvSetUri.empty()) {
+        const ResolvedUri uru = resolver.resolve(geo.defaultUvSetUri, baseDir);
+        if (uru.resolved()) {
+            std::shared_ptr<const FigureDocument> uvDoc = resolver.loadDocument(uru);
+            sets.defaultSet = parseUvSet(uvDoc->root(), uru.fragment);
+            defaultUvKey = uru.path + '#' + uru.fragment;
+        }
+    }
+    // At least one entry: untagged geometry is one zone to the assembly (subdivision.cpp's
+    // zoneOf), and reads the default set through it.
+    sets.perZone.assign(std::max<std::size_t>(geo.materialZones.size(), 1), &sets.defaultSet);
+    if (std::getenv("POSESTUDIO_UV_DEFAULT_ONLY") == nullptr) {
+        const std::unordered_map<std::string, std::string> zoneUris = sceneMaterialUvSets(root, scope);
+        for (std::size_t zone = 0; zone < geo.materialZones.size(); ++zone) {
+            const auto named = zoneUris.find(geo.materialZones[zone]);
+            if (named == zoneUris.end()) {
+                continue;
+            }
+            try {
+                const ResolvedUri uru = resolver.resolve(named->second, presetDir);
+                if (!uru.resolved()) {
+                    continue;
+                }
+                const std::string key = uru.path + '#' + uru.fragment;
+                if (key == defaultUvKey) {
+                    continue;
+                }
+                auto it = sets.own.find(key);
+                if (it == sets.own.end()) {
+                    auto set = std::make_unique<UvSet>(
+                        parseUvSet(resolver.loadDocument(uru)->root(), uru.fragment));
+                    const bool fits = !set->empty() &&
+                                      (set->vertexCount == 0 ||
+                                       set->vertexCount == geo.positions.size());
+                    if (!fits) {
+                        set.reset(); // remembered as refused, so it is not re-read per zone
+                    }
+                    it = sets.own.emplace(key, std::move(set)).first;
+                }
+                if (it->second) {
+                    sets.perZone[zone] = it->second.get();
+                    ++sets.zonesOnOwnSet;
+                }
+            } catch (const std::exception&) {
+                // An unreadable set: the zone keeps the default, as every zone did before.
+            }
+        }
+    }
 }
 
 // The full loader. `includeAddons` is true for the user-facing entry point and false for the
@@ -144,7 +224,7 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
         if (!root.contains("geometry_library")) {
             throw std::runtime_error("figure import: no geometry reference found in " + path);
         }
-        geomEntry = findGeometryEntry(root, geomUri.empty() ? std::string() : urlDecode(geomUri.substr(1)));
+        geomEntry = findGeometryEntry(root, referencedId(geomUri));
     } else {
         const ResolvedUri ru = resolver.resolve(geomUri, presetDir);
         if (!ru.resolved()) {
@@ -180,74 +260,16 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
     const float                     figureScale = shape.figureScale;
     const JointCenterOffsets&       jointCenterOffsets = shape.jointCenterOffsets; // per-bone rest-origin shifts
 
-    // The UV sets. The base geometry names the DEFAULT (resolved relative to the base file), and
-    // each scene material may name the set ITS zone's maps are painted on (`uv_set`, resolved
-    // relative to the preset): a newer generation's character commonly keeps the previous
-    // generation's skin maps and names that generation's layout for the skin zones while its eyes
-    // and nails use the new one. The two layouts differ by a few dozen UVs and seam entries —
-    // read through the default alone, every skin feature landed a little off: a crack along the
-    // scalp's seam, a patch between the shoulder blades, the throat's notch displaced (found
-    // 2026-10-26). Each distinct set is parsed once and shared by the zones that name it; a set
-    // authored for another cage (its vertex_count is not this geometry's) is refused — indexed by
-    // base vertex, it would scramble the mapping — and the zone keeps the default, as a zone whose
-    // set cannot be read does. POSESTUDIO_UV_DEFAULT_ONLY is the A/B: the default for every zone.
-    UvSet defaultUv;
-    std::string defaultUvKey; // the resolved "path#fragment": a material naming it shares the parse
-    if (!geo.defaultUvSetUri.empty()) {
-        const ResolvedUri uru = resolver.resolve(geo.defaultUvSetUri, baseDir);
-        if (uru.resolved()) {
-            std::shared_ptr<const FigureDocument> uvDoc = resolver.loadDocument(uru);
-            defaultUv = parseUvSet(uvDoc->root(), uru.fragment);
-            defaultUvKey = uru.path + '#' + uru.fragment;
-        }
-    }
-    std::vector<const UvSet*> zoneUvs(geo.materialZones.size(), &defaultUv);
-    std::unordered_map<std::string, std::unique_ptr<UvSet>> ownUvSets; // by resolved key; null = refused
-    int zonesOnOwnUvSet = 0;
-    if (std::getenv("POSESTUDIO_UV_DEFAULT_ONLY") == nullptr) {
-        const std::unordered_map<std::string, std::string> zoneUris = sceneMaterialUvSets(root, scope);
-        for (std::size_t zone = 0; zone < geo.materialZones.size(); ++zone) {
-            const auto named = zoneUris.find(geo.materialZones[zone]);
-            if (named == zoneUris.end()) {
-                continue;
-            }
-            try {
-                const ResolvedUri uru = resolver.resolve(named->second, presetDir);
-                if (!uru.resolved()) {
-                    continue;
-                }
-                const std::string key = uru.path + '#' + uru.fragment;
-                if (key == defaultUvKey) {
-                    continue;
-                }
-                auto it = ownUvSets.find(key);
-                if (it == ownUvSets.end()) {
-                    auto set = std::make_unique<UvSet>(
-                        parseUvSet(resolver.loadDocument(uru)->root(), uru.fragment));
-                    const bool fits = !set->empty() &&
-                                      (set->vertexCount == 0 ||
-                                       set->vertexCount == geo.positions.size());
-                    if (!fits) {
-                        set.reset(); // remembered as refused, so it is not re-read per zone
-                    }
-                    it = ownUvSets.emplace(key, std::move(set)).first;
-                }
-                if (it->second) {
-                    zoneUvs[zone] = it->second.get();
-                    ++zonesOnOwnUvSet;
-                }
-            } catch (const std::exception&) {
-                // An unreadable set: the zone keeps the default, as every zone did before.
-            }
-        }
-    }
+    // The UV set each material zone reads (the geometry's default, or the one its material names).
+    ZoneUvSets uvSets;
+    resolveZoneUvSets(geo, root, scope, resolver, baseDir, presetDir, uvSets);
 
     out.figureScale = figureScale;
-    out.zonesOnOwnUvSet = zonesOnOwnUvSet;
+    out.zonesOnOwnUvSet = uvSets.zonesOnOwnSet;
     out.graftPopulated = geo.graftPopulated;
     if (const nlohmann::json* figureNode = findFigureNode(root)) {
-        out.figureNodeId = figureNode->value("id", std::string());
-        out.figureNodeName = figureNode->value("name", std::string());
+        out.figureNodeId = stringOf(*figureNode, "id");
+        out.figureNodeName = stringOf(*figureNode, "name");
     }
 
     // Skeleton + skin weights (from the base file's node_library + its SkinBinding modifier), parsed
@@ -268,6 +290,9 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
         }
     }
 
+    // Per BASE-cage vertex; subdivision refines them onto the render mesh's vertices (empty for an
+    // unrigged figure).
+    std::vector<VertexSkin> vertexSkins;
     if (!out.bones.empty()) {
         // Twist bones sit mid-limb where there's no real joint; keep their axial twist but forbid the
         // mid-bone bend the figure would otherwise allow. Done after the origins (incl. morph-driven
@@ -283,8 +308,8 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
                 // The binding's own vertex_count wins over the cage size; if it is smaller, the
                 // tail cage vertices get no entry and subdivision pads them as zero-weight
                 // (unskinned) vertices rather than failing.
-                const int vc = skin->value("vertex_count", static_cast<int>(geo.positions.size()));
-                out.vertexSkins = parseSkinWeights(*skin, vc, boneNameToIndex);
+                const int vc = intOf(*skin, "vertex_count", static_cast<int>(geo.positions.size()));
+                vertexSkins = parseSkinWeights(*skin, vc, boneNameToIndex);
             }
         }
 
@@ -299,7 +324,8 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
                 boneNames.insert(b.name);
             }
             out.correctives = discoverCorrectives(resolver, baseDir, boneNames, dialedMorphs,
-                                                  baseFile, geo.positions.size());
+                                                  shape.channelValues, baseFile, geo.positions.size(),
+                                                  &out.skipped);
         }
     }
 
@@ -311,7 +337,7 @@ FigureData loadFigureFile(const std::string& path, UriResolver& resolver, bool i
     // stencils (carryCorrectivesToSubdivided), so the GPU's live corrective blend needs no change.
     // Level 1 (4x faces) is a good editing-time smoothness; raise for finer at a vertex-count cost.
     constexpr int kSubdivisionLevels = 1;
-    SubdivisionResult sub = subdivideFigure(geo, zoneUvs, out.vertexSkins, kSubdivisionLevels);
+    SubdivisionResult sub = subdivideFigure(geo, uvSets.perZone, vertexSkins, kSubdivisionLevels);
     out.meshes = std::move(sub.meshes);
     out.baseVertexCount = sub.vertexCount;
     if (!out.correctives.empty()) {
@@ -431,6 +457,25 @@ FigureData FigureImporter::load(const std::string& path,
                                 const std::vector<std::string>& contentRoots) const {
     UriResolver resolver(contentRoots);
     return loadFigureFile(path, resolver, /*includeAddons=*/true);
+}
+
+std::string FigureImporter::contentRootOf(const std::string& path) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path dir = fs::absolute(fs::path(path), ec).parent_path();
+    // The cap bounds the walk on a pathological path (a file filed absurdly deep, a filesystem
+    // whose parent_path never converges); real libraries are three to six levels deep.
+    for (int level = 0; level < 16 && !dir.empty(); ++level) {
+        if (fs::exists(dir / "data", ec)) {
+            return dir.string();
+        }
+        const fs::path parent = dir.parent_path();
+        if (parent == dir) {
+            break; // the filesystem root
+        }
+        dir = parent;
+    }
+    return std::string();
 }
 
 } // namespace pose

@@ -6,14 +6,18 @@ This manual describes everything that works in the version you are running. It o
 
 ## What PoseStudio does today
 
-- **Imports** static models (`.obj`) and fully rigged, morphable character figures from their native scene format (`.duf` presets with `.dsf` data files), complete with materials, textures, skin weights, joint limits and pose correctives.
-- **Renders** them in a Vulkan-based viewport with image-based lighting from HDR panoramas, a photoreal PBR mode with skin shading, soft shadows, bloom and anti-aliasing — plus seventeen other shading modes for form studies, wireframes and diagnostic views.
-- **Poses** figures with full-body inverse kinematics: drag any joint and the whole body answers, with planted feet, balance, stepping, joint limits, self-collision, joint pins and a complete undo history — by dragging, with the `B` / `S` / `T` keys, or by number on the Transform tab. Poses save to plain-text `.pose` files, and the whole scene — figures, poses, lighting and camera — to a `.pss` project file.
+- **Imports** static models (`.obj`); fully rigged, morphable character figures from their native scene format (`.duf` presets with `.dsf` data files), complete with materials, textures, skin weights, joint limits and pose correctives; rigged characters and plain models from `.fbx`, glTF (`.glb`, `.gltf`), VRM (`.vrm`) and USD (`.usd`, `.usda`, `.usdc`, `.usdz`) files, which pose like the native figures; and Gaussian splat scenes (`.ply`, `.splat`, `.spz`) — photographed places and people a figure can stand in. See [Importing Content](importing.md).
+- **Shows** them in a Vulkan-based viewport with image-based lighting from HDR panoramas, a photoreal PBR mode with skin shading, soft shadows, bloom and anti-aliasing — plus eighteen other shading modes: form studies, wireframes, diagnostic views, and a **Rendered** mode that path traces the scene in the viewport as you work. See [Shading and Display](shading.md).
+- **Poses** figures with full-body inverse kinematics: drag any joint and the whole body answers, with planted feet, balance, stepping, joint limits, self-collision, joint pins and a complete undo history — by dragging, with the `B` / `S` / `T` keys, or by number on the Transform tab. Poses save to plain-text `.pose` files, and the whole scene — figures, poses, materials, lighting and camera — to a `.pss` project file.
+- **Edits materials** on the Materials tab: every surface is one physically based material, set with sliders, color swatches and texture slots, with overlays for tattoos, marks and makeup, and a library for the materials you save. See [Materials](materials.md).
+- **Lights** the scene with an HDR panorama and a key light, and with lights of your own — point, spot, area and sun lights placed in the scene. See [Lighting and Environment](environment.md) and [Lights](lights.md).
+- **Renders** finished pictures with a path tracer (**Render → Render Image**, `F12`) — real shadows, bounced light, skin and glass, at sizes up to 4K. See [Rendering](rendering.md).
+- **Shows the scene in a VR headset** (**View → VR Mode**): you walk around the figure at her true size and pose her with the controllers. See [VR Mode](vr.md).
 - **Organises** your content with the Asset Manager: browse any number of asset folders, search them, and file assets into Favorites and nested Collections.
 
 ## What it does not do yet
 
-PoseStudio is an early-stage project. Animation, timelines and the other file formats listed in the File menu are on the roadmap but do not exist in this build — every menu entry that is greyed out is a placeholder for something planned. The project's website and release notes say what is coming; see [What's New](changelog.md) for what changed in this version.
+PoseStudio is an early-stage project. Animation and timelines are on the roadmap but do not exist in this build — every menu entry that is greyed out is a placeholder for something planned. The project's website and release notes say what is coming; see [What's New](changelog.md) for what changed in this version.
 
 ## How to use this manual
 
@@ -31,7 +35,7 @@ If you are new, start with [Getting Started](getting-started.md), then [Posing](
 | --- | --- |
 | **Drag** | Press and hold the left mouse button while moving the mouse. |
 | **Click** | Press and release without moving the mouse. |
-| `Ctrl+Z`, `F1`, `1` | Press these keys. Keys named alone (`1`, `P`, `X`) are pressed without modifiers. |
+| `Ctrl+Z`, `F1`, `1` | Press these keys. Keys named alone (`1`, `P`, `T`) are pressed without modifiers. |
 | **File → Import** | Open the File menu, then choose Import. |
 | *Numpad* | The numeric keypad. The view keys work on the number row too. |
 

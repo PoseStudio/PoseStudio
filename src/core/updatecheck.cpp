@@ -6,6 +6,7 @@
 #include "updatecheck.h"
 #include "constants.h"
 #include "preferencesmanager.h"
+#include "runmode.h"
 
 #include <QDebug>
 #include <QDesktopServices>
@@ -111,6 +112,13 @@ void UpdateCheck::check(bool interactive) {
     if (!interactive) {
         if (!qEnvironmentVariableIsEmpty("POSESTUDIO_NO_UPDATE_CHECK")) {
             qInfo() << "[update] POSESTUDIO_NO_UPDATE_CHECK set; skipped";
+            deleteLater();
+            return;
+        }
+        if (RunMode::probing()) {
+            // A run a script or a probe drives: nobody is there to read a prompt, and one raised
+            // over the window would sit in the frames such a run reads.
+            qInfo() << "[update] a scripted or probing run; skipped";
             deleteLater();
             return;
         }

@@ -5,18 +5,35 @@
 # (VK_INSTANCE_LAYERS) and a settings file (VK_LAYER_SETTINGS_PATH) turns synchronization
 # validation on and logs to a file; the legacy VK_LAYER_ENABLES token is ignored by SDK 1.4.350.
 #
-#   tools\vr\validate_vr.ps1 [-Figure <preset.duf>] [-Seconds 40] [-Exe build\Release\PoseStudio.exe]
+#   tools\vr\validate_vr.ps1 -Figure <preset.duf> [-Seconds 40] [-Exe build\Release\PoseStudio.exe]
+#
+# The figure to stand in the headset is -Figure, else the POSESTUDIO_TEST_FIGURE environment
+# variable (what the scripted runs of tools\ikscripts read), else the script asks for it. There
+# is no default: which figures a machine has is its owner's business.
 #
 # Put the headset on once the app is up (the session renders only while the headset is worn and
 # focused); walk and grab a joint or two. The summary counts errors, synchronization hazards,
 # warnings and performance notes; the 10 "OutputNotConsumed" performance notes — shadow.vert's
 # eight and the splat occluder pipeline's two (mesh.vert's outputs depthcutout.frag does not
-# read) — are the known baseline. The full log stays beside the script's output folder.
+# read) — are the known baseline. The full log stays in the script's output folder
+# (posestudio-vr-validation in the temp folder).
 param(
-    [string]$Figure = "C:\Users\Public\Documents\My DAZ 3D Library\People\Genesis 8 Female\Genesis 8 Basic Female.duf",
+    [string]$Figure = $env:POSESTUDIO_TEST_FIGURE,
     [int]$Seconds = 40,
     [string]$Exe = (Join-Path $PSScriptRoot "..\..\build\Release\PoseStudio.exe")
 )
+if ([string]::IsNullOrWhiteSpace($Figure)) {
+    try {
+        $Figure = Read-Host "Figure to load (the path of a figure preset, .duf)"
+    } catch {
+        $Figure = "" # (a host that cannot ask: the message below says how to name one)
+    }
+}
+$Figure = "$Figure".Trim().Trim('"')
+if ([string]::IsNullOrWhiteSpace($Figure) -or !(Test-Path -LiteralPath $Figure -PathType Leaf)) {
+    Write-Host "validate_vr.ps1: no figure to load ('$Figure'). Name one with -Figure <preset.duf>, or set POSESTUDIO_TEST_FIGURE."
+    exit 2
+}
 $out = Join-Path ([System.IO.Path]::GetTempPath()) "posestudio-vr-validation"
 New-Item -ItemType Directory -Force $out | Out-Null
 $logFile = Join-Path $out "validation.log"

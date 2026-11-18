@@ -11,7 +11,7 @@ should be deleted.
 
 **Labels:** `good first issue`, `testing`
 
-The Asset Manager (the left-side panel with the directory tree + asset grid) is one of the
+The Asset Manager (the side panel's first tab, with the directory tree + asset grid) is one of the
 most feature-complete parts of PoseStudio, but it hasn't had broad usage outside the core
 contributors. We need people to actually use it and break it.
 
@@ -60,31 +60,3 @@ what's missing, what would you expect that isn't there yet?
 
 This is feedback, not a bug report — vague is fine, "this felt clunky" is a useful
 data point. No code required.
-
----
-
-## 3. Design and build an in-app Help/Documentation subsystem
-
-**Labels:** `enhancement`, `help wanted`, `discussion`
-
-The Help menu (`src/shell/menumanager.cpp`) currently has disabled placeholders for
-"Release Notes", "Tutorials", and "Support" — there's no backend or design for this
-yet, so this issue is as much about deciding the approach as building it.
-
-**Open questions to settle first** (let's discuss in the issue/Discussions before
-code):
-- In-app documentation viewer (rendering local Markdown/HTML), or just open links
-  out to the website/Discord?
-- Where does content live — bundled in `resources/` and shipped with the app, or
-  fetched live from the docs site?
-- Does "Release Notes" pull from `CHANGELOG.md` automatically, or get curated
-  separately?
-
-**Once direction is picked, rough scope**
-1. Wire up the existing Help menu actions in `src/shell/menumanager.cpp` (currently
-   all `setEnabled(false)`).
-2. Whatever content/viewer mechanism is decided on above.
-
-This is a bigger, less-defined task than the other issues here — best suited for
-someone who wants to help shape a new subsystem from scratch rather than follow an
-existing pattern. Comment if you want to propose a direction before starting.

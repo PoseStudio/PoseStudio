@@ -1,9 +1,19 @@
 /**
  * @file transformpanel.h
- * @brief The "Transform" properties tab: the selected joint's rotation as three dials.
+ * @brief The "Transform" properties tab: where the figure (or a selected static model) stands,
+ *        and the selected joint's rotation as three dials.
  *
- * A self-contained docker panel (its own module, like EnvironmentPanel): with a joint selected on
- * the posable figure it shows that joint's name and three DragNumberBox rows —
+ * A self-contained docker panel (its own module, like EnvironmentPanel), in two groups.
+ *
+ * THE FIGURE GROUP places the whole figure as posed: Left-Right / Up-Down / Back-Forward in
+ * centimetres and Turn / Tip / Tilt in degrees — the rig root's pose translation and world
+ * rotation, a pose edit like a dial's, and live for any posable figure whether or not a joint is
+ * selected. With a STATIC model selected instead (an OBJ, a Gaussian splat scene) the same rows
+ * read and set its model transform, and a seventh row, Scale (percent of the imported size), is
+ * enabled; a static model's placement is no pose edit and has no undo entry.
+ *
+ * THE ROTATION GROUP: with a joint selected on the posable figure the tab shows that joint's
+ * name and three DragNumberBox rows —
  *
  *   Bend       the joint's natural direction (a knee's fold, a spine joint's forward bend)
  *   Side-Side  its secondary direction
@@ -23,7 +33,8 @@
  * (ViewportWidget::jointTransformChanged).
  *
  * Undo: every completed gesture (a scrub, a type-in, a row's restore button, Reset All) is
- * ONE entry on the viewport's unified undo stack, bracketed begin/endJointTransformEdit.
+ * ONE entry on the viewport's unified undo stack, bracketed begin/endJointTransformEdit — the
+ * Figure group's rows through the same bracket.
  */
 
 #ifndef TRANSFORMPANEL_H

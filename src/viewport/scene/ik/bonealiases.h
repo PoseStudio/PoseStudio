@@ -20,7 +20,12 @@ namespace pose {
 class Armature;
 
 /// The index on @p arm of the bone the tests call @p canonical: the name itself when the rig has
-/// it, else the first alias it has, else -1.
+/// it, else the first alias it has, else the bone of the ROLE the name denotes in the rig standard
+/// (rigroles.h), else -1. SIDE EFFECT: when neither the name nor an alias fits and @p arm has no
+/// IK rig yet, the rig is BUILT to read its roles (Armature::prepareIkRig, through a const_cast:
+/// the rig is a cache of the bind skeleton, as the first drag would have built it); a lookup the
+/// names answer builds nothing. One collision of conventions is settled by role although the
+/// name fits: "pelvis" on a rig that calls its HIPS so is the Pelvis-role bone (see the .cpp).
 int aliasedBoneIndex(const Armature& arm, const std::string& canonical);
 
 /// The rig's own name for @p canonical (see aliasedBoneIndex), or @p canonical when no bone fits

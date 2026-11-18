@@ -59,6 +59,29 @@ float evalSpline(const std::vector<CorrectiveKnot>& knots, float x) {
     return std::clamp(y, std::min(p1.y, p2.y), std::max(p1.y, p2.y));
 }
 
+// A driver written as spline_linear (CorrectiveOp::linear): straight segments between the knots,
+// flat outside them. Read as the smooth spline above, a two-knot ramp bowed by up to a twentieth
+// of its height.
+float evalLinear(const std::vector<CorrectiveKnot>& knots, float x) {
+    if (knots.empty()) {
+        return 0.0f;
+    }
+    if (knots.size() == 1 || x <= knots.front().x) {
+        return knots.front().y;
+    }
+    if (x >= knots.back().x) {
+        return knots.back().y;
+    }
+    std::size_t i = 0;
+    while (i + 1 < knots.size() && x > knots[i + 1].x) {
+        ++i;
+    }
+    const CorrectiveKnot& p1 = knots[i];
+    const CorrectiveKnot& p2 = knots[i + 1];
+    const float h = p2.x - p1.x;
+    return h <= 1e-6f ? p1.y : p1.y + (p2.y - p1.y) * ((x - p1.x) / h);
+}
+
 } // namespace
 
 void CorrectiveSet::build(const ModelData& data, std::vector<std::vector<uint32_t>>& perMeshRanges,
@@ -343,7 +366,7 @@ float CorrectiveSet::evalWeight(std::size_t correctiveIndex, const Armature& arm
                     if (depth > 0) {
                         --depth;
                     }
-                    push(evalSpline(op.knots, d));
+                    push(op.linear ? evalLinear(op.knots, d) : evalSpline(op.knots, d));
                     break;
                 }
                 case CorrectiveOp::Kind::Mult:
@@ -376,8 +399,13 @@ bool CorrectiveSet::evaluateWeights(const Armature& armature) {
     for (std::size_t i = 0; i < m_correctives.size(); ++i) {
         const float w = evalWeight(i, armature);
         // Only commit a move past the threshold, so the stored weight is always exactly what the
-        // GPU has (sub-threshold drift accumulates until it trips, never silently diverges).
-        if (std::fabs(w - m_weight[i]) > 1e-4f) {
+        // GPU has (sub-threshold drift accumulates until it trips, never silently diverges) —
+        // AND a weight that is back at exactly zero, whatever is stored: the threshold was chosen
+        // for a pose corrective's unitless weight, but a soft-body field's weight is a
+        // displacement in METRES (a tenth of a millimetre, then), and a field that has settled
+        // must leave the skin ON its sculpt, not up to that far off it by whichever path led
+        // there. The same for a pose corrective whose driver has gone back to rest.
+        if (std::fabs(w - m_weight[i]) > 1e-4f || (w == 0.0f && m_weight[i] != 0.0f)) {
             m_weight[i] = w;
             changed = true;
         }
@@ -388,16 +416,20 @@ bool CorrectiveSet::evaluateWeights(const Armature& armature) {
     return changed;
 }
 
+void CorrectiveSet::evaluateIfMoved(const Armature& armature) {
+    // The pose moved since the weights were last evaluated (any posing path — a drag tick, a
+    // dial turn, an IK settle, a pose load — bumps the armature's skin version).
+    if (!m_correctives.empty() && m_evalSkinVersion != armature.skinVersion()) {
+        evaluateWeights(armature);
+        m_evalSkinVersion = armature.skinVersion();
+    }
+}
+
 void CorrectiveSet::uploadIfDirty(uint32_t frameIndex, const Armature& armature) {
     if (m_correctives.empty() || frameIndex >= static_cast<uint32_t>(kMaxFramesInFlight)) {
         return;
     }
-    // The pose moved since the weights were last evaluated (any posing path — a drag tick, a
-    // dial turn, an IK settle, a pose load — bumps the armature's skin version).
-    if (m_evalSkinVersion != armature.skinVersion()) {
-        evaluateWeights(armature);
-        m_evalSkinVersion = armature.skinVersion();
-    }
+    evaluateIfMoved(armature);
     if (m_uploaded[frameIndex] == m_version) {
         return;
     }

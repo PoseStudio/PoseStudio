@@ -73,6 +73,10 @@ struct LightingSettings {
     bool operator!=(const LightingSettings& o) const { return !(*this == o); }
 };
 
+/// The key light's color (linear RGB, a warm white): what keyIntensity scales, wherever the key
+/// light is drawn — the camera block's lightColor, a render's sun, the material ball's shader.
+inline constexpr float kKeyLightColor[3] = {1.0f, 0.96f, 0.9f};
+
 } // namespace pose
 
 #endif // LIGHTINGSETTINGS_H

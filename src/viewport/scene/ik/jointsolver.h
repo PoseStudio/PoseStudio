@@ -210,16 +210,12 @@ public:
 
     void setSkeleton(std::vector<JointSolverBone> bones);
     std::size_t boneCount() const { return m_bones.size(); }
-    const JointSolverBone& bone(std::size_t i) const { return m_bones[i]; }
 
     /// Forward kinematics of @p pose — the Armature's composition, in double.
     void forwardKinematics(const Pose& pose, Frames& frames) const;
 
     /// Solves @p problem on @p pose in place (the warm start) and leaves the result there.
     Result solve(Pose& pose, const Problem& problem, const Settings& settings) const;
-
-    /// The total cost of @p pose under @p problem (tasks + posture): tests and traces.
-    double cost(const Pose& pose, const Problem& problem) const;
 
     /// Self-test: the largest difference between the analytic Jacobian and a central finite
     /// difference of the residuals at @p pose, over every row and DoF of @p problem (weights
@@ -273,6 +269,12 @@ private:
     void dofBounds(const Problem& problem, std::vector<double>& lo, std::vector<double>& hi) const;
     /// One Levenberg-Marquardt descent from @p pose (see solve).
     Result descend(Pose& pose, const Problem& problem, const Settings& settings) const;
+    /// Bone @p i's rotation in its parent's frame under @p pose: orient · euler · orient^T, the
+    /// Euler channels composed in the bone's rotation order (the Armature's composition).
+    glm::dmat3 localRotation(const Pose& pose, std::size_t i) const;
+    /// Bone @p i's world frame in @p frames from its parent's — already placed: parents precede
+    /// children — its @p local rotation and its bind offset plus @p pose's translation.
+    void placeBone(const Pose& pose, std::size_t i, const glm::dmat3& local, Frames& frames) const;
     glm::dvec3 dofAxis(const Pose& pose, const Frames& frames, const JointSolverDof& dof) const;
 
     /// A per-axis orientation row's error frame at the linearization's pose: what every DoF's
@@ -296,7 +298,12 @@ private:
         std::vector<char>             rowOff, rowEntered, blocked;
         std::vector<JointPlaneTask>   planes, trialPlanes;
         Pose                          trial;
+        Pose                          kicked;    ///< solve: the fold retry's starting pose
         Frames                        frames, trialFrames;
+        /// descend's FK CACHE: each bone's local rotation at the descent's pose, the bones that own
+        /// an Euler DoF of the problem, and a trial's local rotations for those bones alone.
+        std::vector<glm::dmat3>       local, trialLocal;
+        std::vector<char>             eulerDof;
         ComModel                      com;
         std::vector<double>           subCoeff;  ///< linearize: the balance row's subtree sums ...
         std::vector<glm::dvec3>       subMoment;

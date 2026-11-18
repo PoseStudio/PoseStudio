@@ -66,7 +66,8 @@ public:
     /// The page's headings, in order (ATX `#`..`######` lines outside fenced code blocks), each
     /// with the anchor slug the rendered document carries.
     std::vector<ManualHeading> headingsOf(const QString& file);
-    /// The page as searchable plain text (lower-cased Markdown with the markup thinned out).
+    /// The page as searchable plain text (lower-cased Markdown with the markup thinned out;
+    /// cached).
     QString searchTextOf(const QString& file);
 
     /// Renders a page's Markdown into @p document: parses it (GitHub dialect), then restyles it for
@@ -88,6 +89,7 @@ private:
     std::vector<ManualPage>  m_pages;
     QString                  m_error;
     QHash<QString, QString>  m_markdownCache;
+    QHash<QString, QString>  m_searchTextCache; ///< searchTextOf(), per page file
 };
 
 #endif // HELP_MANUAL_H

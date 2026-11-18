@@ -102,7 +102,7 @@ void main() {
 
     // Selection highlight amount: the skin weight this vertex puts on the selected joint and its
     // twist twin — the flesh that joint moves, fading out where the weights blend into the
-    // neighbouring bones. material3.z packs kind + 8·(joint+1) + 8192·(twin+1) (exact below
+    // neighbouring bones. The push block's meta.y packs kind + 8·(joint+1) + 8192·(twin+1) (exact below
     // 2^24); -1 (no selection, or a static mesh, which has nothing to select) yields 0 everywhere.
     // ... and the joints lit WITH the selection: the FACE RIG under a selected head (the face is the
     // head's — its bones are not selectable — and the head bone's own weights cover the scalp

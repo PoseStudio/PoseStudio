@@ -154,16 +154,6 @@ QList<LibraryPaths::HdriEntry> LibraryPaths::hdriEntries() {
     return entries;
 }
 
-QStringList LibraryPaths::hdriFiles() {
-    QStringList files;
-    const QList<HdriEntry> entries = hdriEntries();
-    files.reserve(entries.size());
-    for (const HdriEntry& entry : entries) {
-        files.append(entry.path);
-    }
-    return files;
-}
-
 QString LibraryPaths::defaultHdri() {
     // An explicit <appDir>/environment.hdr (or .exr) override wins — checked here, in the one
     // resolution both the viewport and the Environment panel call, so the panel's caption can

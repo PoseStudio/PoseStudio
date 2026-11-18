@@ -114,7 +114,8 @@ bool isWhite(const float c[3]) {
 }
 
 /// The image handles of one scene: each application image is added to Cycles's image manager
-/// once (per row order), however many materials sample it.
+/// once, however many materials sample it. (The environment's panorama is not one of these: it is
+/// read with its rows flipped, and buildWorld adds it itself.)
 class ImageSet {
 public:
     ImageSet(ccl::Scene* scene, const Scene& in) : m_scene(scene), m_in(in) {}
@@ -131,9 +132,8 @@ public:
         return image.format == PixelFormat::Float32 ? ccl::u_colorspace_scene_linear : ccl::u_colorspace_data;
     }
 
-    ccl::ImageHandle handle(int index, bool flipRows) {
-        const std::pair<int, bool> key(index, flipRows);
-        const auto found = m_handles.find(key);
+    ccl::ImageHandle handle(int index) {
+        const auto found = m_handles.find(index);
         if (found != m_handles.end()) {
             return found->second;
         }
@@ -145,15 +145,15 @@ public:
         params.extension = ccl::EXTENSION_REPEAT;
         params.interpolation = ccl::INTERPOLATION_LINEAR;
         ccl::ImageHandle handle = m_scene->image_manager->add_image(
-            std::make_unique<MemoryImageLoader>(m_in.images[index], flipRows), params);
-        m_handles.emplace(key, handle);
+            std::make_unique<MemoryImageLoader>(m_in.images[index], /*flipRows=*/false), params);
+        m_handles.emplace(index, handle);
         return handle;
     }
 
 private:
-    ccl::Scene*                                   m_scene;
-    const Scene&                                  m_in;
-    std::map<std::pair<int, bool>, ccl::ImageHandle> m_handles;
+    ccl::Scene*                     m_scene;
+    const Scene&                    m_in;
+    std::map<int, ccl::ImageHandle> m_handles;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -231,7 +231,7 @@ ccl::ImageTextureNode* MaterialGraph::imageNode(const Texture& texture, ccl::Sha
     node->set_alpha_type(ccl::IMAGE_ALPHA_CHANNEL_PACKED);
     node->set_extension(ccl::EXTENSION_REPEAT);
     node->set_interpolation(ccl::INTERPOLATION_LINEAR);
-    node->handle = m_images.handle(texture.image, /*flipRows=*/false);
+    node->handle = m_images.handle(texture.image);
     if (coords != nullptr) {
         m_graph->connect(coords, node->input("Vector"));
     }

@@ -17,10 +17,6 @@ namespace pose {
 
 namespace fs = std::filesystem;
 
-std::string UriResolver::urlDecode(const std::string& s) {
-    return pose::urlDecode(s);
-}
-
 UriResolver::UriResolver(std::vector<std::string> contentRoots) : m_roots(std::move(contentRoots)) {}
 
 const std::unordered_map<std::string, std::string>&
@@ -32,10 +28,12 @@ UriResolver::directoryListing(const std::string& dir) const {
     // First visit: list the directory once. emplace keeps the FIRST entry per lowercased name, in
     // iteration order — the same match the original per-miss scan returned. A directory that
     // can't be listed (missing, not a directory) memoizes as empty, so it misses cheaply next time.
+    // (An explicit increment(ec): a range-for advances with the THROWING operator++, and an I/O
+    // error half way down a listing — a network share — would leave resolve() by exception.)
     std::unordered_map<std::string, std::string> listing;
     std::error_code dirEc;
-    for (const auto& entry : fs::directory_iterator(fs::path(dir), dirEc)) {
-        const std::string name = entry.path().filename().string();
+    for (fs::directory_iterator it(fs::path(dir), dirEc), end; !dirEc && it != end; it.increment(dirEc)) {
+        const std::string name = it->path().filename().string();
         listing.emplace(toLowerAscii(name), name);
     }
     return m_listings.emplace(dir, std::move(listing)).first->second;

@@ -22,8 +22,12 @@
  *  - A formula driven by a JOINT (a rotation) is a pose corrective's and is not evaluated here:
  *    correctivescan finds those and the engine blends them live. What is baked is the shape at
  *    rest.
- *  - spline_tcb / spline_linear are evaluated (a control that shapes one morph below zero and
- *    another above it is written as two splines).
+ *  - The splines (spline_tcb, spline_linear, spline_constant) are evaluated — a control that
+ *    shapes one morph below zero and another above it is written as two — and so are inv ("divide
+ *    by") and neg. The operations themselves are read by formulaops, which the corrective
+ *    translator shares.
+ *  - A formula with an operation outside that vocabulary is NOT evaluated: what it drives goes
+ *    without it, and `missing` says so. Run with the operation skipped it gave another number.
  *
  * NOT DONE: a formula that lives in the DRIVEN morph's own file and is driven by a channel this
  * walk reaches ("this detail follows that head") is only found when something else reaches that
@@ -73,13 +77,21 @@ struct ResolvedShape {
     /// The per-bone `center_point` adjustments the same formulas drive (see JointCenterOffsets).
     JointCenterOffsets jointCenterOffsets;
     /// Channels the preset dials or a control drives that could not be read — "<id>: <why>" (its
-    /// file is not under any content root, or the file does not define that id). Reported, so a
-    /// character that comes out as the base figure says which of its files is missing.
+    /// file is not under any content root, or the file does not define that id) — and, after
+    /// them, what a formula with an unknown operation would have driven. Reported, so a character
+    /// that comes out as the base figure says which of its files is missing.
     std::vector<std::string> missing;
+    /// What every channel the walk KNOWS came to, by decoded id — its limits applied, and ZERO
+    /// included: the dials, what they drive, and what a formula merely reads (its file's
+    /// default). A pose corrective's gates are resolved against this before any file is asked
+    /// for a default (correctivescan): `morphs` leaves out a channel at zero, and a switch the
+    /// preset turns OFF — a channel whose file default is on — then read as on.
+    std::unordered_map<std::string, float> channelValues;
 };
 
 /// Evaluates the dials @p presetRoot's scene sets on the figure @p scope names through their
-/// channel-driver formulas. Never throws: an unreadable file is a `missing` entry.
+/// channel-driver formulas. Never throws: an unreadable file is a `missing` entry, and a field
+/// of the wrong type reads as absent.
 ResolvedShape resolveDialedMorphs(const nlohmann::json& presetRoot, UriResolver& resolver,
                                   const std::string& presetDir, const FigureScope& scope);
 

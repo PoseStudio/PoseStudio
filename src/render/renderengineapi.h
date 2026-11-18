@@ -95,7 +95,7 @@ enum class MapSlot : int32_t {
     Bump,              ///< height map
     Emission,
     Subsurface,        ///< the translucency color map: its luminance scales the subsurface weight
-    DetailNormal,      ///< the tiled micro-detail normal map
+    DetailNormal,      ///< the tiled micro-detail normal map (handed over; no engine renders the Detail layer yet)
     CoatWeight,
     CoatRoughness,
     SheenWeight,
@@ -107,8 +107,9 @@ enum class MapSlot : int32_t {
 constexpr int kMapSlotCount = static_cast<int>(MapSlot::Count);
 
 enum MaterialFlags : uint32_t {
-    kMaterialThinWalled = 1u << 0,    ///< a sheet, not a solid (a pane, a leaf, a lash card)
-    kMaterialShadowCatcher = 1u << 1, ///< shows only the shadows cast on it (the floor)
+    kMaterialThinWalled = 1u << 0, ///< a sheet, not a solid (a pane, a leaf, a lash card)
+    // (Bit 1 is free: nothing has ever set or read it. The shadow-catching floor is
+    // Scene::floorShadows, not a material.)
     /// The normal map is DirectX-style (green = down the image). Unflagged, a normal map is
     /// OpenGL-style (green = up), which is what the engine is to read it as.
     kMaterialFlipNormalY = 1u << 2,
@@ -161,6 +162,8 @@ struct Material {
     float opacity = 1.0f;
     float normalStrength = 1.0f;
     float bumpStrength = 1.0f;
+    // The Detail layer (the tiled micro-detail normal, MapSlot::DetailNormal): the application
+    // fills these three, and no engine reads them yet — a render shows a zone without its detail.
     float detailWeight = 0.0f;
     float detailTiling[2] = {1.0f, 1.0f};
     float detailOffset[2] = {0.0f, 0.0f};
@@ -228,7 +231,8 @@ struct Light {
     int32_t   castShadow = 1;
 };
 
-/// The lighting environment and what the camera sees behind the scene.
+/// The lighting environment and what the camera sees behind the scene. Of `image` and `file` an
+/// engine uses the IMAGE when both are given (the application gives one or the other).
 struct Environment {
     int32_t     image = -1;      ///< an equirectangular Image of the scene (row 0 = the +Y pole) …
     const char* file = nullptr;  ///< … or a panorama file the engine reads (.hdr / .exr); neither = `color`
@@ -278,7 +282,9 @@ struct Settings {
     int32_t     width = 1280;
     int32_t     height = 720;
     int32_t     samples = 256;
-    const char* device = nullptr; ///< a DeviceInfo::id; null or "" = the CPU
+    /// A DeviceInfo::id; null or "" = the CPU. Read DURING the call it is passed to only (an
+    /// engine copies it): unlike a Scene's pointers it need not outlive start().
+    const char* device = nullptr;
     int32_t     denoise = 1;
     int32_t     maxBounces = 12;
     float       exposure = 1.0f; ///< a multiplier on the image (the viewport's Exposure dial)
@@ -331,10 +337,13 @@ struct Status {
     char     error[512] = {0}; ///< State::Failed: why
 };
 
-/// A render engine instance. One render at a time: start() begins it on the engine's own
-/// threads and returns; poll status() and copyImage() from the calling thread. (A second
-/// instance — the entry function called again — renders beside the first: the viewport's
-/// interactive render and a final render each have their own.)
+/// A render engine instance. ONE RENDER AT A TIME: start() begins it on the engine's own
+/// threads and returns; poll status() and copyImage() from the calling thread. start() while a
+/// render of this instance is running ENDS that render first, as cancel() would — status() and
+/// copyImage() then speak of the new one — so whoever shares an instance must agree on whose
+/// render it is running (the application: RenderSession). A second instance — the entry function
+/// called again — renders beside the first: the viewport's interactive render and a final render
+/// each have their own.
 class Engine {
 public:
     /// The engine's name and version, for the interface ("Cycles", "5.3.0").
@@ -345,15 +354,18 @@ public:
     virtual int32_t deviceCount() = 0;
     virtual bool    device(int32_t index, DeviceInfo& out) = 0;
 
-    /// Begins rendering @p scene. False (with Status::error set) if it could not start. See the
-    /// file comment for how long the scene's pointers must live.
+    /// Begins rendering @p scene, ending a render this instance is still running first. False
+    /// (with Status::error set) if it could not start. See the file comment for how long the
+    /// scene's pointers must live.
     virtual bool start(const Scene& scene, const Settings& settings) = 0;
     /// Stops the render and waits until the engine no longer touches the scene's memory.
     virtual void cancel() = 0;
     virtual void status(Status& out) = 0;
-    /// Copies the image as it stands — linear RGBA float, @p width × @p height as started, row 0
-    /// = top, the exposure applied, alpha = coverage — into @p rgba. False before the first
-    /// pixels exist or if the size is not the render's.
+    /// Copies the image as it stands — linear RGBA float, row 0 = top, the exposure applied,
+    /// alpha = coverage — into @p rgba. @p width × @p height must be the image's size: the size
+    /// the render was started with, and for an interactive render the size of its last camera
+    /// update once that is shown (Status::imageWidth / imageHeight say which it is now). False
+    /// before the first pixels exist or if the size is not the image's.
     virtual bool copyImage(float* rgba, int32_t width, int32_t height) = 0;
 
     /// AN INTERACTIVE RENDER (Settings::interactive) is changed while it runs. Returns at once:

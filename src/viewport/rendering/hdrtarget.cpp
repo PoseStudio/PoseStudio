@@ -87,6 +87,7 @@ struct ResolvePush {
     float pad0;
     float pad1;
 };
+static_assert(sizeof(ResolvePush) == 16, "ResolvePush must match photoresolve.frag's push block");
 
 VkExtent2D scaledExtent(VkExtent2D extent, float scale) {
     const auto dim = [scale](uint32_t v) {

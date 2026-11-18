@@ -11,9 +11,11 @@
  * so their difference only detects sinking below the LOWEST pin's bind height — exact for two
  * same-height feet, weaker for knee + foot pins; penetrationMax is the per-joint check against
  * the rig's own floor clearance. `suspended` reads "every pin released while contacts existed",
- * which cannot detect a suspension that a user pin survives. runIdleMetrics is a second,
- * identical pass that keeps per-joint step histories for the idle-joint tremble metrics, so the
- * main loop stays a plain mirror of the viewport's tick.
+ * which cannot detect a suspension that a user pin survives. runIdleMetrics is a second pass
+ * over the PLAIN drag (the pre-pose, the pins, the grab, the path) that keeps per-joint step
+ * histories for the idle-joint tremble metrics, so the main loop stays a plain mirror of the
+ * viewport's tick; it replays no prelude, hover, grab point, group or scope, and refuses a
+ * scenario that uses one.
  */
 
 #ifndef IKHARNESS_SIMULATOR_H
@@ -115,7 +117,6 @@ struct RunResult {
     bool                     ok = false;
     std::string              error;
     std::vector<PhaseStats>  phases;
-    int                      dragTicks = 0;
     // Contact pins (ground contacts the rig pinned at drag start) — drift from their start.
     std::vector<int>         contactPins;
     double                   contactDriftMax = 0.0;   // after the settle
@@ -131,7 +132,7 @@ struct RunResult {
     double                   headDisp = 0.0, chestDisp = 0.0;
     // Effector.
     int                      grabIndex = -1;
-    glm::vec3                grabStart{0.0f}, grabEnd{0.0f}, cursorEnd{0.0f};
+    glm::vec3                grabStart{0.0f}, grabEnd{0.0f};
     glm::vec3                grabEulerStart{0.0f}, grabEulerEnd{0.0f}; // the grabbed bone's pose (deg)
     double                   restingMiss = 0.0;       // |grab - cursor| at the end of the drag
     double                   headJumpMax = 0.0;       // the HEAD's worst single-tick move over the drag
@@ -169,10 +170,9 @@ struct RunResult {
     /// The bones whose Euler channels moved farthest from the drag-start pose by the end (the
     /// six largest |channel delta| in degrees, name + delta): a distortion finder.
     std::vector<std::pair<std::string, double>> topEulerDeltas;
-    /// Every bone's Euler channels (degrees) at the end, and the bones' names in the same order.
+    /// Every bone's Euler channels (degrees) at the end.
     std::vector<glm::vec3>   endEuler;
     std::vector<glm::vec3>   startEuler; // at the measured drag's press (after the preludes)
-    std::vector<std::string> boneNames;
     // The lower hand's world height: its minimum over the drag + settle (a hand planted on
     // the floor sits ~9cm up with its fingers hanging to the floor; lower = fingers through
     // it) and its value at the end.
@@ -191,13 +191,15 @@ struct RunResult {
     double                   userPinDistMax = 0.0;    // worst distance from its pin position
     double                   userPinRotMaxDeg = 0.0;  // worst world-rotation deviation
     // Everything, for ad-hoc checks: at drag start, at mouse-up (before the settle), after it.
+    // (These and the other per-bone vectors are sized to the skeleton before the run can fail,
+    // so a phase that indexes one of a failed run reads a zero, not past an empty vector.)
     std::vector<glm::vec3>   startPos, dragEndPos, endPos;
     /// Per bone at the end: a HAND's palm normal (world, unit; Armature::handPalmNormal), zero
     /// elsewhere - where a hand laid on the body faces (the hand-lay phases).
     std::vector<glm::vec3>   endPalm;
-    /// The body's CENTRE OF MASS (the rig's masses over the pose) at the measured drag's start
-    /// and at the end: where the weight stands over the feet (the weight shift onto a standing foot).
-    glm::vec3                comStart{0.0f}, comEnd{0.0f};
+    /// The body's CENTRE OF MASS (the rig's masses over the pose) at the end: where the weight
+    /// stands over the feet (the weight shift onto a standing foot).
+    glm::vec3                comEnd{0.0f};
     std::vector<glm::vec3>   restPos; // before the preludes (Scenario::before): the standing figure
     double                   hipDropAtRelease = 0.0;   // hip descent at mouse-up (a crouch's depth)
     // FLOOR PENETRATION: the deepest any body joint went below (floor + its rig clearance) —
@@ -218,8 +220,8 @@ struct RunResult {
     int                      riderPenetrationNode = -1;
     double                   minJointY = 1e9;         // lowest ANY joint went vs its bind height (drag; --custom info)
     // LEG diagnostics (the "knees twist inward / feet mangled" complaints), per leg over both:
-    // kneeTwist* read the thigh twist bone's one free channel — the fold-plane twist the
-    // extraction's witness sets — as |twist - drag start|; kneeInward* is the knee's offset from
+    // kneeTwist* read the thigh twist bone's one free channel — the leg's twist about its own
+    // length — as |twist - drag start|; kneeInward* is the knee's offset from
     // its hip-socket->ankle line TOWARD the midline (valgus, m; negative = bowed outward);
     // kneeOscMax / kneeStepMax are the knees' reversal-overlap tremble and worst single-tick
     // step during the drag; footRot* is the worst world-rotation deviation of a contact-pinned
@@ -244,6 +246,7 @@ struct RunResult {
 // A second, lighter simulator pass for the IDLE-joint metrics (per-tick steps of joints that
 // should not move during a gesture): tremble = accumulated reversal overlap, and the worst
 // single-tick step. Kept separate so the main loop stays a faithful mirror of the viewport.
+// It replays the PLAIN drag only (see runIdleMetrics).
 struct IdleMetrics {
     double oscMax = 0.0;   // worst accumulated reversal overlap over the idle joints
     double stepMax = 0.0;  // worst single-tick step of an idle joint
@@ -277,7 +280,10 @@ RunResult runScenario(const std::vector<pose::ArmatureBone>& baseBones, const Sc
                       bool verbose);
 
 /// The idle-joint tremble pass (see the header note): the same drag, measuring only the joints
-/// named in sc.idleJoints.
+/// named in sc.idleJoints. The PLAIN drag: the pre-pose, the pins, the grab at its joint and the
+/// path are replayed; a scenario with a prelude (before), a hover, pinsAfterBefore /
+/// resetAfterBefore, a grab point (grabShare, grabOffset), a group (alsoGrab), a scope or toRest
+/// is REFUSED (a line on stderr, zero metrics) — its idle pass would be another drag's.
 IdleMetrics runIdleMetrics(const std::vector<pose::ArmatureBone>& baseBones, const Scenario& sc);
 
 /// start -> @p offset over @p moveTicks, then held for @p holdTicks (labels "move" and "hold").

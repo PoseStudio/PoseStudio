@@ -8,6 +8,7 @@
 #include "constants.h"
 #include "helpwindow.h"
 #include "preferencesmanager.h"
+#include "runmode.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -41,11 +42,69 @@ constexpr int kPreviousReleasesShown = 1;
 /// The one window open at a time (Help → What's New… raises it instead of stacking a second).
 QPointer<WhatsNewDialog> g_open;
 
-/// A run that drives the app itself — a scripted posing test, the bench, a manual screenshot, a
-/// skeleton dump — never sees the window: it would sit over the frames such a run reads.
-bool probingRun() {
-    return qEnvironmentVariableIsSet("POSESTUDIO_IK_SCRIPT") || qEnvironmentVariableIsSet("POSESTUDIO_IK_BENCH") ||
-           qEnvironmentVariableIsSet("POSESTUDIO_MANUAL_SHOT") || qEnvironmentVariableIsSet("POSESTUDIO_DUMP_SKELETON");
+/// The embedded changelog (the manual's copy, a quarter of a megabyte), as lines.
+QStringList changelogLines() {
+    HelpManual manual;
+    return manual.markdownOf(QLatin1String(kChangelogFile)).split(QLatin1Char('\n'));
+}
+
+/// True when @p line (trimmed) is the heading of a release's section: @p heading — `## [x.y.z]`
+/// — followed by nothing, or by something that is no letter or digit.
+bool isReleaseHeading(const QString& line, const QString& heading) {
+    return line.startsWith(heading) && (line.size() == heading.size() || !line.at(heading.size()).isLetterOrNumber());
+}
+
+/// WhatsNewDialog::releaseBefore() on the changelog's lines.
+QString releaseBeforeIn(const QStringList& lines, const QString& version) {
+    // The changelog lists releases newest first: the next `## [x.y.z]` heading after @p version's.
+    const QString heading = QStringLiteral("## [%1]").arg(version);
+    bool          found = false;
+    for (const QString& raw : lines) {
+        const QString line = raw.trimmed();
+        if (!line.startsWith(QLatin1String("## ["))) {
+            continue;
+        }
+        if (!found) {
+            found = isReleaseHeading(line, heading);
+            continue;
+        }
+        const int close = line.indexOf(QLatin1Char(']'));
+        const QString next = close > 4 ? line.mid(4, close - 4) : QString();
+        if (!next.isEmpty() && next.at(0).isDigit()) { // (never "Unreleased")
+            return next;
+        }
+    }
+    return QString();
+}
+
+/// WhatsNewDialog::notesFor() on the changelog's lines.
+QString notesIn(const QStringList& lines, const QString& version, QString* dateOut) {
+    // The changelog keeps one `## [x.y.z] - date` section per release (Keep a Changelog); the
+    // section runs to the next `## ` heading. The embedded copy is the manual's.
+    const QString heading = QStringLiteral("## [%1]").arg(version);
+    int from = -1;
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString line = lines.at(i).trimmed();
+        if (isReleaseHeading(line, heading)) {
+            from = i;
+            if (dateOut != nullptr) {
+                const int dash = line.indexOf(QLatin1String(" - "), heading.size());
+                *dateOut = dash >= 0 ? line.mid(dash + 3).trimmed() : QString();
+            }
+            break;
+        }
+    }
+    if (from < 0) {
+        return QString();
+    }
+    QStringList section;
+    for (int i = from + 1; i < lines.size(); ++i) {
+        if (lines.at(i).startsWith(QLatin1String("## "))) {
+            break;
+        }
+        section.append(lines.at(i));
+    }
+    return section.join(QLatin1Char('\n')).trimmed();
 }
 
 } // namespace
@@ -74,10 +133,11 @@ WhatsNewDialog::WhatsNewDialog(QWidget* owner) : QDialog(owner), m_owner(owner) 
     connect(m_browser, &QTextBrowser::anchorClicked, this, &WhatsNewDialog::onAnchorClicked);
     layout->addWidget(m_browser, 1);
 
-    QString       date;
-    const QString version = QLatin1String(Constants::APP_VERSION);
-    const QString notes = notesFor(version, &date);
-    QString       markdown = QStringLiteral("# What's New in PoseStudio %1\n\n").arg(version);
+    QString           date;
+    const QString     version = QLatin1String(Constants::APP_VERSION);
+    const QStringList changelog = changelogLines(); // (read once for everything the window shows)
+    const QString     notes = notesIn(changelog, version, &date);
+    QString           markdown = QStringLiteral("# %1\n\n").arg(tr("What's New in PoseStudio %1").arg(version));
     if (!date.isEmpty()) {
         markdown += tr("*Released %1*\n\n").arg(date);
     }
@@ -93,12 +153,12 @@ WhatsNewDialog::WhatsNewDialog(QWidget* owner) : QDialog(owner), m_owner(owner) 
     // release is old news.
     QString previous = version;
     for (int i = 0; i < kPreviousReleasesShown; ++i) {
-        previous = releaseBefore(previous);
+        previous = releaseBeforeIn(changelog, previous);
         if (previous.isEmpty()) {
             break;
         }
         QString       previousDate;
-        const QString previousNotes = notesFor(previous, &previousDate);
+        const QString previousNotes = notesIn(changelog, previous, &previousDate);
         if (previousNotes.isEmpty()) {
             break;
         }
@@ -162,7 +222,9 @@ WhatsNewDialog::WhatsNewDialog(QWidget* owner) : QDialog(owner), m_owner(owner) 
 }
 
 void WhatsNewDialog::showIfUpdated(QWidget* owner) {
-    if (qEnvironmentVariableIsSet("POSESTUDIO_NO_WHATS_NEW") || probingRun()) {
+    // A run that drives the app itself — a scripted posing test, the bench, a manual screenshot,
+    // a skeleton dump — never sees the window: it would sit over the frames such a run reads.
+    if (qEnvironmentVariableIsSet("POSESTUDIO_NO_WHATS_NEW") || RunMode::probing()) {
         return;
     }
     const bool    force = qEnvironmentVariableIsSet("POSESTUDIO_WHATS_NEW");
@@ -212,60 +274,11 @@ void WhatsNewDialog::setEnabled(bool enabled) {
 }
 
 QString WhatsNewDialog::releaseBefore(const QString& version) {
-    // The changelog lists releases newest first: the next `## [x.y.z]` heading after @p version's.
-    HelpManual        manual;
-    const QStringList lines = manual.markdownOf(QLatin1String(kChangelogFile)).split(QLatin1Char('\n'));
-    const QString     heading = QStringLiteral("## [%1]").arg(version);
-    bool              found = false;
-    for (const QString& raw : lines) {
-        const QString line = raw.trimmed();
-        if (!line.startsWith(QLatin1String("## ["))) {
-            continue;
-        }
-        if (!found) {
-            found = line.startsWith(heading) &&
-                    (line.size() == heading.size() || !line.at(heading.size()).isLetterOrNumber());
-            continue;
-        }
-        const int close = line.indexOf(QLatin1Char(']'));
-        const QString next = close > 4 ? line.mid(4, close - 4) : QString();
-        if (!next.isEmpty() && next.at(0).isDigit()) { // (never "Unreleased")
-            return next;
-        }
-    }
-    return QString();
+    return releaseBeforeIn(changelogLines(), version);
 }
 
 QString WhatsNewDialog::notesFor(const QString& version, QString* dateOut) {
-    // The changelog keeps one `## [x.y.z] - date` section per release (Keep a Changelog); the
-    // section runs to the next `## ` heading. The embedded copy is the manual's.
-    HelpManual     manual;
-    const QString  markdown = manual.markdownOf(QLatin1String(kChangelogFile));
-    const QString  heading = QStringLiteral("## [%1]").arg(version);
-    const QStringList lines = markdown.split(QLatin1Char('\n'));
-    int from = -1;
-    for (int i = 0; i < lines.size(); ++i) {
-        const QString line = lines.at(i).trimmed();
-        if (line.startsWith(heading) && (line.size() == heading.size() || !line.at(heading.size()).isLetterOrNumber())) {
-            from = i;
-            if (dateOut != nullptr) {
-                const int dash = line.indexOf(QLatin1String(" - "), heading.size());
-                *dateOut = dash >= 0 ? line.mid(dash + 3).trimmed() : QString();
-            }
-            break;
-        }
-    }
-    if (from < 0) {
-        return QString();
-    }
-    QStringList section;
-    for (int i = from + 1; i < lines.size(); ++i) {
-        if (lines.at(i).startsWith(QLatin1String("## "))) {
-            break;
-        }
-        section.append(lines.at(i));
-    }
-    return section.join(QLatin1Char('\n')).trimmed();
+    return notesIn(changelogLines(), version, dateOut);
 }
 
 void WhatsNewDialog::onAnchorClicked(const QUrl& url) {

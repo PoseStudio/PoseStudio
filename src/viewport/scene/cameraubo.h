@@ -4,8 +4,9 @@
  *        fills it from the camera, the Environment panel's dials, and the baked environment.
  *
  * The block is the one contract between the CPU and every scene shader that reads set 0
- * (mesh.vert/frag, background.frag, skeleton.vert): its std140 layout must match the `CameraUbo`
- * declaration in those shaders field for field. Keeping the struct and its fill routine in one
+ * (mesh.vert/frag, background.vert/frag, skeleton.vert, splat.vert): its std140 layout must match
+ * the `CameraUbo` block field for field — declared ONCE on the shader side, in
+ * shaders/include/camera_ubo.glsl, which those shaders include. Keeping the struct and its fill routine in one
  * Qt-free file means a new dial is added in exactly two places — here and the shader — and the
  * Scene just memcpy's the result into this frame's mapped buffer. The analytic 3-point rig
  * (key/fill/rim) still lives here for the non-IBL shade modes; the PBR mode reads only the key,
@@ -17,6 +18,7 @@
 
 #include <glm/glm.hpp>
 
+#include <cstddef>
 #include <vector>
 
 namespace pose {
@@ -37,11 +39,12 @@ struct LightUbo {
                          //       w = a spot's cos(half cone)
     glm::vec4 params;    // x = a spot's edge: 1 / ((1 - cos half cone) × blend); yzw spare
 };
+static_assert(sizeof(LightUbo) == 64, "LightUbo must match SceneLightUbo in camera_ubo.glsl");
 /// How many of them the block carries (= kMaxViewportLights, scenelight.h).
 inline constexpr int kCameraUboLights = 8;
 
 /// std140-compatible camera + lighting block. vec3 fields are padded to vec4. Must match the
-/// `CameraUbo` block declared in mesh.vert / mesh.frag. Layout (std140) must match both shaders.
+/// `CameraUbo` block of shaders/include/camera_ubo.glsl (std140) field for field.
 struct CameraUbo {
     glm::mat4 viewProj;
     glm::mat4 view;          // world -> view (fragment modes derive view-space normals for matcaps)
@@ -67,6 +70,10 @@ struct CameraUbo {
     glm::vec4 lightInfo;   // x = how many of `lights` are in use; yzw spare
     LightUbo  lights[kCameraUboLights]; // the scene's light objects (the first enabled ones)
 };
+// The sizes camera_ubo.glsl's block has under std140 (every member is a mat4 or a vec4, so the
+// C++ layout is the same with no padding): a member added on one side alone fails here.
+static_assert(sizeof(CameraUbo) == 1072, "CameraUbo must match camera_ubo.glsl");
+static_assert(offsetof(CameraUbo, lights) == 560, "CameraUbo::lights must match camera_ubo.glsl");
 
 /// The normalized world-space direction TO the key light from the Environment panel's
 /// azimuth/elevation dials (world-fixed relative to the subject; the defaults reproduce the old
@@ -87,8 +94,8 @@ glm::vec3 keyLightDirection(const LightingSettings& lighting, bool pbrFollowsRot
 ///
 /// The default (PBR) mode is image-based-lit — its diffuse comes from the environment's SH
 /// irradiance and its specular from the prefiltered-environment cubemap (set 3). The analytic
-/// lights feed only the *non-IBL* shade modes: only Rendered (mode 0) uses the full key/fill/rim
-/// rig; the other analytic modes use just the key + ambient, and PBR uses only the key (scaled by
+/// lights feed only the *non-IBL* shade modes: only Texture Shaded (mesh.frag mode 0) uses the
+/// full key/fill/rim rig; the other analytic modes use just the key + ambient, and PBR uses only the key (scaled by
 /// the panel's keyIntensity). The rig is world-space (fixed relative to the subject, so lighting
 /// stays consistent as the camera orbits); dirs point TO each light — Fill = opposite the key,
 /// lower + dimmer (opens the shadow side); Back/rim = behind + above (rims the shoulders so the

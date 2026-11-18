@@ -17,7 +17,11 @@ import sys
 
 from PIL import Image, ImageChops, ImageDraw
 
-PIXEL_THRESHOLD = 24      # a pixel "changed" when any channel moved by more than this
+# Both numbers are read off the BRIGHTNESS of the difference (its three channels weighed as a
+# grey conversion weighs them), which is what the eye goes by and is blind to some things: a
+# change in blue alone counts for a ninth of the same change in all three, and a difference of
+# a few levels on a few hundred pixels is "same". For an exact comparison, diff the files.
+PIXEL_THRESHOLD = 24      # a pixel "changed" when the brightness of its difference is this or more
 CHANGED_SHARE = 0.002     # a shot changed when more than this share of its pixels did ...
 CHANGED_MEAN = 0.35       # ... or its mean absolute difference is over this
 

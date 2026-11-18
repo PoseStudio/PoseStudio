@@ -1,13 +1,23 @@
 /**
  * @file armatureiksolvetuning.h
  * @brief Every tuning constant of the Armature's per-tick IK solve (armatureiksolve*.cpp), with
- *        the reasoning each was set by, and the env probes (A/B levers) more than one TU reads.
+ *        the reasoning each was set by, and the env probes (A/B levers) more than one TU reads —
+ *        and, beside them, the constants of the special drags that run on the solve's machinery:
+ *        the bone classes and the digit drag (kDigit*), the landing bounce's dip (kLandingDip*,
+ *        kLandingSeconds, kLandingShortest, kLandingDownShare, kLandingBlendFrom) and the hanging
+ *        feet's two distances (kHangFeet*).
+ *
+ * NOT here, each in the one file that reads it: the landing's arm swing and tail (kLandingArm*,
+ * kLandingTailSeconds: armaturelanding.cpp), how a hanging foot is recognised (kHangFoot*:
+ * armaturehangfeet.cpp), the dials' thresholds (kDial*: armaturedials.cpp) and everything of the
+ * soft body (armaturebreasts.cpp, armaturebreastfield.cpp, armaturebuttocks.cpp).
  *
  * The numbers are the model: weights per m^2 / rad^2, stiffness classes, the shares and ranges
  * every gesture is gated by. Each is annotated with what it was measured against (the IK harness
  * on the eight reference rigs, the character sweep, the in-app galleries) — change one, and the
- * comment says which phases will tell you what it cost. Private to the solve: only
- * armatureiksolve*.cpp, armatureikpost.cpp, armatureikdigit.cpp and armaturelanding.cpp include it.
+ * comment says which phases will tell you what it cost. Private to the IK: only
+ * armatureik.cpp, armatureiksolve*.cpp, armatureikpost.cpp, armatureboneclass.cpp, armatureikdigit.cpp,
+ * armatureikfigure.cpp, armaturehangfeet.cpp and armaturelanding.cpp include it.
  * Qt-free (std + GLM).
  */
 
@@ -33,7 +43,7 @@ namespace pose {
 constexpr double kEffectorWeight = 1.0e6;
 constexpr double kEffectorPull = 200.0;
 constexpr double kRootDragPullScale = 5.0;
-/// The suspended root's hang below the cursor (see the SUSPENDED note in solveIk).
+/// The suspended root's hang below the cursor (see SUSPENDED in ikCursorRows).
 constexpr double kSuspendHangWeight = 1.0e4;
 /// The solve root's ROTATION under a pelvis drag, per rad^2 (see rootTurns). 80, from 20: at 20
 /// a kneel pitched the whole torso 56 degrees forward and splayed the thighs 29 (rotating the
@@ -61,7 +71,7 @@ constexpr double kBalanceWeight = 1.0e4;
 /// m_jsBalanceSlack).
 constexpr float kBalanceRampStep = 0.01f;
 /// ... and a support that GROWS is grown into at this pace, metres a tick (see m_jsGrowFrom in
-/// solveIk): the slack's own, so a landing gives a lean back no faster than a lift-off asks for one.
+/// ikBalanceRow): the slack's own, so a landing gives a lean back no faster than a lift-off asks for one.
 constexpr float kSupportGrowStep = 0.01f;
 /// The posture stiffness classes (see the file note) and the range normalization's bounds: a
 /// channel narrower than kMinRangeDeg is priced as that (a +-5 degree knee play is not 1000x a
@@ -124,7 +134,7 @@ constexpr double kReachFoldPerMetre = 125.0;
 /// both legs straight under a fold at its cap. IK_JS_REACHKNEECOUPLING=30 is the A/B.
 constexpr double kReachKneeCoupling = 0.0;
 constexpr double kReachFoldMaxDeg = 55.0;
-/// The pelvis's price, every way, while a dragged FOOT is on the floor (the SLIDE, see solveIk):
+/// The pelvis's price, every way, while a dragged FOOT is on the floor (the SLIDE, see ikFootDrag):
 /// per m^2. A stance cannot widen or lengthen without the hips coming between the feet and down —
 /// that is geometry, not preference (a hand pull is the opposite case: there the pelvis must
 /// stay put, which is what the prices above are for). At those prices a foot dragged 55cm forward
@@ -176,7 +186,7 @@ constexpr double kSlideSolePitchWeight = 20.0;
 constexpr float  kSoleTurnStepDeg = 5.0f;
 constexpr double kSlideSoleHeadingWeight = 200.0;
 constexpr double kSlideSoleRollWeight = 20.0;
-/// A KNEE dragged over its planted foot (see the knee drag in solveIk): the foot lets go as the
+/// A KNEE dragged over its planted foot (see ikKneeDrag): the foot lets go as the
 /// knee's target is pulled UP past where the drag began — from kKneeLiftFrom, gone by
 /// kKneeLiftFull (m, figure-scaled) — its rows falling by kKneeLiftDecades on the way (a pin is
 /// 1e8: a linear fade does nothing, see the live contacts'); and a leg that hangs from a dragged
@@ -254,24 +264,24 @@ constexpr float kTrunkLeanWidth = 0.20f;
 /// neck pulled 20cm back leaned into the support's edge and stopped 27mm short, the follow
 /// still waiting for a lean that could not come).
 constexpr float kTrunkLeanBalanced = 0.8f;
-/// The sway's roll answers a leg that has RUN OUT (see the sway in solveIk): in full while the
+/// The sway's roll answers a leg that has RUN OUT (see the sway in ikTrunkPolicy): in full while the
 /// shortest-handed standing leg has under kSwayLegInHandFrom of length in hand where the cursor
 /// takes the hips, none from kSwayLegInHandGone.
 constexpr float kSwayLegInHandFrom = 0.03f;
 constexpr float kSwayLegInHandGone = 0.10f;
 /// The pelvis's rotation price is its PITCH's (kRootRotationStiffness); its heading and its roll
-/// cost this many times as much (see the root's channels in solveIk).
+/// cost this many times as much (see the root's channels in ikPostureDofs).
 constexpr double kRootSquareness = 5.0;
 /// The spine's neighbours are held to the same SHARE of their ranges (see the couplings in
-/// solveIk), per unit of share^2 — the order of a spine channel's own posture price in those
+/// ikSpineCoupling), per unit of share^2 — the order of a spine channel's own posture price in those
 /// units (40), so an S-curve of half a range each way costs as much as the bends themselves.
 /// A knee coming down over its planted foot holds its PLACE this softly (per m^2) until it has
-/// landed (solveIk's hard live pins); its height is held in full.
+/// landed (ikPinRows' landing knee); its height is held in full.
 constexpr double kKneeLandingHold = 1.0e4;
 /// With her knees planted (hard live pins) a pelvis drag pays this many times the root's
-/// rotation price for the pelvis's tilt (solveIk).
+/// rotation price for the pelvis's tilt (ikPostureDofs).
 constexpr double kKneelTiltScale = 5.0;
-/// The foot below a knee that is on the floor holds its PLACE this softly (per m^2): solveIk's
+/// The foot below a knee that is on the floor holds its PLACE this softly (per m^2): ikPinRowFootModel's
 /// ball row.
 constexpr double kKneelFootHold = 1.0e4;
 /// A KNEELING FOOT LIES FLAT (2026-09-26; the user, with a photo of a kneel-sit: "feet get
@@ -362,20 +372,20 @@ constexpr float kKneeUnrollExtra = 0.25f;
 /// brow, standing up off all fours by the hips. IK_JS_NO_RISE_TRUNK_HOME is the A/B.
 constexpr float kTrunkHomeStep = 0.03f;
 constexpr double kSpineCoupling = 80.0;
-/// ... and the NECK's links to it (see the couplings in solveIk): the neck is the spine's top.
+/// ... and the NECK's links to it (see ikSpineCoupling): the neck is the spine's top.
 constexpr double kNeckCoupling = 80.0;
 /// The pelvis's horizontal price under a trunk drag whose stance cannot walk and whose lean has
-/// run out of balance room (see m_jsTrunkCounter in solveIk): low enough that the balance row
+/// run out of balance room (see m_jsTrunkCounter in ikTrunkPolicy): low enough that the balance row
 /// and the cursor place the hips between them.
 constexpr double kTrunkCounterStiffness = 250.0;
 /// The spine's twist and side-bend channels under a trunk drag that stays in the sagittal plane
-/// (see sagittalLock in solveIk): this many times their price.
+/// (see sagittalLock in ikPosturePolicy): this many times their price.
 constexpr double kSagittalLock = 20.0;
 /// The bow's arc is a drag's that goes FORWARD: none of it under this cosine of the travel's angle
 /// off the figure's heading, all of it from the second.
 constexpr float kBowArcSagittalFrom = 0.70f;
 constexpr float kBowArcSagittalFull = 0.92f;
-/// How much of a rigid trunk's arc (see leanArc in solveIk) a spine that CURLS as it folds reaches.
+/// How much of a rigid trunk's arc (see leanArc in ikTrunkPolicy) a spine that CURLS as it folds reaches.
 constexpr double kBowArcShare = 0.75;
 /// The pelvis pitch's nominal RANGE, degrees: what its share of the bend is measured in where it is
 /// coupled to the first spine bone's (see kSpineCoupling) — a hip folds about 90 degrees.
@@ -387,7 +397,7 @@ constexpr double kTrunkHingeRangeDeg = 90.0;
 /// 50 degrees, the head tucked under between her arms - where a body folds 90 degrees at the hips
 /// under a back that stays all but flat, its thighs upright over its knees.
 constexpr double kKneelFoldStiffness = 5.0;
-/// A HAND ON THE FLOOR lies on its PALM (see the live contacts in solveIk): the soft pulls, per
+/// A HAND ON THE FLOOR lies on its PALM (see ikPinRowLiveContact): the soft pulls, per
 /// rad^2, that roll it flat about its fingertip (pitch, and level about the fingers' line) and
 /// keep the fingers' heading. Soft beside everything that places the arm: a wrist a hand's length
 /// over the floor cannot lie flat, and must not drag the shoulder down to try.
@@ -511,10 +521,10 @@ constexpr float  kHangFeetFallSpan = 0.35f;
 /// A hand contact's arm is SLACK — the hand held down, a ceiling on it — while the wrist's reach from
 /// its limb junction is under this share of the arm's span; above it the rise unloads the hand. Kept
 /// ABOVE the rig's lift-off test (kLiveContactTaut 0.95), so a hand hanging from its straight arm
-/// reads taut there every tick and lifts off (solveIk, the live-contact block).
+/// reads taut there every tick and lifts off (ikPinRowLiveContact).
 constexpr float kHandSlackShare = 0.97f;
 /// ... and the hold FADES over the arm's last few percent of straightening, never at once (2026-10-27;
-/// handTautShare in armatureiksolverows.cpp): by the limb's own stretch from kHandSlackShare to dead
+/// handTautShare in armatureiksolvepins.cpp): by the limb's own stretch from kHandSlackShare to dead
 /// straight (1.0), and by the junction's reach over this band below kHandSlackShare. "Slack" had been
 /// a switch, and thrown with the body's rise already complete it took a hand's hold from 1e8 to
 /// nothing in ONE solve — the arm the pin had stretched to its limits snapped back toward the fold the
@@ -542,7 +552,7 @@ constexpr float kHandUnloadStep = 0.03f;
 /// IK_JS_NO_HAND_TRAIL is the A/B.
 constexpr float kHandTrailFrom = 0.45f;
 constexpr float kHandTrailFull = 0.75f;
-/// THE FACE LIFTS OFF THE FLOOR (2026-10-29; ikChooseUnknowns, ikPostureDofs): under a pelvis drag going
+/// THE FACE LIFTS OFF THE FLOOR (2026-10-29; ikTrunkPolicy, ikPostureDofs): under a pelvis drag going
 /// DOWN, the NECK chain joins the unknowns as the trunk tilts past the head righting's fade (the same
 /// 70-110 degrees: on all fours or lying down the neck is not held up against the trunk), priced as the
 /// trunk over the tilt's share and frozen (the floor below) under it — no lever for the balance row in
@@ -557,7 +567,7 @@ constexpr float kHandTrailFull = 0.75f;
 /// off in one 112mm tick. Bounded, the hand slides along the floor behind the body from the
 /// trail's first tick and no backlog forms.
 constexpr double kHandTrailPull = 300.0;
-/// THE PRONE's share (ikChooseUnknowns): a kneel-start pelvis drag's target this far of the way from
+/// THE PRONE's share (ikTrunkPolicy): a kneel-start pelvis drag's target this far of the way from
 /// the hips at the press down to the hip joint's lying clearance (none .. all), while ahead of the
 /// planted knees (kProneFootFreeFrom/Full). From 0.4-0.8 the hands' release came after the body
 /// had stuck against the pelvis's dear tilt price, and the backlog went in one tick: 139mm on the
@@ -591,12 +601,12 @@ constexpr float kArmLandSoftenDeg = 10.0f;
 constexpr float kArmLandSoftenFrom = 0.15f;
 constexpr float kArmLandSoftenStepDeg = 1.5f;
 constexpr double kKneelFoldRangeDeg = 300.0;
-/// THE SEAT ROLLS (solveIk): the share of the target's swept angle about the seat that the
+/// THE SEAT ROLLS (ikPosturePolicy): the share of the target's swept angle about the seat that the
 /// pelvis's pitch reference takes, and the most it takes either way (degrees).
 constexpr double kSeatRollShare = 1.0;
 constexpr double kSeatRollMaxDeg = 110.0;
 /// THE BOW: under an upper-body trunk drag that began standing the pelvis's PITCH joins the
-/// unknowns, per rad^2 (see m_jsTrunkHinge in solveIk).
+/// unknowns, per rad^2 (see m_jsTrunkHinge in ikTrunkPolicy).
 constexpr double kTrunkHingeStiffness = 20.0;
 /// The hinge's release once a pelvis drag WALKS: slack per tick, and the slack at which the row is
 /// dropped for the rest of the drag (no imbalance a standing figure can have is that large).
@@ -610,13 +620,13 @@ constexpr float kPelvisBalanceReleaseGone = 0.40f;
 /// a hard row's pose barely reads its weight until the posture terms rival it.)
 constexpr float kPelvisBalanceStanceFrom = 0.12f;
 constexpr float kPelvisBalanceStanceGain = 1.5f;
-/// Under a hip sway (see the sway's roll in solveIk) the CHEST stays LEVEL: its roll about the
+/// Under a hip sway (see the sway's roll in ikTrunkPolicy) the CHEST stays LEVEL: its roll about the
 /// figure's fore axis held as the drag found it, per rad^2 — against four or five spine joints
 /// at the trunk's price (~150 each) that is 97% of the pelvis's roll taken up in the spine.
 /// Riding the rolled pelvis rigidly, the whole torso leaned away from the sway like a mast: 8
 /// degrees for 8cm, the head back over where the hips had been.
 constexpr double kSwayChestLevelWeight = 1000.0;
-/// A dragged ELBOW's hand tends to STAY where it is (see the elbow drag in solveIk): its wrist held
+/// A dragged ELBOW's hand tends to STAY where it is (see ikElbowDrag): its wrist held
 /// at its place as the drag found it, per m^2 — two decades over the arm's own posture terms, so
 /// the elbow swivels about a hand that stays to the millimetre where the arm's geometry lets it
 /// (elbows out, in, tucked: what an elbow is grabbed FOR), and well under the cursor's pull
@@ -689,7 +699,7 @@ constexpr double kRiseHomeStiffness = 0.2;
 /// The slack-hand CEILING (a hand held DOWN at its planted height while its arm has length to
 /// give: a body pushing up off its belly keeps its hands on the floor as the arms straighten)
 /// stands down for a body COMING DOWN — over this much of the target's downward travel since
-/// the drag began (m, figure-scaled). See the live-contact block in solveIk.
+/// the drag began (m, figure-scaled). See ikPinRowLiveContact.
 constexpr float  kHandCeilingDownFrom = 0.02f;
 constexpr float  kHandCeilingDownFull = 0.08f;
 /// ... by RISING: the ceiling stands this far over the planted height (m, figure-scaled) at the
@@ -774,7 +784,7 @@ constexpr double kTiptoeDeg = 35.0;
 // from its socket, not the limb rise's kLimbReachShare (0.95): at 0.95 a hand that could reach
 // flat-footed (+86cm on the base rig, 0.04mm short) went 4.6cm onto its toes.
 constexpr float kTiptoeReachShare = 1.0f;
-// THE BONE CLASSES AND THE DIGIT DRAG (armatureikdigit.cpp; 2026-09-28, the user: "the face rig
+// THE BONE CLASSES AND THE DIGIT DRAG (armatureboneclass.cpp, armatureikdigit.cpp; 2026-09-28, the user: "the face rig
 // joints are specifically for expressions and should not be part of the IK ... only the head itself
 // should be selectable ... IK in the fingers and toes should only apply to that digit, stopping at
 // the hand or foot"). A DIGIT's joint hangs below a wrist or an ankle and BENDS: its widest channel
@@ -839,6 +849,11 @@ template <typename T> T envOr(const char* name, T fallback) {
 inline const double kRootRot = envOr("IK_JS_ROOTROT", kRootRotationStiffness);
 inline const bool kHangAsFound = std::getenv("IK_JS_KNEE_HANG_AS_FOUND") != nullptr;   // A/B probe: the knee hang's found offset
 inline const bool kNoUnderEase = std::getenv("IK_JS_KNEE_UNDER_NO_EASE") != nullptr;  // A/B probe: the hanging foot's target unEASED
+// ... and the traces more than one TU prints under (one definition each: a probe is one switch).
+inline const bool kIkTrace = std::getenv("POSESTUDIO_IK_TRACE") != nullptr;      // the drag's begin lines (beginIkDrag) and the [js] row per solve (ikSolveTraces)
+inline const bool kArmHangTrace = std::getenv("IK_ARM_HANG_TRACE") != nullptr;   // the idle arms' hang: each arm's find, swing, turn and stop, and what balance weighs of it
+inline const bool kKneeTrace = std::getenv("IK_JS_KNEE_TRACE") != nullptr;       // a dragged knee's goal after its projections, and the letting-go foot's spring, hang and targets
+inline const bool kWeightTrace = std::getenv("IK_JS_WEIGHT_TRACE") != nullptr;   // the weight shift: what the press found, and the hips' home per tick
 
 /// Per damping level: the posture easing kappa (each tick the redundant posture covers
 /// 1 / (1 + kappa) of what separates it from its solution: 95% in 0 / 4 / 7 / 13 ticks) and the

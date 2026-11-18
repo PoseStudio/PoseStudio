@@ -25,14 +25,17 @@ struct MaterialGpu {
                             //   BUMP strength of a bump map carried beside a normal map
     vec4 uvTransform;       // xy tiling, zw offset (applied to the UVs in the vertex stage)
     vec4 specularColor;     // rgb specular tint (a dielectric's F0 color), w anisotropy (0..1)
-    vec4 transmission;      // x weight, y depth, z thin-walled (0/1), w index of refraction
-    vec4 transmissionColor; // rgb tint, w dispersion
-    vec4 subsurface;        // rgb color, w radius scale
+    vec4 transmission;      // x weight, y depth (stored: no viewport shader reads it), z thin-walled
+                            //   (0/1), w index of refraction
+    vec4 transmissionColor; // rgb tint, w dispersion (stored: not read here)
+    vec4 subsurface;        // rgb color, w radius scale (all four stored: not read here — a render
+                            //   engine's)
     vec4 sheen;             // x weight, y roughness, z the anisotropy's rotation (radians), w coat ior
     vec4 sheenColor;        // rgb, w thin-film thickness
     vec4 coatColor;         // rgb, w thin-film ior
-    vec4 extra;             // x diffuse roughness, y thin-film weight, z unused, w = 1 when a bump map
-                            //   is bound beside the normal map (its strength rides emission.w)
+    vec4 extra;             // x diffuse roughness, y thin-film weight, z the ambient-occlusion MAP's
+                            //   weight, w = 1 when a bump map is bound beside the normal map (its
+                            //   strength rides emission.w)
     vec4 detail;            // the DETAIL layer's placement: xy its tiling (x = the count material3.w
                             //   packs), zw its offset in repeats
     vec4 extra2;            // x the detail layer's roughness multiplier (1 = none), y the coat's

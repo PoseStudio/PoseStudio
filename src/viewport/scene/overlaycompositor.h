@@ -62,7 +62,6 @@ struct OverlayImage {
     uint32_t             width = 0;
     uint32_t             height = 0;
     std::vector<uint8_t> rgba;           ///< width × height × 4, tightly packed.
-    bool                 hasAlpha = false; ///< The source had transparent texels (its alpha is the shape).
 
     bool empty() const { return width == 0 || height == 0 || rgba.empty(); }
 };
@@ -104,7 +103,7 @@ inline constexpr float kOverlayBumpSlope = 1.0f / 160.0f;
 
 /// One color through an overlay's bitmap adjustments, in their order — gamma, brightness,
 /// contrast, tint, hue and saturation — on display (sRGB) values 0..1. What the compositor does
-/// per texel; exposed for the tab's thumbnails and the tests.
+/// per texel; exposed for the compositor's check tool (tools/overlay).
 glm::vec3 adjustOverlayColor(const MaterialOverlay& overlay, glm::vec3 rgb);
 
 /// @p source blended over @p dest by @p blend, per channel, both 0..1 (before the alpha mix).

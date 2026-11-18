@@ -51,7 +51,6 @@ struct VrHandInput {
 /// Everything the controllers say for one frame. The buttons report the PRESS (the frame they
 /// went down), never a held state.
 struct VrInput {
-    bool        focused = false;  ///< The session has input focus (else every value is at rest).
     glm::vec2   move{0.0f};       ///< Left stick: x right, y forward, each -1..1.
     glm::vec2   turn{0.0f};       ///< Right stick.
     bool        pinPressed = false;

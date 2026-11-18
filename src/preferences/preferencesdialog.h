@@ -44,6 +44,10 @@ signals:
     void selectionOutlineChanged(const QColor& color, double opacity);
     void jointHighlightChanged(const QColor& color, double opacity);
 
+    /// Forwarded from FactoryResetPreferencesPanel: the user confirmed a factory reset. The
+    /// caller does it (the unsaved-changes prompt, the wipe, the relaunch).
+    void factoryResetRequested();
+
 private:
     /// Registers a panel as a tab: adds its label to the left nav and its page to the stack.
     void addPanel(const QString& tabLabel, PreferencesPanel* panel);

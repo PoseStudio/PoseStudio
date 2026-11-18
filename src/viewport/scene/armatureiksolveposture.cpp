@@ -13,7 +13,6 @@
 #include "armatureiksolvestate.h"
 #include "armatureiksolvetuning.h"
 
-#include "balancecontroller.h"
 #include "ikmath.h"
 #include "ikrig.h"
 #include "jointsolver.h"
@@ -21,11 +20,9 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <tuple>
 
 namespace pose {
 
@@ -40,6 +37,8 @@ const double kTrunkPrice = envOr("IK_JS_TRUNK", kTrunkStiffness);          // th
 const double kPinLimbPrice = envOr("IK_JS_PINLIMB", kPinLimbStiffness);
 const double kPinTwistPrice = envOr("IK_JS_PINTWIST", kPinLimbTwistScale);
 const double kRootPrice = envOr("IK_JS_ROOT", kRootStiffness);             // ... and the root's horizontal price (ikPostureRoot)
+const bool   kAbductTrace = std::getenv("IK_JS_ABDUCT_TRACE") != nullptr;  // the planted thighs and their boxed channel
+const bool   kLyingTrace = std::getenv("IK_JS_LYING_TRACE") != nullptr;    // the prone's lying reference of the root's pitch, and its easing
 } // namespace
 
 /// The POSTURE MODEL: every unknown's stiffness and reference — the policy that sets the references
@@ -113,7 +112,6 @@ void Armature::ikPosturePolicy(IkSolveScratch& s) {
     const bool& rootTurns = s.rootTurns;
     bool& swayValid = s.swayValid;
     glm::vec3& swayEuler = s.swayEuler;
-    std::vector<char>& girdle = s.girdle;
     bool& legDrag = s.legDrag;
     const glm::vec3*& goalPoint = s.goalPoint;
     const float& slide = s.slide;
@@ -183,7 +181,6 @@ void Armature::ikPosturePolicy(IkSolveScratch& s) {
             abductAxis[static_cast<std::size_t>(thigh)] = best;
             flexAxis[static_cast<std::size_t>(thigh)] = flex;
         }
-        static const bool kAbductTrace = std::getenv("IK_JS_ABDUCT_TRACE") != nullptr; // the planted thighs and their boxed channel
         if (kAbductTrace) {
             std::fprintf(stderr, "[js-abduct] pin %s -> thigh %s: abduction axis %d (fore %.2f), twist axis %d, euler (%.1f %.1f %.1f)\n",
                          m_boneNames[static_cast<std::size_t>(node)].c_str(), m_boneNames[static_cast<std::size_t>(thigh)].c_str(), best, bestFore,
@@ -238,8 +235,8 @@ void Armature::ikPosturePolicy(IkSolveScratch& s) {
     // kStrideYawPerMetre of the stance's fore-aft split, saturating toward kStrideYawMaxDeg, by the
     // CHANGE since the press (a pose found striding carries its stance's turn, the arm swing's rule)
     // and scaled by the slide (a lifted foot is no stance: the turn unwinds as the foot lifts and
-    // comes back as it lands); the chest's heading is held as found (ikCursorRows' sway row, its
-    // heading axis) and the spine's TWIST channels take the turn up (ikPostureDofs). A price alone
+    // comes back as it lands); the chest keeps the heading it was found at because the spine's TWIST
+    // channels are referred to take the turn up (ikPostureDofs: references, not a row). A price alone
     // could not do it — a price only ever prefers LESS travel — so what a walker's pelvis does is
     // given, as the contrapposto's roll and the reach-down fold are. Every stride, step back and walk
     // had stood with the pelvis dead square, the mannequin's.
@@ -341,7 +338,6 @@ void Armature::ikPosturePolicy(IkSolveScratch& s) {
     // hips to rise.
     s.inSpine.assign(n, 0);
     std::vector<char>& inSpine = s.inSpine;
-    const std::vector<char>& active = s.active;
     for (std::size_t k = 1; k < m_jsSpineChain.size(); ++k) {
         inSpine[static_cast<std::size_t>(m_jsSpineChain[k])] = 1;
     }
@@ -470,7 +466,7 @@ void Armature::ikPosturePolicy(IkSolveScratch& s) {
     double& sagittalLock = s.sagittalLock;
     glm::vec3 lateralAxis(1.0f, 0.0f, 0.0f);
     if (trunkDrag && goalPoint != nullptr) {
-        lateralAxis = glm::vec3(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
+        lateralAxis = s.lateral;
         const glm::vec3 travel = *goalPoint - m_jsStartTarget;
         const float sideways = std::abs(glm::dot(travel, lateralAxis)) / std::max(glm::length(travel), 0.03f * rig.sizeScale());
         static const double kLock = envOr("IK_JS_SAGITTALLOCK", kSagittalLock);
@@ -515,7 +511,7 @@ void Armature::ikPosturePolicy(IkSolveScratch& s) {
                                                                     kProneFootFreeFull * rig.sizeScale(), glm::dot(hips - knee, fore)));
         }
         // (... AND COMES BACK AS THE TRUNK LIES DOWN, 2026-10-29: the fade let the pelvis pitch face-down
-        // when its reference was the all-fours value; under THE PRONE (ikChooseUnknowns) the reference
+        // when its reference was the all-fours value; under THE PRONE (ikTrunkPolicy) the reference
         // turns to LYING at the trunk's home share, and faded to the limb's price the pelvis DIVED past
         // flat to chase a cursor beyond the thighs' reach from the planted knees — the whole 35 degrees
         // of hip hyperextension and the pelvis bone's 25 spent for a few centimetres forward, root and
@@ -547,7 +543,6 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
     const std::size_t n = s.n;
     const int root = s.root;
     const int effector = s.effector;
-    const std::vector<IkEffector>& pins = s.pins;
     std::vector<char>& dofBone = s.dofBone;
     const float& rising = s.rising;
     const float& risen = s.risen;
@@ -606,7 +601,7 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
     // side is "pointed" on every generation). Before it she kept her STANDING pose in the air — the
     // legs apart in the stance, the free arm out at the A-pose angle, the feet level: a mannequin on
     // a hook. The thigh is the bone with a foot below it hanging from the solve root or the pelvis
-    // bone (the rig's legOf names it for every bone of a leg); the knee a leg joint above the foot
+    // bone (found from the rig's legOf, below); the knee a leg joint above the foot
     // with a fold channel; the ankle the foot-class joint whose parent is none.
     m_jsDangleRef.assign(n, glm::vec3(0.0f));
     m_jsDangleValid.assign(n, 0);
@@ -705,13 +700,13 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
             const double rangeDeg =
                 bone.rotLimited[a] ? std::max(static_cast<double>(range), kMinRangeDeg) : kFreeRangeDeg;
             const double rangeRad = rangeDeg * kPi / 180.0;
-            double s = 1.0 / (rangeRad * rangeRad);
-            s *= cls[b] == 1 ? kLimbStiffness : cls[b] == 2 ? kPinLimbPrice : kTrunkPrice;
+            double price = 1.0 / (rangeRad * rangeRad);
+            price *= cls[b] == 1 ? kLimbStiffness : cls[b] == 2 ? kPinLimbPrice : kTrunkPrice;
             if (b < hangArmDof.size() && hangArmDof[b]) { // (A RELEASED ARM UNDER THE PRONE: the limb's price, whatever its class)
-                s = kLimbStiffness / (rangeRad * rangeRad);
+                price = kLimbStiffness / (rangeRad * rangeRad);
             }
             if (b < neckLift.size() && neckLift[b]) { // (THE FACE LIFT: the neck, frozen until the trunk has tilted)
-                s /= static_cast<double>(std::max(neckLiftShare, kFaceLiftFloor));
+                price /= static_cast<double>(std::max(neckLiftShare, kFaceLiftFloor));
             }
             // (The PELVIS BONE — the girdle joint between the root and the thigh sockets, no spine
             // bone — is locked with the spine: it is the trunk's other way out of the plane. A sit-up
@@ -723,11 +718,11 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
             const bool pelvisBone = !kNoPelvisSagittal && rig.isPelvisBone(static_cast<int>(b));
             if ((inSpine[b] || pelvisBone) && sagittalLock > 1.0 &&
                 std::abs(glm::dot(glm::vec3(bone.orient[a]), glm::vec3(1.0f, 0.0f, 0.0f))) < 0.7f) {
-                s *= sagittalLock; // (a channel that is not the trunk's flexion: see kSagittalLock)
+                price *= sagittalLock; // (a channel that is not the trunk's flexion: see kSagittalLock)
             }
             if (girdle[b]) {
                 static const double kGirdle = envOr("IK_JS_ELBOWGIRDLE", kElbowGirdleStiffness);
-                s *= kGirdle;
+                price *= kGirdle;
             }
             // ON HER KNEES THE PELVIS'S TILT IS DEAR (kKneelTiltScale, over the root's pitch and the
             // PELVIS BONE's — the bone between the root and the thigh sockets, a joint of the girdle
@@ -741,7 +736,7 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
             // 20cm short. Found by LOOKING at the in-app kneel; no gate measured it.)
             static const bool kNoPelvisBonePrice = std::getenv("IK_JS_NO_PELVIS_BONE_PRICE") != nullptr; // A/B probe
             if (!kNoPelvisBonePrice && effector == root && rig.isPelvisBone(static_cast<int>(b)) && kneelTilt > 1.0) {
-                s = std::max(s, kRootRot * kneelTilt);
+                price = std::max(price, kRootRot * kneelTilt);
             }
             if (static_cast<int>(b) == root && !rootTurns && contrapposto > 1.0e-3f &&
                 std::abs(glm::vec3(bone.orient[a]).z) >= 0.9f) {
@@ -750,7 +745,7 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
                 // (swayEuler). Nothing else of the root's rotation: let through at the sway's
                 // prices (pitch cheap, as under a pelvis drag) the balance row pitched the pelvis
                 // 12 degrees back under a knee raise and every lifted-foot phase popped 100-190mm.
-                s = kRootRot * kRootSquare / static_cast<double>(contrapposto);
+                price = kRootRot * kRootSquare / static_cast<double>(contrapposto);
             } else if (static_cast<int>(b) == root && !rootTurns && strideYaw > 1.0e-3f &&
                        std::abs(glm::vec3(bone.orient[a]).y) >= 0.9f) {
                 // THE STRIDE TURNS THE HIPS: the pelvis's HEADING — the channel about the vertical — at
@@ -758,7 +753,7 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
                 // yaw toward the lead leg). Frozen at the floor's share while the foot is in the air;
                 // under every other drag the branch below leaves it out, as before.
                 static const double kYawS = envOr("IK_JS_STRIDEYAW", kStrideYawStiffness);
-                s = kYawS / static_cast<double>(strideYaw);
+                price = kYawS / static_cast<double>(strideYaw);
             } else if (static_cast<int>(b) == root && !rootTurns) {
                 // (The bow's hinge alone: the pelvis's PITCH, and nothing else of its rotation — and
                 // only while a hinge is ON: the root is marked an unknown by CONTRAPPOSTO too, whose
@@ -775,22 +770,22 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
                 // floor folded the trunk 130, the head hanging at the knees.)
                 static const double kReach = envOr("IK_JS_REACHHINGE", kReachHingeStiffness);
                 const double        kHinge = m_jsKneelStart ? kKneelFoldS : (m_jsReachHinge > 1.0e-3f && !trunkDrag ? kReach : kTrunkHingeS);
-                s = kHinge / static_cast<double>(m_jsTrunkHinge);
+                price = kHinge / static_cast<double>(m_jsTrunkHinge);
             } else if (static_cast<int>(b) == root) {
-                s = effector == root ? kRootRot * kneelTilt : kRootRot / static_cast<double>(rising);
+                price = effector == root ? kRootRot * kneelTilt : kRootRot / static_cast<double>(rising);
                 if (m_jsTrunkHinge > 1.0e-3f && std::abs(glm::vec3(bone.orient[a]).x) >= 0.9f) {
                     const double        kHinge = m_jsKneelStart ? kKneelFoldS : kTrunkHingeS;
-                    s = std::min(s, kHinge / static_cast<double>(m_jsTrunkHinge));
+                    price = std::min(price, kHinge / static_cast<double>(m_jsTrunkHinge));
                 }
                 // (A pelvis PITCHES readily — a sit rolls it back, a kneel and a deep fold tip it
                 // forward — but it stays SQUARE: its heading and its level are the stance's, and
                 // cost kRootSquareness times its pitch. At one price, a lunge pressed down onto
                 // its back knee answered the last centimetres with 11 degrees of pelvis roll.)
                 const float lateral = std::abs(glm::vec3(bone.orient[a]).x);
-                s *= glm::mix(kRootSquare, 1.0, static_cast<double>(glm::smoothstep(0.5f, 0.9f, lateral)));
+                price *= glm::mix(kRootSquare, 1.0, static_cast<double>(glm::smoothstep(0.5f, 0.9f, lateral)));
             }
             if ((cls[b] == 2 || cls[b] == 1) && twistPriced[b] && m_jsTwistAxis[b] == a) {
-                s *= kPinTwistPrice;
+                price *= kPinTwistPrice;
             }
             static const bool kLiftedTwistFree = std::getenv("IK_JS_KNEE_LIFT_TWIST_FREE") != nullptr; // A/B probe
             if (!kLiftedTwistFree && kneeLegBone[b] && plant < 1.0f) {
@@ -806,28 +801,11 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
                 static const bool kTwistByName = std::getenv("IK_JS_TWIST_BY_NAME") != nullptr; // A/B probe
                 double share = m_jsTwistAxis[b] == a ? 1.0 : 0.0;
                 if (!kTwistByName && share < 1.0) {
-                    float longest = 0.02f;
-                    glm::vec3 segment(0.0f);
-                    for (const int ch : m_children[b]) {
-                        const glm::vec3 offset(m_bones[static_cast<std::size_t>(ch)].localBind[3]);
-                        if (glm::length(offset) > longest) {
-                            longest = glm::length(offset);
-                            segment = offset / longest;
-                        }
-                    }
+                    const glm::vec3 segment = m_jsSegmentDir[b]; // (toward the bone's longest child: buildJointSolver)
                     if (glm::dot(segment, segment) > 0.5f) {
                         // the channel's axis after the rotations composed before it, and the
                         // segment as the bone turns it — both in the parent's frame
-                        glm::mat3 prefix(1.0f);
-                        for (const char ch : bone.rotationOrder) {
-                            const int axis = ch == 'X' ? 0 : ch == 'Y' ? 1 : ch == 'Z' ? 2 : -1;
-                            if (axis < 0 || axis == a) {
-                                break;
-                            }
-                            glm::vec3 e(0.0f);
-                            e[axis] = 1.0f;
-                            prefix = prefix * glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(m_boneEuler[b][axis]), e));
-                        }
+                        const glm::mat3 prefix = channelPrefix(b, a);
                         glm::vec3 e(0.0f);
                         e[a] = 1.0f;
                         const glm::vec3 axisNow = glm::mat3(bone.orient) * prefix * e;
@@ -836,12 +814,12 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
                         share = static_cast<double>(glm::smoothstep(kTwistAlongFrom, kTwistAlongFull, along));
                     }
                 }
-                s *= std::pow(kPinTwistPrice, static_cast<double>(1.0f - plant) * share); // (the lifted leg's twist price, geometrically with the release)
+                price *= std::pow(kPinTwistPrice, static_cast<double>(1.0f - plant) * share); // (the lifted leg's twist price, geometrically with the release)
             }
             JointSolverDof dof;
             dof.bone = static_cast<int>(b);
             dof.axis = a;
-            dof.stiffness = s;
+            dof.stiffness = price;
             dof.reference = m_ikStartEuler[b][a];
             // A bone a POST-STEP has turned (a hanging arm, the righted neck) that is now the
             // SOLVE's — a hanging hand has come down on the floor and is a contact; the body has
@@ -854,7 +832,7 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
                 dof.reference = m_jsPostStepEuler[b][a];
             }
             // (The trunk's HOME is measured from where a hand's unload RE-BASED it, where one did —
-            // rebaseContactArm in armatureiksolverows.cpp — else from the drag-start value.)
+            // rebaseContactArm in armatureiksolvepins.cpp — else from the drag-start value.)
             const float homeBase = (b < m_jsPostStepTurned.size() && m_jsPostStepTurned[b]) ? m_jsPostStepEuler[b][a] : m_ikStartEuler[b][a];
             if (static_cast<int>(b) == root && rising > 0.0f) {
                 // (... at the trunk's PACED share once the trunk comes up with the rise, 2026-10-28
@@ -875,7 +853,6 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
                 std::abs(glm::vec3(bone.orient[a]).x) >= 0.9f) {
                 const float forward = homeBase >= m_jsRootUprightEuler[a] ? 1.0f : -1.0f;
                 dof.reference = glm::mix(homeBase, m_jsRootUprightEuler[a] + 90.0f * forward, m_jsTrunkHomeShare);
-                static const bool kLyingTrace = std::getenv("IK_JS_LYING_TRACE") != nullptr;
                 if (kLyingTrace) {
                     std::fprintf(stderr, "[lying] root (bone %d) axis %d: value %.2f homeBase %.2f (rebased %d) upright %.2f forward %.0f share %.3f -> ref %.2f sway %d seatRoll %.1f", static_cast<int>(b), a,
                                  m_boneEuler[b][a], homeBase, (b < m_jsPostStepTurned.size() && m_jsPostStepTurned[b]) ? 1 : 0,
@@ -1067,8 +1044,7 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
                 if (kAbductBox > 0.0) {
                     dof.minDeg = std::max(dof.minDeg, std::min(static_cast<double>(m_boneEuler[b][a]), -kAbductBox));
                     dof.maxDeg = std::min(dof.maxDeg, std::max(static_cast<double>(m_boneEuler[b][a]), kAbductBox));
-                    static const bool kBoxTrace = std::getenv("IK_JS_ABDUCT_TRACE") != nullptr;
-                    if (kBoxTrace) {
+                    if (kAbductTrace) {
                         std::fprintf(stderr, "[js-abduct] %s axis %d boxed [%.1f, %.1f] at %.1f\n", m_boneNames[b].c_str(), a, dof.minDeg, dof.maxDeg,
                                      m_boneEuler[b][a]);
                     }
@@ -1083,7 +1059,6 @@ void Armature::ikPostureDofs(IkSolveScratch& s) {
 /// seat's lift, the kneel-up's seat, the tiptoe, THE WEIGHT SHIFT, and the prices that yield.
 void Armature::ikPostureRoot(IkSolveScratch& s) {
     IkRig& rig = s.rig;
-    const std::size_t n = s.n;
     const int root = s.root;
     const int effector = s.effector;
     const std::vector<IkEffector>& pins = s.pins;
@@ -1119,17 +1094,8 @@ void Armature::ikPostureRoot(IkSolveScratch& s) {
         // `rootAt` (the thigh joint rides the root as the pose has it).
         const glm::vec3 rootNow(m_poseGlobal[static_cast<std::size_t>(root)][3]);
         const auto straightHeight = [&](int ankle, const glm::vec3& rootAt, const glm::vec3& ankleAt) {
-            const int junction = rig.limbJunction(ankle);
-            int top = ankle;
             float length = 0.0f;
-            for (;;) {
-                const int par = m_bones[static_cast<std::size_t>(top)].parent;
-                if (par < 0 || par == junction || par == root) {
-                    break;
-                }
-                length += glm::length(glm::vec3(m_bones[static_cast<std::size_t>(top)].localBind[3]));
-                top = par;
-            }
+            const int top = limbTop(ankle, length);
             const glm::vec3 socket = glm::vec3(m_poseGlobal[static_cast<std::size_t>(top)][3]) - rootNow;
             const glm::vec2 across(rootAt.x + socket.x - ankleAt.x, rootAt.z + socket.z - ankleAt.z);
             return ankleAt.y + std::sqrt(std::max(0.0f, length * length - glm::dot(across, across))) - socket.y;
@@ -1191,7 +1157,6 @@ void Armature::ikPostureRoot(IkSolveScratch& s) {
         m_jsWeightEased = m_jsWeightEasing ? m_jsWeightEased + gap * (step / gapLen) : want;
         rootHome.x += m_jsWeightEased.x;
         rootHome.z += m_jsWeightEased.y;
-        static const bool kWeightTrace = std::getenv("IK_JS_WEIGHT_TRACE") != nullptr;
         if (kWeightTrace && (m_jsWeightLift > 0.0f || m_jsWeightLiftStart > 0.0f || gapLen > 0.0f)) {
             std::fprintf(stderr, "[weight] shift(%.4f %.4f) lift %.3f start %.3f applied %.3f eased(%.4f %.4f) slide %.3f plant %.3f\n",
                          m_jsWeightShift.x, m_jsWeightShift.y, lift, m_jsWeightLiftStart, m_jsWeightLift,
@@ -1446,8 +1411,7 @@ void Armature::ikSpineCoupling(IkSolveScratch& s) {
             const std::size_t b = static_cast<std::size_t>(dof.bone);
             const double previous = dof.axis < 3 ? static_cast<double>(m_boneEuler[b][dof.axis])
                                                  : static_cast<double>(m_boneTranslation[b][dof.axis - 3]);
-            static const bool kLyingTrace2 = std::getenv("IK_JS_LYING_TRACE") != nullptr;
-            if (kLyingTrace2 && dof.bone == m_ikRig->rootNode() && dof.axis == 0) {
+            if (kLyingTrace && dof.bone == m_ikRig->rootNode() && dof.axis == 0) {
                 std::fprintf(stderr, "[lying-ease] root axis 0: ref %.2f previous %.2f kappa %.2f -> ref %.2f stiffness %.1f", dof.reference, previous, kappa,
                              (dof.reference + kappa * previous) / (1.0 + kappa), dof.stiffness * (1.0 + kappa));
                 std::fputc(10, stderr);

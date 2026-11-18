@@ -51,10 +51,12 @@ public:
     /// LESS_OR_EQUAL compare always passes = fully lit) while shadows are off or nothing casts.
     const glm::mat4& lightViewProj() const { return m_lightViewProj; }
 
-    /// Fits the frustum around @p models' world bounds and their floor projections along
+    /// Fits the frustum around the bounds, as posed (Model::posedBounds), of @p models' MESH
+    /// models (a Gaussian splat scene neither casts nor receives, and is left out) and their
+    /// floor projections along
     /// @p keyDir (the normalized direction TO the light). Returns true when the pass should be
     /// recorded; false — with the matrix parked as above — when @p enabled is false or there
-    /// are no casters. In both false cases the map keeps its previous contents: harmless,
+    /// is no mesh model. In both false cases the map keeps its previous contents: harmless,
     /// since the degenerate matrix makes every lookup pass without reading it.
     bool fit(const std::vector<std::unique_ptr<Model>>& models, const glm::vec3& keyDir,
              bool enabled);

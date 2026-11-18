@@ -8,7 +8,7 @@ The viewport sits on the left and the side panel on the right, separated by a dr
 
 ## The menu bar
 
-**File** — starting a new scene, opening and saving the scene as a `.pss` project, importing models and figures, saving and loading poses, and quitting. The greyed entries — Open Recent, Save Copy, Export and the other import formats — are placeholders for planned features.
+**File** — starting a new scene, opening and saving the scene as a `.pss` project, importing models and figures, saving and loading poses, and quitting. The greyed entries — Open Recent, Save Copy and Export — are placeholders for planned features.
 
 | Entry | What it does |
 | --- | --- |
@@ -17,15 +17,17 @@ The viewport sits on the left and the side panel on the right, separated by a dr
 | Save (`Ctrl+S`) / Save As… (`Ctrl+Shift+S`) | Saves the whole scene as a `.pss` project. See [Project Files](project-files.md). |
 | Import → .OBJ (Wavefront) | Imports a static mesh. See [Importing Content](importing.md#static-models-obj). |
 | Import → .DUF (DUF File) | Imports a rigged character figure. See [Importing Content](importing.md#character-figures-duf-dsf). |
+| Import → .FBX (FBX File) / .GLB (GL Transmission Format .glTF) / .USD (Universal Scene Description) / .VRM (VRM Avatar) | Imports a rigged character, or a plain model, from one of those formats. See [Importing Content](importing.md#characters-from-fbx-gltf-and-usd-files). |
+| Import → .PLY / .SPLAT / .SPZ (Gaussian Splat) | Imports a Gaussian splat scene. See [Importing Content](importing.md#gaussian-splat-scenes-ply-splat-spz). |
 | Save Pose… | Writes the active figure's pose to a `.pose` file. |
 | Load Pose… | Applies a `.pose` file to the active figure (undoable). |
 | Quit (`Ctrl+Q`) | Closes PoseStudio. With unsaved changes it asks first: Save, Discard Changes or Cancel. |
 
-**Edit** — the undo history, the pose utilities, and the keys that turn a joint with the mouse.
+**Edit** — the undo history, the pose utilities, adding lights, and the keys that turn a joint with the mouse. The greyed entries — Undo History, Copy and Paste — are placeholders for planned features.
 
 | Entry | What it does |
 | --- | --- |
-| Undo (`Ctrl+Z`) / Redo (`Ctrl+Y`) | One history for pose edits and lighting edits alike. See [Posing](posing.md#undo-and-redo). |
+| Undo (`Ctrl+Z`) / Redo (`Ctrl+Y` or `Ctrl+Shift+Z`) | One history for pose, lighting, material and light edits alike. See [Posing](posing.md#undo-and-redo). |
 | Delete Selected Object | Removes the outlined model from the scene — or the selected light. The `Delete` key does the same while the viewport has focus. Deleting a model also clears the undo history; deleting a light is an undo step. |
 | Add Light → Point Light / Spot Light / Area Light / Sun | Adds a light to the scene, two metres from the figure and aimed at it. See [Lights](lights.md). |
 | Turn Joint with Mouse → Bend (`B`) / Side-Side (`S`) / Twist (`T`) | Turns the selected joint by moving the mouse; see [Posing](posing.md#turning-a-joint-with-the-mouse-b-s-t). |
@@ -33,7 +35,7 @@ The viewport sits on the left and the side panel on the right, separated by a dr
 | Mirror Pose / Mirror Limb to Other Side | Swap the pose's sides, or copy the selected limb's pose to the other side. |
 | Preferences | Opens the Preferences dialog. |
 
-**View** — the skeleton overlay and the camera views (all with keyboard shortcuts; see [Navigating the Viewport](navigation.md#the-camera-views)).
+**View** — Show Skeleton (the skeleton overlay), the camera views (each with a keyboard shortcut; see [Navigating the Viewport](navigation.md#the-camera-views)), and VR Mode with Recenter VR View (see [VR Mode](vr.md)).
 
 **Render** — *Render Image* (`F12`) opens the Render window and renders the scene as the viewport shows it; *Show Render Window* brings the window and its last picture back. See [Rendering](rendering.md).
 
@@ -41,18 +43,18 @@ The viewport sits on the left and the side panel on the right, separated by a dr
 
 ## The viewport strip
 
-A row of controls floats in the viewport's top-right corner:
+A row of controls floats in the viewport's top-right corner. From left to right:
 
 | Control | What it does |
 | --- | --- |
 | **Render** (left of the shading picker) | Renders the scene: opens the Render window and starts the render, as **Render → Render Image** and `F12` do. See [Rendering](rendering.md). |
 | **Shading picker** (reads *PBR Shaded* by default) | Chooses how the scene is drawn — its second entry, **Rendered**, path traces the scene in the viewport. See [Shading and Display](shading.md). |
 | **View picker** (reads *Home View* by default) | Snaps the camera to a named view; reads *Perspective View* once you orbit away from one. |
+| **VR** (right of the view picker) | Enter or leave VR Mode — see [VR Mode](vr.md); lit in blue while the headset has the scene. The view picker's last entry, VR Mode, does the same, and `Esc` leaves. |
 | **Home** | Returns the camera to the default framing (also `5`). |
 | **Ground** | Drops the active figure so its lowest point rests on the floor; landing on her feet, she absorbs the drop with her knees. See [Posing](posing.md#the-ground-button). |
 | **Skeleton** | Toggles the bone overlay. Joints can be grabbed with it on or off. |
 | **Selection** | Opens [Preferences → Selection](preferences.md#selection): the selection outline and the joint highlight, each switched on or off and given its color and opacity. |
-| **VR** (right of the view picker) | Enter or leave VR Mode — see [VR Mode](vr.md); lit in blue while the headset has the scene. The view picker's last entry, VR Mode, does the same, and `Esc` leaves. |
 
 While the mouse is turning a joint (`B`, `S` or `T` with a joint selected: see [Posing](posing.md#turning-a-joint-with-the-mouse-b-s-t)), a small badge under the strip names the motion: Bend, Side-Side or Twist. In the **Rendered** shading mode a line there says how far the traced picture is: *Rendered: 37 / 128 samples*, then *Rendered*.
 
@@ -61,7 +63,7 @@ While the mouse is turning a joint (`B`, `S` or `T` with a joint selected: see [
 The seven tabs sit on the panel's left edge.
 
 - **Asset Manager** — a tree of your asset libraries, Favorites and Collections above a thumbnail grid, with a search field at the top. Double-clicking an asset imports it. See [The Asset Manager](asset-manager.md).
-- **Transform** — the selected joint's rotation as three dials: Bend, Side-Side and Twist. See [The Transform tab](posing.md#the-transform-tab).
+- **Transform** — the figure's place and turn (or a selected object's, with its size), and the selected joint's rotation as three dials: Bend, Side-Side and Twist. See [The Transform tab](posing.md#the-transform-tab).
 - **Materials** — the selected object's material zones as sliders: color, roughness, metallic, specular, opacity, the skin layers — and the overlays layered over the skin: tattoos, marks, makeup; its **Save** button saves a material to your library. See [Materials](materials.md).
 - **Materials Library** — the Asset Manager over one folder, the *Materials* folder of your PoseStudio library: the materials you saved from the Materials tab, by category, with search, Favorites and collections of their own; double-click one to put it on the selected object. See [The Materials Library](asset-manager.md#the-materials-library).
 - **Soft Body Physics** — the switches and dials for the breasts' and the buttocks' motion: on and off, their softness, the breasts' bounce. See [The Soft Body Physics tab](posing.md#the-soft-body-physics-tab).
@@ -76,7 +78,7 @@ Every number in the tabs and in Preferences is the same kind of field: a bar tha
 
 - **Drag** left or right across the field to change the value. A plain drag moves in the field's own steps — whole numbers for most: a joint's dial, a percentage, an opacity.
 - **Shift + drag** is fine control: steps a tenth the size, at a tenth of the speed, so a dial that moves in whole numbers is set to 17.1, 17.2, 17.3. Press or let go of Shift at any point of a drag; the drag carries on from where it is at the other pace.
-- **Click** the field once to type a value — any value in its range, to whatever precision you type. `Enter` confirms, `Esc` cancels.
+- **Click** the field once to type a value — any value in its range, to whatever precision you type. `Enter` confirms, and so does clicking anywhere else; `Esc` cancels. A field you open and leave without typing keeps its value exactly as it was.
 
 A field shows the extra digit only when the value has one: 17 stays 17, and a value set finely, typed, or simply what the scene holds — a joint posed by dragging the body rarely lands on a whole number — reads 17.3. A plain drag takes such a value back onto whole steps.
 

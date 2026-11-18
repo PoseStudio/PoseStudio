@@ -76,9 +76,6 @@ public:
     /// The shared sampler for @p desc (created on first request). Borrowed — never destroy it.
     VkSampler get(const SamplerDesc& desc);
 
-    /// Number of distinct samplers created so far (diagnostics).
-    std::size_t size() const { return m_samplers.size(); }
-
 private:
     VkDevice                                          m_device;
     std::vector<std::pair<SamplerDesc, UniqueSampler>> m_samplers; // a handful of entries: linear scan

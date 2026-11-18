@@ -65,8 +65,17 @@ void computeTangents(std::vector<Vertex>& vertices, const std::vector<uint32_t>&
             v.tangent = glm::vec4(0.0f); // no UV signal — shader falls back to cotangent frame
             continue;
         }
-        // Gram-Schmidt orthonormalize against the normal; w = bitangent handedness.
-        const glm::vec3 ortho = glm::normalize(t - n * glm::dot(n, t));
+        // Gram-Schmidt orthonormalize against the normal; w = bitangent handedness. A vertex
+        // whose accumulated tangent lies ALONG its normal (cards whose normals point down their
+        // own U direction), or whose normal has no length, has nothing left to normalize: it gets
+        // the "no tangent" marker — never a NaN direction with a handedness of ±1, which the
+        // shader and the render engine would take at their word.
+        const glm::vec3 across = t - n * glm::dot(n, t);
+        if (!(glm::dot(across, across) > 1e-12f * glm::dot(t, t))) { // (also true for a NaN)
+            v.tangent = glm::vec4(0.0f);
+            continue;
+        }
+        const glm::vec3 ortho = glm::normalize(across);
         const float handed = (glm::dot(glm::cross(n, ortho), bitan[vi]) < 0.0f) ? -1.0f : 1.0f;
         v.tangent = glm::vec4(ortho, handed);
     }

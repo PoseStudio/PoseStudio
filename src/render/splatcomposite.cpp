@@ -15,7 +15,8 @@ namespace pose {
 
 namespace {
 
-// The ACES fit the viewport's composite and the render session share (color.glsl's tonemapACES).
+// The ACES fit of the viewport's composite (color.glsl's tonemapACES). displayEncode below is the
+// one definition of the display transform in this folder: RenderSession's picture is made with it.
 constexpr float kA = 2.51f;
 constexpr float kB = 0.03f;
 constexpr float kC = 2.43f;
@@ -29,11 +30,11 @@ float srgbDecode(float x) {
     return x <= 0.04045f ? x / 12.92f : std::pow((x + 0.055f) / 1.055f, 2.4f);
 }
 
-unsigned char toByte(float x) {
-    return static_cast<unsigned char>(std::lround(std::clamp(x, 0.0f, 1.0f) * 255.0f));
-}
-
 } // namespace
+
+unsigned char displayToByte(float display) {
+    return static_cast<unsigned char>(std::lround(std::clamp(display, 0.0f, 1.0f) * 255.0f));
+}
 
 float displayEncode(float linear, bool tonemap) {
     float x = std::isfinite(linear) ? std::max(linear, 0.0f) : 0.0f;
@@ -131,9 +132,9 @@ void SplatComposite::compose(const float* render, unsigned char* out8, std::size
             for (int c = 0; c < 3; ++c) {
                 const float shown = displayEncode(under[c] * inv, tonemap);
                 straight[c] = (front[c] + behind * shown) * outInv;
-                bytes[c] = toByte(straight[c]);
+                bytes[c] = displayToByte(straight[c]);
             }
-            bytes[3] = transparent ? toByte(outCover) : 255;
+            bytes[3] = transparent ? displayToByte(outCover) : 255;
 
             if (linearOut != nullptr) {
                 // The same picture in linear light: the render's own values wherever the front of

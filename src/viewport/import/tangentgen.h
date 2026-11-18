@@ -7,8 +7,9 @@
  * seams. This fills Vertex::tangent (xyz + bitangent handedness in w) with the classic Lengyel
  * accumulation: per-triangle tangents from the UV parameterization, summed per vertex, then
  * Gram-Schmidt orthonormalized against the vertex normal. Runs on the FINAL render meshes
- * (post-morph, post-subdivision). Meshes without UVs keep w = 0 — the shader's marker to fall
- * back to the cotangent frame. Pure std + GLM — no Qt, no Vulkan.
+ * (post-morph, post-subdivision). A vertex without a usable tangent — no UVs, degenerate UVs, a
+ * tangent that lies along the normal, a normal of no length — keeps w = 0, the shader's marker
+ * to fall back to the cotangent frame. Pure std + GLM — no Qt, no Vulkan.
  */
 
 #ifndef TANGENTGEN_H

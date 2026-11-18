@@ -1,9 +1,9 @@
 /**
  * @file ikharness.cpp
  * @brief The full-body-IK harness: unit tests for the IK math and constraints, plus a drag-loop
- *        simulator that runs the REAL engine loop (Armature: solve -> extract rotations -> FK ->
- *        next solve, through the same cursor filter and tick order as the viewport) on a figure's
- *        dumped skeleton and gates the measured behaviour.
+ *        simulator that runs the REAL engine loop (Armature: beginIkDrag -> dragIkTo per tick ->
+ *        the settle -> endIkDrag, through the same cursor filter and tick order as the viewport)
+ *        on a figure's dumped skeleton and gates the measured behaviour.
  *
  * Every FBIK policy in scene/ik/ and scene/armatureik.cpp traces to a user-visible failure that
  * was first reproduced here; a change to either is not done until this passes. Build target
@@ -16,7 +16,7 @@
  * Usage: ikharness [skeleton.skel] [--only <phase-substring>] [--verbose]
  *        ikharness <skeleton.skel> --custom <bone> <dx> <dy> <dz> <moveTicks> <holdTicks> [pin ...]
  *                  [--pose <bone> <x> <y> <z>]... [--hover <m>] [--scale <s>] [--return <ticks>]
- *                  [--before <bone> <dx> <dy> <dz>]... [--to-rest] [--share <0..1>]
+ *                  [--before <bone> <dx> <dy> <dz>]... [--to-rest] [--share <0..1>] [--pin-after]
  *
  * The sources split by role: report.{h,cpp} (gates + printing), simulator.{h,cpp} (the drag-loop
  * simulator over the real Armature), unitphases.{h,cpp} (the skeleton-free unit tests),

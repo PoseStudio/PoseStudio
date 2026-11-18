@@ -1,6 +1,6 @@
 /**
  * @file assetmanagerwidget_menus.cpp
- * @brief AssetManagerWidget, second translation unit: the tree and grid context menus.
+ * @brief AssetManagerWidget, the context menus' translation unit: the tree's and the grid's.
  *
  * Every right-click menu the Asset Manager shows is built here, per node kind (empty tree
  * space, the Favorites root, the Collections root, a Collection, a physical folder; a grid
@@ -10,7 +10,8 @@
  * Collapse entries, and the "Find In Library / Browse Folder" pair for anything shown outside
  * the plain library tree. Icons come from the widget's per-instance cache rather than being
  * constructed from resource paths on every menu open. Split out of assetmanagerwidget.cpp
- * purely for size: it is the same class, with full access to its state.
+ * purely for size (assetmanagerwidget.h lists the four files): it is the same class, with full
+ * access to its state.
  */
 
 #include "assetmanagerwidget.h"
@@ -226,9 +227,8 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
 
         QMenu* collMenu = newContextMenu(this);
 
-        QAction *renameAction = collMenu->addAction(icon(QStringLiteral("rename")),
-                                                    tr("Rename %1").arg(tr("Collection")));
-        QAction *deleteAction = collMenu->addAction(tr("Delete %1").arg(tr("Collection")));
+        QAction *renameAction = collMenu->addAction(icon(QStringLiteral("rename")), tr("Rename Collection"));
+        QAction *deleteAction = collMenu->addAction(tr("Delete Collection"));
         // Deletable only when both asset items and sub-collections are absent
         deleteAction->setEnabled(AssetDb::collectionIsEmpty(collId));
         collMenu->addSeparator();
@@ -295,7 +295,7 @@ void AssetManagerWidget::onContextMenuRequested(const QPoint &pos) {
         contextMenu->addSeparator();
     }
 
-    // Packages (assetstore.h): this folder zipped with everything in it, or a package unpacked into it.
+    // Packages (assetpackage.h): this folder zipped with everything in it, or a package unpacked into it.
     QAction *exportPackageAction = contextMenu->addAction(icon(QStringLiteral("export")), tr("Export Package..."));
     QAction *installPackageAction = contextMenu->addAction(icon(QStringLiteral("import")), tr("Install Package..."));
     contextMenu->addSeparator();
@@ -549,7 +549,7 @@ void AssetManagerWidget::onGridContextMenuRequested(const QPoint &pos) {
     if (inFavoritesView)
         removeFromFavAction = itemMenu->addAction(icon(QStringLiteral("unfavorite")), tr("Remove From Favorites"));
 
-    // An asset of PoseStudio's own (a saved material): its file operations (assetstore.h).
+    // An asset of PoseStudio's own (a saved material): its file operations (assetfileops.h).
     const FileActions fileActions = addFileActions(itemMenu, fullPath);
 
     itemMenu->addSeparator();

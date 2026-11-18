@@ -89,11 +89,11 @@ glm::vec3 eulerFromMatrix(const glm::mat3& m, const std::string& order);
 
 /// eulerFromMatrix's twin for a value read back CONTINUOUSLY as the rotation it reads moves: of the
 /// angle triples that compose to @p m in @p order — the two branches (a, b, c) and (a+180, 180-b,
-/// c+180), and at gimbal lock every split of the folded angle — returns the one nearest @p near
+/// c+180), and at gimbal lock every split of the folded angle — returns the one nearest @p nearTo
 /// (degrees, each angle compared modulo 360), each angle in [-180, 180]. eulerFromMatrix alone
 /// keeps the middle angle within ±90, so a rotation carried through it flips the other two by 180
 /// in one step (the Figure group's Tip past 90, the root's channels under a Tilt past 90).
-glm::vec3 eulerFromMatrixNear(const glm::mat3& m, const std::string& order, const glm::vec3& near);
+glm::vec3 eulerFromMatrixNear(const glm::mat3& m, const std::string& order, const glm::vec3& nearTo);
 
 } // namespace pose
 

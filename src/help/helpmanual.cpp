@@ -9,6 +9,7 @@
 #include "constants.h"
 
 #include <QColor>
+#include <QCoreApplication> // translate(): this class is no QObject
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -71,13 +72,15 @@ bool HelpManual::load() {
     m_error.clear();
     const QString text = readResource(kManualRoot + QStringLiteral("manual.json"));
     if (text.isEmpty()) {
-        m_error = QStringLiteral("The manual's table of contents (manual.json) is not embedded in this build.");
+        m_error = QCoreApplication::translate(
+            "HelpManual", "The manual's table of contents (manual.json) is not embedded in this build.");
         return false;
     }
     QJsonParseError parseError;
     const QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8(), &parseError);
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
-        m_error = QStringLiteral("The manual's table of contents (manual.json) could not be read: %1")
+        m_error = QCoreApplication::translate(
+                      "HelpManual", "The manual's table of contents (manual.json) could not be read: %1")
                       .arg(parseError.errorString());
         return false;
     }
@@ -88,7 +91,8 @@ bool HelpManual::load() {
         }
     }
     if (m_pages.empty()) {
-        m_error = QStringLiteral("The manual's table of contents (manual.json) lists no pages.");
+        m_error = QCoreApplication::translate("HelpManual",
+                                              "The manual's table of contents (manual.json) lists no pages.");
         return false;
     }
     return true;
@@ -191,17 +195,27 @@ QString HelpManual::searchTextOf(const QString& file) {
     static const QRegularExpression kImage(QStringLiteral("!\\[[^\\]]*\\]\\([^)]*\\)"));
     static const QRegularExpression kLink(QStringLiteral("\\[([^\\]]*)\\]\\([^)]*\\)"));
     static const QRegularExpression kMarkup(QStringLiteral("[`*_#>|]"));
+    // Kept per page: a search asks for every page's text at each (debounced) keystroke, and
+    // thinning half a megabyte of Markdown is three regular-expression passes and a lowering.
+    auto it = m_searchTextCache.find(file);
+    if (it != m_searchTextCache.end()) {
+        return it.value();
+    }
     QString text = markdownOf(file);
     text.remove(kImage);
     text.replace(kLink, QStringLiteral("\\1"));
     text.remove(kMarkup);
-    return text.toLower();
+    text = text.toLower();
+    m_searchTextCache.insert(file, text);
+    return text;
 }
 
 void HelpManual::render(const QString& file, QTextDocument& document) {
     const QString markdown = markdownOf(file);
     renderMarkdown(markdown.isEmpty()
-                       ? QStringLiteral("# Page not found\n\nThe page `%1` is not embedded in this build.").arg(file)
+                       ? QCoreApplication::translate(
+                             "HelpManual", "# Page not found\n\nThe page `%1` is not embedded in this build.")
+                             .arg(file)
                        : markdown,
                    document);
 }

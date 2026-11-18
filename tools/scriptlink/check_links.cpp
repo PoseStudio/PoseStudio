@@ -9,7 +9,10 @@
  * around it, an absolute Windows path with escaped backslashes, single quotes, comments that
  * hold calls, a chain of links, a circle, a dead link, a program, an encrypted script and a
  * binary one — and which folders open their character: one figure (plain and gzip), two, none,
- * a wearable alone, a prop alone, and wearables and props beside the character.
+ * a wearable alone, a prop alone, and wearables and props beside the character. And what a link
+ * must NOT lead to: a file PoseStudio does not open itself (a program or a document beside the
+ * script), and a network share. And that reading stays quick on what was never written to be a
+ * link: a script of very many tokens, one whose variables multiply, one of many dead ends.
  *
  * Usage: PoseStudioScriptLinkCheck                       — the checks; exit code = failures
  *        PoseStudioScriptLinkCheck --follow <script> [<content root>...]
@@ -22,6 +25,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
@@ -62,6 +66,7 @@ const char* problemName(AssetScriptLink::Link::Problem p) {
     case P::Unreadable: return "unreadable";
     case P::NotALink: return "not a link";
     case P::Missing: return "missing";
+    case P::Unsupported: return "not a file PoseStudio opens";
     }
     return "?";
 }
@@ -128,8 +133,8 @@ const QByteArray kBaseFigure =
 
 QByteArray folderLink(const QString& relative) {
     return QStringLiteral(
-               "var oPane = MainWindow.getPaneMgr().findPane(\"DzContentLibraryPane\");\r\n"
-               "var sPath = MainWindow.getPaneMgr().findPane(\"DzContentLibraryPane\").getSelectedContainer().getFullPath();\r\n"
+               "var oPane = MainWindow.getPaneMgr().findPane(\"ContentLibraryPane\");\r\n"
+               "var sPath = MainWindow.getPaneMgr().findPane(\"ContentLibraryPane\").getSelectedContainer().getFullPath();\r\n"
                "oPane.browseToNativeFolder(sPath + \"%1\");\r\n")
         .arg(relative)
         .toUtf8();
@@ -190,7 +195,7 @@ int main(int argc, char** argv) {
           "var oContentMgr = App.getContentMgr();\r\noContentMgr.openFile( sFile, true );\r\n");
     // A loader by "%1".arg(the script's own folder).
     write(chars + QStringLiteral("/Loader Arg.dsa"),
-          "var oFile = new DzFileInfo( getScriptFileName() );\nvar sDir = oFile.path();\n"
+          "var oFile = new FileInfo( getScriptFileName() );\nvar sDir = oFile.path();\n"
           "App.getContentMgr().openNativeFile( String(\"%1/Vendor Char/Char for Gen/Char.duf\").arg( sDir ), false );\n");
     // A literal with no recognised call around it.
     write(chars + QStringLiteral("/Loader Literal.dsa"),
@@ -210,10 +215,32 @@ int main(int argc, char** argv) {
     // A dead link, a program, an encrypted script, a binary one.
     write(chars + QStringLiteral("/Dead.dsa"), folderLink(QStringLiteral("/Gone")));
     write(chars + QStringLiteral("/Program.dsa"),
-          "this.oProcess = new DzProcess(findAbsContentFilePath( \"Scripts/Tool/Tool.exe\" ));\n"
+          "this.oProcess = new Process(findAbsContentFilePath( \"Scripts/Tool/Tool.exe\" ));\n"
           "if( !this.oProcess.start() ){ MessageBox.critical( qsTr(\"Could not start the process.\"), qsTr(\"Fatal Error\"), qsTr(\"&OK\") ); }\n");
-    write(chars + QStringLiteral("/Encrypted.dse"), "DZEncrypted\x01\x02\x03");
+    write(chars + QStringLiteral("/Encrypted.dse"), "\x01\x02\x03 not text");
     write(chars + QStringLiteral("/Binary.dsa"), QByteArray("\x00\x01\x02 binary", 10));
+    // What a link must not lead to: a program, a document, a machine of the script's choosing.
+    write(chars + QStringLiteral("/setup.exe"), "MZ");
+    write(chars + QStringLiteral("/Manual.pdf"), "%PDF");
+    write(chars + QStringLiteral("/Setup.dsa"), "App.getContentMgr().openFile(\"setup.exe\");");
+    write(chars + QStringLiteral("/Manual.dsa"), "App.getContentMgr().openNativeFile(sPath + \"/Manual.pdf\");");
+    write(chars + QStringLiteral("/Share.dsa"), "App.getContentMgr().openFile(\"//server.invalid/share/Char.duf\");");
+    // ... and a later call that does lead somewhere still wins.
+    write(chars + QStringLiteral("/Setup Then Folder.dsa"),
+          "App.getContentMgr().openFile(\"setup.exe\");\noPane.browseToNativeFolder(sPath + \"/Vendor Char\");\n");
+    // What was not written to be a link, read in bounded time: a script of very many tokens with
+    // its link at the very end, one whose variables multiply (each the sum of forty of the one
+    // before, seven deep), and one with more dead ends than the reader follows.
+    write(chars + QStringLiteral("/Huge.dsa"), QByteArray("x=").repeated(200000) + "0;\n" + folderLink(QStringLiteral("/Vendor Char")));
+    QByteArray multiplying = "var a0 = \"x\";\n";
+    for (int i = 1; i <= 7; ++i) {
+        const QByteArray before = "a" + QByteArray::number(i - 1);
+        multiplying += "var a" + QByteArray::number(i) + " = " + before + (" + " + before).repeated(39) + ";\n";
+    }
+    write(chars + QStringLiteral("/Multiplying.dsa"), multiplying + "App.getContentMgr().openFile(a7);\n");
+    QByteArray deadEnds;
+    for (int i = 0; i < 70; ++i) deadEnds += "App.getContentMgr().openFile(sPath + \"/gone " + QByteArray::number(i) + ".duf\");\n";
+    write(chars + QStringLiteral("/Dead Ends.dsa"), deadEnds + folderLink(QStringLiteral("/Vendor Char")));
     // A script outside the library, linking by a content-relative path.
     const QString outside = tmp.path() + QStringLiteral("/Elsewhere/Outside.dsa");
     write(outside, "App.getContentMgr().openFile(\"/People/Gen Female/Characters/Vendor Char/Char for Gen/Char.duf\");");
@@ -263,6 +290,16 @@ int main(int argc, char** argv) {
     expect(chars + QStringLiteral("/Program.dsa"), Link::Kind::None, {}, Link::Problem::NotALink);
     expect(chars + QStringLiteral("/Encrypted.dse"), Link::Kind::None, {}, Link::Problem::Unreadable);
     expect(chars + QStringLiteral("/Binary.dsa"), Link::Kind::None, {}, Link::Problem::Unreadable);
+    expect(chars + QStringLiteral("/Setup.dsa"), Link::Kind::None, {}, Link::Problem::Unsupported);  // a program is not opened
+    expect(chars + QStringLiteral("/Manual.dsa"), Link::Kind::None, {}, Link::Problem::Unsupported); // nor a document
+    expect(chars + QStringLiteral("/Share.dsa"), Link::Kind::None, {}, Link::Problem::Missing);      // a share is not probed
+    expect(chars + QStringLiteral("/Setup Then Folder.dsa"), Link::Kind::Folder, product);
+    QElapsedTimer boundedTimer;
+    boundedTimer.start();
+    expect(chars + QStringLiteral("/Huge.dsa"), Link::Kind::Folder, product);                        // 400,000 tokens, then the link
+    expect(chars + QStringLiteral("/Multiplying.dsa"), Link::Kind::None, {}, Link::Problem::NotALink); // 40^7 terms are not evaluated
+    check(boundedTimer.elapsed() < 20000, QStringLiteral("... and both are read at once, not after minutes"));
+    expect(chars + QStringLiteral("/Dead Ends.dsa"), Link::Kind::None, {}, Link::Problem::Missing);  // the reader gives up
     expect(outside, Link::Kind::None, {}, Link::Problem::Missing);          // no root to find it under
     expect(outside, Link::Kind::File, charDuf, Link::Problem::None, {lib}); // ... and with the library
 

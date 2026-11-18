@@ -25,14 +25,16 @@
  *
  * "+ Add Overlay" adds an EMPTY overlay (no file is asked for): its card is where it is made.
  *
- * The cards are listed as an image editor lists its layers: the TOP of the stack first, a new
- * overlay appearing at the top. The stack belongs to the MAP, not the one zone: every zone painted on the selected zone's color map
- * carries it (a face image reaches the lips and the ears) — the note under the cards says which.
+ * The cards are listed in the stack's own order, which is the order the overlays are PAINTED in:
+ * the first overlay first, a new one at the bottom of the list and over those above it (a card's
+ * up / down buttons say which way each paints). The stack belongs to the MAP, not the one zone:
+ * every zone painted on the selected zone's color map carries it (a face image reaches the lips
+ * and the ears) — the note under the cards says which.
  *
  * Live and undoable like the tab's rows: a scrub re-composites the one map its control touches
  * and is ONE undo entry (begin/endMaterialEdit bracket it), as is an add, a remove, a move, an
  * image choice, a tint pick. The widget holds no state of its own but which cards are folded: it
- * mirrors the viewport's MaterialView (setView), rebuilding its cards only when the stack's
+ * mirrors the overlay stack of the viewport's MaterialView (setView), rebuilding its cards only when the stack's
  * STRUCTURE changes — an overlay added, removed, moved, an image chosen — so a scrub in flight
  * is never torn down under the pointer.
  */
@@ -40,6 +42,7 @@
 #ifndef OVERLAYSTACK_H
 #define OVERLAYSTACK_H
 
+#include "colorswatch.h"
 #include "materialparams.h"
 
 #include <QColor>
@@ -56,7 +59,6 @@
 #include <vector>
 
 class QCheckBox;
-class QColorDialog;
 class QFormLayout;
 class QFrame;
 class QGraphicsOpacityEffect;
@@ -85,8 +87,8 @@ public:
     void setView(const MaterialView& view);
 
 public slots:
-    /// Adds an EMPTY overlay at the bottom of the list (one undo entry) — the + Add Overlay
-    /// button's, and the folded section header's "+".
+    /// Adds an EMPTY overlay at the bottom of the list — the top of the stack (one undo entry):
+    /// the + Add Overlay button's.
     void addOverlay();
     /// Opens the inline NAME editor on overlay @p index's card (Enter or a click elsewhere keeps
     /// the text, Esc drops it). What the header's Rename… runs.
@@ -128,7 +130,7 @@ private:
         QPixmap                           pixmap;
     };
 
-    /// Tears the cards down and builds one per overlay of m_view (the structure changed).
+    /// Tears the cards down and builds one per overlay of m_overlays (the structure changed).
     void rebuild();
     /// Builds overlay @p index's card (its widgets wired to the edit functions by that index).
     Card buildCard(int index);
@@ -167,18 +169,17 @@ private:
     QPixmap imagePixmap(const std::string& path, OverlayImageKind kind, int px, std::unordered_map<std::string, Thumb>& cache);
 
     ViewportWidget* m_viewport = nullptr;
-    QVBoxLayout*    m_cardColumn = nullptr; // the cards, the top of the stack first
+    QVBoxLayout*    m_cardColumn = nullptr; // the cards, in the stack's (painting) order
     QLabel*         m_zonesNote = nullptr;  // which zones the stack is painted on
     QPushButton*    m_add = nullptr;
-    MaterialView    m_view;
+    bool                         m_valid = false; // a zone is shown (the view's `valid`)
+    std::vector<MaterialOverlay> m_overlays;      // the shown zone's stack, as last mirrored (setView)
     std::vector<Card>        m_cards;
     std::vector<std::string> m_structure; // per overlay, its image paths: what the cards were built for
     std::vector<bool>        m_open;      // per overlay, whether its card is unfolded
     std::string              m_shownZone; // the object + zone the fold state belongs to
-    QColorDialog*   m_tintDialog = nullptr;
-    int             m_tintIndex = -1;
-    QColor          m_tintAtOpen;
-    bool            m_tintAbandoned = false; // the dialog is closing because its overlay moved or went: no Cancel restore
+    colorswatch::ColorPick m_tint;      // a card's Base Color dialog, while one is open
+    int             m_tintIndex = -1;   // … and the overlay it edits
     std::unordered_map<std::string, Thumb> m_thumbs;   // the cards' thumbnails
     std::unordered_map<std::string, Thumb> m_previews; // the hover previews
     QPointer<QLineEdit> m_nameEditor;      // the inline rename editor, while one is open

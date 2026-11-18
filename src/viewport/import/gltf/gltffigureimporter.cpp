@@ -5,8 +5,12 @@
  */
 
 #include "gltffigureimporter.h"
+#include "meshrepair.h"
 #include "specgloss.h"
 
+// cgltf parses the JSON's numbers with atof, which follows the C locale's decimal separator.
+// main.cpp sets LC_NUMERIC to "C" after QApplication (Qt installs the desktop's locale) and this
+// reader depends on it: under a comma-decimal locale a matrix entry like -4.37e-08 reads as -4.
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
 
@@ -18,6 +22,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -52,7 +57,198 @@ glm::mat4 worldOf(const cgltf_node* node) {
     return glm::make_mat4(m);
 }
 
-/// A base64 data URI's payload (the part after the comma), decoded. Empty on a malformed string.
+/// WHAT cgltf's PARSER LEAVES UNCHECKED and this reader's own reads depend on. The library
+/// validates a file's structure in a separate pass (cgltf_validate), which also refuses a file for
+/// data this reader never touches — animation samplers, morph weights, material variants — so the
+/// two things that would otherwise read out of bounds or never return are checked here, narrowly,
+/// where they are used: an accessor or an embedded image that reaches past the bytes its buffer
+/// holds (cgltf's accessor readers do no bounds check of their own), and a skin joint that is its
+/// own ancestor (requireJointsInATree).
+///
+/// Whether @p count elements of @p elementSize bytes, @p stride apart from @p offset into
+/// @p view, lie inside the bytes the view's buffer holds. True for a view whose buffer was not
+/// loaded: nothing is read from one (cgltf's readers return "no data").
+bool spanInBuffer(const cgltf_buffer_view* view, cgltf_size offset, cgltf_size stride, cgltf_size count, cgltf_size elementSize) {
+    if (view == nullptr || count == 0) {
+        return true;
+    }
+    cgltf_size available = view->size; // the bytes that can be read from the view's start
+    if (view->data == nullptr) {
+        const cgltf_buffer* buffer = view->buffer;
+        if (buffer == nullptr || buffer->data == nullptr) {
+            return true;
+        }
+        if (view->offset > buffer->size) {
+            return false;
+        }
+        available = std::min(view->size, buffer->size - view->offset);
+    }
+    if (elementSize > available || offset > available - elementSize) {
+        return false;
+    }
+    if (count == 1 || stride == 0) {
+        return true;
+    }
+    return count - 1 <= (available - elementSize - offset) / stride;
+}
+
+/// Throws when reading @p acc element by element would run past its buffer. A sparse accessor is
+/// passed over: cgltf's per-element readers refuse one without reading anything.
+void requireReadable(const cgltf_accessor* acc, const char* what) {
+    if (acc == nullptr || acc->is_sparse) {
+        return;
+    }
+    if (!spanInBuffer(acc->buffer_view, acc->offset, acc->stride, acc->count, cgltf_calc_size(acc->type, acc->component_type))) {
+        throw std::runtime_error(std::string("glTF: the ") + what + " data reaches past the end of its buffer (the file is damaged or cut short)");
+    }
+}
+
+/// Throws when a SPARSE accessor cannot be unpacked safely: its base array, its index array and
+/// its value array must each lie inside their buffers, and every index must name an element the
+/// accessor has (cgltf's unpacking writes through the indices unchecked).
+void requireSparseReadable(const cgltf_accessor* acc, const char* what) {
+    const cgltf_accessor_sparse& sparse = acc->sparse;
+    const cgltf_size             elementSize = cgltf_calc_size(acc->type, acc->component_type);
+    const cgltf_component_type   indexType = sparse.indices_component_type;
+    const cgltf_size             indexSize = cgltf_component_size(indexType);
+    bool sound = (indexType == cgltf_component_type_r_8u || indexType == cgltf_component_type_r_16u || indexType == cgltf_component_type_r_32u) &&
+                 spanInBuffer(acc->buffer_view, acc->offset, acc->stride, acc->count, elementSize) &&
+                 spanInBuffer(sparse.indices_buffer_view, sparse.indices_byte_offset, indexSize, sparse.count, indexSize) &&
+                 spanInBuffer(sparse.values_buffer_view, sparse.values_byte_offset, acc->stride, sparse.count, elementSize);
+    const uint8_t* indices = sound && sparse.indices_buffer_view != nullptr ? cgltf_buffer_view_data(sparse.indices_buffer_view) : nullptr;
+    for (cgltf_size i = 0; indices != nullptr && sound && i < sparse.count; ++i) {
+        const uint8_t* at = indices + sparse.indices_byte_offset + i * indexSize;
+        cgltf_size     index = 0;
+        if (indexSize == 1) {
+            index = *at;
+        } else if (indexSize == 2) {
+            uint16_t v16;
+            std::memcpy(&v16, at, 2);
+            index = v16;
+        } else {
+            uint32_t v32;
+            std::memcpy(&v32, at, 4);
+            index = v32;
+        }
+        sound = index < acc->count;
+    }
+    if (!sound) {
+        throw std::runtime_error(std::string("glTF: the sparse ") + what + " data reaches past its buffer or its element count (the file is damaged)");
+    }
+}
+
+/// Whether the accessor has anything to read: a loaded buffer behind it, or sparse values. One
+/// without a buffer view is all zeros by the format's rule — which is also what is left of a mesh
+/// whose real data sits in a compression extension this reader does not decode.
+bool hasData(const cgltf_accessor* acc) {
+    if (acc == nullptr) {
+        return false;
+    }
+    if (acc->is_sparse) {
+        return true;
+    }
+    return acc->buffer_view != nullptr && cgltf_buffer_view_data(acc->buffer_view) != nullptr;
+}
+
+/// One vertex attribute as floats, read element by element. cgltf's per-element reader gives
+/// nothing for a SPARSE accessor (a base array, or zeros, with some elements replaced), so one is
+/// checked (requireSparseReadable) and unpacked whole, and read from the copy; any other accessor
+/// is read in place through cgltf_accessor_read_float, after the bounds check (requireReadable).
+class FloatAttribute {
+public:
+    FloatAttribute(const cgltf_accessor* acc, const char* what) : m_acc(acc) {
+        if (acc == nullptr) {
+            return;
+        }
+        requireReadable(acc, what);
+        if (acc->is_sparse) {
+            requireSparseReadable(acc, what);
+            m_components = cgltf_num_components(acc->type);
+            m_unpacked.resize(acc->count * m_components);
+            if (cgltf_accessor_unpack_floats(acc, m_unpacked.data(), m_unpacked.size()) != m_unpacked.size()) {
+                m_unpacked.clear(); // (a buffer that was not loaded: nothing to read)
+            }
+        }
+    }
+
+    /// Element @p i into @p out (room for @p n floats). False, @p out untouched, when there is no
+    /// such element or it has more components than @p n.
+    bool read(cgltf_size i, float* out, cgltf_size n) const {
+        if (m_acc == nullptr || i >= m_acc->count) {
+            return false;
+        }
+        if (!m_acc->is_sparse) {
+            return cgltf_accessor_read_float(m_acc, i, out, n) != 0;
+        }
+        if (m_unpacked.empty() || n < m_components) {
+            return false;
+        }
+        std::copy(m_unpacked.begin() + static_cast<std::ptrdiff_t>(i * m_components),
+                  m_unpacked.begin() + static_cast<std::ptrdiff_t>((i + 1) * m_components), out);
+        return true;
+    }
+
+private:
+    const cgltf_accessor* m_acc = nullptr;
+    cgltf_size            m_components = 0;
+    std::vector<float>    m_unpacked; ///< a sparse accessor's elements, base and sparse values combined
+};
+
+/// A JOINTS_n attribute, four indices an element: through cgltf_accessor_read_uint, or — sparse —
+/// through the float copy (joint indices are small whole numbers, exact as floats).
+class JointAttribute {
+public:
+    JointAttribute(const cgltf_accessor* acc, const char* what) : m_acc(acc), m_floats(acc != nullptr && acc->is_sparse ? acc : nullptr, what) {
+        requireReadable(acc, what);
+    }
+
+    bool read(cgltf_size i, cgltf_uint* out) const {
+        if (m_acc == nullptr || i >= m_acc->count) {
+            return false;
+        }
+        if (!m_acc->is_sparse) {
+            return cgltf_accessor_read_uint(m_acc, i, out, 4) != 0;
+        }
+        float f[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        if (!m_floats.read(i, f, 4)) {
+            return false;
+        }
+        for (int k = 0; k < 4; ++k) {
+            out[k] = static_cast<cgltf_uint>(std::max(0.0f, f[k]) + 0.5f);
+        }
+        return true;
+    }
+
+private:
+    const cgltf_accessor* m_acc = nullptr;
+    FloatAttribute        m_floats;
+};
+
+/// Throws when a skin's joint is its own ancestor. The parser gives every node one parent at most,
+/// so two nodes that name each other as children pass it; no walk down from the scene reaches
+/// them (a scene's nodes have no parent), but a skin may name them as joints, and every walk UP a
+/// joint's parents — the skeleton's ancestors, a joint's world transform — would then never end.
+void requireJointsInATree(const cgltf_data* data) {
+    std::vector<char> sound(data->nodes_count, 0); // the nodes whose parents are known to end at a root
+    for (cgltf_size s = 0; s < data->skins_count; ++s) {
+        const cgltf_skin& skin = data->skins[s];
+        for (cgltf_size j = 0; j < skin.joints_count; ++j) {
+            cgltf_size steps = 0;
+            for (const cgltf_node* n = skin.joints[j]; n != nullptr && !sound[static_cast<std::size_t>(n - data->nodes)]; n = n->parent) {
+                if (++steps > data->nodes_count) {
+                    throw std::runtime_error("glTF: the node hierarchy loops back on itself (a joint is its own ancestor)");
+                }
+            }
+            for (const cgltf_node* n = skin.joints[j]; n != nullptr && !sound[static_cast<std::size_t>(n - data->nodes)]; n = n->parent) {
+                sound[static_cast<std::size_t>(n - data->nodes)] = 1;
+            }
+        }
+    }
+}
+
+/// A base64 data URI's payload (the part after the comma), decoded: characters outside the
+/// alphabet (line breaks, spaces) are passed over, and decoding ends at the padding, a closing
+/// quote or the string's end.
 std::vector<uint8_t> decodeBase64(const char* text) {
     static const auto value = [](char c) -> int {
         if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -88,6 +284,15 @@ std::vector<uint8_t> decodeBase64(const char* text) {
 TextureSource resolveImage(TextureFinder& finder, const cgltf_image* image, RiggedImportInfo* info) {
     TextureSource out;
     if (image == nullptr) {
+        // (Called for a texture that exists: it has no image this reader can hand on — only a
+        // Basis Universal one, which a file may carry without REQUIRING the extension, or none.)
+        if (info != nullptr) {
+            ++info->missingTextures;
+            const std::string note = "a texture has no image this reader can decode (Basis Universal / KTX2 only, or no source): left out";
+            if (std::find(info->notes.begin(), info->notes.end(), note) == info->notes.end()) {
+                info->notes.push_back(note);
+            }
+        }
         return out;
     }
     if (image->buffer_view != nullptr) {
@@ -97,6 +302,13 @@ TextureSource resolveImage(TextureFinder& finder, const cgltf_image* image, Rigg
                                                                      ? static_cast<const uint8_t*>(view->buffer->data) + view->offset
                                                                      : nullptr);
         if (base != nullptr && view->size > 0) {
+            if (!spanInBuffer(view, 0, 0, 1, view->size)) {
+                if (info != nullptr) {
+                    ++info->missingTextures;
+                    info->notes.push_back("an embedded image reaches past the end of its buffer (the file is damaged or cut short): left out");
+                }
+                return out;
+            }
             out.encoded.assign(base, base + view->size);
             if (info != nullptr) {
                 ++info->embeddedTextures;
@@ -340,6 +552,7 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
     // the default pose is the vertices skinned by jointWorld · IBM with the joints where the
     // file's nodes put them, and that is what is read — a file whose nodes are saved posed
     // imports in that pose (its animation is not read).
+    requireJointsInATree(data);
     std::vector<char> wanted(data->nodes_count, 0);
     std::vector<char> isJoint(data->nodes_count, 0);
     for (cgltf_size s = 0; s < data->skins_count; ++s) {
@@ -382,11 +595,13 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
             if (jointsAcc == nullptr || weightsAcc == nullptr) {
                 continue;
             }
-            const cgltf_size n = std::min(jointsAcc->count, weightsAcc->count);
+            const JointAttribute joints(jointsAcc, "skin joint");
+            const FloatAttribute weights(weightsAcc, "skin weight");
+            const cgltf_size     n = std::min(jointsAcc->count, weightsAcc->count);
             for (cgltf_size v = 0; v < n; ++v) {
                 cgltf_uint j[4] = {0, 0, 0, 0};
                 float      w[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-                if (!cgltf_accessor_read_uint(jointsAcc, v, j, 4) || !cgltf_accessor_read_float(weightsAcc, v, w, 4)) {
+                if (!joints.read(v, j) || !weights.read(v, w, 4)) {
                     continue;
                 }
                 for (int k = 0; k < 4; ++k) {
@@ -488,8 +703,10 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
         bone.parent = boneParent[static_cast<std::size_t>(i)];
         bone.position = glm::vec3(world[3]);
         if (const auto tip = tipNodeOf.find(node); tip != tipNodeOf.end()) {
-            const glm::mat4 local = glm::inverse(worldOf(node)) * worldOf(tip->second);
-            bone.tip = glm::vec3((world * local)[3]);
+            // (The marker's own place: here the bind IS the nodes as the file stands, so there is
+            // nothing to carry it through — the FBX reader's carry to a separate bind pose, copied
+            // here, only added an inverse that a zero-scaled joint turned into NaN.)
+            bone.tip = glm::vec3(worldOf(tip->second)[3]);
             bone.hasTip = true;
         }
         if (kBoneTrace) {
@@ -536,7 +753,8 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
     ModelData     model;
     TextureFinder textures(fs::path(path).parent_path());
     bool          anySkinned = false;
-    bool          notedTransform = false, notedMorphs = false, notedPoints = false, notedSecondSet = false;
+    bool          notedMorphs = false, notedPoints = false, notedSecondSet = false;
+    int           unreadable = 0; // primitives left out because their data could not be read
     for (const cgltf_node* node : meshNodes) {
         const cgltf_mesh* mesh = node->mesh;
         const cgltf_skin* skin = node->skin;
@@ -625,15 +843,12 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
                     if (baseView->has_transform) {
                         // KHR_texture_transform on the base map: its scale, offset and rotation are
                         // the material's UV tiling, offset and rotation (every map of the material
-                        // follows it; the rotation is stored — the viewport does not turn its maps).
+                        // follows it; the mesh shader turns the maps after tiling them, the
+                        // extension's own order).
                         const cgltf_texture_transform& t = baseView->transform;
                         out.uvTiling = glm::vec2(t.scale[0], t.scale[1]);
                         out.uvOffset = glm::vec2(t.offset[0], t.offset[1]);
                         out.uvRotation = glm::degrees(t.rotation);
-                        if (t.rotation != 0.0f && info != nullptr && !notedTransform) {
-                            info->notes.push_back("texture transform rotations (KHR_texture_transform) are stored, not drawn");
-                            notedTransform = true;
-                        }
                     }
                 }
                 if (mat->normal_texture.texture != nullptr) {
@@ -641,21 +856,20 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
                     out.normalMode = out.normal.empty() ? 0 : 1;
                     out.normalStrength = std::max(0.1f, std::min(8.0f, mat->normal_texture.scale > 0.0f ? mat->normal_texture.scale : 1.0f));
                 }
+                // The core occlusion texture (its red channel, strength = scale), drawn over the
+                // viewport's own baked per-vertex occlusion.
+                if (mat->occlusion_texture.texture != nullptr) {
+                    out.aoMap = resolveImage(textures, imageOf(mat->occlusion_texture.texture), info);
+                    out.aoWeight = std::max(0.0f, std::min(1.0f, mat->occlusion_texture.scale));
+                }
                 // THE CANONICAL MATERIAL's further channels, from the extensions that carry them
-                // (their own maps have no slot yet: the factors alone are read, the emission map
-                // excepted).
+                // (the factors, and the maps the material has a slot for).
                 {
                     const glm::vec3 e(mat->emissive_factor[0], mat->emissive_factor[1], mat->emissive_factor[2]);
                     const float     peak = std::max(e.x, std::max(e.y, e.z));
                     if (peak > 0.0f) {
                         out.emissionColor = e / peak;
                         out.emission = peak * (mat->has_emissive_strength ? std::max(0.0f, mat->emissive_strength.emissive_strength) : 1.0f);
-                        // The core occlusion texture (its red channel, strength = scale): a stored-only
-                        // slot — the viewport bakes its own per-vertex AO.
-                        if (mat->occlusion_texture.texture != nullptr) {
-                            out.aoMap = resolveImage(textures, imageOf(mat->occlusion_texture.texture), info);
-                            out.aoWeight = std::max(0.0f, std::min(1.0f, mat->occlusion_texture.scale));
-                        }
                         if (mat->emissive_texture.texture != nullptr) {
                             out.emissionMap = resolveImage(textures, imageOf(mat->emissive_texture.texture), info);
                         }
@@ -781,7 +995,33 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
             if (posAcc == nullptr || posAcc->count == 0) {
                 continue;
             }
+            if (!hasData(posAcc)) {
+                // NOTHING TO READ where the positions should be: geometry compressed by an
+                // extension the file uses without declaring it required (refused by name, as a
+                // required one is above), or an accessor with no data at all — which read as
+                // zeros and came in as triangles collapsed onto one point.
+                if (prim.has_draco_mesh_compression) {
+                    throw std::runtime_error("glTF: the file's meshes are compressed with KHR_draco_mesh_compression, which this reader does not "
+                                             "decode; export it without mesh compression");
+                }
+                if (posAcc->buffer_view != nullptr && posAcc->buffer_view->has_meshopt_compression) {
+                    throw std::runtime_error("glTF: the file's meshes are compressed with EXT_meshopt_compression, which this reader does not "
+                                             "decode; export it without mesh compression");
+                }
+                ++unreadable;
+                continue;
+            }
             const bool primSkinned = skinned && jointsAcc != nullptr && weightsAcc != nullptr;
+            // Every accessor read below, checked against its buffer first (see spanInBuffer).
+            const FloatAttribute positions(posAcc, "vertex position");
+            const FloatAttribute normals(normAcc, "vertex normal");
+            const FloatAttribute uvs(uvAcc, "texture coordinate");
+            const JointAttribute skinJoints(primSkinned ? jointsAcc : nullptr, "skin joint");
+            const FloatAttribute skinWeights(primSkinned ? weightsAcc : nullptr, "skin weight");
+            requireReadable(prim.indices, "index");
+            if (primSkinned) {
+                requireReadable(skin->inverse_bind_matrices, "inverse bind matrix");
+            }
             // Per joint of the skin: jointWorld · IBM — what puts a vertex bound to that joint
             // where the file's nodes stand (the bind, see the skeleton above).
             std::vector<glm::mat4> skinMats;
@@ -800,12 +1040,12 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
             for (cgltf_size v = 0; v < posAcc->count; ++v) {
                 Vertex& vert = out.vertices[v];
                 float   p[3] = {0.0f, 0.0f, 0.0f};
-                cgltf_accessor_read_float(posAcc, v, p, 3);
+                positions.read(v, p, 3);
                 glm::vec3 pos(p[0], p[1], p[2]);
                 glm::vec3 n(0.0f);
                 if (normAcc != nullptr && v < normAcc->count) {
                     float nn[3] = {0.0f, 0.0f, 0.0f};
-                    cgltf_accessor_read_float(normAcc, v, nn, 3);
+                    normals.read(v, nn, 3);
                     n = glm::vec3(nn[0], nn[1], nn[2]);
                 }
                 vert.joints = glm::uvec4(rideBone);
@@ -815,8 +1055,8 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
                 if (primSkinned && v < jointsAcc->count && v < weightsAcc->count) {
                     cgltf_uint j[4] = {0, 0, 0, 0};
                     float      w[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-                    cgltf_accessor_read_uint(jointsAcc, v, j, 4);
-                    cgltf_accessor_read_float(weightsAcc, v, w, 4);
+                    skinJoints.read(v, j);
+                    skinWeights.read(v, w, 4);
                     struct Influence {
                         int        bone;
                         float      w;
@@ -861,7 +1101,7 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
                 vert.normal = len > 1e-12f ? n / len : glm::vec3(0.0f);
                 if (uvAcc != nullptr && v < uvAcc->count) {
                     float uv[2] = {0.0f, 0.0f};
-                    cgltf_accessor_read_float(uvAcc, v, uv, 2);
+                    uvs.read(v, uv, 2);
                     vert.uv = glm::vec2(uv[0], uv[1]); // (glTF's origin is the top-left, as the renderer's)
                 } else {
                     vert.uv = glm::vec2(0.0f);
@@ -871,7 +1111,10 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
             std::vector<uint32_t> raw;
             if (prim.indices != nullptr) {
                 raw.resize(prim.indices->count);
-                cgltf_accessor_unpack_indices(prim.indices, raw.data(), sizeof(uint32_t), raw.size());
+                if (cgltf_accessor_unpack_indices(prim.indices, raw.data(), sizeof(uint32_t), raw.size()) != raw.size()) {
+                    ++unreadable; // (index data that is not there, or sparse: zeros would be read)
+                    continue;
+                }
             } else {
                 raw.resize(posAcc->count);
                 for (std::size_t i = 0; i < raw.size(); ++i) {
@@ -913,7 +1156,12 @@ ModelData GltfFigureImporter::load(const std::string& path, RiggedImportInfo* in
         }
     }
     if (model.meshes.empty()) {
-        throw std::runtime_error("glTF: the file holds no triangle mesh");
+        throw std::runtime_error(unreadable > 0 ? "glTF: the file's meshes carry no vertex or index data this reader can read (it is missing, or "
+                                                  "compressed by an extension that is not decoded)"
+                                                : "glTF: the file holds no triangle mesh");
+    }
+    if (unreadable > 0 && info != nullptr) {
+        info->notes.push_back(std::to_string(unreadable) + " mesh part(s) without readable vertex or index data were left out");
     }
 
     // ---- UNITS: glTF is metres by definition, but an export in centimetres happens; a character

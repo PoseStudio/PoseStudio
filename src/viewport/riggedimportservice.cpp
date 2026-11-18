@@ -14,7 +14,6 @@
 #include "vulkanrenderer.h"
 
 #include <QDebug>
-#include <QMessageBox>
 #include <QObject>
 
 #include <cstdlib>
@@ -59,9 +58,9 @@ ModelData readFile(const QString& path, RiggedImportInfo& info) {
 bool RiggedImportService::importInto(VulkanRenderer& renderer, const QString& path, bool showProgress) {
     const Format format = formatOf(path);
     try {
-        ModelImportService::ImportProgress progress(showProgress, format.title, format.reading);
-        RiggedImportInfo                   info;
-        ModelData                          data = readFile(path, info);
+        ImportProgress progress(showProgress, format.title, format.reading);
+        RiggedImportInfo info;
+        ModelData        data = readFile(path, info);
         progress.parsed();
 
         qInfo("[%s] %s: %s; %d bones (%d skinless leaves left out), %d skinned + %d rigid meshes, %d materials; skinning %s; %.2f m tall; "
@@ -76,7 +75,8 @@ bool RiggedImportService::importInto(VulkanRenderer& renderer, const QString& pa
             qInfo("[%s]   %s", format.tag, note.c_str());
         }
 
-        QString counts = QObject::tr(", %1 meshes, %2 bones").arg(data.meshes.size()).arg(data.bones.size());
+        // (The tail of the import's log line: plain English like every log line, not interface text.)
+        QString counts = QStringLiteral(", %1 meshes, %2 bones").arg(data.meshes.size()).arg(data.bones.size());
         static const bool kNoConform = std::getenv("POSESTUDIO_RIG_NO_CONFORM") != nullptr ||
                                        std::getenv("POSESTUDIO_FBX_NO_CONFORM") != nullptr; // A/B: the raw skeleton
         if (!data.bones.empty() && !kNoConform) {
@@ -106,8 +106,8 @@ bool RiggedImportService::importInto(VulkanRenderer& renderer, const QString& pa
                 if (std::getenv("POSESTUDIO_RIG_ROLES_TRACE") != nullptr) {
                     qInfo("%s", rep.roles.c_str());
                 }
-                counts += rep.complete ? QObject::tr(", conformed to the rig standard")
-                                       : QObject::tr(", conformed to the rig standard with %1 role(s) missing").arg(rep.missing.size());
+                counts += rep.complete ? QStringLiteral(", conformed to the rig standard")
+                                       : QStringLiteral(", conformed to the rig standard with %1 role(s) missing").arg(rep.missing.size());
             } else {
                 qWarning("[%s] the skeleton could not be conformed to the rig standard: imported as read", format.tag);
             }
@@ -116,9 +116,7 @@ bool RiggedImportService::importInto(VulkanRenderer& renderer, const QString& pa
         return true;
     } catch (const std::exception& e) {
         qWarning() << "[viewport]" << format.tag << "import failed:" << path << "-" << e.what();
-        if (showProgress) {
-            QMessageBox::warning(nullptr, format.failed, QObject::tr("Could not import \"%1\".\n\n%2").arg(path, QString::fromUtf8(e.what())));
-        }
+        reportImportFailure(showProgress, format.failed, path, QString::fromUtf8(e.what()));
         return false;
     }
 }

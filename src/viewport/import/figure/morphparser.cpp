@@ -18,11 +18,10 @@ std::vector<MorphDelta> parseMorphDeltas(const nlohmann::json& morphDoc,
         *outVertexCount = 0;
     }
 
-    // The modifier the fragment names (its morph, if it has one), else — for a fragment that names
-    // nothing in this file — the first one carrying a morph at all.
+    // The modifier the fragment names, if it has a morph (see findMorphModifier).
     const nlohmann::json* mod = findMorphModifier(morphDoc, fragment);
     if (!mod) {
-        return out; // no shape here (e.g. a formula-only driver modifier)
+        return out; // no shape here (a formula-only driver modifier; an id this file does not define)
     }
 
     const nlohmann::json& morph = (*mod)["morph"];

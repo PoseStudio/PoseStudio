@@ -239,11 +239,10 @@ bool OpenXrInput::sync(int64_t time, XrSpace baseSpace, VrInput& out) {
     XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
     syncInfo.countActiveActionSets = 1;
     syncInfo.activeActionSets = &active;
-    const XrResult synced = xrSyncActions(m_session, &syncInfo);
-    if (XR_FAILED(synced)) {
+    // (XR_SESSION_NOT_FOCUSED is a success code: every action then reads inactive, at rest.)
+    if (XR_FAILED(xrSyncActions(m_session, &syncInfo))) {
         return false;
     }
-    out.focused = synced == XR_SUCCESS; // XR_SESSION_NOT_FOCUSED: a success code, every action inactive
 
     XrActionStateGetInfo get{XR_TYPE_ACTION_STATE_GET_INFO};
 

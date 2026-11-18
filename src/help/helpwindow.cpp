@@ -416,7 +416,9 @@ void HelpWindow::highlightMatches() {
     QList<QTextEdit::ExtraSelection> selections;
     if (!query.isEmpty()) {
         QTextCharFormat mark;
-        mark.setBackground(QColor(91, 135, 204, 110)); // the accent, translucent
+        QColor          accent(Constants::COLOR_ACCENT);
+        accent.setAlpha(110); // the accent, translucent
+        mark.setBackground(accent);
         QTextDocument* document = m_browser->document();
         QTextCursor cursor(document);
         while (true) {

@@ -62,7 +62,6 @@ public:
     renderapi::Engine* engine() const { return m_engine; }
     /// Another engine of this library, the caller's own (null if the library refuses).
     std::unique_ptr<RenderEngineInstance> createEngine() const;
-    const QString&     directory() const { return m_directory; }
 
 private:
     RenderEngineLibrary() = default;
@@ -71,7 +70,6 @@ private:
     renderapi::CreateEngineFn m_create = nullptr; // the library's entry (createEngine)
     QByteArray                m_resourceDir;      // … and what it is called with
     QByteArray                m_userDir;
-    QString                   m_directory;
 };
 
 } // namespace pose

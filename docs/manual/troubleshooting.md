@@ -16,6 +16,8 @@ PoseStudio renders with Vulkan, which needs a graphics driver that provides it. 
 - **"Content Folder Needed" / "Locate Content Folder…"** — the preset's `data` folder was not found. Point PoseStudio at the folder that directly contains `data`; see [Importing Content](importing.md#when-the-figures-data-cannot-be-found). It is remembered for next time.
 - **"This file may be a pose, material, or other preset rather than a figure."** — only character presets import. Pose and material presets in that format are not supported yet.
 - **The import takes long** — a fully textured character takes some seconds while its textures decode and its correctives are prepared; the progress dialog names each stage. A debug build (the window title says so) is much slower.
+- **"Could not import …"** for an `.obj`, an `.fbx`, a glTF, a USD or a Gaussian splat file — the line under it is the reason. For an `.obj`, *the file holds no faces* means it has only vertices, lines or points, which are not a model, and *the file is gzip-compressed* means it is a compressed download that was saved under an `.obj` name: unpack it with an archive tool and import the file that comes out. The other reasons are listed under [Import problems](importing.md#import-problems).
+- **A file given on the command line does not appear, and nothing is said** — a file handed over at start-up may be imported before the window is ready, without dialogs. The log has the reason (see [Seeing what PoseStudio is doing](#seeing-what-posestudio-is-doing)); or import the file from **File → Import** to be told.
 
 ## The figure looks wrong
 
@@ -48,15 +50,15 @@ PoseStudio renders with Vulkan, which needs a graphics driver that provides it. 
 
 ## Posing does not do what I expect
 
-- **The joint I clicked is not the one I wanted**: the pick is the joint nearest the pointer, and on a thick limb the twist bone in its middle counts as the limb. Turn on **View → Show Skeleton** to see where the joints are, or click a little closer to the joint you mean.
-- **Dragging orbits the camera instead of posing**: the press did not land on a joint. Press on the body nearer a joint.
+- **The joint I clicked is not the one I wanted**: a click takes the skin in front of the pointer and the joint that moves that skin, never a part hidden behind it (see [Grabbing a joint](posing.md#grabbing-a-joint)). Turn on **View → Show Skeleton** to see where the joints are, or click a little closer to the joint you mean.
+- **Dragging orbits the camera instead of posing**: the press did not land on the figure — or a prop or a capture in front of her took it. Press on her skin, where nothing stands in front of it.
 - **The hand stops short of the cursor**: the arm is at full reach and the body has leaned as far as its balance allows. Take the hips along, or let a foot step first (drag the hips or the chest).
 - **She will not go lower / will not stand up**: a kneeling body is stopped by its thighs over the planted knees — drag the hips *back* to sit onto the heels. To get up from a kneel or a sit, drag the hips or the chest *up*.
 - **A pinned joint holds a drag back**: unpin it (`P`, or *Unpin All Joints* in the context menu). Orange markers show the pins.
 - **Her breasts or buttocks do not move**: check the switches in the **Soft Body Physics** tab. The breasts' motion is sized by the bust read off her mesh at import — a flat chest gets none, and a small bust very little; raise **Softness** to see more. A model with no skeleton (a static scan) has no soft body. See [Soft breasts](posing.md#soft-breasts).
 - **Delete or P does nothing**: the viewport needs keyboard focus — click in it first.
-- **Undo is empty after deleting an object**: deleting clears the whole undo history. File → New clears it too.
-- **Opening a project says a figure file is missing**: the project names each figure by the path it was imported from; if the file moved, choose it again in the dialog, or skip it to open the rest. See [Project Files](project-files.md#if-a-figure-file-has-moved).
+- **Undo is empty after deleting a model**: deleting a model clears the whole undo history (deleting a light does not: it is an undo step). File → New clears it too.
+- **Opening a project says a file is missing**: the project names each figure, model and capture by the path it was imported from; if the file moved, choose it again in the dialog, or skip it to open the rest. See [Project Files](project-files.md#if-a-figure-file-has-moved).
 
 ## Assets do not appear
 
@@ -67,14 +69,14 @@ PoseStudio renders with Vulkan, which needs a graphics driver that provides it. 
 
 ## Seeing what PoseStudio is doing
 
-PoseStudio logs what it does to its console output — imports, the ping, the update check, warnings about content it skipped. To see the log on Windows, start it from a terminal with the environment variable `QT_LOGGING_TO_CONSOLE=1` set:
+PoseStudio logs what it does to its console output — imports, the ping, the update check, warnings about content it skipped. To see the log on Windows, start it from a terminal with the environment variable `QT_FORCE_STDERR_LOGGING=1` set:
 
 ```
-set QT_LOGGING_TO_CONSOLE=1
+set QT_FORCE_STDERR_LOGGING=1
 PoseStudio.exe
 ```
 
-For an imported character the log has a line `[figure] shape: … morphs applied (…)` naming the shapes that made her, and a warning `[figure] shape: NOT applied —` for each shape that could not be applied, with its reason: its file is not under any content folder (the path it was looked for at is given), or it was made for another figure.
+For an imported character the log has a line `[figure] shape: … morphs applied (…)` naming the shapes that made her, and a warning `[figure] shape: NOT applied —` for each shape that could not be applied, with its reason: its file is not under any content folder (the path it was looked for at is given), or it was made for another figure. A warning `[figure] left out: …` names a part of her that could not be read and was left out while the rest came in — a material, or a pose corrective made for another figure or written in a way PoseStudio does not read.
 
 ## Starting over
 

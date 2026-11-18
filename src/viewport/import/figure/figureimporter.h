@@ -5,7 +5,8 @@
  * This is the top-level orchestrator of the import/figure/ subsystem. Given a file and the content-
  * library roots, it: loads the preset, locates and loads the referenced base figure geometry, bakes
  * the dialed character morphs (with joint-center adjustment), parses the skeleton + per-vertex skin
- * weights, discovers the pose correctives, resolves and parses the UV set, subdivides the cage,
+ * weights, discovers the pose correctives, resolves and parses the UV sets (the geometry's default
+ * and each material zone's own), subdivides the cage,
  * assembles the per-zone meshes, attaches each zone's material, and merges any post-load follower
  * addons. Unlike the static MeshImporter (which returns ModelData and needs no external context), a
  * figure spans many files and needs the content roots to resolve its cross-file URIs — so it is its
@@ -35,6 +36,13 @@ public:
     /// be located/resolved. Texture paths that don't resolve are left empty (the zone renders with
     /// its base color), so a missing map degrades gracefully rather than failing the import.
     FigureData load(const std::string& path, const std::vector<std::string>& contentRoots) const;
+
+    /// The content root the file at @p path lies in: the first folder above it that contains
+    /// "data" — the anchor its "/data/…" and "/Runtime/…" references resolve against — or empty
+    /// when there is none within 16 levels (a presets-only folder: the roots must then come from
+    /// elsewhere). What the application detects for an imported file, and what the check tool
+    /// uses so that it imports the same thing.
+    static std::string contentRootOf(const std::string& path);
 };
 
 } // namespace pose

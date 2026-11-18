@@ -23,6 +23,11 @@
  *   folder whose name begins with a dot is in no listing the browsers are built from — not a
  *   folder of the tree, not an asset, not a thumbnail, not a reason to call its parent a hit —
  *   and a folder named `textures` is an ordinary folder.
+ * - THE THUMBNAIL RULE (assets/assetscan.h): which picture an asset wears. The three ways content
+ *   names a thumbnail — `Name.png`, `Name.duf.png`, and a larger `Name.tip.png` — each still
+ *   pair with `Name.duf`; two assets whose names differ only after a dot (`Material.001`,
+ *   `Material.002`) each wear their own picture; and one with no picture of its own is an asset
+ *   still, as it was when the first dot alone decided.
  *
  * Exit code = number of failed checks (0 = green).
  */
@@ -91,21 +96,12 @@ QStringList names(const QList<AssetDb::CollectionRow>& rows) {
     return out;
 }
 
-/// The schema file's statements, split the way initializeDatabase splits them (whole-line
-/// comments dropped, then on ';').
+/// The schema file's statements, split by the application's own splitter (database.h) — so the
+/// check runs exactly what a fresh install runs, never a copy of the rule.
 QStringList schemaStatements(const QString& path) {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return {};
-    QStringList lines = QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'));
-    QStringList kept;
-    for (const QString& line : lines) {
-        if (!line.trimmed().startsWith(QLatin1String("--"))) kept << line;
-    }
-    QStringList statements;
-    for (const QString& statement : kept.join(QLatin1Char('\n')).split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
-        if (!statement.trimmed().isEmpty()) statements << statement.trimmed();
-    }
-    return statements;
+    return splitSchemaStatements(QString::fromUtf8(file.readAll()));
 }
 
 const QString kMaterials = QStringLiteral("materials");
@@ -362,11 +358,12 @@ void checkHiddenNames() {
     const QList<AssetScan::AssetHit> mixed = AssetScan::scanFolderAssets(lib + QStringLiteral("/Mixed"));
     check(mixed.size() == 1 && mixed.first().assetFileName == QLatin1String("shown.psm") && mixed.first().bestImage == QLatin1String("shown.png"),
           "a folder's assets: the hidden asset is not one, and a hidden picture is nobody's thumbnail");
-    check(AssetScan::scanFolderAssets(lib + QStringLiteral("/Secret")).isEmpty() && !AssetScan::folderHasDirectAssetHit(lib + QStringLiteral("/Secret")) &&
-              AssetScan::folderHasDirectAssetHit(lib + QStringLiteral("/Mixed")) && AssetScan::folderHasDirectAssetHit(lib + QStringLiteral("/textures")),
+    using AssetScan::HitState;
+    const auto holdsAssets = [](const QString& folder) { return AssetScan::classifyFolder(folder, {}).value(folder) == HitState::DirectHit; };
+    check(AssetScan::scanFolderAssets(lib + QStringLiteral("/Secret")).isEmpty() && !holdsAssets(lib + QStringLiteral("/Secret")) &&
+              holdsAssets(lib + QStringLiteral("/Mixed")) && holdsAssets(lib + QStringLiteral("/textures")),
           "a folder that holds only hidden assets holds none; one named `textures` holds its own");
 
-    using AssetScan::HitState;
     const QHash<QString, HitState> states = AssetScan::classifyFolder(lib, {});
     bool                            walkedHidden = false;
     for (auto it = states.cbegin(); it != states.cend(); ++it) walkedHidden = walkedHidden || HiddenNames::inHiddenPath(it.key(), lib);
@@ -377,6 +374,87 @@ void checkHiddenNames() {
     check(AssetScan::classifyFolder(lib + QStringLiteral("/Visible"), {}).value(lib + QStringLiteral("/Visible")) == HitState::DirectHit &&
               AssetScan::classifyFolder(lib + QStringLiteral("/textures"), {}).value(lib + QStringLiteral("/textures")) == HitState::DirectHit,
           "a folder with an asset is a hit, its hidden texture store beside the point — and so is one named `textures`");
+}
+
+/// A file of @p bytes bytes (a thumbnail's SIZE decides between two that qualify).
+bool sized(const QString& path, int bytes) {
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile out(path);
+    return out.open(QIODevice::WriteOnly) && out.write(QByteArray(bytes, 'x')) == bytes;
+}
+
+/// "asset=picture" for every asset of @p folder, by asset name: what the grid would show.
+QStringList pairsOf(const QString& folder) {
+    QStringList pairs;
+    for (const AssetScan::AssetHit& hit : AssetScan::scanFolderAssets(folder)) pairs << hit.assetFileName + QLatin1Char('=') + hit.bestImage;
+    pairs.sort();
+    return pairs;
+}
+
+/// The same pairs as Favorites and collections resolve them (resolveAssetHits), for @p assets of @p folder.
+QStringList resolvedPairsOf(const QString& folder, const QStringList& assets) {
+    QStringList paths;
+    for (const QString& asset : assets) paths << folder + QLatin1Char('/') + asset;
+    QStringList pairs;
+    for (const AssetScan::AssetHit& hit : AssetScan::resolveAssetHits(paths)) pairs << hit.assetFileName + QLatin1Char('=') + hit.bestImage;
+    pairs.sort();
+    return pairs;
+}
+
+/// THE THUMBNAIL RULE (assetscan.h): which picture an asset wears.
+void checkThumbnails() {
+    std::printf("-- an asset wears the picture named after it\n");
+    QTemporaryDir temp;
+    if (!temp.isValid()) {
+        check(false, "a temporary folder for the thumbnail checks");
+        return;
+    }
+    const QString lib = temp.path();
+    bool          made = true;
+    // The three ways content names a thumbnail.
+    made = sized(lib + "/Plain/Name.duf", 10) && sized(lib + "/Plain/Name.png", 40) && made;
+    made = sized(lib + "/Whole/Name.duf", 10) && sized(lib + "/Whole/Name.duf.png", 40) && made;
+    made = sized(lib + "/Tip/Name.duf", 10) && sized(lib + "/Tip/Name.png", 40) && sized(lib + "/Tip/Name.tip.png", 400) && made;
+    made = sized(lib + "/TipOnly/Name.duf", 10) && sized(lib + "/TipOnly/Name.tip.png", 400) && made;
+    made = sized(lib + "/WholeTip/Name.duf", 10) && sized(lib + "/WholeTip/Name.DUF.png", 40) && sized(lib + "/WholeTip/Name.duf.Tip.png", 400) && made;
+    // Names that differ only after a dot.
+    made = sized(lib + "/Dotted/Material.001.psm", 10) && sized(lib + "/Dotted/Material.001.png", 40) && made;
+    made = sized(lib + "/Dotted/Material.002.psm", 10) && sized(lib + "/Dotted/Material.002.png", 400) && made;
+    made = sized(lib + "/Dotted/Material.003.psm", 10) && made; // (no picture of its own)
+    made = sized(lib + "/Previews/Char 8.1 A.duf", 10) && sized(lib + "/Previews/Char 8.1 A.png", 40) && sized(lib + "/Previews/Char 8.1 A.tip.png", 90) && made;
+    made = sized(lib + "/Previews/Char 8.1 B.duf", 10) && sized(lib + "/Previews/Char 8.1 B.png", 40) && sized(lib + "/Previews/Char 8.1 B.tip.png", 400) && made;
+    // A picture that is named after no asset of its group.
+    made = sized(lib + "/Borrowed/Set.A.duf", 10) && sized(lib + "/Borrowed/Set.B.duf", 10) && sized(lib + "/Borrowed/Set.png", 40) && made;
+    check(made, "the test folders are written");
+
+    check(pairsOf(lib + "/Plain") == QStringList{"Name.duf=Name.png"}, "`Name.png` beside `Name.duf`: an asset, wearing it");
+    check(pairsOf(lib + "/Whole") == QStringList{"Name.duf=Name.duf.png"}, "`Name.duf.png` (the whole file name): an asset, wearing it");
+    check(pairsOf(lib + "/Tip") == QStringList{"Name.duf=Name.tip.png"},
+          "`Name.png` and a larger `Name.tip.png`: ONE asset (the preview is none of its own), wearing the larger");
+    check(pairsOf(lib + "/TipOnly") == QStringList{"Name.duf=Name.tip.png"}, "`Name.tip.png` alone: an asset still");
+    check(pairsOf(lib + "/WholeTip") == QStringList{"Name.duf=Name.duf.Tip.png"},
+          "the whole file name with `.tip`, in any case: the larger of the asset's own again");
+    check(pairsOf(lib + "/Dotted") ==
+              QStringList({"Material.001.psm=Material.001.png", "Material.002.psm=Material.002.png", "Material.003.psm=Material.002.png"}),
+          "`Material.001` and `Material.002` each wear their own picture; `Material.003`, with none of its own, is an asset still");
+    check(pairsOf(lib + "/Previews") == QStringList({"Char 8.1 A.duf=Char 8.1 A.tip.png", "Char 8.1 B.duf=Char 8.1 B.tip.png"}),
+          "a dotted name keeps to its own preview, though its neighbour's is larger");
+    check(pairsOf(lib + "/Borrowed") == QStringList({"Set.A.duf=Set.png", "Set.B.duf=Set.png"}),
+          "a picture named after neither still makes both assets (the first-dot rule, kept)");
+
+    check(resolvedPairsOf(lib + "/Dotted", {"Material.001.psm", "Material.002.psm", "Material.003.psm"}) == pairsOf(lib + "/Dotted") &&
+              resolvedPairsOf(lib + "/Tip", {"Name.duf"}) == pairsOf(lib + "/Tip") &&
+              resolvedPairsOf(lib + "/Whole", {"Name.duf"}) == pairsOf(lib + "/Whole") &&
+              resolvedPairsOf(lib + "/Previews", {"Char 8.1 A.duf", "Char 8.1 B.duf"}) == pairsOf(lib + "/Previews"),
+          "Favorites and collections pair an asset with the same picture its folder does");
+
+    using AssetScan::HitState;
+    bool allHits = true;
+    for (const char* folder : {"Plain", "Whole", "Tip", "TipOnly", "WholeTip", "Dotted", "Previews", "Borrowed"}) {
+        const QString path = lib + QLatin1Char('/') + QLatin1String(folder);
+        allHits = allHits && AssetScan::classifyFolder(path, {}).value(path) == HitState::DirectHit;
+    }
+    check(allHits, "every one of those folders is a folder with assets");
 }
 
 } // namespace
@@ -393,6 +471,7 @@ int main(int argc, char** argv) {
     checkCollections();
     checkFavorites();
     checkHiddenNames();
+    checkThumbnails();
 
     // The connection must be gone before the application object is.
     QSqlDatabase::database(QLatin1String(kDatabaseConnectionName)).close();

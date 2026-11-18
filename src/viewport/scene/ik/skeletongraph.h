@@ -5,7 +5,7 @@
  *        subgraph of a drag — the paths joining the effector and every pin to the root
  *        (markActivePaths): what the solve may move; everything else rides.
  *
- * setRoot(node) rebuilds the directed parent/children view and the BFS traversal order without
+ * setRoot(node) rebuilds the directed parent view and the BFS traversal order without
  * touching the engine's anatomical hierarchy. The rig always roots it at the PELVIS. (It is
  * re-rootable because the first, position-space solver once walked it from a ground contact;
  * the capability is kept, unused.)
@@ -29,7 +29,7 @@ public:
     /// bone index, -1 for the skeleton root) and roots the graph at the hierarchy root initially.
     void build(const std::vector<int>& parents);
 
-    /// Re-roots the graph at @p node: recomputes the per-node parent, children, and root-first
+    /// Re-roots the graph at @p node: recomputes the per-node parent and the root-first
     /// traversal order via BFS over the undirected adjacency. Returns false if @p node is invalid.
     bool setRoot(int node);
 

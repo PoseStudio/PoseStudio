@@ -1,16 +1,18 @@
 /**
  * @file ikrig.cpp
  * @brief IkRig construction: the per-figure FBIK policy state built once from the bind skeleton
- *        (the body tree, the masses, the floor clearances fitted to the mesh), plus the metric
- *        helpers every drag phase shares (path lengths, socket leashes, limb junctions).
+ *        (the body tree, the masses, the floor clearances fitted to the mesh), plus a pin's
+ *        socket leash.
  *
- * The rig's implementation spans six translation units so the phases can evolve independently:
- * this file, ikrigvolumes.cpp (the self-collision BODY VOLUMES: the mesh fit, the drag-start
- * mask, the drag-target clamp), ikrigdrag.cpp (beginDrag / plantContacts — contacts, pins, user
- * pins, promotion), ikrigpolicy.cpp (the per-tick intents, the lift-off test, the step policy's
- * entry), ikrigstepping.cpp (balance- and anchor-driven foot re-planting) and ikrigcontacts.cpp
- * (live contact re-detection, landings, pin-set maintenance); the tuning constants they share
- * live in ikrig_constants.h. build() hosts the load-bearing rooting decision: the FBIK root is the
+ * The rig's implementation spans seven translation units so the phases can evolve independently:
+ * this file, ikrigstructure.cpp (what each joint IS to the rig — girdle, spine, leg, limb tip,
+ * real mass — and the tree metrics: path lengths, limb junctions), ikrigvolumes.cpp (the
+ * self-collision BODY VOLUMES: the mesh fit, the drag-start mask, the drag-target clamp),
+ * ikrigdrag.cpp (beginDrag / plantContacts — contacts, pins, user pins, promotion),
+ * ikrigpolicy.cpp (the per-tick intents, the lift-off test, the step policy's entry),
+ * ikrigstepping.cpp (balance- and anchor-driven foot re-planting) and ikrigcontacts.cpp (live
+ * contact re-detection, landings, pin-set maintenance); the tuning constants they share live in
+ * ikrig_constants.h. build() hosts the load-bearing rooting decision: the FBIK root is the
  * first multi-child DESCENDANT of the anatomical root (real figures root at an origin-level
  * figure node whose chain is excluded from the rig wholesale — no graph edge, no contact
  * eligibility, no balance mass), and every world-space threshold scales with the figure's
@@ -18,7 +20,6 @@
  */
 
 #include "ikrig.h"
-#include "ikmath.h"
 
 #include "balancecontroller.h"
 #include "ikrig_constants.h"
@@ -32,6 +33,14 @@
 #include <vector>
 
 namespace pose {
+
+namespace {
+
+// The probes more than one function of this file reads (each a `static const` at its sites before).
+const bool kNoRoleMasses = std::getenv("IK_NO_ROLE_MASSES") != nullptr;        // A/B probe: the name table's masses on every rig
+const bool kRolesTrace = std::getenv("POSESTUDIO_RIG_ROLES_TRACE") != nullptr; // the conformance report and the masses given by role, on stderr
+
+} // namespace
 
 void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMeshPoint>* mesh) {
     const std::size_t n = bones.size();
@@ -118,9 +127,9 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
         }
     }
     m_graph.build(graphParents);
-    // Root the graph at the pelvis right away: build() defaults to the first parentless node,
-    // which after the exclusion above can be the (isolated) figure node. beginDrag() re-asserts
-    // this per drag, but a freshly-built rig should never sit in a nonsensical rooting.
+    // Root the graph at the pelvis, once: build() defaults to the first parentless node, which
+    // after the exclusion above can be the (isolated) figure node. Nothing re-roots it afterwards,
+    // so m_graph.root() is m_pelvis for the rig's life (the rig's own code reads m_pelvis).
     if (m_pelvis >= 0) {
         m_graph.setRoot(m_pelvis);
     }
@@ -130,28 +139,7 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
             m_masses[i] = 0.0f;
         }
     }
-    // LEAF twist helpers carry no segment: the newest generation hangs its twist bones OFF the
-    // chain as childless siblings of the shin and the forearm (`l_thightwist1/2`), and the
-    // name-class table gave each a third of the thigh — enough "off-path mass" at the thigh
-    // for limbJunction to end the foot's limb chain at the knee, cutting the leg's stiffness
-    // class (and a limb's reach measure) in half. A pass-through twist bone (the earlier generations') keeps its
-    // share — it is on the chain and its share is harmless there. (A twist helper by STRUCTURE —
-    // IkRigBone::helper, Armature::isTwistBone — not by its name, since 2026-11-02.)
-    for (std::size_t i = 0; i < n; ++i) {
-        if (m_children[i].empty() && m_helperNode[i]) {
-            m_masses[i] = std::min(m_masses[i], BalanceController::unclassifiedMass());
-        }
-    }
-    // Per-node subtree mass (own + all descendants): the token-limb promotion and the
-    // trunk-junction search read it. Figure skeletons list parents before children (hierarchy
-    // order), so one reverse pass accumulates leaves into roots.
-    m_subtreeMass = m_masses;
-    for (std::size_t i = n; i-- > 1;) {
-        const int p = m_parents[i];
-        if (p >= 0) {
-            m_subtreeMass[static_cast<std::size_t>(p)] += m_subtreeMass[i];
-        }
-    }
+    finishMasses(); // (the leaf twist helpers' clamp, the subtree masses)
     // Figure size relative to the adult reference every world-space threshold here was tuned
     // on: the pelvis bind height (~1m standing). A 0.54-scale child's pelvis-to-foot path is
     // ~0.5m — less than the ADULT contact-release reach — so unscaled thresholds released the
@@ -219,7 +207,6 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
         m_rootIsSeat = m_roles.built() && m_roles.complete() && m_roles.find(RigRole::Pelvis) < 0;
         m_headNode = m_roles.find(RigRole::Head);
         m_neckBase = m_roles.find(RigRole::Neck, RigSide::Centre, 1);
-        static const bool kRolesTrace = std::getenv("POSESTUDIO_RIG_ROLES_TRACE") != nullptr;
         if (kRolesTrace) {
             std::fputs(m_roles.report().c_str(), stderr);
         }
@@ -275,7 +262,7 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
     static const bool kHelperRiders = std::getenv("IK_HELPER_RIDERS") != nullptr; // A/B probe
     m_ridingDescendants.assign(n, {});
     for (std::size_t i = 0; i < n; ++i) {
-        if (!m_bodyNode[i] || (m_masses[i] < kTokenBoneMass && m_subtreeMass[i] < kTokenLimbMass)) {
+        if (!m_bodyNode[i] || !realMass(static_cast<int>(i))) {
             continue;
         }
         std::vector<int> stack(m_children[i].begin(), m_children[i].end());
@@ -283,8 +270,7 @@ void IkRig::build(const std::vector<IkRigBone>& bones, const std::vector<BodyMes
             const int c = stack.back();
             stack.pop_back();
             const std::size_t ci = static_cast<std::size_t>(c);
-            if (!m_bodyNode[ci] || m_masses[ci] >= kTokenBoneMass ||
-                m_subtreeMass[ci] >= kTokenLimbMass) {
+            if (!m_bodyNode[ci] || realMass(c)) {
                 continue;
             }
             if (!kHelperRiders && m_helperNode[ci]) {
@@ -367,7 +353,73 @@ float massShareOf(RigRole cls, int spineIndex, int spineLinks) {
     }
 }
 
+/// The key of a balance GROUP: a class on a side — and, for the spine, in a half of the chain.
+int massGroupKey(const RigRoleTag& t, RigRole cls, int spineLinks) {
+    const int half = cls == RigRole::Spine && spineUpperHalf(t.index, spineLinks) ? 1 : 0;
+    return (static_cast<int>(cls) * 3 + static_cast<int>(t.side)) * 2 + half;
+}
+
+/// The balance groups found so far, in the order first met: each a key, the number of bones that
+/// share the group and the class's share of the body's mass (which they split).
+struct MassGroups {
+    std::vector<int>   keys;
+    std::vector<int>   count;
+    std::vector<float> share;
+
+    /// The group of @p key — added, with @p groupShare, when new — with one more bone counted in it.
+    int join(int key, float groupShare) {
+        int g = -1;
+        for (std::size_t k = 0; k < keys.size(); ++k) {
+            if (keys[k] == key) {
+                g = static_cast<int>(k);
+                break;
+            }
+        }
+        if (g < 0) {
+            keys.push_back(key);
+            count.push_back(0);
+            share.push_back(groupShare);
+            g = static_cast<int>(keys.size()) - 1;
+        }
+        ++count[static_cast<std::size_t>(g)];
+        return g;
+    }
+    /// What one bone of group @p g weighs: the group's share split among its bones.
+    float massOf(int g) const {
+        const std::size_t at = static_cast<std::size_t>(g);
+        return share[at] / static_cast<float>(std::max(1, count[at]));
+    }
+};
+
 } // namespace
+
+// THE MASSES' TAIL, after any pass that assigns them (the name table in build(), the two role
+// passes below): the leaf twist helpers' clamp, then the subtree masses.
+void IkRig::finishMasses() {
+    const std::size_t n = m_masses.size();
+    // LEAF twist helpers carry no segment: the newest generation hangs its twist bones OFF the
+    // chain as childless siblings of the shin and the forearm (`l_thightwist1/2`), and the
+    // name-class table gave each a third of the thigh — enough "off-path mass" at the thigh
+    // for limbJunction to end the foot's limb chain at the knee, cutting the leg's stiffness
+    // class (and a limb's reach measure) in half. A pass-through twist bone (the earlier generations') keeps its
+    // share — it is on the chain and its share is harmless there. (A twist helper by STRUCTURE —
+    // IkRigBone::helper, Armature::isTwistBone — not by its name, since 2026-11-02.)
+    for (std::size_t i = 0; i < n; ++i) {
+        if (m_children[i].empty() && m_helperNode[i]) {
+            m_masses[i] = std::min(m_masses[i], BalanceController::unclassifiedMass());
+        }
+    }
+    // Per-node subtree mass (own + all descendants): the token-limb promotion and the
+    // trunk-junction search read it. Figure skeletons list parents before children (hierarchy
+    // order), so one reverse pass accumulates leaves into roots.
+    m_subtreeMass = m_masses;
+    for (std::size_t i = n; i-- > 1;) {
+        const int p = m_parents[i];
+        if (p >= 0) {
+            m_subtreeMass[static_cast<std::size_t>(p)] += m_subtreeMass[i];
+        }
+    }
+}
 
 // THE BALANCE MASSES OF A STANDARD-NAMED RIG (2026-11-03): every real bone by its role, the class's
 // share split among the bones of that class on that side (and, for the spine, in that half) — the
@@ -378,20 +430,13 @@ float massShareOf(RigRole cls, int spineIndex, int spineLinks) {
 // token mass, as on the reference. The leaf twist helpers' clamp is re-applied after and the
 // subtree masses recomputed, as fillMassesByRole does. IK_NO_ROLE_MASSES keeps the name table's.
 void IkRig::assignMassesByRole() {
-    static const bool kNoRoleMasses = std::getenv("IK_NO_ROLE_MASSES") != nullptr; // A/B probe
     if (kNoRoleMasses || !m_roles.built()) {
         return;
     }
     const std::size_t n = m_masses.size();
     const float       token = BalanceController::unclassifiedMass();
-    const auto        keyOf = [&](const RigRoleTag& t, RigRole cls) {
-        const int half = cls == RigRole::Spine && spineUpperHalf(t.index, m_roles.spineLinks()) ? 1 : 0;
-        return (static_cast<int>(cls) * 3 + static_cast<int>(t.side)) * 2 + half;
-    };
-    std::vector<int>   group(n, -1);
-    std::vector<int>   keys;
-    std::vector<int>   groupCount;
-    std::vector<float> groupShare;
+    std::vector<int>  group(n, -1);
+    MassGroups        groups;
     for (std::size_t i = 0; i < n; ++i) {
         if (!m_bodyNode[i]) {
             m_masses[i] = 0.0f;
@@ -412,144 +457,70 @@ void IkRig::assignMassesByRole() {
         if (share <= 0.0f) {
             continue;
         }
-        const int key = keyOf(t, cls);
-        int       g = -1;
-        for (std::size_t k = 0; k < keys.size(); ++k) {
-            if (keys[k] == key) {
-                g = static_cast<int>(k);
-                break;
-            }
-        }
-        if (g < 0) {
-            keys.push_back(key);
-            groupCount.push_back(0);
-            groupShare.push_back(share);
-            g = static_cast<int>(keys.size()) - 1;
-        }
-        group[i] = g;
-        ++groupCount[static_cast<std::size_t>(g)];
+        group[i] = groups.join(massGroupKey(t, cls, m_roles.spineLinks()), share);
     }
     int massed = 0;
     for (std::size_t i = 0; i < n; ++i) {
         if (group[i] >= 0) {
-            const std::size_t g = static_cast<std::size_t>(group[i]);
-            m_masses[i] = groupShare[g] / static_cast<float>(std::max(1, groupCount[g]));
+            m_masses[i] = groups.massOf(group[i]);
             ++massed;
         }
     }
-    static const bool kRolesTrace = std::getenv("POSESTUDIO_RIG_ROLES_TRACE") != nullptr;
     if (kRolesTrace) {
         std::fprintf(stderr, "[rig-roles] a standard-named rig: %d balance mass(es) by role\n", massed);
     }
-    for (std::size_t i = 0; i < n; ++i) {
-        if (m_children[i].empty() && m_helperNode[i]) {
-            m_masses[i] = std::min(m_masses[i], BalanceController::unclassifiedMass());
-        }
-    }
-    m_subtreeMass = m_masses;
-    for (std::size_t i = n; i-- > 1;) {
-        const int p = m_parents[i];
-        if (p >= 0) {
-            m_subtreeMass[static_cast<std::size_t>(p)] += m_subtreeMass[i];
-        }
-    }
+    finishMasses();
 }
 
 void IkRig::fillMassesByRole() {
-    static const bool kNoRoleMasses = std::getenv("IK_NO_ROLE_MASSES") != nullptr; // A/B probe
     if (kNoRoleMasses) {
         return;
     }
     const std::size_t n = m_masses.size();
     const float       token = BalanceController::unclassifiedMass();
-    const auto        classOf = [](RigRole r) { return massClassOf(r); };
-    const auto        upperHalf = [&](int spineIndex) { return spineUpperHalf(spineIndex, m_roles.spineLinks()); };
-    const auto        shareOf = [&](RigRole cls, int spineIndex) -> float { return massShareOf(cls, spineIndex, m_roles.spineLinks()); };
     // Only a class the name table gave NO mass to at all is filled: a class with one bone named
     // (the reference generations' forearm beside its twist helper named like a wrist) keeps the
     // table's books, so the reference rigs stay bit-identical.
-    const auto keyOf = [&](const RigRoleTag& t, RigRole cls) {
-        const int half = cls == RigRole::Spine && upperHalf(t.index) ? 1 : 0;
-        return (static_cast<int>(cls) * 3 + static_cast<int>(t.side)) * 2 + half;
-    };
     std::vector<int> namedKeys; // the (class, side, half) groups the name table already massed
     for (std::size_t i = 0; i < n; ++i) {
         const RigRoleTag& t = m_roles.tag(static_cast<int>(i));
         if (!m_bodyNode[i] || m_masses[i] == token || t.role == RigRole::None) {
             continue;
         }
-        namedKeys.push_back(keyOf(t, classOf(t.role)));
+        namedKeys.push_back(massGroupKey(t, massClassOf(t.role), m_roles.spineLinks()));
     }
-    std::vector<int>   group(n, -1);
-    std::vector<int>   keys;
-    std::vector<int>   groupCount;
-    std::vector<float> groupShare;
+    std::vector<int> group(n, -1);
+    MassGroups       groups;
     for (std::size_t i = 0; i < n; ++i) {
         const RigRoleTag& t = m_roles.tag(static_cast<int>(i));
         if (!m_bodyNode[i] || m_masses[i] != token || t.role == RigRole::None) {
             continue;
         }
-        const RigRole cls = classOf(t.role);
-        const float   share = shareOf(cls, t.index);
+        const RigRole cls = massClassOf(t.role);
+        const float   share = massShareOf(cls, t.index, m_roles.spineLinks());
         if (share <= 0.0f) {
             continue;
         }
-        const int key = keyOf(t, cls);
+        const int key = massGroupKey(t, cls, m_roles.spineLinks());
         if (std::find(namedKeys.begin(), namedKeys.end(), key) != namedKeys.end()) {
             continue; // (the table knows this class on this rig: its books stand)
         }
-        int g = -1;
-        for (std::size_t k = 0; k < keys.size(); ++k) {
-            if (keys[k] == key) {
-                g = static_cast<int>(k);
-                break;
-            }
-        }
-        if (g < 0) {
-            keys.push_back(key);
-            groupCount.push_back(0);
-            groupShare.push_back(share);
-            g = static_cast<int>(keys.size()) - 1;
-        }
-        group[i] = g;
-        ++groupCount[static_cast<std::size_t>(g)];
+        group[i] = groups.join(key, share);
     }
-    if (keys.empty()) {
+    if (groups.keys.empty()) {
         return;
     }
     int filled = 0;
     for (std::size_t i = 0; i < n; ++i) {
         if (group[i] >= 0) {
-            const std::size_t g = static_cast<std::size_t>(group[i]);
-            m_masses[i] = groupShare[g] / static_cast<float>(std::max(1, groupCount[g]));
+            m_masses[i] = groups.massOf(group[i]);
             ++filled;
         }
     }
-    static const bool kRolesTrace = std::getenv("POSESTUDIO_RIG_ROLES_TRACE") != nullptr;
     if (kRolesTrace) {
         std::fprintf(stderr, "[rig-roles] %d balance mass(es) filled by role (the name table knew none of their classes)\n", filled);
     }
-    for (std::size_t i = 0; i < n; ++i) {
-        if (m_children[i].empty() && m_helperNode[i]) {
-            m_masses[i] = std::min(m_masses[i], BalanceController::unclassifiedMass());
-        }
-    }
-    m_subtreeMass = m_masses;
-    for (std::size_t i = n; i-- > 1;) {
-        const int p = m_parents[i];
-        if (p >= 0) {
-            m_subtreeMass[static_cast<std::size_t>(p)] += m_subtreeMass[i];
-        }
-    }
-}
-
-float IkRig::pathLenToRoot(int node) const {
-    float len = 0.0f;
-    for (int cur = node; cur >= 0 && cur != m_pelvis;
-         cur = m_parents[static_cast<std::size_t>(cur)]) {
-        len += m_edgeRestLen[static_cast<std::size_t>(cur)];
-    }
-    return len;
+    finishMasses();
 }
 
 float IkRig::socketLeash(int node, const glm::vec3& target,
@@ -568,33 +539,14 @@ float IkRig::socketLeash(int node, const glm::vec3& target,
     const glm::vec3& socketPos = positions[static_cast<std::size_t>(socket)];
     offsetOut = socketPos - rootPos;
     const float limb = pathLenToRoot(node) - m_edgeRestLen[static_cast<std::size_t>(socket)];
-    // Never beyond what the limb can SPAN (its straight rest path): a leash measured from an
+    // Never beyond what the limb can SPAN (its straight rest path). (The cap dates from the
+    // position-space solver, which projected the root into these balls: a leash measured from an
     // overstretched stance — a step landed while its leg could not yet reach the spot — recorded
-    // the impossible distance as the allowed maximum, and two such balls pinned the root
-    // between them (every forward-pass move toward one foot left the other's ball and was
-    // projected straight back), so the release settle could never bring the feet down: the
-    // figure stood 4cm in the air after every stepping chest drag. Capped, the projection pulls
-    // the root back INTO reach and the feet plant.
+    // the impossible distance as the allowed maximum, two such balls pinned the root between
+    // them, and the figure stood 4cm in the air after every stepping chest drag. Today the
+    // lift-off test alone reads the radius — updateSuspension — and its gates are calibrated on
+    // the capped value.)
     return std::min(std::max(glm::length(socketPos - target), 0.9f * limb), 0.995f * limb);
-}
-
-int IkRig::limbJunction(int node) const {
-    constexpr float kTrunkJunctionMass = 0.05f; // ~5% of body mass hanging off the path
-    int prevOnPath = node;
-    for (int cur = m_parents[static_cast<std::size_t>(node)];
-         cur >= 0 && cur != m_pelvis; cur = m_parents[static_cast<std::size_t>(cur)]) {
-        float offPathMass = 0.0f;
-        for (const int c : m_children[static_cast<std::size_t>(cur)]) {
-            if (c != prevOnPath && m_bodyNode[static_cast<std::size_t>(c)]) {
-                offPathMass += m_subtreeMass[static_cast<std::size_t>(c)];
-            }
-        }
-        if (offPathMass > kTrunkJunctionMass) {
-            return cur; // first real junction walking up = where the limb attaches
-        }
-        prevOnPath = cur;
-    }
-    return m_pelvis;
 }
 
 // THE FLOOR CLEARANCES OF THE JOINTS ABOVE THE FEET, FROM THE SKIN. They were one number, 1.5cm —
@@ -698,11 +650,11 @@ void IkRig::fitFloorClearances(const std::vector<BodyMeshPoint>& mesh) {
         std::vector<std::size_t> extreme;
         for (const glm::vec3& d : directions) {
             std::size_t best = 0;
-            float       far = -1.0e9f;
+            float       farthest = -1.0e9f;
             for (std::size_t k = 0; k < own[i].size(); ++k) {
                 const float t = glm::dot(own[i][k] - m_bindPos[i], d);
-                if (t > far) {
-                    far = t;
+                if (t > farthest) {
+                    farthest = t;
                     best = k;
                 }
             }

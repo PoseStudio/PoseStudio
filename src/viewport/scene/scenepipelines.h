@@ -1,14 +1,17 @@
 /**
  * @file scenepipelines.h
- * @brief The scene's shared GPU plumbing: the four descriptor set layouts, the per-frame camera
- *        UBO sets, the scene-wide IBL/shadow set, the 1x1 fallback textures, and the main-pass
- *        mesh pipelines (opaque, transparent, the transmission pair, wire, hidden-line fill, backdrop).
+ * @brief The scene's shared GPU plumbing: the five descriptor set layouts, the per-frame camera
+ *        UBO sets, the scene-wide IBL/shadow set, the 1x1 fallback textures, and the pipelines
+ *        of the scene and photo passes (the mesh variants — opaque, transparent, the
+ *        transmission pair, wire, hidden-line fill, the splat layer's depth cutout —, the
+ *        backdrop, and the Gaussian splats').
  *
  * Everything here is created once when the Scene is built and shared by every model and pass:
  * the layouts define the descriptor contract of the mesh shaders (set 0 = camera, 1 = material
- * textures, 2 = per-model pose data, 3 = IBL maps + shadow map), the pipelines are the variants
- * of that one shader pair the shade modes select between, and the fallbacks let one pipeline
- * serve textured and untextured meshes alike. Every Vulkan handle is held by an RAII owner
+ * textures, 2 = per-model pose data + materials, 3 = IBL maps + shadow map; the fifth layout is
+ * the splat pipeline's own set 1), the pipelines are the variants of that one shader pair the
+ * shade modes select between, and the fallbacks let one pipeline serve textured and untextured
+ * meshes alike. Every Vulkan handle is held by an RAII owner
  * (vulkanhandles.h / the buffer, texture and pipeline classes), so a constructor step that throws
  * — a missing shader, a failed allocation — can't leak what was created before it; members are
  * torn down in reverse declaration order and the Scene needs no hand-written destroy sequence.
@@ -79,8 +82,8 @@ public:
     const VulkanTexture& fallbackDiffuse() const { return *m_fallbackDiffuse; } // opaque white
     const VulkanTexture& fallbackNormal() const { return *m_fallbackNormal; }   // flat normal, linear
 
-    // --- Main-pass pipelines (all built against the one mesh shader pair + layout set, except
-    // the backdrop) ---
+    // --- The pipelines (all built against the one mesh shader pair + layout set, except the
+    // backdrop and the splats') ---
     const VulkanPipeline& opaque() const { return *m_opaque; }          // depth write on
     const VulkanPipeline& transparent() const { return *m_transparent; } // alpha-blended, depth write off
     // TRANSMISSION (2026-11-10): a transmissive zone is drawn twice in the transparent pass —
@@ -104,17 +107,22 @@ private:
     // Declaration order = reverse destruction order: layouts outlive the pools and pipelines
     // built against them, pools outlive the buffers their sets describe.
     UniqueDescriptorSetLayout m_cameraSetLayout;
-    // Set 1: six combined image samplers read in the fragment stage — binding 0 = diffuse,
-    // 1 = detail (normal/bump) map, 2 = roughness map, 3 = spec-mask map, 4 = translucency map,
-    // 5 = micro-detail (pore) normal map (2/3 are per-texel multipliers on the material scalars,
-    // 4 the transmitted tint/strength, 5 a tiled linear normal; absent maps bind the fallbacks).
-    // The layout is shared; each Model owns the pool/sets for its meshes.
+    // Set 1: kMaterialBindingCount (ten) combined image samplers read in the fragment stage, in
+    // mesh.h's MaterialBinding order — 0 = diffuse (the cutout in its alpha), 1 = detail
+    // (normal/bump) map, 2 = the parameter map (roughness, metalness, ambient occlusion,
+    // transmission weight), 3 = spec-mask map, 4 = translucency map, 5 = micro-detail (pore)
+    // normal map, 6 = a bump map beside a normal map, 7 = emission, 8 = the layer map (coat
+    // weight and roughness, sheen weight, thin-film thickness), 9 = sheen color. The packed maps
+    // are per-texel multipliers on the material's scalars; absent maps bind the fallbacks. The
+    // layout is shared; each Model owns the pool/sets for its meshes.
     UniqueDescriptorSetLayout m_materialSetLayout;
-    // Set 2: the per-model POSE buffers, all read in the vertex stage — binding 0 = the skinning
-    // dual quaternions, 1 = this frame's pose-corrective weights, 2 = the model's per-vertex
-    // corrective delta entries (static). Bindings 1/2 let the vertex shaders blend the
-    // correctives live; a model without correctives binds tiny zero buffers. Each Model owns its
-    // buffers + one set per frame in flight.
+    // Set 2: the per-model storage buffers — binding 0 = the skinning dual quaternions (and, in
+    // the buffer's second half, the joints lit with the selection), 1 = this frame's
+    // pose-corrective weights, 2 = the model's per-vertex corrective delta entries (static),
+    // 3 = the MATERIAL BUFFER (a MaterialGpu per mesh). 0-2 are the vertex stage's: bindings 1/2
+    // let the vertex shaders blend the correctives live (a model without correctives binds tiny
+    // zero buffers); 3 is read by the fragment stage, and by the vertex stage for the UV
+    // transform. Each Model owns its buffers + one set per frame in flight.
     UniqueDescriptorSetLayout m_poseSetLayout;
     // Set 3: the scene-wide maps — binding 0 = prefiltered specular cubemap, 1 = BRDF LUT (both
     // refilled per environment), 2 = the key light's shadow map (comparison sampler), 3 = the

@@ -46,7 +46,8 @@ void main() {
     const int   block = max(int(ceil(ratio - 1e-4)), 1);
     const ivec2 last = textureSize(uDepth) - ivec2(1);
     // The block destination texel p covers starts at source texel p * ratio, read off the
-    // texel's INDEX (see depthresolve.frag).
+    // texel's INDEX (gl_FragCoord is its centre, p + 0.5: scaled as it stands, at ratio 2 the
+    // block began a source texel late and the splats were depth-tested a scene pixel off).
     const ivec2 base = min(ivec2(floor(gl_FragCoord.xy - 0.5) * ratio), last);
     const int   samples = int(pc.params.x);
     float depth = 1.0;

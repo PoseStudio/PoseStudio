@@ -11,7 +11,6 @@
 #include "openxrsystem.h" // the headset's Vulkan requirements, negotiated before the instance (vr/)
 #include "scene/jointtransform.h"
 #include "scene/materialparams.h"
-#include "scene/shademode.h"
 #include "rendering/selectionstyle.h" // kJointHighlightDefaultOpacity
 #include "renderscene.h"              // RenderSceneHolder (captureRenderScene)
 #include "selectionsettings.h"
@@ -19,7 +18,6 @@
 #include "vrsettings.h"
 #include "vulkanwindow.h"
 
-#include <QAction>
 #include <QApplication>
 #include <QByteArrayList>
 #include <QColor>
@@ -27,18 +25,12 @@
 #include <QDebug>
 #include <QEvent>
 #include <QKeyEvent>
-#include <QKeySequence>
 #include <QLineEdit>
 #include <QAbstractItemView>
 #include <QAbstractSpinBox>
 #include <QTextEdit>
 
 #include "dragnumberbox.h"
-#include "menupickerbutton.h"
-#include <QAbstractButton>
-#include <QCheckBox>
-#include <QMenu>
-#include <QMouseEvent>
 #include <QWindow>
 #include <QHideEvent>
 #include <QLabel>
@@ -52,7 +44,6 @@
 #include <vulkan/vulkan.h>
 
 #include <algorithm>
-#include <cmath>
 #include <string>
 
 namespace pose {
@@ -127,7 +118,7 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
         return;
     }
 
-    // Compiled shaders are mirrored next to the executable by the build (see CMakeLists).
+    // Compiled shaders are mirrored next to the executable by the build (cmake/Shaders.cmake).
     const QString shaderDir = QCoreApplication::applicationDirPath() + QStringLiteral("/shaders");
 
     // The instance exists: did it take every extension the headset runtime asked for? Qt drops
@@ -159,229 +150,23 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
     connect(m_window, &VulkanWindow::materialViewChanged, this, &ViewportWidget::materialViewChanged);
     // ... and the Lights tab's: the light objects, the selected light.
     connect(m_window, &VulkanWindow::lightsChanged, this, &ViewportWidget::lightsChanged);
-    // The scripted test's `uishot`: the main window's widgets as a picture (the panels beside the
-    // viewport; the native viewport itself is not in a widget grab — `shot` reads that off the GPU),
-    // and the floating strip, a window of its own, beside it as <name>_strip.png (its badge).
-    connect(m_window, &VulkanWindow::scriptWindowSizeRequested, this, [this](int width, int height) {
-        if (QWidget* top = window()) {
-            if (top->isMaximized() || top->isFullScreen()) {
-                top->showNormal();
-            }
-            top->resize(width, height);
-        }
-    });
-    connect(m_window, &VulkanWindow::uiShotRequested, this, [this](const QString& path) {
-        // The picture of the widgets AS LAID OUT: a tab that has just rebuilt or unfolded part of
-        // itself (a section opening for the zone clicked a line earlier, an overlay's card) has
-        // only POSTED its layout request — grabbed now it is drawn at its stale, squeezed
-        // geometry. (Twice: a layout pass can post the next one up the hierarchy.)
-        QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
-        QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
-        if (QWidget* top = window()) {
-            top->grab().save(path);
-            // ... and an open DIALOG (the Preferences dialog a script opened with `prefs`), a
-            // window of its own, beside it as <name>_dialog.png.
-            if (QWidget* dialog = QApplication::activeModalWidget(); dialog != nullptr && dialog != top) {
-                QString dialogPath = path;
-                dialogPath.replace(QStringLiteral(".png"), QStringLiteral("_dialog.png"));
-                dialog->grab().save(dialogPath);
-            }
-            // ... and the Render window, a window of its own too, as <name>_render.png.
-            if (QWidget* render = top->findChild<QWidget*>(QStringLiteral("RenderWindow")); render != nullptr && render->isVisible()) {
-                QString renderPath = path;
-                renderPath.replace(QStringLiteral(".png"), QStringLiteral("_render.png"));
-                render->grab().save(renderPath);
-            }
-        }
-        if (m_strip) {
-            QString stripPath = path;
-            stripPath.replace(QStringLiteral(".png"), QStringLiteral("_strip.png"));
-            m_strip->grab().save(stripPath);
-        }
-    });
-    // The scripted test's `ui`: a widget of the application, addressed by its `testId` dynamic
-    // property, driven through its own slot (a click, a scrub value, a check, a picker entry)
-    // and read back — how a script checks that a panel's CONTROLS do what its commands do.
-    const auto testWidget = [this](const QString& id, int index) -> QWidget* {
-        QWidget* top = window();
-        if (top == nullptr || index < 0) {
-            return nullptr;
-        }
-        int seen = 0;
-        const QList<QWidget*> all = top->findChildren<QWidget*>();
-        for (QWidget* widget : all) {
-            if (widget->property("testId").toString() == id && seen++ == index) {
-                return widget;
-            }
-        }
-        return nullptr;
-    };
-    connect(m_window, &VulkanWindow::uiActionRequested, this,
-            [testWidget](const QString& verb, const QString& id, int index, double value, const QString& text) {
-        QWidget* target = testWidget(id, index);
-        if (target == nullptr) {
-            qWarning().noquote() << "[ui] no widget" << id << index;
-            return;
-        }
-        if (verb == QLatin1String("click")) {
-            if (auto* button = qobject_cast<QAbstractButton*>(target); button != nullptr && button->isEnabled()) {
-                button->click();
-            }
-        } else if (verb == QLatin1String("set")) {
-            if (auto* box = qobject_cast<DragNumberBox*>(target); box != nullptr && box->isEnabled()) {
-                box->setValue(value);
-            }
-        } else if (verb == QLatin1String("check")) {
-            if (auto* box = qobject_cast<QCheckBox*>(target); box != nullptr && box->isEnabled()) {
-                box->setChecked(value >= 0.5);
-            }
-        } else if (verb == QLatin1String("call") || verb == QLatin1String("post")) {
-            // One of the widget's own slots / invokables taking an int — what a context menu's
-            // entry runs (a menu's exec() cannot be driven from here): "<method> [int]". `post`
-            // runs it from the event loop instead of here and now: for a slot that opens a MODAL
-            // dialog, whose exec() would otherwise hold the script that is to look at it.
-            const QStringList part = text.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-            const auto        how = verb == QLatin1String("post") ? Qt::QueuedConnection : Qt::DirectConnection;
-            if (!part.isEmpty() && !QMetaObject::invokeMethod(target, part[0].toLatin1().constData(), how,
-                                                              Q_ARG(int, part.size() > 1 ? part[1].toInt() : 0))) {
-                qWarning().noquote() << "[ui] no slot" << part[0] << "on" << id;
-            }
-        } else if (verb == QLatin1String("type")) {
-            if (auto* edit = qobject_cast<QLineEdit*>(target); edit != nullptr && edit->isEnabled()) {
-                edit->setText(text);
-            }
-        } else if (verb == QLatin1String("key")) {
-            // Enter or Esc to the widget itself, through its event filters: an inline editor's commit and cancel.
-            const int key = text.compare(QLatin1String("esc"), Qt::CaseInsensitive) == 0 ? Qt::Key_Escape : Qt::Key_Return;
-            QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier);
-            QCoreApplication::sendEvent(target, &press);
-        } else if (verb == QLatin1String("scrub")) {
-            // A SCRUB of a field: a left press at its middle, mouse moves to @p value PERCENT OF ITS
-            // WIDTH to the right of it (negative: left) and a release — with Shift held when the
-            // text says so — sent to the widget itself, through its own mouse handlers (the snap to
-            // the step, the fine scrub, the edit bracket). "<% of the width> [shift]". A share of
-            // the width, not pixels: a box sweeps its range across its width, so the value a scrub
-            // lands on is the same however wide the panel happens to be.
-            if (target->isEnabled()) {
-                const bool                  shift = text.contains(QLatin1String("shift"), Qt::CaseInsensitive);
-                const Qt::KeyboardModifiers mods = shift ? Qt::ShiftModifier : Qt::NoModifier;
-                const QPointF               at(target->width() * 0.5, target->height() * 0.5);
-                const double                dx = value / 100.0 * std::max(1, target->width());
-                const auto send = [target, mods](QEvent::Type type, const QPointF& where, Qt::MouseButton button, Qt::MouseButtons held) {
-                    QMouseEvent e(type, where, target->mapToGlobal(where), button, held, mods);
-                    QCoreApplication::sendEvent(target, &e);
-                };
-                send(QEvent::MouseButtonPress, at, Qt::LeftButton, Qt::LeftButton);
-                const int steps = std::max(1, static_cast<int>(std::ceil(std::abs(dx) / 4.0)));
-                for (int k = 1; k <= steps; ++k) {
-                    send(QEvent::MouseMove, at + QPointF(dx * k / steps, 0.0), Qt::NoButton, Qt::LeftButton);
-                }
-                send(QEvent::MouseButtonRelease, at + QPointF(dx, 0.0), Qt::LeftButton, Qt::NoButton);
-            }
-        } else if (verb == QLatin1String("pick")) {
-            if (auto* picker = qobject_cast<MenuPickerButton*>(target); picker != nullptr && picker->isEnabled()) {
-                int entry = 0;
-                for (QAction* action : picker->pickerMenu()->actions()) {
-                    if (!action->isSeparator() && entry++ == static_cast<int>(value)) {
-                        action->trigger();
-                        break;
-                    }
-                }
-            }
-        }
-    });
-    connect(m_window, &VulkanWindow::uiQueryRequested, this,
-            [testWidget, this](const QString& what, const QString& id, int index, double* value, bool* ok) {
-        if (what == QLatin1String("count")) {
-            int count = 0;
-            if (QWidget* top = window()) {
-                const QList<QWidget*> all = top->findChildren<QWidget*>();
-                for (QWidget* widget : all) {
-                    count += widget->property("testId").toString() == id ? 1 : 0;
-                }
-            }
-            *value = count;
-            *ok = true;
-            return;
-        }
-        QWidget* target = testWidget(id, index);
-        if (target == nullptr) {
-            *ok = false;
-            return;
-        }
-        *ok = true;
-        if (what == QLatin1String("enabled")) {
-            *value = target->isEnabled() ? 1.0 : 0.0;
-        } else if (what == QLatin1String("visible")) {
-            *value = target->isVisibleTo(window()) ? 1.0 : 0.0;
-        } else if (auto* label = qobject_cast<QLabel*>(target)) {
-            *value = label->text().toDouble(ok); // (a label that is a number: a count)
-        } else if (auto* box = qobject_cast<DragNumberBox*>(target)) {
-            *value = box->value();
-        } else if (auto* check = qobject_cast<QCheckBox*>(target)) {
-            *value = check->isChecked() ? 1.0 : 0.0;
-        } else if (auto* picker = qobject_cast<MenuPickerButton*>(target)) {
-            *value = picker->currentIndex();
-        } else if (auto* button = qobject_cast<QAbstractButton*>(target)) {
-            *value = button->isChecked() ? 1.0 : 0.0;
-        } else {
-            *ok = false;
-        }
-    }, Qt::DirectConnection);
+    // The scripted test's hooks (viewportwidget_testhooks.cpp): `uishot`, `ui`, `app`, `windowsize`.
+    // Nothing but a running script emits their signals.
+    if (m_window->scriptRunning()) {
+        connectScriptHooks();
+    }
     // THE JOINT MOUSE MODE's input wherever it lands (see jointmodalinput.h): on with the mode,
     // off when it ends.
     m_modalInput = new JointModalInput(m_window, this);
     connect(m_window, &VulkanWindow::jointModalChanged, this,
             [this](int kind) { m_modalInput->setActive(kind >= 0); });
-    // The scripted test's `app`: the mode's input as it reaches the application with the viewport
-    // NOT focused. The keys are the Edit menu's actions (found by their shortcut, and only if
-    // enabled, as the shortcut map would); Esc, Enter, the clicks and the moves are events sent
-    // to the main window, through the application's event filters like any other.
-    connect(m_window, &VulkanWindow::appInputRequested, this,
-            [this](const QString& what, const QPointF& delta, int steps) {
-        QWidget* top = window();
-        QWindow* handle = top ? top->windowHandle() : nullptr;
-        if (!handle || !m_window) {
-            return;
-        }
-        const auto sendKey = [handle](int key) {
-            QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier);
-            QCoreApplication::sendEvent(handle, &press);
-        };
-        const auto sendMouse = [this, handle](QEvent::Type type, Qt::MouseButton button, Qt::MouseButtons held) {
-            QMouseEvent e(type, handle->mapFromGlobal(m_scriptCursor), m_scriptCursor, button, held, Qt::NoModifier);
-            QCoreApplication::sendEvent(handle, &e);
-        };
-        if (what == QLatin1String("b") || what == QLatin1String("s") || what == QLatin1String("t")) {
-            const QKeySequence key(what == QLatin1String("b") ? Qt::Key_B : what == QLatin1String("s") ? Qt::Key_S : Qt::Key_T);
-            m_scriptCursor = m_window->mapToGlobal(QPointF(m_window->width() * 0.5, m_window->height() * 0.5));
-            const QList<QAction*> actions = top->findChildren<QAction*>();
-            for (QAction* action : actions) {
-                if (action->shortcut() == key && action->isEnabled()) {
-                    action->trigger();
-                    break;
-                }
-            }
-        } else if (what == QLatin1String("esc")) {
-            sendKey(Qt::Key_Escape);
-        } else if (what == QLatin1String("enter")) {
-            sendKey(Qt::Key_Return);
-        } else if (what == QLatin1String("click") || what == QLatin1String("rclick")) {
-            const Qt::MouseButton button = what == QLatin1String("click") ? Qt::LeftButton : Qt::RightButton;
-            sendMouse(QEvent::MouseButtonPress, button, button);
-            sendMouse(QEvent::MouseButtonRelease, button, Qt::NoButton);
-        } else if (what == QLatin1String("move")) {
-            for (int k = 0; k < steps; ++k) {
-                m_scriptCursor += delta / steps;
-                sendMouse(QEvent::MouseMove, Qt::NoButton, Qt::NoButton);
-            }
-        }
-    });
     connect(m_window, &VulkanWindow::preferencesRequested, this, &ViewportWidget::preferencesRequested);
     connect(m_window, &VulkanWindow::libraryOperationRequested, this, &ViewportWidget::libraryOperationRequested);
     connect(m_window, &VulkanWindow::renderWindowRequested, this, &ViewportWidget::renderWindowRequested);
     // Same forward for the document state: the main window's title listens on the facade.
     connect(m_window, &VulkanWindow::documentChanged, this, &ViewportWidget::documentChanged);
+    // ... and for the skeleton overlay when the window itself turns it off (a scene reset).
+    connect(m_window, &VulkanWindow::showSkeletonChanged, this, &ViewportWidget::skeletonVisibilityChanged);
     connect(m_window, &VulkanWindow::environmentRestored, this, &ViewportWidget::environmentRestored);
     m_container = QWidget::createWindowContainer(m_window, this);
     m_container->setFocusPolicy(Qt::StrongFocus); // so the viewport can receive wheel/keys
@@ -389,8 +174,10 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QWidget(parent) {
 
     createStrip(); // the floating control strip in the top-right corner
 
-    // Application-wide, for the one key that must work wherever the focus is: Esc leaves VR Mode
-    // (eventFilter). The top-level window's own filter (anchorStrip) is installed in showEvent.
+    // ONE filter, on the application (eventFilter): for the key that must work wherever the focus
+    // is — Esc leaves VR Mode, or deselects — and for the main window's moves, resizes and
+    // activations, which the floating strip follows (a child's own moveEvent does not fire when
+    // the whole application window is dragged).
     QCoreApplication::instance()->installEventFilter(this);
 }
 
@@ -426,10 +213,14 @@ int ViewportWidget::loadProjectFile(const QString& path,
                                     const std::map<std::string, std::string>& recovered,
                                     std::vector<std::string>& missing, std::string& error) {
     if (!m_window) {
-        error = "no viewport (Vulkan unavailable)";
+        error = tr("The viewport is not available.").toStdString();
         return -1;
     }
     return m_window->loadProjectFile(path, recovered, missing, error);
+}
+
+bool ViewportWidget::awaitingRenderer() const {
+    return m_window && !m_window->rendererReady();
 }
 
 QString ViewportWidget::projectPath() const {
@@ -709,16 +500,6 @@ void ViewportWidget::recenterVr() {
     withWindow([](VulkanWindow& w) { w.recenterVr(); });
 }
 
-QStringList ViewportWidget::shaderModeNames() {
-    // Picker order = the table's order (scene/shademode.h); the index handed to setShadeMode is
-    // a row of that table, and the row maps itself onto mesh.frag's mode + the draw variants.
-    QStringList names;
-    for (const ShadeMode& mode : kShadeModes) {
-        names << QString::fromUtf8(mode.name);
-    }
-    return names;
-}
-
 void ViewportWidget::createStrip() {
     m_strip = new ViewportStrip(this);
 
@@ -754,7 +535,11 @@ void ViewportWidget::createStrip() {
             qInfo().noquote() << "[traced] the Rendered mode is not available:" << message;
             return; // (a scripted run waits for no dialog)
         }
-        QMessageBox::information(window(), tr("Rendered Mode"), message);
+        // From the event loop, not from here: the signal arrives out of the middle of a frame (or
+        // the engine's poll tick, or the renderer's initialisation), and a modal box must not
+        // nest its event loop inside one.
+        QMetaObject::invokeMethod(
+            this, [this, message] { QMessageBox::information(window(), tr("Rendered Mode"), message); }, Qt::QueuedConnection);
     });
     connect(m_window, &VulkanWindow::vrModeChanged, m_strip, &ViewportStrip::setVrActive);
     connect(m_strip, &ViewportStrip::vrModeToggled, this, &ViewportWidget::vrModeRequested);
@@ -781,15 +566,6 @@ void ViewportWidget::showEvent(QShowEvent* event) {
     if (!m_strip) {
         return;
     }
-    // Follow the top-level window's moves/resizes (a child moveEvent doesn't fire when the whole app
-    // window is dragged). Re-target the filter if we've been reparented into a different window.
-    if (QWidget* w = window(); w && w != m_filteredWindow) {
-        if (m_filteredWindow) {
-            m_filteredWindow->removeEventFilter(this);
-        }
-        w->installEventFilter(this);
-        m_filteredWindow = w;
-    }
     m_strip->show();
     m_strip->raise();
     anchorStrip();
@@ -813,11 +589,16 @@ void ViewportWidget::moveEvent(QMoveEvent* event) {
 }
 
 bool ViewportWidget::eventFilter(QObject* watched, QEvent* event) {
+    // (A scripted test drives the keys itself and runs on a desktop in use: a REAL key that
+    // reaches its window is not part of it. This filter runs before the viewport's own event(),
+    // which shields the gestures: without the same test here a real Esc deselected mid-script.)
+    const bool realKeyUnderScript = event->type() == QEvent::KeyPress && m_window && m_window->scriptRunning() &&
+                                    event->spontaneous();
     // ESCAPE, anywhere in the application, leaves VR Mode (installed on the application for
     // that; the event is read at the WINDOW it arrives at, once per press). Not while the joint
     // mouse mode is on — its Esc puts the joint back, and JointModalInput consumes it — and not
     // while a modal dialog has the keyboard (its own Esc closes it).
-    if (event->type() == QEvent::KeyPress && watched->isWindowType() && m_window && m_window->vrModeActive() &&
+    if (event->type() == QEvent::KeyPress && !realKeyUnderScript && watched->isWindowType() && m_window && m_window->vrModeActive() &&
         m_window->jointModal() < 0 && QApplication::activeModalWidget() == nullptr) {
         const auto* key = static_cast<const QKeyEvent*>(event);
         if (key->key() == Qt::Key_Escape && !key->isAutoRepeat()) {
@@ -831,8 +612,8 @@ bool ViewportWidget::eventFilter(QObject* watched, QEvent* event) {
     // manual's Esc (its own top-level window) still closes it; a modal dialog never lets a key
     // reach either (the scripted import's progress dialog lingers as the "active modal widget"
     // without the keyboard, which is why that test is not made here).
-    if (event->type() == QEvent::KeyPress && m_window && m_window->jointModal() < 0 && !m_window->vrModeActive() &&
-        (watched == m_window || (m_filteredWindow != nullptr && watched == m_filteredWindow->windowHandle()))) {
+    if (event->type() == QEvent::KeyPress && !realKeyUnderScript && m_window && m_window->jointModal() < 0 &&
+        !m_window->vrModeActive() && (watched == m_window || watched == window()->windowHandle())) {
         const auto* key = static_cast<const QKeyEvent*>(event);
         // An edit in progress keeps its Esc: a scrub field's inline editor (a QLineEdit under a
         // DragNumberBox), an item view's inline RENAME editor (the Asset Manager's collections: a
@@ -858,11 +639,13 @@ bool ViewportWidget::eventFilter(QObject* watched, QEvent* event) {
             return true;
         }
     }
-    if (watched == m_filteredWindow) {
-        const QEvent::Type t = event->type();
-        if (t == QEvent::Move || t == QEvent::Resize || t == QEvent::WindowStateChange) {
+    // THE STRIP FOLLOWS THE MAIN WINDOW (the type first: this filter sees every event in the process).
+    const QEvent::Type t = event->type();
+    if ((t == QEvent::Move || t == QEvent::Resize || t == QEvent::WindowStateChange || t == QEvent::WindowActivate) &&
+        watched == window()) {
+        if (t != QEvent::WindowActivate) {
             anchorStrip();
-        } else if (t == QEvent::WindowActivate) {
+        } else {
             // The main window was activated (focus, un-minimize, user click): re-raise the strip
             // so it can't sit BEHIND the main window. On X11 a top-level strip's stacking
             // relative to its owner is the WM's call, so we re-assert it whenever the owner is
@@ -879,7 +662,7 @@ bool ViewportWidget::eventFilter(QObject* watched, QEvent* event) {
 
 ViewportWidget::~ViewportWidget() {
     if (QCoreApplication::instance()) {
-        QCoreApplication::instance()->removeEventFilter(this); // the Esc-leaves-VR filter
+        QCoreApplication::instance()->removeEventFilter(this); // (eventFilter: Esc, and the strip's anchoring)
     }
     // The QVulkanInstance (m_instance) owns the VkInstance, and the VulkanWindow's
     // device/renderer were created from it. Qt would otherwise destroy the window via the

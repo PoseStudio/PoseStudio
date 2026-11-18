@@ -72,7 +72,7 @@ BonePick pickBone(const std::vector<std::unique_ptr<Model>>& models, float px, f
     }
     // Priority: a joint under the cursor, then the nearest bone body within the click
     // tolerance, then a joint within it (leaf bones — toes, fingertips — have no segment).
-    constexpr float kJointSnapPx = 14.0f;  // right on a joint origin
+    // (kJointSnapPx — right on a joint origin — is bonepicker.h's: the skin pick's snap shares it.)
     constexpr float kPickRadiusPx = 32.0f; // click tolerance around a bone body or joint
     BonePick pick;
     if (joint >= 0 && jointDist <= kJointSnapPx) {

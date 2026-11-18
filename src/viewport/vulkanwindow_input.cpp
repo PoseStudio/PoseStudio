@@ -3,11 +3,11 @@
  * @brief VulkanWindow's mouse, wheel and keyboard handlers, the object context menu, and the
  *        cursor→world helpers.
  *
- * One of the seven translation units of VulkanWindow — see vulkanwindow.h for the map. The
+ * One of the translation units of VulkanWindow — see vulkanwindow.h for the map. The
  * handlers here are ROUTING: they decide which gesture a press/move/key belongs to and hand it
- * to the gesture's own code (the IK/fall/axis-hold machinery in vulkanwindow_ik.cpp, the pose
+ * to the gesture's own code (the IK drag and the fall in vulkanwindow_ik.cpp, the pose
  * edits in vulkanwindow_pose.cpp, the camera in vulkanwindow_camera.cpp). The one rule every
- * branch obeys: a camera move acts only on buttons in m_activeDragButtons — pressed IN this
+ * branch obeys: a camera move acts only on buttons in m_pointer.activeDragButtons — pressed IN this
  * window — because a modal dialog closing over the native child window can leak a button-held
  * move to us and snap the camera (the "event-leak class" of bugs).
  */
@@ -52,14 +52,21 @@ void VulkanWindow::mousePressEvent(QMouseEvent* event) {
     // click keeps what it made, a right click puts the joint back — and neither is a press on
     // the scene: no selection, no drag, no context menu (the matching release is the mode's too).
     // Any other button does nothing until the mode is over.
-    if (m_modalKind >= 0) {
+    if (m_modal.kind >= 0) {
         if (event->button() == Qt::LeftButton) {
             confirmJointModal();
         } else if (event->button() == Qt::RightButton) {
             cancelJointModal();
         }
-        m_modalSwallow |= event->button();
-        m_lastMousePos = event->position();
+        m_modal.swallow |= event->button();
+        m_pointer.lastPos = event->position();
+        return;
+    }
+    // A LIGHT's drag in flight (the left button holds its marker): another button is no new
+    // interaction. Let through, a right press closed the drag's open edit (closeSettlingEdits,
+    // below) — one drag became two undo entries — and its release offered the light's menu, whose
+    // Delete left the drag pointing at whatever light took the deleted one's place.
+    if (m_lightDrag.active && event->button() != Qt::LeftButton) {
         return;
     }
     // A new interaction must not overlap a still-animating release settle, a figure still
@@ -67,8 +74,8 @@ void VulkanWindow::mousePressEvent(QMouseEvent* event) {
     // would be overwritten below). A live button-held drag is left alone here: a right press
     // while the left button drags is the context-menu-mid-drag case, handled by the menu's actions.
     closeSettlingEdits();
-    m_lastMousePos = event->position();
-    m_activeDragButtons |= event->button(); // a drag with this button started in the viewport
+    m_pointer.lastPos = event->position();
+    m_pointer.activeDragButtons |= event->button(); // a drag with this button started in the viewport
 
     // Left-press priority: (0) a joint -> select it + full-body-IK drag of it (the body follows:
     // feet pinned, auto-balanced) — THE posing gesture, no modifier; (1) Ctrl + a joint -> select
@@ -77,10 +84,10 @@ void VulkanWindow::mousePressEvent(QMouseEvent* event) {
     // released without dragging, a CLICK that selects the model under the cursor / clears the
     // selection (see the release).
     if (event->button() == Qt::LeftButton && m_renderer) {
-        m_leftClickCandidate = false;
-        m_leftPressPos = event->position();
+        m_pointer.leftClickCandidate = false;
+        m_pointer.leftPressPos = event->position();
         // A left press while a left-button gesture is still flagged means its release never
-        // reached this window (a modal/shortcut swallowed the mouse-up — the m_activeDragButtons
+        // reached this window (a modal/shortcut swallowed the mouse-up — the m_pointer.activeDragButtons
         // event-leak class): close it out, or the 60 Hz timer runs forever and this press hijacks
         // into IK-dragging the old joint.
         if (m_ik.dragging) {
@@ -101,7 +108,7 @@ void VulkanWindow::mousePressEvent(QMouseEvent* event) {
                                : beginJointGesture(event->position(),
                                                    event->modifiers().testFlag(Qt::ControlModifier));
         if (!began) {
-            m_leftClickCandidate = true; // the orbit gesture, until it moves
+            m_pointer.leftClickCandidate = true; // the orbit gesture, until it moves
         }
         requestUpdate(); // reflect the new selection (outline / skeleton highlight)
     }
@@ -155,14 +162,15 @@ void VulkanWindow::selectModelAtClick(const QPointF& localPos) {
 }
 
 void VulkanWindow::mouseReleaseEvent(QMouseEvent* event) {
-    if (m_modalSwallow & event->button()) {
-        m_modalSwallow &= ~event->button(); // the click that ended the joint mouse mode: all of it
+    if (m_modal.swallow & event->button()) {
+        m_modal.swallow &= ~event->button(); // the click that ended the joint mouse mode: all of it
         return;
     }
-    m_activeDragButtons &= ~event->button();
+    const bool pressedHere = m_pointer.activeDragButtons.testFlag(event->button());
+    m_pointer.activeDragButtons &= ~event->button();
     if (event->button() == Qt::LeftButton && m_lightDrag.active) {
         endLightGesture(); // a light's drag: its one undo entry (a press that never moved: none)
-        m_leftClickCandidate = false;
+        m_pointer.leftClickCandidate = false;
         requestUpdate();
         return;
     }
@@ -187,30 +195,34 @@ void VulkanWindow::mouseReleaseEvent(QMouseEvent* event) {
                 beginIkRelease();
             }
             requestUpdate();
-        } else if (m_leftClickCandidate && m_renderer) {
-            // The orbit gesture that never moved: a CLICK. Within the platform's drag distance
-            // it selects what's under the cursor (or clears the selection on empty space); a
-            // real orbit — however short — leaves the selection alone, so orbiting around a
-            // figure can't deselect it.
-            const bool moved = (event->position() - m_leftPressPos).manhattanLength() >=
+        } else if (m_pointer.leftClickCandidate && m_renderer) {
+            // The orbit gesture that never began: a CLICK. The pointer never left the platform's
+            // drag distance of the press (the move handler drops the candidate the moment it
+            // does), so it selects what's under the cursor (or clears the selection on empty
+            // space). A real orbit — however short, and wherever it ends: back on the press
+            // point too — leaves the selection alone, so orbiting around a figure can't deselect it.
+            const bool moved = (event->position() - m_pointer.leftPressPos).manhattanLength() >=
                                QGuiApplication::styleHints()->startDragDistance();
             if (!moved) {
                 selectModelAtClick(event->position());
             }
         }
-        m_leftClickCandidate = false;
+        m_pointer.leftClickCandidate = false;
         m_ik.dragging = false;
     }
     // Right-click (on release, the desktop convention) opens the object context menu. The right
-    // button drives no camera motion, so there's nothing to disambiguate from a drag here.
-    if (event->button() == Qt::RightButton) {
+    // button drives no camera motion, so there's nothing to disambiguate from a drag here — but
+    // the click must be OURS: a release whose press this window never saw (a dialog or a menu
+    // closing over the viewport with the button down) opens nothing, the rule every other button
+    // follows.
+    if (event->button() == Qt::RightButton && pressedHere) {
         showObjectContextMenu(event->position(), event->globalPosition().toPoint());
     }
 }
 
 void VulkanWindow::showObjectContextMenu(const QPointF& localPos, const QPoint& globalPos) {
-    if (!m_renderer) {
-        return;
+    if (!m_renderer || m_lightDrag.active) {
+        return; // (no menu under a light's drag: its actions would act on the light being moved)
     }
     // A joint under the cursor gets the pin actions (selecting it, so the skeleton overlay —
     // when shown — highlights which joint the menu acts on); the model under the cursor gets
@@ -289,9 +301,9 @@ void VulkanWindow::mouseMoveEvent(QMouseEvent* event) {
     if (!m_renderer) {
         return;
     }
-    const QPointF delta = event->position() - m_lastMousePos;
-    m_lastMousePos = event->position();
-    if (m_modalKind >= 0) {
+    const QPointF delta = event->position() - m_pointer.lastPos;
+    m_pointer.lastPos = event->position();
+    if (m_modal.kind >= 0) {
         // The joint mouse mode: every move turns the selected joint's dial, button or no button
         // (a QWindow gets move events with none held). It requests its own frame when the pose moves.
         jointModalMove(event->position());
@@ -301,7 +313,7 @@ void VulkanWindow::mouseMoveEvent(QMouseEvent* event) {
     // Only act on buttons that are BOTH held now AND were pressed inside this window. Using
     // event->buttons() alone would let a leaked move (e.g. as the modal Import dialog closes
     // over us with a button still logically down) snap the camera from a stale last-position.
-    const Qt::MouseButtons active = m_activeDragButtons & event->buttons();
+    const Qt::MouseButtons active = m_pointer.activeDragButtons & event->buttons();
 
     Camera& camera = m_renderer->camera();
     if ((active & Qt::LeftButton) && m_lightDrag.active) {
@@ -319,13 +331,28 @@ void VulkanWindow::mouseMoveEvent(QMouseEvent* event) {
             // in per-tick units) ran several times faster than designed.
         }
     } else if (active & Qt::LeftButton) {
+        // A press that may still be a CLICK (it hit no joint) orbits nothing while the pointer
+        // stays within the platform's drag distance of it: a click made with a pixel or two of
+        // hand jitter must not turn the view — which also drops an orthographic axis view to
+        // perspective. The orbit BEGINS when the pointer first leaves that distance, with the
+        // whole movement since the press, so nothing of the gesture is lost and the view stands
+        // where it would have had it turned from the first pixel.
+        QPointF turn = delta;
+        if (m_pointer.leftClickCandidate) {
+            const QPointF sincePress = event->position() - m_pointer.leftPressPos;
+            if (sincePress.manhattanLength() < QGuiApplication::styleHints()->startDragDistance()) {
+                return; // still a click: nothing changed, no frame
+            }
+            m_pointer.leftClickCandidate = false; // an orbit from here on, whatever the release finds
+            turn = sincePress;
+        }
         // Grabbing the scene, both ways (the other 3D applications' turntable): drag right and the
         // scene turns right; drag DOWN and it tips toward you — the camera rises to look from above
         // — drag up and the camera sinks to look from below. (Until 2026-11-11 the vertical was the
         // other way round, an airplane's yoke: mouse forward looked down.)
-        camera.orbit(-static_cast<float>(delta.x()) * kOrbitRadiansPerPixel,
-                     static_cast<float>(delta.y()) * kOrbitRadiansPerPixel);
-        if (!delta.isNull()) {
+        if (!turn.isNull()) { // (Camera::orbit leaves an orthographic view even for a turn of nothing)
+            camera.orbit(-static_cast<float>(turn.x()) * kOrbitRadiansPerPixel,
+                         static_cast<float>(turn.y()) * kOrbitRadiansPerPixel);
             noteView(ViewPreset::Free); // orbited away from whatever named view this was
             noteCameraChange();
         }
@@ -347,14 +374,14 @@ void VulkanWindow::wheelEvent(QWheelEvent* event) {
         return;
     }
     const float steps = static_cast<float>(event->angleDelta().y()) / 120.0f;
-    if (m_lightDrag.active && (m_activeDragButtons & event->buttons() & Qt::LeftButton)) {
+    if (m_lightDrag.active && (m_pointer.activeDragButtons & event->buttons() & Qt::LeftButton)) {
         // DEPTH during a light's drag, as during a joint's: each notch moves the drag's plane
         // along the view, the light staying under the pointer.
         lightDragDepth(steps, event->position());
         requestUpdate();
         return;
     }
-    if (m_ik.dragging && (m_activeDragButtons & event->buttons() & Qt::LeftButton)) {
+    if (m_ik.dragging && (m_pointer.activeDragButtons & event->buttons() & Qt::LeftButton)) {
         // DEPTH during a full-body-IK drag. The cursor only ever places the grabbed joint within
         // the camera-parallel drag plane, so without this every "bring the hand forward" needed a
         // release, an orbit, and a second drag. Each notch moves the drag plane along the view
@@ -382,19 +409,25 @@ void VulkanWindow::focusOutEvent(QFocusEvent* event) {
     // left to the stale close-out at the next press: its timer keeps re-issuing the last target,
     // which is harmless, and the mouse-up may still arrive.
     confirmJointModal();
-    m_modalSwallow = Qt::NoButton;
-    m_activeDragButtons = Qt::NoButton;
-    m_leftClickCandidate = false;
+    m_modal.swallow = Qt::NoButton;
+    m_pointer.activeDragButtons = Qt::NoButton;
+    m_pointer.leftClickCandidate = false;
     QWindow::focusOutEvent(event);
 }
 
 void VulkanWindow::keyPressEvent(QKeyEvent* event) {
     // Fallback path: the Edit-menu actions carry the app-wide Ctrl+Z/Ctrl+Y shortcuts, but keep
     // handling the raw keys here too in case a platform delivers them to the native window
-    // without the shortcut map consuming them first.
+    // without the shortcut map consuming them first. Ctrl+SHIFT+Z is redo (the second standard
+    // redo key, and the 3D tools' usual one): the Edit menu's action carries every redo key of
+    // the platform, so it works from a panel too, and this handler is the fallback for it as well.
     if (m_renderer && event->modifiers().testFlag(Qt::ControlModifier)) {
         if (event->key() == Qt::Key_Z) {
-            undo();
+            if (event->modifiers().testFlag(Qt::ShiftModifier)) {
+                redo();
+            } else {
+                undo();
+            }
             event->accept();
             return;
         }
@@ -421,12 +454,12 @@ void VulkanWindow::keyPressEvent(QKeyEvent* event) {
         event->accept();
         return;
     }
-    if (m_modalKind >= 0 && event->key() == Qt::Key_Escape) {
+    if (m_modal.kind >= 0 && event->key() == Qt::Key_Escape) {
         cancelJointModal();
         event->accept();
         return;
     }
-    if (m_modalKind >= 0 && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)) {
+    if (m_modal.kind >= 0 && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)) {
         confirmJointModal();
         event->accept();
         return;
@@ -435,7 +468,7 @@ void VulkanWindow::keyPressEvent(QKeyEvent* event) {
     // app-wide, this is the in-viewport fallback like Ctrl+Z). Not while a button drag owns the
     // camera or the pose.
     if (m_renderer && !dragInFlight() &&
-        !(m_activeDragButtons & (Qt::LeftButton | Qt::MiddleButton)) && handleViewHotkey(event)) {
+        !(m_pointer.activeDragButtons & (Qt::LeftButton | Qt::MiddleButton)) && handleViewHotkey(event)) {
         event->accept();
         return;
     }

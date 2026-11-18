@@ -7,8 +7,9 @@
  * This proxy overlays two things on it without touching the source.
  *
  * (1) Hit state. Each folder row's icon and text color reflect whether the folder contains
- * assets DIRECTLY (AssetScan's non-image-plus-same-basename-image rule), only somewhere BELOW
- * it (IndirectHit), or nowhere (NoHit, greyed); a Collection counts as a hit when it holds at
+ * assets DIRECTLY (AssetScan's rule: a non-image file with a picture named like it), only
+ * somewhere BELOW it (IndirectHit), or nowhere (NoHit, greyed); a Collection counts as a hit
+ * when it holds at
  * least one item that still exists on disk. Classifying a folder means walking its subtree,
  * and data() runs for every visible row on every repaint, so nothing is ever classified inline:
  * an unknown row is queued, painted with a placeholder icon, classified on a QtConcurrent
@@ -17,7 +18,10 @@
  * are merged into a per-path cache on the GUI thread only; the cache and queue reset with the
  * model, and a generation counter discards results from before a reset. The search needs
  * states synchronously (it walks results as it finds them): folderHitState() classifies on
- * the calling thread into the same cache.
+ * the calling thread into the same cache. Between resets the cache is kept true by its owner
+ * saying what changed: refreshNode (one row: a collection's items, the search results),
+ * refreshFolder (an asset's file operation in a folder) and refreshCollections (an asset
+ * deleted from the disk).
  *
  * (2) Drag-and-drop. Only Collection rows are draggable and only Collections/the Collections
  * header accept drops; a validated drop is reported through collectionReparentRequested, and
@@ -64,6 +68,18 @@ public:
     /// knows where its collections and section roots live), so no tree walk happens here.
     void refreshNode(const QModelIndex& proxyIndex);
 
+    /// The FILES of `folderPath` changed (an asset deleted, renamed, added) while the tree stays
+    /// as it is: establishes again, on the calling thread, the hit state of that folder and of
+    /// every folder above it — a folder's state is what lies in and below it — and repaints the
+    /// rows. Every other folder keeps its state: re-walking a library for one deleted file would
+    /// be the cost of a Refresh.
+    void refreshFolder(const QString& folderPath);
+
+    /// An asset that may be filed in collections is gone from the disk: forgets every
+    /// collection's hit state and repaints the rows (the states come back lazily, as on a first
+    /// paint).
+    void refreshCollections();
+
     /// SYNCHRONOUS classification for the search: walks the subtree on the calling thread and
     /// caches every folder it visits. The painting path never calls this.
     FolderHitState folderHitState(const QString& folderPath) const;
@@ -99,14 +115,22 @@ private:
     void dispatchHitChecks() const;
     /// Loads the collection -> item paths aggregate once per invalidation.
     void ensureCollectionItemsLoaded() const;
+    /// Drops every queued check and makes the result of every running one void: they read the
+    /// disk or the database as it was. (The rows are asked again when they are next painted.)
+    void abandonHitChecks();
+    /// dataChanged for the icon and color of every loaded row under `parent`.
+    void announceHitStates(const QModelIndex& parent);
 
     mutable QHash<QString, FolderHitState> m_hitCache;
     mutable QList<HitJob> m_pendingHitChecks;
     mutable QSet<QString> m_pendingHitIds;   ///< Queued OR in flight: blocks duplicate jobs for one row
+    /// Rows refreshed (refreshNode) while a check of them was queued or running: that check's
+    /// result is not kept, and the row is asked once more.
+    QSet<QString> m_staleHitIds;
     mutable int m_hitChecksInFlight = 0;
     const int m_maxHitChecksInFlight;
-    /// Bumped on every model reset: a worker result created under an older generation is
-    /// discarded (its row and cache are gone).
+    /// Bumped on every model reset and whenever the running checks are abandoned: a worker
+    /// result created under an older generation is discarded.
     mutable int m_generation = 0;
 
     mutable QHash<int, QStringList> m_collectionItems; ///< collection id -> item paths (one aggregate query)

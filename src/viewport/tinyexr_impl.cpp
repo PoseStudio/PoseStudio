@@ -7,8 +7,8 @@
  * <tinyexr.h> for declarations only. Used by environmentsource.cpp to decode `.exr` panoramas.
  *
  * TINYEXR_USE_MINIZ (tinyexr's default) routes its ZIP inflate through <miniz.h> — satisfied by
- * the same miniz sources the figure importer already compiles into the target (see the
- * target_sources block in CMakeLists.txt), so EXR support adds no zlib dependency.
+ * the same miniz objects the figure importer inflates its files with (the build's
+ * posestudio_miniz library, in CMakeLists.txt), so EXR support adds no zlib dependency.
  */
 
 #define TINYEXR_IMPLEMENTATION

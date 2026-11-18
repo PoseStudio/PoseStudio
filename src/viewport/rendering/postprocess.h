@@ -140,7 +140,7 @@ public:
     VkDescriptorImageInfo bloomInfo() const;
 
     /// VR Mode's DEPTH RESOLVE (XR_KHR_composition_layer_depth): the eye target's multisampled
-    /// depth (@p msaaDepth = HdrTarget::depthInfo of a storeDepth target, @p sampleCount samples)
+    /// depth (@p msaaDepth = HdrTarget::depthInfo, @p sampleCount samples)
     /// resolved — the nearest sample — into the headset's single-sample depth image through
     /// @p depthRenderPass (the session's depth-only pass, cleared to 1.0 here). Build once after
     /// construction; recordDepthResolve then runs per eye.

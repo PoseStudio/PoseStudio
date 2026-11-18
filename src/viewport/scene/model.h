@@ -1,14 +1,19 @@
 /**
  * @file model.h
- * @brief One imported model (OBJ mesh or rigged figure): its meshes under a shared transform,
- *        the armature that poses it, and the per-frame GPU pose data the shaders skin with.
+ * @brief One imported model (a static mesh, a rigged figure, or a Gaussian splat scene): its
+ *        meshes under a shared transform, the armature that poses it, and the per-frame GPU
+ *        pose data the shaders skin with.
  *
  * A Model groups the meshes of one imported file (one Mesh per material group — mesh.h), owns
- * the descriptor pool their set-1 descriptors and its own per-frame set-2 (pose) descriptors
- * come from, and carries an Armature (armature.h) — the runtime skeleton, pose, pins, and
- * full-body IK of a skinned figure — whose skinning dual quaternions it uploads per frame in
- * flight, next to the pose correctives' weights (CorrectiveSet) and the ground samples the
- * ground button scans (GroundSampler). Every posing call here is a thin forwarder into the
+ * the descriptor pool their set-1 descriptors and its own per-frame set-2 (pose + material)
+ * descriptors come from, and carries an Armature (armature.h) — the runtime skeleton, pose,
+ * pins, and full-body IK of a skinned figure — whose skinning dual quaternions it uploads per
+ * frame in flight, next to the pose correctives' weights (CorrectiveSet), the zones' packed
+ * materials, and the CPU copy of its surface that grounding and picking read (GroundSampler).
+ * A splat scene has a SplatCloud (splatcloud.h) in place of meshes. The class is two
+ * translation units: model.cpp (construction, the record paths, bounds and picking, the
+ * zones' materials and smoothing) and modelbake.cpp (bakePosedMesh: the vertex stage on the CPU
+ * for a render engine). Every posing call here is a thin forwarder into the
  * armature (the ones that change the pose also refresh this model's correctives, which the
  * armature can't know about); new posing behaviour belongs in the armature, never here — the
  * split is what lets the IK harness drive the real drag loop without Vulkan. Qt-free.
@@ -19,7 +24,7 @@
 
 #include "armature.h"      // the skeleton + pose + IK a Model poses through
 #include "correctiveset.h" // the GPU-blended pose correctives
-#include "groundsampler.h" // the ground button's posed lowest-point scan
+#include "groundsampler.h" // the surface on the CPU: the ground scan and the picks' casts
 #include "mesh.h"
 #include "posedmesh.h"     // PosedMesh: a mesh as posed, for a render engine
 #include "vulkanbuffer.h"
@@ -144,9 +149,11 @@ public:
         std::vector<std::pair<std::string, std::string>> textures;
     };
     std::vector<MaterialOverride> materialOverrides() const;
-    /// (@p keepSmoothing: the zone keeps its own smoothing whatever @p params carry — a project
-    /// saved before THE SMOOTHING existed says nothing of it.)
-    bool applyMaterialOverride(const std::string& zone, const MaterialParams& params, bool keepSmoothing = false);
+    /// (@p named: the values of @p params that count — the keys the override's file named,
+    /// ProjectMaterial::named. Every other value stays as the zone has it: a project saved by a
+    /// build that did not know a value yet says nothing of it, and the zone keeps the import's.
+    /// Null: every value of @p params.)
+    bool applyMaterialOverride(const std::string& zone, const MaterialParams& params, const std::vector<std::string>* named = nullptr);
     /// THE TEXTURE SLOTS: replaces slot @p map of mesh @p i (Mesh::setSlotImage — the caller has
     /// derived @p gpuImage and waited for the device), re-partitioning the meshes if the cutout
     /// changed the mesh's transparency; bumps materialRevision(). False for a bad index.
@@ -186,10 +193,20 @@ public:
     /// the dominant joint's rigid motion is exact for the near-single-joint shells that layer.
     glm::vec3 posedCentroid(const Mesh& mesh) const;
 
-    /// The model's world-space AABB (local bounds through the model transform), unioned with a
-    /// posed figure's live joint positions plus a flesh margin. Returns false when the model has
-    /// no geometry bounds. Used to fit the key light's shadow frustum and for framing.
+    /// The model's world-space AABB with its bind box where it was IMPORTED: the local bounds
+    /// through the model transform, unioned with a posed figure's live joint positions plus a
+    /// flesh margin. Returns false when the model has no geometry bounds. Exact for a static
+    /// model (a splat scene's box: eyeInsideSplatBox); for a figure that has been moved in her
+    /// pose it spans where she was and where she is — use posedBounds for "where is she".
     bool worldBounds(glm::vec3& outMin, glm::vec3& outMax) const;
+    /// WHERE THE MODEL IS, as posed: for a figure the bind box carried by her root's (the hips')
+    /// skin transform, then the model transform — so it goes and turns with her when she is
+    /// moved, grounded, walked or laid down — unioned with her live joints plus the flesh
+    /// margin, as worldBounds. The same box as worldBounds for a static model and for a figure
+    /// whose root is at bind. What a light is aimed at, what Frame Selected frames
+    /// (Scene::subjectBounds / framingBounds) and what the key light's shadow frustum is fitted
+    /// around (ShadowPass::fit). False without geometry bounds.
+    bool posedBounds(glm::vec3& outMin, glm::vec3& outMax) const;
 
     /// The model matrix (owned by the armature — IK, picking, and grounding all need it).
     const glm::mat4& transform() const { return m_armature.transform(); }
@@ -221,8 +238,7 @@ public:
     /// positions, channels and the rig's step count from it).
     const Armature& armature() const { return m_armature; }
     void setSelectedBone(int index) { m_armature.setSelectedBone(index); }
-    // THE GROUP (Armature::toggleGroupBone): several joints dragged together.
-    bool toggleGroupBone(int index) { return m_armature.toggleGroupBone(index); }
+    // THE GROUP (Armature::makeGroupPrimary): several joints dragged together.
     bool makeGroupPrimary(int index) { return m_armature.makeGroupPrimary(index); }
     bool removeFromGroup(int index) { return m_armature.removeFromGroup(index); }
     bool inGroup(int index) const { return m_armature.inGroup(index); }
@@ -333,8 +349,9 @@ public:
     /// The FIRST point of the CURRENT pose's SKIN along @p ray (world) and the joint that weighs
     /// most on the skin there — what a click is ON (GroundSampler::pickSurface; the opaque meshes
     /// only) — and, in @p mesh when given, the mesh (material zone) the hit is on. A STATIC model's
-    /// surface is cast through its transform (its samples are kept up to a triangle cap). False
-    /// for a ray that misses or a model without samples.
+    /// surface is cast through its transform (its samples are kept up to a triangle cap); its
+    /// hit has no joint, and @p bone is -1. False for a ray that misses or a model without
+    /// samples.
     bool pickSurface(const Ray& ray, float& tOut, glm::vec3& hitWorld, int& bone, int* mesh = nullptr) const;
     /// What a click's ray meets of a model (pickExact). Distances are the world's, along the
     /// ray's unit direction: comparable across models.
@@ -385,6 +402,11 @@ private:
     /// Which of the model's meshes a record path draws.
     enum class MeshFilter { Opaque, All, NotMasked };
 
+    /// The constructor's last step: the per-frame-slot joint and material buffers and the set-2
+    /// descriptors over them and the correctives' buffers (m_meshes, m_jointCount and the
+    /// corrective buffers exist by then).
+    void createPoseBuffers(VulkanContext& context, VkDescriptorSetLayout poseSetLayout);
+
     /// Rebuilds m_opaqueMeshes / m_transparentMeshes from Mesh::isTransparent (at construction,
     /// and after a material edit moved a mesh across).
     void repartitionMeshes();
@@ -399,6 +421,18 @@ private:
     void recordPositionOnly(VkCommandBuffer cmd, VkPipelineLayout layout, const glm::mat4& viewProj,
                             uint32_t frameIndex, MeshFilter filter);
 
+    /// worldBounds / posedBounds: the bind box's corners through @p boxToWorld, unioned with a
+    /// figure's live joints plus the flesh margin.
+    bool boundsThrough(const glm::mat4& boxToWorld, glm::vec3& outMin, glm::vec3& outMax) const;
+    /// The world AABB of the posed joints, with no margin (the caller has a skeleton: with no
+    /// bones the box comes back inverted). A bone the figure's root does not carry (the figure
+    /// node above the hips) is counted where the root's motion takes it, so the box is where
+    /// the figure IS after she has been moved in her pose.
+    void jointWorldBox(glm::vec3& lo, glm::vec3& hi) const;
+    /// Whether @p ray starts inside a splat scene's world box — an environment the camera stands
+    /// in, which no click is on (intersectRay, pickExact). False for a model that is none.
+    bool eyeInsideSplatBox(const Ray& ray) const;
+
     /// Uploads the armature's skin data into frame slot @p frameIndex's joint buffer if that slot
     /// hasn't seen the current Armature::skinVersion yet, and likewise the pose-corrective
     /// weights (CorrectiveSet::uploadIfDirty).
@@ -412,8 +446,10 @@ private:
     // can't leak it. Sized to one set-1 per mesh + one set-2 per frame slot.
     UniqueDescriptorPool     m_descriptorPool;
     std::vector<Mesh>        m_meshes;
-    // The meshes partitioned once by Mesh::isTransparent (pointers into m_meshes, which never
-    // changes after construction), so the record paths don't re-test every mesh every frame.
+    // The meshes partitioned by Mesh::isTransparent (pointers into m_meshes, which never
+    // reallocates after construction), so the record paths don't re-test every mesh every frame:
+    // at construction, and again whenever a material or texture-slot edit moves a mesh across
+    // (repartitionMeshes).
     std::vector<const Mesh*> m_opaqueMeshes;
     std::vector<const Mesh*> m_transparentMeshes;
     glm::vec3                m_boundsMin{0.0f}; // local-space AABB over all mesh vertices
@@ -453,7 +489,8 @@ private:
 
     // Pose correctives, blended on the GPU (set 2 bindings 1 + 2 — see correctiveset.h).
     CorrectiveSet            m_correctives;
-    // The ground button's samples (skinned models only — see groundsampler.h).
+    // The surface on the CPU: the ground button's samples and the picks' triangles (a static
+    // model's too, up to a triangle cap — see groundsampler.h).
     GroundSampler            m_ground;
 };
 

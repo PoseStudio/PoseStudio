@@ -10,8 +10,8 @@
  *     user travels beyond the request itself and a "PoseStudio/<version>" user agent (GitHub
  *     requires one). Pre-releases and drafts are never offered: that endpoint excludes them.
  *   - It never blocks or delays anything: a timer arms it after the window is up, the request
- *     carries a transfer timeout, every failure is logged at debug level and ignored, and it
- *     never retries in the same session.
+ *     carries a transfer timeout, every failure is logged (qInfo, under "[update]") and
+ *     ignored, and it never retries in the same session.
  *   - The user can switch the startup check off in Preferences → General
  *     (PREF_UPDATE_CHECK_ENABLED, default on) and can silence one particular version ("Skip This
  *     Version" in the prompt, PREF_UPDATE_SKIPPED_VERSION). Help → "Check for Updates…" runs the
@@ -22,6 +22,8 @@
  *   - POSESTUDIO_NO_UPDATE_CHECK=1 in the environment disables the startup check for that run.
  *   - POSESTUDIO_UPDATE_URL=<url> overrides the endpoint — point it at a local server that
  *     returns {"tag_name":"v9.9.9","html_url":"..."} to see the prompt without a real release.
+ * A scripted or probing run (core/runmode.h) skips the startup check: nobody is there to read
+ * the prompt, and it would sit over the window such a run reads.
  */
 
 #ifndef UPDATECHECK_H

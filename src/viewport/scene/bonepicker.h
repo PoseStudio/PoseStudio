@@ -37,6 +37,12 @@ struct BonePick {
     float along = 0.0f;
 };
 
+/// How near (pixels) a click must be to a joint's projected origin to be right ON the joint:
+/// pickBone's first priority, and the radius of the joint snap Scene::pickBoneAt makes after a
+/// hit on the skin — one number, so a click that takes the joint in one path takes it in the
+/// other.
+inline constexpr float kJointSnapPx = 14.0f;
+
 /// Finds the figure joint under the pixel (@p px, @p py) of a @p vpW × @p vpH viewport. Every
 /// figure's joints compete and the nearest of ANY figure wins.
 ///

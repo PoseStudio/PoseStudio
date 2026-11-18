@@ -26,7 +26,7 @@ bool graftBlockPopulated(const nlohmann::json& graft, const char* key) {
     if (it->is_array()) {
         return !it->empty();
     }
-    return it->is_object() && it->value("count", 0) > 0;
+    return intOf(*it, "count", 0) > 0;
 }
 
 } // namespace

@@ -120,7 +120,7 @@ int favoritesRevision();
 /// transaction.
 bool setCollectionOrder(int collectionId, const QStringList& pathsInOrder);
 
-/// The asset filed as `oldPath` is at `newPath` now — renamed or moved on disk (assetstore.h):
+/// The asset filed as `oldPath` is at `newPath` now — renamed or moved on disk (assetfileops.h):
 /// its Favorites entry and every collection filing follow it, each keeping its place. Where the
 /// new path is filed already (a favorite, or in the same collection), the old filing just goes.
 /// One transaction.

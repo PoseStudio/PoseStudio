@@ -86,8 +86,9 @@ jobs:
           }
           if (-not $downloaded) { throw 'Could not download the Vulkan SDK installer.' }
           # Documented silent-install invocation for the LunarG SDK installer.
-          # It installs to C:\VulkanSDK\<version>, which CMakeLists.txt finds on
-          # its own (it globs C:/VulkanSDK/* when VULKAN_SDK is not set).
+          # It installs to C:\VulkanSDK\<version>, which the build finds on its
+          # own (cmake/Dependencies.cmake globs C:/VulkanSDK/* when VULKAN_SDK is
+          # not set).
           Start-Process -Wait -FilePath $installer -ArgumentList `
             '--accept-licenses', '--default-answer', '--confirm-command', 'install'
 

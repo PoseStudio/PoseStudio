@@ -11,7 +11,7 @@
  * way. Two things a newcomer must not "fix":
  *
  *  - The channel readers come in TWO deliberate flavours, documented side by side below: the
- *    "current wins" readers (channelScalar/channelDouble/channelBool/channelColor) for DIALED values
+ *    "current wins" readers (channelScalar/channelBool/channelColor) for DIALED values
  *    — a material color, a morph weight — and the "rest wins" reader (restVec3Channels) for BIND
  *    transforms, where a scene's current_value is the posed state and the bind must come from rest.
  *  - parseChannelRef() returns BOTH the raw and the percent-decoded id, and AN ID IS COMPARED
@@ -59,6 +59,17 @@ ChannelRef parseChannelRef(const std::string& ref);
 /// literally; '+' is left as-is (the figure format encodes spaces as %20, not '+').
 std::string urlDecode(const std::string& s);
 
+/// The id a plain reference names — what follows its '#', percent-decoded: "#Some%20Hair" and
+/// "/data/x.dsf#Some%20Hair" both give "Some Hair" (a reference with no '#' is taken to be the id
+/// itself). A bone's `parent`, a skin joint's `node`, a material's base `url`, a scene entry's
+/// `geometry` are all compared with a file's own "id" fields through this: AN ID IS COMPARED
+/// DECODED (see the file comment), and each of those sites once compared it as written.
+std::string referencedId(const std::string& reference);
+
+/// 'x' / 'y' / 'z' -> 0 / 1 / 2, anything else -1: the axis a property's trailing letter names
+/// ("rotation/x", "center_point/y").
+int axisIndex(char letter);
+
 /// ASCII-lowercases @p s in place and returns it (byte-wise; the format's ids and file names are
 /// ASCII, and this must stay locale-independent).
 std::string toLowerAscii(std::string s);
@@ -74,6 +85,31 @@ const nlohmann::json& valuesArray(const nlohmann::json& node);
 /// Note it only FINDS: the result may be any JSON type — check is_object()/is_string() before
 /// calling value()/get() on it (both throw on the wrong type).
 const nlohmann::json* childOf(const nlohmann::json* node, const char* key);
+
+// --- Tolerant field readers --------------------------------------------------------------------
+// nlohmann's value("key", fallback) THROWS on a value that is no object, and on a key that holds
+// another type than the fallback's. These files are machine-written and nearly always well
+// typed — which is why the one that is not must cost the field it is wrong in, never the import
+// (a third-party morph with "formulas": [null] once could abort a whole character). Each reader
+// returns its fallback for a non-object, a missing key, and a value of another type; on a
+// well-typed file it is value() exactly.
+
+/// The string at @p key of @p object.
+std::string stringOf(const nlohmann::json& object, const char* key,
+                     const std::string& fallback = std::string());
+
+/// The boolean at @p key of @p object (a number counts as "not zero": a switch written 0 / 1).
+bool boolOf(const nlohmann::json& object, const char* key, bool fallback);
+
+/// The number at @p key of @p object, as a float / as an int. A boolean reads as 0 / 1: a channel
+/// that is a switch writes its value as true / false.
+float floatOf(const nlohmann::json& object, const char* key, float fallback);
+int   intOf(const nlohmann::json& object, const char* key, int fallback);
+
+/// The number at @p key of @p object in double precision — a channel field may also be written
+/// as a boolean (a switch), read as 0 / 1 — into @p out. False, and @p out untouched, when the
+/// field is absent or anything else.
+bool numberOf(const nlohmann::json& object, const char* key, double& out);
 
 /// The geometry_library entry named @p fragment in @p doc, else the FIRST entry (also when
 /// @p fragment is empty); nullptr if the document carries no geometry.
@@ -130,9 +166,12 @@ struct FigureScope {
 /// null); an unscoped, empty scope for a document with no figure node (a bare base file).
 FigureScope figureScopeOf(const nlohmann::json& root, const nlohmann::json* figureNode = nullptr);
 
-/// True when @p root is a document the figure importer loads: a base figure file (it carries a
-/// geometry_library) or a preset whose scene names a figure's geometry (findFigureNode) — the
-/// test loadFigureFile makes before anything else. A pose, material or shape preset is neither.
+/// True when @p root is a document the figure importer can load: a base figure file (it carries a
+/// non-empty geometry_library) or a preset whose scene names a figure's geometry (findFigureNode).
+/// A pose, material or shape preset is neither. This is figureFileKind's test — "is it worth
+/// offering to the importer" — not the importer's own, which asks the figure node first and only
+/// then the geometry_library (see loadFigureFile), so the two can differ on a document that
+/// carries an EMPTY geometry_library beside a figure node.
 bool isFigureRoot(const nlohmann::json& root);
 
 /// What a figure file holds, as far as opening it goes.
@@ -148,9 +187,9 @@ enum class FigureFileKind {
 /// isFigureRoot over a file's raw bytes (plain or gzip-compressed), for a caller that has not
 /// parsed it — the Asset Manager asking which file in a folder is THE character — and what kind
 /// of figure it is. A preset lists its figure's bones as scene nodes (each with a parent in the
-/// file); a figure with at least kCharacterMinBones of them is a character. A file that names no geometry at all skips the JSON parse (the
-/// textual prefilter), so a folder of pose or material presets costs its reads; anything
-/// unreadable is NotAFigure, never an exception.
+/// file); a figure with at least kCharacterMinBones of them is a character. A file that names no
+/// geometry at all skips the JSON parse (the textual prefilter), so a folder of pose or material
+/// presets costs its reads; anything unreadable is NotAFigure, never an exception.
 FigureFileKind figureFileKind(std::vector<std::uint8_t> bytes);
 
 /// The modifier_library entry whose "id" equals @p id, or nullptr. @p id is the id as the file
@@ -158,9 +197,8 @@ FigureFileKind figureFileKind(std::vector<std::uint8_t> bytes);
 const nlohmann::json* findModifierById(const nlohmann::json& doc, const std::string& id);
 
 /// The modifier whose morph a reference to @p fragment applies: the entry whose "id" equals
-/// @p fragment if it carries a "morph" — nullptr if that entry is a control with none — and, only
-/// when @p fragment is empty or names no entry of this file, the first entry that has a "morph" at
-/// all (nullptr for a formula-only driver document).
+/// @p fragment (the decoded id), if it carries a "morph". nullptr if that entry is a control with
+/// none, and nullptr if the file defines no such entry — never some other entry's morph.
 const nlohmann::json* findMorphModifier(const nlohmann::json& doc, const std::string& fragment);
 
 // --- Channel readers ---------------------------------------------------------------------------
@@ -173,16 +211,12 @@ const nlohmann::json* findMorphModifier(const nlohmann::json& doc, const std::st
 /// The channel's scalar as float ("current_value", else "value"), else @p fallback.
 float channelScalar(const nlohmann::json& channel, float fallback);
 
-/// The same lookup in double precision — the morph resolver accumulates channel values as doubles
-/// through its formula rounds, and a float round-trip would perturb the last bits it propagates.
-double channelDouble(const nlohmann::json& channel, double fallback);
-
 /// The channel's boolean ("current_value", else "value"; numbers are tolerated as != 0), else
 /// @p fallback.
 bool channelBool(const nlohmann::json& channel, bool fallback);
 
 /// Reads a float_color channel's RGB ("current_value", else "value") into @p out; false (and
-/// @p out untouched) when the channel carries neither as a 3+ element array.
+/// @p out untouched) when the channel carries neither as an array of three numbers or more.
 bool channelColor(const nlohmann::json& channel, glm::vec3& out);
 
 /// Reads an array of three channel_float objects ([{id:x,value:..},{id:y,..},{id:z,..}]) into a

@@ -282,10 +282,12 @@ void Armature::findHangFeet(std::vector<HangFoot>& out, std::vector<char>* flags
 }
 
 bool Armature::beginHangFeetLanding() {
-    m_hangFeet.clear();
-    if (m_bones.empty() || !ensureIkRig() || m_ikRig->dragActive() || m_landing.active) {
+    // (Not while a drag owns the pose: the rig's, or a figure move's or a digit drag's, in which
+    // the rig has no drag. A drag lands the hanging feet itself, and this list is then its own.)
+    if (m_figureMove || m_digitDrag || m_bones.empty() || !ensureIkRig() || m_ikRig->dragActive() || m_landing.active) {
         return false;
     }
+    m_hangFeet.clear();
     findHangFeet(m_hangFeet, nullptr);
     return !m_hangFeet.empty();
 }

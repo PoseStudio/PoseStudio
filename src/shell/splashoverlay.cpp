@@ -18,6 +18,7 @@
 #include <QRect>
 #include <QShowEvent>
 #include <QVBoxLayout>
+#include <QWindow>
 
 SplashOverlay::SplashOverlay(QWidget *parent)
     : QWidget(parent, Qt::Tool | Qt::FramelessWindowHint) {
@@ -94,15 +95,16 @@ SplashOverlay::SplashOverlay(QWidget *parent)
     // Dismiss on the next mouse press ANYWHERE in the app, not just on the splash window.
     // As a translucent top-level window, clicks on its fully-transparent regions fall
     // through to the app beneath it, so watching only this widget would miss them — filter
-    // the whole application instead. (The parent's resize/move events also arrive through
-    // this same app-wide filter, which keeps the overlay aligned over the window.)
+    // the whole application instead (see eventFilter for which presses it also consumes).
+    // (The parent's resize/move events also arrive through this same app-wide filter, which
+    // keeps the overlay aligned over the window.)
     if (qApp) {
         qApp->installEventFilter(this);
     }
 }
 
 void SplashOverlay::mousePressEvent(QMouseEvent *) {
-    dismiss(); // fallback; in practice the app-wide filter intercepts the press first
+    dismiss(Qt::NoButton); // fallback; in practice the app-wide filter intercepts the press first
 }
 
 void SplashOverlay::showEvent(QShowEvent *event) {
@@ -116,29 +118,73 @@ void SplashOverlay::showEvent(QShowEvent *event) {
 
 bool SplashOverlay::eventFilter(QObject *watched, QEvent *event) {
     const QEvent::Type type = event->type();
-    // Any mouse press anywhere in the app dismisses the splash, and is consumed so the
-    // dismissing click doesn't also act on whatever sits underneath it.
-    if (type == QEvent::MouseButtonPress) {
-        dismiss();
-        return true;
-    }
     // As a top-level window we don't move with the parent automatically, so follow both
     // its resizes and moves to stay aligned over the window.
-    if (watched == parent() && (type == QEvent::Resize || type == QEvent::Move)) {
+    if (!m_dismissed && watched == parent() && (type == QEvent::Resize || type == QEvent::Move)) {
         syncGeometryToParent();
     }
-    return QWidget::eventFilter(watched, event);
+    // A press or a release is read as it arrives at a WINDOW, before a widget gets its copy: one
+    // physical click, one reading.
+    if ((type != QEvent::MouseButtonPress && type != QEvent::MouseButtonRelease) || !watched->isWindowType()) {
+        return QWidget::eventFilter(watched, event);
+    }
+    const Qt::MouseButton button = static_cast<QMouseEvent *>(event)->button();
+    if (m_dismissed) {
+        // Gone from the screen, and still here for one thing: the release of the press that
+        // dismissed it. (Another button's release is not it. A press instead: that release
+        // never came, and this press is nobody's but its widget's.)
+        if (type == QEvent::MouseButtonRelease && button != m_swallowButton) {
+            return false;
+        }
+        finish();
+        return type == QEvent::MouseButtonRelease;
+    }
+    if (type != QEvent::MouseButtonPress) {
+        return QWidget::eventFilter(watched, event);
+    }
+    // ANY press dismisses the splash. It is CONSUMED — so that the dismissing click does not
+    // also act on whatever sits underneath — only where it landed on the splash's own area,
+    // and then its release is consumed too: a release with no press before it is not nothing
+    // to everyone (the viewport opens its context menu on a right button's release). A press
+    // on a window that came up OVER the splash — the update prompt's buttons — is that
+    // window's: it dismisses the splash and does what it was pressed for.
+    const bool ownArea = onOwnArea(static_cast<QWindow *>(watched));
+    dismiss(ownArea ? button : Qt::NoButton);
+    return ownArea;
 }
 
-void SplashOverlay::dismiss() {
+bool SplashOverlay::onOwnArea(const QWindow *target) const {
+    const QWindow *top = target;
+    while (top->parent() != nullptr) {
+        top = top->parent(); // a native child (the 3D viewport) counts as the window it is in
+    }
+    if (top == windowHandle()) {
+        return true; // the artwork
+    }
+    // … and, through the splash's transparent regions, the window it covers or a tool window
+    // floating over that one (the viewport's strip): they lie UNDER the splash.
+    const QWidget *owner = parentWidget();
+    const QWindow *covered = owner != nullptr ? owner->window()->windowHandle() : nullptr;
+    return covered != nullptr && (top == covered || (top->type() == Qt::Tool && top->transientParent() == covered));
+}
+
+void SplashOverlay::dismiss(Qt::MouseButton awaitedRelease) {
     if (m_dismissed) {
         return;
     }
     m_dismissed = true;
+    m_swallowButton = awaitedRelease;
+    hide();
+    emit dismissed();
+    if (awaitedRelease == Qt::NoButton) {
+        finish(); // nothing to wait for
+    }
+}
+
+void SplashOverlay::finish() {
     if (qApp) {
         qApp->removeEventFilter(this);
     }
-    emit dismissed();
     deleteLater();
 }
 

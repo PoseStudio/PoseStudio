@@ -30,6 +30,7 @@
  * Developer levers:
  *   - POSESTUDIO_NO_PING=1 in the environment disables the ping for that run.
  *   - POSESTUDIO_PING_URL=<url> overrides the endpoint (a local listener, a staging server).
+ * A scripted or probing run (core/runmode.h) never pings: it is not somebody's launch.
  */
 
 #ifndef INSTALLPING_H

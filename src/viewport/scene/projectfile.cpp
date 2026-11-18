@@ -27,13 +27,9 @@ constexpr int         kVersion      = 1;
 /// hand-edited file can't feed an absurd angle to the limit clamp downstream.
 float wrapDegrees(float v) { return std::fmod(v, 360.0f); }
 
-/// [x, y, z] and a boolean field: the material codec's readers (materialjson.h), under the
-/// names this file has always called them by.
-bool readVec3(const json& j, glm::vec3& out) { return readJsonVec3(j, out); }
-
 /// Reads @p j's [x, y, z] into @p out, wrapping each channel into [-360, 360].
 bool readVec3Degrees(const json& j, glm::vec3& out) {
-    if (!readVec3(j, out)) {
+    if (!readJsonVec3(j, out)) {
         return false;
     }
     out = glm::vec3(wrapDegrees(out.x), wrapDegrees(out.y), wrapDegrees(out.z));
@@ -62,10 +58,14 @@ bool readQuat(const json& j, glm::vec4& out) {
     return true;
 }
 
-/// Reads one lighting dial by field name.
-/// older build simply lacks the new dial); present but non-numeric or non-finite rejects the file.
-template <class T>
-bool readSetting(const json& j, const char* field, T& out) {
+/// Reads one lighting dial by field name. Absent keeps the struct's default (a file from an
+/// older build simply lacks the new dial); present but non-numeric, non-finite or past a
+/// float's range rejects the file.
+bool readSetting(const json& j, const char* field, float& out) { return readJsonFloat(j, field, out); }
+
+/// … and a dial that is a whole number (the backdrop's mode): one that an int does not hold
+/// rejects the file too.
+bool readSetting(const json& j, const char* field, int& out) {
     const auto it = j.find(field);
     if (it == j.end()) {
         return true;
@@ -74,15 +74,12 @@ bool readSetting(const json& j, const char* field, T& out) {
         return false;
     }
     const double v = it->get<double>();
-    if (!std::isfinite(v)) {
+    if (!std::isfinite(v) || v < -2147483648.0 || v > 2147483647.0) {
         return false;
     }
-    out = static_cast<T>(v);
+    out = static_cast<int>(v);
     return true;
 }
-
-/// The bool analogue (a JSON boolean, not a number).
-bool readBoolSetting(const json& j, const char* field, bool& out) { return readJsonBool(j, field, out); }
 
 /// The environment's `settings` object: every LightingSettings field by name (absent = default).
 bool readLightingSettings(const json& j, LightingSettings& s) {
@@ -99,12 +96,12 @@ bool readLightingSettings(const json& j, LightingSettings& s) {
            readSetting(j, "keyElevationDeg",        s.keyElevationDeg) &&
            readSetting(j, "subsurface",             s.subsurface) &&
            readSetting(j, "rimIntensity",           s.rimIntensity) &&
-           readBoolSetting(j, "tonemap",            s.tonemap) &&
+           readJsonBool(j, "tonemap",               s.tonemap) &&
            readSetting(j, "backdropMode",           s.backdropMode) &&
            readSetting(j, "backdropBlur",           s.backdropBlur) &&
            readSetting(j, "backdropBrightness",     s.backdropBrightness) &&
            readSetting(j, "domeRadius",             s.domeRadius) &&
-           readBoolSetting(j, "shadowsEnabled",   s.shadowsEnabled) &&
+           readJsonBool(j, "shadowsEnabled",        s.shadowsEnabled) &&
            readSetting(j, "shadowIntensity",        s.shadowIntensity) &&
            readSetting(j, "shadowSoftness",         s.shadowSoftness) &&
            readSetting(j, "shadowReach",            s.shadowReach);
@@ -154,9 +151,10 @@ bool readFigure(const json& j, ProjectFigure& fig) {
         }
     }
 
-    // The Materials tab's per-zone edits: each entry names its zone and carries the values that
-    // differ from the struct's defaults (an absent value keeps the default; a non-numeric or
-    // non-finite one rejects the file, as everywhere).
+    // The Materials tab's per-zone edits: each entry names its zone and carries the zone's
+    // values (a non-numeric or non-finite one rejects the file, as everywhere). Which of them
+    // the entry NAMES is kept beside them: an absent value reads as the struct's default here,
+    // and the loader gives the zone its own imported value for it instead (ProjectMaterial::named).
     const auto materialsIt = j.find("materials");
     if (materialsIt != j.end()) {
         if (!materialsIt->is_array()) {
@@ -175,7 +173,9 @@ bool readFigure(const json& j, ProjectFigure& fig) {
             if (!materialFromJson(entry, m.params, m.textures)) {
                 return false;
             }
-            m.hasSmoothing = entry.contains("smoothByAngle");
+            for (const auto& item : entry.items()) {
+                m.named.push_back(item.key());
+            }
             fig.materials.push_back(std::move(m));
         }
     }
@@ -189,7 +189,7 @@ bool readFigure(const json& j, ProjectFigure& fig) {
     }
 
     const auto transIt = j.find("rootTranslation");
-    if (transIt != j.end() && !readVec3(*transIt, fig.rootTranslation)) {
+    if (transIt != j.end() && !readJsonVec3(*transIt, fig.rootTranslation)) {
         return false;
     }
 
@@ -200,7 +200,7 @@ bool readFigure(const json& j, ProjectFigure& fig) {
         }
         const json& t = *transformIt;
         const auto tr = t.find("translation");
-        if (tr != t.end() && !readVec3(*tr, fig.translation)) {
+        if (tr != t.end() && !readJsonVec3(*tr, fig.translation)) {
             return false;
         }
         const auto ro = t.find("rotation");
@@ -208,7 +208,7 @@ bool readFigure(const json& j, ProjectFigure& fig) {
             return false;
         }
         const auto sc = t.find("scale");
-        if (sc != t.end() && !readVec3(*sc, fig.scale)) {
+        if (sc != t.end() && !readJsonVec3(*sc, fig.scale)) {
             return false;
         }
     }
@@ -251,35 +251,21 @@ bool readLight(const json& j, SceneLight& light) {
         if (!it->is_string()) {
             return false;
         }
-        const std::string kind = it->get<std::string>();
-        light.kind = kind == "spot" ? LightKind::Spot : kind == "area" ? LightKind::Area : kind == "sun" ? LightKind::Sun : LightKind::Point;
+        light.kind = LightKind::Point;
+        lightKindFromKey(it->get<std::string>(), light.kind); // (scenelight.h's keys: "point", "spot", "area", "sun")
     }
-    if (const auto it = j.find("position"); it != j.end() && !readVec3(*it, light.position)) {
+    if (const auto it = j.find("position"); it != j.end() && !readJsonVec3(*it, light.position)) {
         return false;
     }
-    if (const auto it = j.find("color"); it != j.end() && !readVec3(*it, light.color)) {
+    if (const auto it = j.find("color"); it != j.end() && !readJsonVec3(*it, light.color)) {
         return false;
     }
-    return readBoolSetting(j, "enabled", light.enabled) && readSetting(j, "turnDeg", light.turnDeg) &&
+    return readJsonBool(j, "enabled", light.enabled) && readSetting(j, "turnDeg", light.turnDeg) &&
            readSetting(j, "tiltDeg", light.tiltDeg) && readSetting(j, "intensity", light.intensity) &&
            readSetting(j, "radius", light.radius) && readSetting(j, "coneDeg", light.coneDeg) &&
            readSetting(j, "blend", light.blend) && readSetting(j, "width", light.width) &&
            readSetting(j, "height", light.height) && readSetting(j, "sunAngleDeg", light.sunAngleDeg) &&
-           readBoolSetting(j, "castShadow", light.castShadow);
-}
-
-/// Reads one camera scalar by field name. Absent keeps the struct's default; present but
-/// non-numeric or non-finite rejects the file.
-bool readCameraScalar(const json& j, const char* field, float& out) {
-    const auto it = j.find(field);
-    if (it == j.end()) {
-        return true;
-    }
-    if (!it->is_number() || !std::isfinite(it->get<double>())) {
-        return false;
-    }
-    out = it->get<float>();
-    return true;
+           readJsonBool(j, "castShadow", light.castShadow);
 }
 
 /// The `camera` object: target + yaw/pitch/distance/ortho.
@@ -288,13 +274,14 @@ bool readCamera(const json& j, ProjectCamera& cam) {
         return false;
     }
     const auto targetIt = j.find("target");
-    if (targetIt != j.end() && !readVec3(*targetIt, cam.target)) {
+    if (targetIt != j.end() && !readJsonVec3(*targetIt, cam.target)) {
         return false;
     }
-    return readCameraScalar(j, "yaw", cam.yaw) &&
-           readCameraScalar(j, "pitch", cam.pitch) &&
-           readCameraScalar(j, "distance", cam.distance) &&
-           readBoolSetting(j, "ortho", cam.ortho);
+    // (Absent keeps the struct's default; non-numeric or no finite float rejects the file.)
+    return readJsonFloat(j, "yaw", cam.yaw) &&
+           readJsonFloat(j, "pitch", cam.pitch) &&
+           readJsonFloat(j, "distance", cam.distance) &&
+           readJsonBool(j, "ortho", cam.ortho);
 }
 
 } // namespace
@@ -370,10 +357,9 @@ bool writeProjectFile(const std::string& path, const ProjectDocument& doc) {
     // The light objects (scenelight.h): every field by name.
     json lights = json::array();
     for (const SceneLight& light : doc.lights) {
-        static const char* const kKinds[] = {"point", "spot", "area", "sun"};
         lights.push_back({
             {"name", light.name},
-            {"kind", kKinds[static_cast<int>(light.kind) & 3]},
+            {"kind", lightKindKey(light.kind)},
             {"enabled", light.enabled},
             {"position", json::array({light.position.x, light.position.y, light.position.z})},
             {"turnDeg", light.turnDeg},
@@ -400,11 +386,22 @@ bool writeProjectFile(const std::string& path, const ProjectDocument& doc) {
         {"ortho",    cam.ortho},
     };
 
+    // The text is made BEFORE the file is opened: opening truncates, and a document that cannot
+    // be put into words must not cost the project that was there. A name that is not valid UTF-8
+    // (a zone or a bone named by a model file in another encoding) is written with the
+    // replacement character in the bad bytes' place — the strict default THROWS on one, which
+    // left an empty file behind and took the application down with it.
+    std::string text;
+    try {
+        text = root.dump(2, ' ', false, json::error_handler_t::replace);
+    } catch (const json::exception&) {
+        return false;
+    }
     std::ofstream out(path);
     if (!out) {
         return false;
     }
-    out << root.dump(2) << '\n';
+    out << text << '\n';
     return static_cast<bool>(out);
 }
 
@@ -442,7 +439,10 @@ bool readProjectFile(const std::string& path, ProjectDocument& doc, std::string&
         return false;
     }
 
-    const auto figuresIt = root.find("figures");
+    // (Read into a document of its own and handed over whole: a failure half way leaves @p doc
+    // empty, as the header says, never holding the figures that came before the bad one.)
+    ProjectDocument read;
+    const auto      figuresIt = root.find("figures");
     if (figuresIt != root.end()) {
         if (!figuresIt->is_array()) {
             error = "malformed document: \"figures\" is not an array";
@@ -454,13 +454,13 @@ bool readProjectFile(const std::string& path, ProjectDocument& doc, std::string&
                 error = "malformed figure entry";
                 return false;
             }
-            doc.figures.push_back(std::move(fig));
+            read.figures.push_back(std::move(fig));
         }
     }
 
     const auto environmentIt = root.find("environment");
-    if (environmentIt != root.end() && !readEnvironment(*environmentIt, doc.environment)) {
-        error = "malformed document: \"environment\" is not an object";
+    if (environmentIt != root.end() && !readEnvironment(*environmentIt, read.environment)) {
+        error = "malformed environment entry";
         return false;
     }
     const auto lightsIt = root.find("lights");
@@ -475,15 +475,16 @@ bool readProjectFile(const std::string& path, ProjectDocument& doc, std::string&
                 error = "malformed light entry";
                 return false;
             }
-            doc.lights.push_back(std::move(light));
+            read.lights.push_back(std::move(light));
         }
     }
     const auto cameraIt = root.find("camera");
-    if (cameraIt != root.end() && !readCamera(*cameraIt, doc.camera)) {
-        error = "malformed document: \"camera\" is not an object";
+    if (cameraIt != root.end() && !readCamera(*cameraIt, read.camera)) {
+        error = "malformed camera entry";
         return false;
     }
 
+    doc = std::move(read);
     return true;
 }
 

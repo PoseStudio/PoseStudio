@@ -32,13 +32,8 @@ bool IkRig::limbDownIntent(const glm::vec3& target, const std::vector<glm::vec3>
     const glm::vec3& effPos = positions[static_cast<std::size_t>(m_effector)];
     bool limbTaut = effectorIsTrunk();
     if (!limbTaut) {
-        const int junction = limbJunction(m_effector);
-        glm::vec3 span(0.0f);
-        for (int cur = m_effector; cur >= 0 && cur != junction;
-             cur = m_parents[static_cast<std::size_t>(cur)]) {
-            span += m_edgeRestDir[static_cast<std::size_t>(cur)] *
-                    m_edgeRestLen[static_cast<std::size_t>(cur)];
-        }
+        const int       junction = limbJunction(m_effector);
+        const glm::vec3 span = limbRestSpan(m_effector, junction);
         const float reach =
             junction >= 0 ? glm::length(effPos - positions[static_cast<std::size_t>(junction)])
                           : 0.0f;
@@ -59,7 +54,7 @@ void IkRig::updateIntent(const glm::vec3& target, const std::vector<glm::vec3>& 
         boundLivePins(positions);
         return;
     }
-    if (m_effector == m_graph.root()) {
+    if (m_effector == m_pelvis) {
         // DOWN: the hips below where the drag found them — and NOT ON THEIR WAY BACK UP. "Below
         // the start" alone is down for as long as a drag that went down lasts, and a knee that
         // came down over its planted foot is a HARD pin while the drag goes down (boundLivePins:
@@ -83,7 +78,7 @@ void IkRig::updateIntent(const glm::vec3& target, const std::vector<glm::vec3>& 
 }
 
 bool IkRig::trunkEffector() const {
-    if (m_effector == m_graph.root()) {
+    if (m_effector == m_pelvis) {
         return true;
     }
     const RigRole r = m_roles.role(m_effector);
@@ -281,7 +276,7 @@ void IkRig::updateStepPolicy(const glm::vec3& target, const std::vector<glm::vec
     const float standingY = m_bindPos[static_cast<std::size_t>(m_pelvis)].y + m_groundOffsetY;
     const float lowY = standingY - kStepLowBody * m_sizeScale;
     const bool lowBody = positions[static_cast<std::size_t>(m_pelvis)].y < lowY;
-    if (m_effector == m_graph.root()) {
+    if (m_effector == m_pelvis) {
         // A pelvis drag walks the figure; a downward one is a crouch and keeps its feet.
         const bool crouchIntent =
             target.y < m_startPose[static_cast<std::size_t>(m_pelvis)].y - kCrouchIntentDepth * m_sizeScale;
@@ -329,11 +324,9 @@ void IkRig::updateStepPolicy(const glm::vec3& target, const std::vector<glm::vec
         anchor = glm::vec2(rootPos.x, rootPos.z) + residXZ;
         anchorPtr = &anchor;
     }
-    static const bool kStepGateTrace = std::getenv("IK_STEP_TRACE") != nullptr;
-    if (kStepGateTrace) {
-        std::fprintf(stderr, "[step-gate] up=%d healing=%d low=%d pelvisY=%.3f lowY=%.3f", m_lastUpIntent ? 1 : 0, m_healing ? 1 : 0, lowBody ? 1 : 0,
+    if (kIkStepTrace) {
+        std::fprintf(stderr, "[step-gate] up=%d healing=%d low=%d pelvisY=%.3f lowY=%.3f\n", m_lastUpIntent ? 1 : 0, m_healing ? 1 : 0, lowBody ? 1 : 0,
                      positions[static_cast<std::size_t>(m_pelvis)].y, lowY);
-        std::fputc(10, stderr);
     }
     updateStepping(positions, !m_lastUpIntent && !m_healing && !lowBody, anchorPtr);
 }

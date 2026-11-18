@@ -16,7 +16,6 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QPushButton>
-#include <QScrollArea>
 #include <QSignalBlocker>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -76,19 +75,8 @@ SoftBodyPanel::SoftBodyPanel(ViewportWidget* viewport, QWidget* parent)
 }
 
 void SoftBodyPanel::buildUi() {
-    auto* outer = new QVBoxLayout(this);
-    outer->setContentsMargins(0, 0, 0, 0);
-
-    auto* scroll = new QScrollArea(this);
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    outer->addWidget(scroll);
-
-    auto* content = new QWidget;
-    content->setObjectName(QStringLiteral("SoftBodyContent"));
-    auto* col = new QVBoxLayout(content);
-    col->setContentsMargins(12, 12, 12, 12);
-    col->setSpacing(12);
+    const propertyrows::ScrollColumn tab = propertyrows::makeScrollColumn(this, QStringLiteral("SoftBodyContent"), 12);
+    QVBoxLayout*                     col = tab.column;
 
     // --- The master switch ---
     QFormLayout* master = propertyrows::addGroup(col, tr("Soft Body Physics"));
@@ -158,7 +146,7 @@ void SoftBodyPanel::buildUi() {
     connect(m_reset, &QPushButton::clicked, this, &SoftBodyPanel::restoreDefaults);
 
     col->addStretch(1);
-    scroll->setWidget(content);
+    tab.finish();
 }
 
 void SoftBodyPanel::refresh() {

@@ -2,14 +2,17 @@
  * @file main.cpp
  * @brief Application entry point: boots core services, then builds the main window.
  *
- * Pure wiring — the theming lives in shell/apptheme.*, the database bootstrap in core/database.*.
- * Startup order matters here — the database and preferences cache must be ready before any UI
- * that might read from them gets constructed, and the theme must be installed before the first
- * widget polishes.
+ * Construction and wiring: the theming lives in shell/apptheme.*, the database bootstrap in
+ * core/database.*, the document's life (New / Open / Save, the close gate, the window title, the
+ * scene kept across a restart) in shell/documentactions.*. What is decided here is the startup
+ * ORDER — the database and preferences cache must be ready before any UI that might read from
+ * them gets constructed, and the theme must be installed before the first widget polishes — and
+ * what the files named on the command line do.
  */
 
 #include "importformats.h"
 #include "database.h"
+#include "documentactions.h"
 #include "menumanager.h"
 #include "materialpanel.h"
 #include "softbodypanel.h"
@@ -19,6 +22,7 @@
 #include "helpwindow.h"
 #include "constants.h"
 #include "preferencesmanager.h"
+#include "runmode.h"
 #include "selectionsettings.h"
 #include "installping.h"
 #include "updatecheck.h"
@@ -37,58 +41,7 @@
 #include <QSplitter>
 #include <QTimer>
 #include <QTabWidget>
-#include <QCloseEvent>
-#include <QFile>
-#include <QFileInfo>
 #include <QString>
-
-#include <functional>
-#include <memory>
-#include <string>
-#include <vector>
-
-/**
- * @brief Vetoed window close while the scene has unsaved changes.
- *
- * The prompt and the Save path live in MenuManager (which owns the dirty flag's UI); a
- * declined close is vetoed, an accepted one proceeds.
- */
-class CloseGuard : public QObject {
-public:
-    explicit CloseGuard(MenuManager* menus) : m_menus(menus) {}
-
-protected:
-    bool eventFilter(QObject* watched, QEvent* event) override {
-        if (event->type() == QEvent::Close && m_menus && !m_menus->confirmDiscardChanges()) {
-            event->ignore(); // the user cancelled: stay open
-            return true;
-        }
-        return false;
-    }
-
-private:
-    MenuManager* m_menus;
-};
-
-/**
- * @brief The main window's title for a given document state.
- *
- * A saved/opened project is named by FILE NAME only — its folder would be truncated in the
- * taskbar and adds nothing (the path stays visible in the Save/Open dialogs); unsaved changes
- * earn an asterisk prefix; a new/empty project shows the plain application title. Unoptimized
- * builds keep their marker as the tail of the string: a Debug build is ~5x slower at figure
- * import (MSVC debug-STL overhead), which has been mistaken for a real performance regression
- * when a Debug window was benchmarked against other applications' shipped binaries.
- */
-static QString windowTitleFor(const QString& path, bool dirty) {
-    QString title = QStringLiteral("%1 %2").arg(Constants::APP_NAME, Constants::APP_VERSION);
-#ifndef NDEBUG
-    title += QObject::tr(" [Debug build — slow imports]");
-#endif
-    if (path.isEmpty()) return title;
-    const QString name = QFileInfo(path).fileName();
-    return (dirty ? QStringLiteral("*") : QString()) + name + QStringLiteral(" — ") + title;
-}
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
@@ -121,9 +74,9 @@ int main(int argc, char *argv[]) {
 
     // --- 3. Main window layout ---
     QMainWindow mainWindow;
-    // The title tracks the current document (file name, a * for unsaved changes); at startup
-    // there is no document yet, so it starts as the plain application title.
-    mainWindow.setWindowTitle(windowTitleFor(QString(), /*dirty=*/false));
+    // The document's keeper (see documentactions.h): it titles the window — the plain
+    // application title until there is a document — and gates its close on unsaved changes.
+    DocumentActions *documents = new DocumentActions(&mainWindow);
 
     // Size the window relative to the screen rather than using a fixed pixel size,
     // so it's usable on both small laptop displays and large monitors. The height-derived
@@ -136,11 +89,8 @@ int main(int argc, char *argv[]) {
         mainWindow.resize(width, static_cast<int>(screenGeometry.height() * 0.80));
     }
 
-    MenuManager *menuManager = new MenuManager(&mainWindow);
+    MenuManager *menuManager = new MenuManager(&mainWindow, documents);
     menuManager->setupMenus();
-
-    // Unsaved-changes gate on window close (Save / Don't save / Cancel).
-    mainWindow.installEventFilter(new CloseGuard(menuManager));
 
     QSplitter *mainSplitter = new QSplitter(Qt::Horizontal, &mainWindow);
 
@@ -158,13 +108,7 @@ int main(int argc, char *argv[]) {
     viewport->setSelectionOutline(SelectionSettings::outlineColor(), SelectionSettings::outlineDrawnOpacity());
     viewport->setJointHighlight(SelectionSettings::jointColor(), SelectionSettings::jointDrawnOpacity());
 
-    // Document state changes (save/open/new, dirty transitions) re-title the window — the
-    // facade's signal is the only wiring point, per its contract.
-    QObject::connect(viewport, &pose::ViewportWidget::documentChanged, &mainWindow,
-                     [&mainWindow, viewport]() {
-                         mainWindow.setWindowTitle(windowTitleFor(viewport->projectPath(),
-                                                                  viewport->isProjectDirty()));
-                     });
+    documents->setViewportWidget(viewport); // (the window title follows the document from here on)
 
     QTabWidget *sidePanel = new QTabWidget(mainSplitter);
     sidePanel->setTabPosition(QTabWidget::West);
@@ -202,7 +146,7 @@ int main(int argc, char *argv[]) {
     menuManager->setAssetManagerWidget(assetsTab);
     menuManager->addLibraryBrowser(materialsLibraryTab);
     menuManager->setViewportWidget(viewport);
-    menuManager->setEnvironmentPanel(environmentTab);
+    documents->setEnvironmentPanel(environmentTab);
 
     // Double-clicking an asset in the grid imports it into the viewport — the same entry points the
     // menu and command-line "open with" use: an .obj as a static model, a character figure (.duf/.dsf)
@@ -244,7 +188,7 @@ int main(int argc, char *argv[]) {
     // work gets minimized — and a minimized window draws no frame, so the run's shots never come
     // (its frames are read back from the GPU: an occluded window serves as well as a visible
     // one). POSESTUDIO_IK_SCRIPT_FRONT=1 opens it as any other run, to watch a script go.
-    if (qEnvironmentVariableIsSet("POSESTUDIO_IK_SCRIPT") && !qEnvironmentVariableIsSet("POSESTUDIO_IK_SCRIPT_FRONT")) {
+    if (RunMode::scripted() && !qEnvironmentVariableIsSet("POSESTUDIO_IK_SCRIPT_FRONT")) {
         mainWindow.setAttribute(Qt::WA_ShowWithoutActivating);
         mainWindow.setWindowFlag(Qt::WindowStaysOnBottomHint);
     }
@@ -254,7 +198,7 @@ int main(int argc, char *argv[]) {
     // (POSESTUDIO_IK_SCRIPT) has none: nobody is there to dismiss it, and the press that
     // dismisses it is CONSUMED — the first mouse press a script sent to a widget (`ui scrub`, an
     // `app click`) went to the splash and did nothing.
-    if (!qEnvironmentVariableIsSet("POSESTUDIO_IK_SCRIPT")) {
+    if (!RunMode::scripted()) {
         SplashOverlay *splash = new SplashOverlay(&mainWindow);
         splash->show();
         // The What's New window (see whatsnewdialog.h): on the first start of a new version, its
@@ -288,21 +232,11 @@ int main(int argc, char *argv[]) {
     // above, so here the renderer already exists and these imports run the ordinary interactive
     // path (progress dialog and all). Where the expose arrives later (other platforms), the
     // importers queue the paths and drain them, in this order, once the renderer is up — so the
-    // calls are safe either way.
-    const QStringList launchArgs = QCoreApplication::arguments();
-    QString projectToOpen;   // a .pss on the command line ("open with" a project file)
-    QString restoreScene;    // --restore-scene <tmp.pss>: the SCENE-PRESERVING RESTART (below)
-    QString restoreProject;  // --project <original.pss>: the document that scene belonged to
-    bool    restoreClean = false; // --project-clean: ... and it was saved, not unsaved work
-    for (int i = 1; i < launchArgs.size(); ++i) {
-        const QString& arg = launchArgs.at(i);
-        if (arg == QStringLiteral("--restore-scene") && i + 1 < launchArgs.size()) {
-            restoreScene = launchArgs.at(++i);
-        } else if (arg == QStringLiteral("--project") && i + 1 < launchArgs.size()) {
-            restoreProject = launchArgs.at(++i);
-        } else if (arg == QStringLiteral("--project-clean")) {
-            restoreClean = true;
-        } else if (pose::ImportFormats::isModelFile(arg)) {
+    // calls are safe either way. (A project file, and the arguments of a restart that kept its
+    // scene, are the document's: DocumentActions takes those and opens them after the imports.)
+    const QStringList openWith = documents->takeLaunchArguments(QCoreApplication::arguments());
+    for (const QString& arg : openWith) {
+        if (pose::ImportFormats::isModelFile(arg)) {
             viewport->importObj(arg);
         } else if (pose::ImportFormats::isSplatFile(arg)) {
             viewport->importSplat(arg);
@@ -311,45 +245,13 @@ int main(int argc, char *argv[]) {
         } else if (arg.endsWith(QStringLiteral(".pose"), Qt::CaseInsensitive)) {
             // A pose file applies onto whichever figure was imported (queued until the figure exists).
             viewport->loadPose(arg);
-        } else if (arg.endsWith(QStringLiteral(".pss"), Qt::CaseInsensitive)) {
-            projectToOpen = arg;
         } else if (AssetScriptLink::isScriptFile(arg)) {
             // A content-library script ("open with" a .dsa): followed as the Asset Manager's
             // double-click follows it — the folder it links to shown, its one character imported.
             assetsTab->openAsset(arg);
         }
     }
-    // A project on the command line, or the scene of the process that restarted into this one
-    // (MenuManager::relaunchApplication — the VR Mode "Turn On and Restart": it saved its scene
-    // to a temporary project, which is reopened here, deleted, and re-attached to the document
-    // it came from, unsaved as it was, so nothing is lost across the restart). The load needs
-    // the renderer; on Windows the first expose built it inside show() above, elsewhere the
-    // open is retried until it exists.
-    const QString projectPath = restoreScene.isEmpty() ? projectToOpen : restoreScene;
-    if (!projectPath.isEmpty()) {
-        auto openProject = std::make_shared<std::function<void(int)>>();
-        *openProject = [=](int attempt) {
-            std::vector<std::string> missing;
-            std::string              error;
-            const int status = viewport->loadProjectFile(projectPath, {}, missing, error);
-            if (status == -1 && error == "no renderer yet" && attempt < 40) {
-                QTimer::singleShot(250, viewport, [=]() { (*openProject)(attempt + 1); });
-                return;
-            }
-            if (status != 0) {
-                qWarning() << "[project] could not open" << projectPath << ":" << QString::fromStdString(error)
-                           << (missing.empty() ? "" : "(missing figure sources)");
-            }
-            if (!restoreScene.isEmpty()) {
-                QFile::remove(restoreScene); // the temporary project has served
-                viewport->setProjectPath(restoreProject);
-                if (status == 0 && !restoreClean) {
-                    viewport->markProjectDirty(); // it was unsaved work; it still is
-                }
-            }
-        };
-        (*openProject)(0);
-    }
+    documents->openAtStartup();
 
     // The anonymous per-launch install ping (see installping.h): armed now, it fires a few
     // seconds into the session so it never competes with startup, and is a no-op in builds

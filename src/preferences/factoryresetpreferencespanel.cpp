@@ -4,13 +4,10 @@
  */
 
 #include "factoryresetpreferencespanel.h"
-#include "database.h"
 
 #include <QVBoxLayout>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QApplication>
-#include <QProcess>
 
 FactoryResetPreferencesPanel::FactoryResetPreferencesPanel(QWidget* parent)
     : PreferencesPanel(tr("Factory Reset"), parent) {
@@ -37,15 +34,8 @@ FactoryResetPreferencesPanel::FactoryResetPreferencesPanel(QWidget* parent)
         resetButton->setEnabled(text.trimmed().compare(QLatin1String("reset"), Qt::CaseInsensitive) == 0);
     });
 
-    // Wipe and rebuild posestudio.db, then relaunch: many widgets (the asset tree,
-    // PreferencesManager's cache) hold in-memory state derived from the old data, so rather
-    // than reconciling all of it live we just restart the process after the reset.
-    connect(resetButton, &QPushButton::clicked, this, []() {
-        initializeDatabase(DbInitMode::FactoryReset);
-        // Relaunch with no arguments: passing QApplication::arguments() would hand the new
-        // process its own argv[0] as a file argument, and would also replay any original
-        // "open-with" paths — re-importing last session's file into a factory-fresh state.
-        QProcess::startDetached(QApplication::applicationFilePath(), QStringList());
-        QApplication::quit();
-    });
+    // The page only ASKS: the reset itself — the unsaved-changes prompt first, then the wipe and
+    // the restart — is the shell's (DocumentActions::factoryReset), which owns the document and
+    // the one way the application relaunches itself.
+    connect(resetButton, &QPushButton::clicked, this, &FactoryResetPreferencesPanel::factoryResetRequested);
 }

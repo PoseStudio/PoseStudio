@@ -491,6 +491,26 @@ struct LayerRect {
     uint64_t area() const { return static_cast<uint64_t>(x1 - x0) * (y1 - y0); }
 };
 
+/// How much of a color, gloss or metal layer covers target texel (@p x, @p y): @p weight through
+/// the picture's alpha (all of it for a flat layer, which has no picture) and the overlay's
+/// shape. False where that is nothing an 8-bit map would show. @p src is the picture's texel
+/// there (left alone for a flat layer).
+bool layerCover(const std::optional<LayerSampler>& sampler, const LimitSampler& shaped, uint32_t x, uint32_t y, float weight, float src[4],
+                float& cover) {
+    cover = weight;
+    if (sampler) {
+        if (!sampler->sample(x, y, src)) {
+            return false;
+        }
+        cover = src[3] * weight;
+    }
+    if (cover < kMinAlpha) {
+        return false;
+    }
+    cover *= shaped.at(x, y);
+    return !(cover < kMinAlpha);
+}
+
 /// The overlay's color over the base color: its picture (@p image) — or, without one, a FLAT
 /// layer of its Base Color — adjusted, blended by the overlay's mode, and mixed in by the image's
 /// alpha × the opacity × the opacity's map (@p shape: the overlay's mask). A flat layer covers
@@ -514,18 +534,8 @@ void paintColor(DecodedImage& target, const OverlayImage* image, const MaterialO
         uint8_t* row = target.pixels.data() + static_cast<std::size_t>(y) * target.width * 4;
         float    src[4];
         for (uint32_t x = rect.x0; x < rect.x1; ++x) {
-            float a = opacity;
-            if (sampler) {
-                if (!sampler->sample(x, y, src)) {
-                    continue;
-                }
-                a = src[3] * opacity;
-            }
-            if (a < kMinAlpha) {
-                continue;
-            }
-            a *= shaped.at(x, y);
-            if (a < kMinAlpha) {
+            float a = 0.0f;
+            if (!layerCover(sampler, shaped, x, y, opacity, src, a)) {
                 continue;
             }
             uint8_t*        d = row + static_cast<std::size_t>(x) * 4;
@@ -568,18 +578,8 @@ void paintAmount(DecodedImage& target, int channel, const OverlayImage* image, f
         uint8_t* row = target.pixels.data() + static_cast<std::size_t>(y) * target.width * 4;
         float    src[4];
         for (uint32_t x = rect.x0; x < rect.x1; ++x) {
-            float cover = 1.0f;
-            if (sampler) {
-                if (!sampler->sample(x, y, src)) {
-                    continue;
-                }
-                cover = src[3];
-            }
-            if (cover < kMinAlpha) {
-                continue;
-            }
-            cover *= shaped.at(x, y);
-            if (cover < kMinAlpha) {
+            float cover = 0.0f;
+            if (!layerCover(sampler, shaped, x, y, 1.0f, src, cover)) { // (never the opacity VALUE)
                 continue;
             }
             cover *= owned.at(x, y);
@@ -632,6 +632,17 @@ float signedNormal(float value01) {
     return std::abs(d) <= 0.5f ? 0.0f : d / 127.5f;
 }
 
+/// The slope (@p ox, @p oy) added to the normal the texel @p d holds, the sum renormalized and
+/// written back (the "UDN" blend: the map's own detail kept, the overlay's relief on top).
+void addSlope(uint8_t* d, float ox, float oy) {
+    glm::vec3 n(d[0] * kInv255 * 2.0f - 1.0f + ox, d[1] * kInv255 * 2.0f - 1.0f + oy,
+                std::max(d[2] * kInv255 * 2.0f - 1.0f, 0.01f));
+    n = glm::normalize(n);
+    d[0] = toByte(n.x * 0.5f + 0.5f);
+    d[1] = toByte(n.y * 0.5f + 0.5f);
+    d[2] = toByte(n.z * 0.5f + 0.5f);
+}
+
 /// A tangent-space normal image over the normal map: the overlay's slope added to the map's (the
 /// "UDN" blend — the map's own detail kept, the overlay's relief on top), by @p strength through
 /// the image's alpha. A TURNED overlay's slopes are turned with it: a normal's x and y are a
@@ -656,13 +667,7 @@ void paintNormal(DecodedImage& target, const OverlayImage& image, float strength
             if (sampler.turned()) {
                 sampler.turn(ox, oy);
             }
-            uint8_t*  d = row + static_cast<std::size_t>(x) * 4;
-            glm::vec3 n(d[0] * kInv255 * 2.0f - 1.0f + ox, d[1] * kInv255 * 2.0f - 1.0f + oy,
-                        std::max(d[2] * kInv255 * 2.0f - 1.0f, 0.01f));
-            n = glm::normalize(n);
-            d[0] = toByte(n.x * 0.5f + 0.5f);
-            d[1] = toByte(n.y * 0.5f + 0.5f);
-            d[2] = toByte(n.z * 0.5f + 0.5f);
+            addSlope(row + static_cast<std::size_t>(x) * 4, ox, oy);
         }
     });
 }
@@ -704,13 +709,7 @@ void paintHeightAsNormal(DecodedImage& target, const OverlayImage& image, float 
             if (ox == 0.0f && oy == 0.0f) {
                 continue;
             }
-            uint8_t*  d = row + static_cast<std::size_t>(x) * 4;
-            glm::vec3 n(d[0] * kInv255 * 2.0f - 1.0f + ox, d[1] * kInv255 * 2.0f - 1.0f + oy,
-                        std::max(d[2] * kInv255 * 2.0f - 1.0f, 0.01f));
-            n = glm::normalize(n);
-            d[0] = toByte(n.x * 0.5f + 0.5f);
-            d[1] = toByte(n.y * 0.5f + 0.5f);
-            d[2] = toByte(n.z * 0.5f + 0.5f);
+            addSlope(row + static_cast<std::size_t>(x) * 4, ox, oy);
         }
     });
 }
@@ -840,7 +839,6 @@ std::shared_ptr<OverlayImage> makeOverlayImage(const DecodedImage& image, Overla
             }
         }
     }
-    out->hasAlpha = transparent;
     const Box& box = transparent ? alphaBox : valueBox;
     if (!(transparent ? alphaAny : valueAny) || box.empty()) {
         return out; // nothing anywhere
@@ -865,7 +863,6 @@ std::shared_ptr<OverlayImage> makeOverlayImage(const DecodedImage& image, Overla
             p[0] = p[1] = p[2] = 255;
             p[3] = value;
         }
-        out->hasAlpha = true;
     }
     return out;
 }

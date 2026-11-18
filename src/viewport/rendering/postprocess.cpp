@@ -38,6 +38,7 @@ struct PostPush {
                     // outline mask is a splat scene's opacity; w = the outline's opacity
     float edge[4];  // x = the edge blend's mode (CompositeOptions::edgeMode: 0 off, 1, 2); yzw spare
 };
+static_assert(sizeof(PostPush) == 80, "PostPush must match composite.frag's push block");
 
 /// Bindings of the one post set layout (composite.frag reads all six; every other pass a prefix).
 constexpr uint32_t kPostBindings = 6;

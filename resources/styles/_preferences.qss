@@ -63,13 +63,6 @@
     font-size: 13px;
 }
 
-/* A block's heading within a page (the Selection page's two marks). */
-#PreferencesSubheading {
-    color: #e6e6e6;
-    font-size: 13px;
-    font-weight: bold;
-}
-
 #PreferencesDescription {
     color: #9a9a9a;
     font-size: 12px;

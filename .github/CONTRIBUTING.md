@@ -48,21 +48,34 @@ Before creating bug reports, please check the existing issues list to see if the
 
 ### Pull Requests
 1. Fork the repo and create your branch from `main`.
-2. Build the project and verify your change works in the running application. The one
-   automated test is the full-body-IK harness (`ctest -C Release` from the build folder, or run
-   `PoseStudioIkHarness` directly); its real-figure phases need a skeleton dump — see the FBIK
-   section of `CLAUDE.md`. Everything else is manual verification in the viewport/UI.
-3. If you've changed APIs or user-facing features, update the documentation
-   (README.md, and CHANGELOG.md under an "Unreleased" heading if appropriate).
+2. Build the project and verify your change works in the running application. Then run the
+   automated checks: `ctest -C Release` from the build folder (on Windows with a CMake older
+   than 3.22, put Qt's `bin` folder on your `PATH` first: some of the checks link Qt, and only
+   CMake 3.22 and later lets the tests find it by themselves). The sixteen tests are the
+   full-body-IK harness (`PoseStudioIkHarness`; its unit phases always run, as `ik-harness-unit`;
+   its real-figure phases need a skeleton dump, passed in the `POSESTUDIO_IK_SKELETON`
+   environment variable — see the FBIK section of `CLAUDE.md` — and the `ik-harness` test is
+   reported as skipped without one) and a check tool each for the project and material file
+   formats, the MaterialX reader, the overlay compositor, the import's smoothing and texture
+   fill, mesh displacement, the splat composite, the asset database and texture store, the
+   script-link reader, the figure importer, the user manual (registered when CMake finds
+   Python) and the render engine (skipped in a build without it). What no check covers — how posing feels, the
+   viewport's picture, the panels — is verified in the running application;
+   `tools/ikscripts/` holds scripted in-app runs for that.
+3. If you've changed APIs or user-facing features, update the documentation: the user manual
+   in `docs/manual/` (a user-visible change is not finished until the manual says so; the
+   folder's `README.md` is the writing guide), README.md, and CHANGELOG.md under an
+   "Unreleased" heading if appropriate.
 4. Issue that pull request! If you haven't signed the [CLA](#contributor-license-agreement-cla) yet,
    the CLA Assistant bot will post a link on your pull request.
 
 ## Local Development Setup
 
 See **[Building from Source](../README.md#building-from-source)** in the README for
-prerequisites (Qt 6, CMake 3.21+, the LunarG Vulkan SDK) and build commands. All other
-dependencies are fetched automatically by CMake at configure time. Only the Windows/MSVC
-build has been exercised so far — macOS/Linux build reports and fixes are very welcome.
+prerequisites (Qt 6, CMake 3.21+ — 3.22+ with Qt 6.11 — the LunarG Vulkan SDK) and build
+commands. All other dependencies are fetched automatically by CMake at configure time
+(`cmake/Dependencies.cmake`). Only the Windows/MSVC build has been exercised so far —
+macOS/Linux build reports and fixes are very welcome.
 
 ## Styleguides
 ### Git Commit Messages

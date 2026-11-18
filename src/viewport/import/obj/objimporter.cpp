@@ -14,8 +14,11 @@
 
 #include "objimporter.h"
 
+#include "meshrepair.h"
+
 #include <glm/glm.hpp>
 
+#include <fstream>
 #include <functional>
 #include <stdexcept>
 #include <unordered_map>
@@ -96,8 +99,10 @@ void generateSmoothNormals(MeshData& mesh) {
 // Fills normals ONLY for vertices that didn't get one from the file, keeping authored normals
 // untouched. A legal OBJ can mix `f v//n` and plain `f v` faces (common when exports are
 // concatenated); the plain faces' vertices would otherwise stay zero-initialized, and
-// normalize(0) is NaN in the shader.
-void fillMissingNormals(MeshData& mesh) {
+// normalize(0) is NaN in the shader. (Not meshrepair.h's fillMissingNormals, which also flags a
+// mesh whose vertices ALL lacked a normal for the import's smoothing by angle: this reader
+// decides that per FILE — see the end of load().)
+void fillUnsetNormals(MeshData& mesh) {
     std::vector<bool> missing(mesh.vertices.size());
     bool any = false;
     for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
@@ -125,6 +130,15 @@ void fillMissingNormals(MeshData& mesh) {
         const float len = glm::length(accum[i]);
         mesh.vertices[i].normal = (len > 1e-8f) ? accum[i] / len : glm::vec3(0.0f, 1.0f, 0.0f);
     }
+}
+
+/// Whether the file begins with a gzip header: a compressed download saved under an .obj name,
+/// which the parser reads as a file with nothing in it.
+bool startsWithGzipHeader(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    unsigned char magic[2] = {0, 0};
+    in.read(reinterpret_cast<char*>(magic), 2);
+    return in.gcount() == 2 && magic[0] == 0x1f && magic[1] == 0x8b;
 }
 
 } // namespace
@@ -201,12 +215,13 @@ ModelData ObjImporter::load(const std::string& path) const {
                 mesh.normal.path = resolveTexturePath(config.mtl_search_path, mat.normal_texname);
                 mesh.normalMode = mesh.normal.path.empty() ? 0 : 1;
             } else if (!mat.bump_texname.empty()) {
+                // (a height map, read as one — mode 2 — at its -bm multiplier)
                 mesh.normal.path = resolveTexturePath(config.mtl_search_path, mat.bump_texname);
-            }
-            if (!mat.displacement_texname.empty()) {
-                mesh.displacementMap.path = resolveTexturePath(config.mtl_search_path, mat.displacement_texname); // disp (stored-only)
                 mesh.normalMode = mesh.normal.path.empty() ? 0 : 2;
                 mesh.normalStrength = std::clamp(mat.bump_texopt.bump_multiplier, 0.1f, 8.0f);
+            }
+            if (!mat.displacement_texname.empty()) {
+                mesh.displacementMap.path = resolveTexturePath(config.mtl_search_path, mat.displacement_texname); // disp (a render displaces by it)
             }
             if (mat.dissolve > 0.0f && mat.dissolve < 1.0f) {
                 mesh.opacity = mat.dissolve;
@@ -315,6 +330,26 @@ ModelData ObjImporter::load(const std::string& path) const {
         }
     }
 
+    // NO FACE AT ALL is not a model. The parser reports success for a file with vertices and no
+    // faces, with lines or points alone, or that is not OBJ text in the first place, and the empty
+    // model that came of it was added to the scene with nothing to see, select or delete by.
+    if (result.meshes.empty()) {
+        if (startsWithGzipHeader(path)) {
+            throw std::runtime_error("OBJ: the file is gzip-compressed (it begins with a gzip header, whatever its name says); unpack it first");
+        }
+        throw std::runtime_error("OBJ: the file holds no faces (vertices, lines or points alone are not imported)");
+    }
+
+    // A position that is not a number (a coordinate whose exponent is past a float's range reads
+    // as an infinity) goes with its triangles before anything is measured over the model: see
+    // meshrepair.h.
+    if (const std::size_t removed = removeNonFiniteVertices(result); removed > 0) {
+        if (result.meshes.empty()) {
+            throw std::runtime_error("OBJ: no face of the file has finite vertex positions");
+        }
+        result.notes.push_back(std::to_string(removed) + " vertices whose position is not a number (NaN or infinity) were left out with their triangles");
+    }
+
     if (!fileHasNormals) {
         for (MeshData& mesh : result.meshes) {
             generateSmoothNormals(mesh);
@@ -324,7 +359,7 @@ ModelData ObjImporter::load(const std::string& path) const {
         // The file has SOME normals, but individual faces may still omit them (mixed `v//n` and
         // plain `v` faces are legal) — fill in just the vertices that got none.
         for (MeshData& mesh : result.meshes) {
-            fillMissingNormals(mesh);
+            fillUnsetNormals(mesh);
         }
     }
 

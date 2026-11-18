@@ -3,7 +3,7 @@
  * @brief VulkanWindow's camera: the named views, the Blender-convention view hotkeys, and the
  *        world→screen projection.
  *
- * One of the seven translation units of VulkanWindow — see vulkanwindow.h for the map. The
+ * One of the translation units of VulkanWindow — see vulkanwindow.h for the map. The
  * camera itself (scene/camera.h) is pure GLM; this file is the bookkeeping around it — which
  * NAMED view the camera is in (so the View picker, the View menu and the keys agree), and the
  * in-viewport fallback for the app-wide view shortcuts.

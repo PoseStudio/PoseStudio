@@ -334,6 +334,16 @@ struct PosUvHash {
     }
 };
 
+// The zone a face belongs to: the one its material index names, else zone 0 — a geometry that
+// writes no polygon_material_groups, or a face with a stray index, still has a home. The ONE rule
+// for which mesh a face is assembled into and which UV set its corners are read through; the two
+// disagreeing is how such a face lost its UVs.
+std::size_t zoneOf(int material, std::size_t zoneCount) {
+    return (material >= 0 && static_cast<std::size_t>(material) < zoneCount)
+               ? static_cast<std::size_t>(material)
+               : 0;
+}
+
 std::vector<FigureMesh> assembleCage(const CageState& cage) {
     const std::size_t vcount = cage.positions.size();
 
@@ -394,8 +404,7 @@ std::vector<FigureMesh> assembleCage(const CageState& cage) {
     };
 
     for (const Face& f : cage.faces) {
-        const std::size_t zone =
-            (f.material >= 0 && f.material < static_cast<int>(zoneCount)) ? static_cast<std::size_t>(f.material) : 0;
+        const std::size_t zone = zoneOf(f.material, zoneCount);
         FigureMesh& mesh = meshes[zone];
         auto tri = [&](int a, int b, int c) {
             mesh.indices.push_back(emit(zone, f.c[a]));
@@ -420,6 +429,7 @@ CageState buildBaseCage(const GeometryData& geo, const std::vector<const UvSet*>
         cage.skins.resize(cage.positions.size()); // pad with zero-weight so indexing is safe
     }
     cage.faces.reserve(geo.faces.size());
+    const std::size_t zoneCount = std::max<std::size_t>(geo.materialZones.size(), 1); // assembleCage's
     for (const GeometryData::Face& gf : geo.faces) {
         Face f;
         f.material = gf.material;
@@ -428,9 +438,11 @@ CageState buildBaseCage(const GeometryData& geo, const std::vector<const UvSet*>
         // on one generation's layout and its eyes on another's (see uvparser.h). Meshes are
         // assembled per zone, so a cage vertex shared by two zones on different layouts simply
         // splits, as it does at any UV seam.
-        const UvSet* uv = (gf.material >= 0 && static_cast<std::size_t>(gf.material) < zoneUvs.size())
-                              ? zoneUvs[gf.material]
-                              : nullptr;
+        // A face outside the zone list is assembled into zone 0 and reads zone 0's set: left
+        // without one, a geometry that writes no polygon_material_groups was textured from the
+        // one texel at (0,0).
+        const std::size_t zone = zoneOf(gf.material, zoneCount);
+        const UvSet* uv = (zone < zoneUvs.size()) ? zoneUvs[zone] : nullptr;
         for (int i = 0; i < gf.count; ++i) {
             f.c[i].pos = gf.v[i];
             if (uv && !uv->empty()) {

@@ -5,11 +5,18 @@
  *        analogue of Grid.
  *
  * Kept self-contained so VulkanRenderer doesn't accumulate per-feature pipeline/descriptor code:
- * the renderer just constructs a Scene, forwards imports to addModel(), and calls the three
- * record entry points in order each frame — recordShadowPass() and recordOutlinePass() before
- * the main render pass, record() inside it (before the transparent grid). The posing API is a
- * set of thin forwarders to the ACTIVE figure (sceneposing.cpp); the heavy lifting lives in
- * Model/Armature. Qt-free (Vulkan + std + GLM).
+ * the renderer just constructs a Scene, forwards imports to addModel() / addSplatModel(), and
+ * calls the record entry points in order each frame — recordShadowPass() and recordOutlinePass()
+ * before the scene pass; record() inside it (before the transparent grid), or, in the Rendered
+ * mode, whose surfaces are the path-traced picture, recordOverlays(); recordSplatOccluders()
+ * last in the scene pass where a splat scene needs the see-through meshes' depth; and
+ * recordSplats() in the photo pass after it. The posing API is a set of thin forwarders to the
+ * ACTIVE figure; the heavy lifting lives in Model/Armature. Qt-free (Vulkan + std + GLM).
+ *
+ * The class is four translation units: scene.cpp (construction, the models, the lights, what is
+ * selected, the record sequence — the only one that records commands), scenepicking.cpp (the
+ * CPU picks: a light, a model, a figure's joint, and the selection a joint pick makes),
+ * sceneposing.cpp (the posing forwarders) and scenematerials.cpp (the Materials tab's side).
  */
 
 #ifndef SCENE_H
@@ -78,19 +85,21 @@ public:
     Scene(const Scene&) = delete;
     Scene& operator=(const Scene&) = delete;
 
-    /// Uploads CPU geometry to the GPU and adds it to the scene, and SELECTS it (a freshly
-    /// imported object is the one the user is about to work with, and the outline shows the
-    /// import landed). Call from the GUI thread between frames (the upload blocks briefly on its
-    /// own one-time submit; it touches no in-flight state).
-    void addModel(const ModelData& data);
+    /// Uploads CPU geometry to the GPU and adds it to the scene. The new model is NOT selected:
+    /// the selection stays as it was (a figure imported into a scene without one is the posing
+    /// target all the same — activeFigureIndex). Call from the GUI thread between frames (the
+    /// upload blocks briefly on its own one-time submit; it touches no in-flight state).
+    /// Returns FALSE, the scene unchanged, for data with nothing to draw (no mesh that has a
+    /// triangle): such a model could be neither picked nor deleted. The caller reports it.
+    bool addModel(const ModelData& data);
     /// Adds a Gaussian splat scene (splatcloud.h) as a static model at @p transform (the import
-    /// service turns the capture's y-down frame over); it becomes the selection.
+    /// service turns the capture's y-down frame over). Not selected either.
     void addSplatModel(const SplatData& data, const glm::mat4& transform);
 
     // --- Object selection (the outlined model) ---
     /// The selected model's index, or -1 when nothing is selected. The selection is what the
     /// viewport outlines; clicking a figure's joint selects that figure (setActiveFigure), a
-    /// plain click on a model's box selects it, a click on empty space clears it.
+    /// plain click on a model selects it (pickModel), a click on empty space clears it.
     int selectedModelIndex() const;
     /// Selects model @p index (-1 or out of range = clear). Selecting a figure also makes it the
     /// active (posing-target) figure; the previously selected figure's joint selection is
@@ -103,11 +112,11 @@ public:
     /// interactive HDRI switches); this does only the fast GPU work.
     void applyBakedEnvironment(const BakedEnvironment& baked);
 
-    /// Live lighting/exposure controls (the Environment panel drives these). All shader-side, so this
-    /// is just a cached value read into the next frame's UBO — no re-bake.
     /// How a selected joint's flesh is tinted (selectionstyle.h; the outline half of the style
     /// is the composite's): read into the camera block at the next frame.
     void                   setSelectionStyle(const SelectionStyle& style) { m_selectionStyle = style; }
+    /// Live lighting/exposure controls (the Environment panel drives these). All shader-side, so this
+    /// is just a cached value read into the next frame's UBO — no re-bake.
     void                   setLightingSettings(const LightingSettings& settings) { m_lighting = settings; }
     const LightingSettings& lightingSettings() const { return m_lighting; }
 
@@ -129,7 +138,8 @@ public:
     /// @p camera (window coordinates, as the joint pick's), nearest the camera first; -1 on a miss.
     int pickLight(const Camera& camera, float x, float y, float width, float height) const;
     /// The world AABB of what a light is aimed AT: the active figure's, else the union of every
-    /// model's. False with nothing in the scene.
+    /// model's — each where it IS as posed (Model::posedBounds: a figure moved in her pose takes
+    /// her box with her). False with nothing in the scene.
     bool subjectBounds(glm::vec3& outMin, glm::vec3& outMax) const;
 
     /// THE MODEL A CLICK IS ON (@p ray: the cursor's, world space), -1 for none. What the
@@ -151,8 +161,8 @@ public:
     bool otherSurfaceAt(const Ray& ray, float& tOut) const;
 
     /// The world AABB to frame for "frame selected": the selected model's, else the union of
-    /// every model's (a posed figure's bounds follow its joints — see Model::worldBounds).
-    /// Returns false with nothing to frame.
+    /// every model's (a posed figure's bounds go with her hips and follow her joints — see
+    /// Model::posedBounds). Returns false with nothing to frame.
     bool framingBounds(glm::vec3& outMin, glm::vec3& outMax) const;
 
     /// Removes the model at @p index (no-op if out of range). The caller MUST have ensured the GPU
@@ -187,8 +197,8 @@ public:
     /// Records the selection-outline mask pass — the selected model's silhouette, skinned and
     /// camera-projected, into @p mask (its own render pass, begun and ended here). Call before
     /// the main render pass, like recordShadowPass. Returns false, recording nothing, when no
-    /// model is selected (the composite then draws no outline). A selected splat scene's
-    /// silhouette is its quads (outlinepass.h): @p asyncSort as recordSplats takes it.
+    /// model is selected (the composite then draws no outline). A selected splat scene's mask
+    /// is its accumulated opacity (outlinepass.h): @p asyncSort as recordSplats takes it.
     bool recordOutlinePass(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex,
                            const OutlineMask& mask, bool asyncSort = false);
 
@@ -278,9 +288,11 @@ public:
     /// the HDR post chain (SSS, bloom, ACES) and the HDRI backdrop run only for them.
     const ShadeMode& shadeModeSpec() const { return shadeModeAt(m_shadeMode); }
     bool             isPbr() const { return fragModeIsHdr(shadeModeSpec().fragMode); }
-    /// Selects the figure joint nearest the pixel (@p px, @p py) in a @p vpW × @p vpH viewport (only
-    /// if within a small radius; see bonepicker.h). Returns the selected bone index, or -1 if
-    /// none is selected.
+    /// Selects the figure joint a click at pixel (@p px, @p py) of a @p vpW × @p vpH viewport is
+    /// ON (pickBoneAt: the joint of the posed skin under the cursor; for a click just off the
+    /// silhouette, the 2D joint pick of bonepicker.h), makes its figure the active one and sets
+    /// the IK grab point. Returns the selected bone index, or -1 on a miss — the selection is
+    /// then left as it was.
     int selectBoneAt(float px, float py, float vpW, float vpH, const Camera& camera);
     /// Selects the figure joint nearest the world point @p point within @p radius (metres) — a VR
     /// controller's HAND GRAB: the joint is taken where the hand is, its grab point the joint
@@ -335,7 +347,8 @@ public:
     /// active ones under POSESTUDIO_DUMP_CORRECTIVES — see Model::refreshCorrectives.
     void finalizePose();
 
-    // --- Full-body IK (a plain drag on a joint; Ctrl+drag is the single-joint FK rotate) ---
+    // --- Full-body IK (a plain drag on a joint; Ctrl+drag is a scoped drag — the grabbed chain
+    // alone — or, on the hips, the figure move: IkScope) ---
     /// Begins an FBIK drag of the figure's selected joint: ground contacts are detected and become
     /// the anchor/pins, and the balance support polygon is captured. Returns false without a
     /// figure or selection.
@@ -350,9 +363,6 @@ public:
     /// Ends the FBIK drag (the pose stays; call finalizePose() to settle correctives, as with any
     /// pose drag).
     void endBoneIkDrag();
-    /// World-space position of the figure's selected joint (the IK drag plane's anchor point).
-    /// Returns false when no joint is selected.
-    bool selectedBoneWorldPosition(glm::vec3& out) const;
     /// The point of the selected bone the user took hold of (Armature::ikGrabPointWorld): the
     /// IK drag's plane passes through it and its targets are where IT should go.
     bool ikGrabPointWorld(glm::vec3& out) const;
@@ -417,11 +427,13 @@ public:
     /// What the tab shows: the selected model's zones and the selected zone's values, as they
     /// stand and as imported. Invalid without a selected model that has meshes.
     MaterialView materialView() const;
+    /// Whether materialView() would differ from an earlier one, as a key to compare — the frame
+    /// notify's test, made every rendered frame without building the view (MaterialViewKey).
+    MaterialViewKey materialViewKey() const;
     /// Selects zone @p index of the selected model (the tab's picker). A click on a model's
     /// surface selects the zone it lands on (selectZoneAt, and the joint pick). Out of range or
     /// -1 = the first zone.
     void setSelectedZone(int index);
-    int  selectedZone() const { return m_selectedZone; }
     /// Casts @p ray against the SELECTED model's surface and selects the zone it hits (a plain
     /// click on a model: the joint pick does the same for a figure's skin). False on a miss.
     bool selectZoneAt(const Ray& ray);
@@ -488,6 +500,21 @@ private:
     /// active — what the Transform tab's Figure group places then; else null.
     Model*       selectedStaticModel();
     const Model* selectedStaticModel() const;
+    /// The union of every model's bounds as posed (Model::posedBounds — what subjectBounds and
+    /// framingBounds fall back to); false with nothing that has bounds.
+    bool unionBounds(glm::vec3& outMin, glm::vec3& outMax) const;
+    /// record()'s transparent pass: every model's see-through meshes, sorted back-to-front
+    /// together and drawn after the opaque pass (the caller has bound the camera and IBL sets).
+    void recordTransparent(VkCommandBuffer cmd, const Camera& camera, uint32_t frameIndex);
+    /// writeCameraUbo for the shade-mode row @p spec — record() passes the row it draws with,
+    /// which is not always the picker's (a wire mode on a device without wire pipelines).
+    void writeCameraUbo(const Camera& camera, uint32_t frameIndex, const ShadeMode& spec);
+    /// The tail the joint selections share (selectBoneAt, selectNearestBone, a Shift press that
+    /// falls back to a plain selection): model @p model becomes the active figure — the previous
+    /// figure's joint selection cleared —, its bone @p bone the selection, @p grab (world) the
+    /// IK grab point, and, given one, @p zone the Materials tab's zone. Returns the bone
+    /// selected (a face-rig bone selects the head: Armature::posingBone).
+    int selectPickedBone(int model, int bone, const glm::vec3& grab, int zone = -1);
 
     VulkanContext& m_context;
 
@@ -508,10 +535,10 @@ private:
 
     std::vector<std::unique_ptr<Model>> m_models;
     std::uint64_t m_modelsRevision = 0; ///< See modelsRevision().
-    int m_activeFigure = -1;
-    bool m_pick2D = false; ///< See setPick2D(). ///< See activeFigureIndex(): the posing target among the figures.
+    int m_activeFigure = -1;  ///< See activeFigureIndex(): the posing target among the figures.
+    bool m_pick2D = false;    ///< See setPick2D().
     int m_selectedModel = -1; ///< See selectedModelIndex(): the outlined model (-1 = none).
-    int m_selectedZone = -1;  ///< See selectedZone(): the selected model's zone the Materials tab shows (-1 = the first).
+    int m_selectedZone = -1;  ///< See selectedZoneIndex(): the selected model's zone the Materials tab shows (-1 = the first).
     int m_pickedZone = -1;    ///< The zone the last skin cast of pickBoneAt landed on (selectBoneAt reads it).
 
     int m_shadeMode = kDefaultShadeMode; // picker-table index (shademode.h)

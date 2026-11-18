@@ -63,9 +63,6 @@ public:
         m_handle = handle;
     }
 
-    /// Gives up ownership without destroying (for handing a handle to another owner).
-    Handle release() { return std::exchange(m_handle, Handle{VK_NULL_HANDLE}); }
-
     Handle get() const { return m_handle; }
     operator Handle() const { return m_handle; }
     explicit operator bool() const { return m_handle != VK_NULL_HANDLE; }

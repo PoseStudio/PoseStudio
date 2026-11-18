@@ -1,15 +1,20 @@
 /**
  * @file groundsampler.h
- * @brief A compact CPU copy of a skinned model's vertices, for finding the CURRENT pose's lowest
- *        point (the ground button / the animated ground drop) — and, since 2026-09-26, the
- *        SURFACE a click is on (pickSurface: the opaque meshes' triangles ride along).
+ * @brief A model's SURFACE ON THE CPU — a compact copy of its vertices and triangles — for the
+ *        three questions asked of the posed surface: the CURRENT pose's lowest point (the ground
+ *        button / the animated ground drop: lowestY), what a click is ON (pickSurface: the
+ *        opaque meshes' triangles, with the joint and the material zone at the hit), and whether
+ *        the cursor is on the model at all (pickAnySurface: the see-through meshes too).
  *
- * The GPU vertex buffers are device-local and unreadable, and a posed figure's lowest point is
- * not its bind box's: a knee bend lifts the feet, so grounding by the bind AABB would sink or
- * float the figure. So every render vertex's skinning inputs (position + joints + weights,
- * ~44 bytes/vertex, ~10 MB for a figure) are kept here and CPU-skinned on demand with the
- * armature's live pose. Static models need no samples: their bind AABB through the transform is
- * exact, and lowestY() handles that case from the bounds alone. Qt-free, Vulkan-free.
+ * (The name is its first job's; it has been the model's CPU surface for all three since the
+ * picks came.) The GPU vertex buffers are device-local and unreadable, and a posed figure's
+ * lowest point is not its bind box's: a knee bend lifts the feet, so grounding by the bind AABB
+ * would sink or float the figure. So every render vertex's skinning inputs (position + joints +
+ * weights, ~44 bytes/vertex, ~10 MB for a figure) are kept here and CPU-skinned on demand with
+ * the armature's live pose. A STATIC model keeps its samples too, up to a triangle cap
+ * (Model's constructor) — for the two picks, cast through its transform alone; grounding needs
+ * none of them (its bind AABB through the transform is exact, and lowestY() handles that case
+ * from the bounds). Qt-free, Vulkan-free.
  */
 
 #ifndef GROUNDSAMPLER_H
@@ -43,16 +48,16 @@ public:
     /// @p mesh is the model's mesh index the triangles belong to — what a click's zone is
     /// (pickSurface's meshOut; the Materials tab shows the zone under the last click).
     void add(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, bool pickable, int mesh = 0);
-    bool empty() const { return m_samples.empty(); }
 
     /// The FIRST point of the CURRENT pose's skin along @p ray (world space) — what a click is ON.
-    /// CPU-skins every sample as lowestY() does, tests the pickable triangles (two-sided, as the
-    /// mesh is drawn) and takes the nearest hit: @p tOut its distance along the ray's direction
+    /// CPU-skins every sample as lowestY() does (once per pose: posedSamples), tests the pickable
+    /// triangles (two-sided, as the mesh is drawn) and takes the nearest hit: @p tOut its distance along the ray's direction
     /// (normalized), @p hitWorld the point, @p bone the joint that weighs most on the skin there
     /// (the three corners' weights blended at the hit), @p meshOut (optional) the model's mesh
     /// index the hit triangle belongs to — its material zone. False without samples or when the
     /// ray misses every triangle. A few milliseconds for a figure: a click's worth, never a
-    /// frame's. A STATIC model's samples (no skeleton) are cast through the transform alone.
+    /// frame's. A STATIC model's samples (no skeleton) are cast through the transform alone, and
+    /// its hit names no joint: @p bone comes back -1 with the distance, the point and the zone.
     bool pickSurface(const Armature& armature, const Ray& ray, float& tOut, glm::vec3& hitWorld,
                      int& bone, int* meshOut = nullptr) const;
 
@@ -95,10 +100,21 @@ private:
     std::vector<PickTriangle> m_softTriangles; ///< The see-through meshes' triangles (pickAnySurface alone).
 
     /// Every sample as the current pose (or, for a static model, the transform alone) has it, in
-    /// world space. False — @p world unspecified — when @p dir from @p origin misses their box:
-    /// most of a click's rays miss the model altogether.
-    bool posedSamples(const Armature& armature, const glm::vec3& origin, const glm::vec3& dir,
-                      std::vector<glm::vec3>& world) const;
+    /// world space — or null when @p dir from @p origin misses their box: most of a click's rays
+    /// miss the model altogether. The positions are computed once per pose and kept (m_world):
+    /// the two to four casts of one click, and every click until the pose moves, share one skin
+    /// pass. Valid until the next call after the pose or the transform has moved.
+    const std::vector<glm::vec3>* posedSamples(const Armature& armature, const glm::vec3& origin,
+                                               const glm::vec3& dir) const;
+    // The posed samples and their box, for the pose (Armature::skinVersion) and the model
+    // transform they were skinned at. Mutable: a cache the const casts fill; the casts run on
+    // the GUI thread alone. Costs 12 bytes a sample once a model has been cast against.
+    mutable std::vector<glm::vec3> m_world;
+    mutable glm::vec3              m_worldLo{0.0f};
+    mutable glm::vec3              m_worldHi{0.0f};
+    mutable std::uint64_t          m_worldSkinVersion = 0;
+    mutable glm::mat4              m_worldTransform{1.0f};
+    mutable bool                   m_worldValid = false;
     /// The nearest triangle of @p triangles along the ray (Moller-Trumbore, two-sided), nearer
     /// than @p best on entry: @p best, @p bestTri (an index into @p triangles) and the hit's
     /// barycentric @p bestU / @p bestV are updated on a nearer hit, else left as they were.

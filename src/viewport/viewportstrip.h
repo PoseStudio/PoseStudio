@@ -1,7 +1,8 @@
 /**
  * @file viewportstrip.h
  * @brief The control strip floating in the viewport's top-right corner: the shading-mode and
- *        view pickers, the Home / Ground / Skeleton buttons, and the axis-rotate badge.
+ *        view pickers, the Render / VR / Home / Ground / Skeleton / Selection buttons, and under
+ *        them the Rendered mode's status line and the joint mouse mode's badge.
  *
  * The strip is a TOP-LEVEL window, not a child widget: the viewport is a native child window
  * (QWidget::createWindowContainer), which composites on top of every ordinary sibling widget,
@@ -25,15 +26,13 @@
 #include <QWidget>
 
 class QAction;
+class QLabel;
 class QPushButton;
 
 namespace pose {
 
 class JointModeBadge;
 class MenuPickerButton;
-} // namespace pose
-class QLabel;
-namespace pose {
 
 /**
  * @class ViewportStrip

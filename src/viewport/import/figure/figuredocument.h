@@ -28,6 +28,12 @@ bool isGzip(const std::vector<uint8_t>& bytes);
 /// not a well-formed gzip stream or inflation fails.
 std::vector<uint8_t> gunzip(const uint8_t* data, std::size_t size);
 
+/// The whole of the file at @p path as it lies on disk (still gzip-compressed if it is). Throws
+/// std::runtime_error naming @p path when the file cannot be opened, is empty, or cannot be read.
+/// For a caller that wants the bytes BEFORE the parse — the corrective scan's text prefilter;
+/// everyone else uses FigureDocument::loadFromFile.
+std::vector<uint8_t> readFileBytes(const std::string& path);
+
 /**
  * @class FigureDocument
  * @brief A parsed figure scene file: its JSON root, plus the load pipeline that produced it.

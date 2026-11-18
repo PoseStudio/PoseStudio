@@ -7,14 +7,18 @@
 
 #include "materialxfile.h"
 
+#include "colorcurves.h"
+
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
-#include <cstring>
 #include <iterator>
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -82,8 +86,16 @@ std::string decodeEntities(const std::string& text) {
         } else if (entity.size() > 1 && entity[0] == '#') {
             const bool hex = entity[1] == 'x' || entity[1] == 'X';
             const long code = std::strtol(entity.c_str() + (hex ? 2 : 1), nullptr, hex ? 16 : 10);
+            // Only a character XML can hold: a tab, a line end, or anything from the space up
+            // that is not half of a surrogate pair. Anything else (0, a negative number, a
+            // surrogate, a value past the last code point) would put a NUL or bytes that are
+            // not UTF-8 into a name or a path: it stays as written.
+            const bool character = code == 0x9 || code == 0xA || code == 0xD || (code >= 0x20 && code < 0xD800) ||
+                                   (code >= 0xE000 && code <= 0x10FFFF);
             // (UTF-8: a path may hold any character.)
-            if (code < 0x80) {
+            if (!character) {
+                out += text.substr(i, end - i + 1);
+            } else if (code < 0x80) {
                 out += static_cast<char>(code);
             } else if (code < 0x800) {
                 out += static_cast<char>(0xC0 | (code >> 6));
@@ -106,8 +118,12 @@ std::string decodeEntities(const std::string& text) {
     return out;
 }
 
+/// How deep the elements of a document may nest (the nameless document node counted).
+constexpr std::size_t kMaxXmlDepth = 64;
+
 /// Parses @p text into a tree under a nameless document node. Null with @p error on malformed
-/// markup (an unclosed tag, a closing tag that closes nothing, an attribute without its quotes).
+/// markup (an unclosed tag, a closing tag that closes nothing, an attribute without its quotes,
+/// elements nested past kMaxXmlDepth).
 std::unique_ptr<Xml> parseXml(const std::string& text, std::string& error) {
     auto                document = std::make_unique<Xml>();
     std::vector<Xml*>   open{document.get()};
@@ -226,6 +242,12 @@ std::unique_ptr<Xml> parseXml(const std::string& text, std::string& error) {
         Xml* raw = element.get();
         open.back()->children.push_back(std::move(element));
         if (stays) {
+            // (A MaterialX document nests four deep. The tree is torn down by its destructors,
+            // one call per level: without a limit a file of a hundred thousand unclosed tags
+            // overflowed the stack on its way to the "is not closed" error.)
+            if (open.size() > kMaxXmlDepth) {
+                return fail(i, "the document is nested too deeply");
+            }
             open.push_back(raw);
         }
         i = p;
@@ -258,9 +280,7 @@ struct Signal {
     float       strength = 1.0f;   ///< … of this strength.
 };
 
-float srgbToLinear(float c) {
-    return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
-}
+using colorcurves::srgbToLinear;
 
 std::string lowered(std::string text) {
     std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -292,6 +312,9 @@ std::vector<float> numbersOf(const std::string& text) {
             const float number = std::strtof(token.c_str(), &end);
             if (end == token.c_str()) {
                 return {}; // not a number: a string, a file name
+            }
+            if (!std::isfinite(number)) {
+                return {}; // "nan", "inf", 1e40: no value a material can hold
             }
             numbers.push_back(number);
         }
@@ -333,13 +356,17 @@ int channelOf(const std::string& output) {
     }
 }
 
+/// How many steps a trace may take from a shading node's input toward its source. (A real
+/// graph is a handful of nodes deep; the limit ends a chain of nodes that never does.)
+constexpr int kMaxTraceDepth = 48;
+
 class Tracer {
 public:
     Tracer(const Xml& root, std::vector<std::string>& notes) : m_root(root), m_notes(notes) {}
 
     /// What the input (or a nodegraph's output) @p in is, its `nodename` looked up in @p scope.
     Signal input(const Xml& in, const Xml& scope, int depth = 0) {
-        if (depth > 48) {
+        if (depth > kMaxTraceDepth) {
             return {};
         }
         if (const std::string* value = in.find("value")) {
@@ -443,7 +470,7 @@ private:
     /// The placement a texture node's `texcoord` input names (a place2d, a scaled texcoord).
     void placement(const Xml& port, const Xml& scope, Signal& s, int depth) {
         const std::string* nodeName = port.find("nodename");
-        const Xml*         node = nodeName != nullptr && depth < 48 ? findNode(scope, *nodeName) : nullptr;
+        const Xml*         node = nodeName != nullptr && depth < kMaxTraceDepth ? findNode(scope, *nodeName) : nullptr;
         if (node == nullptr) {
             return;
         }
@@ -488,8 +515,29 @@ private:
         }
     }
 
+    /// What output @p output of @p node is — traced ONCE. A graph may reach one node by many
+    /// paths (a multiply of a node with itself, a mix of three), and traced afresh along each
+    /// the work doubles or triples per level: a short document whose nodes name themselves as
+    /// their inputs, or each other twice over, kept this thread busy for minutes to hours. A
+    /// result is kept per (node, output) — whatever it is: one that the depth limit cut short is
+    /// kept too, or the work below it would be done again by every path — and a node met again
+    /// while it is still being traced is an input of itself, which is no value.
     Signal traceNode(const Xml& node, const std::string& output, int depth) {
-        if (depth > 48 || node.parent == nullptr) {
+        const std::pair<const Xml*, std::string> key(&node, output);
+        if (const auto found = m_traced.find(key); found != m_traced.end()) {
+            return found->second;
+        }
+        if (!m_tracing.insert(key).second) {
+            return {};
+        }
+        const Signal traced = traceNodeOnce(node, output, depth);
+        m_tracing.erase(key);
+        m_traced.emplace(key, traced);
+        return traced;
+    }
+
+    Signal traceNodeOnce(const Xml& node, const std::string& output, int depth) {
+        if (depth > kMaxTraceDepth || node.parent == nullptr) {
             return {};
         }
         const Xml&         scope = *node.parent;
@@ -668,6 +716,8 @@ private:
 
     const Xml&                m_root;
     std::vector<std::string>& m_notes;
+    std::map<std::pair<const Xml*, std::string>, Signal> m_traced;  ///< traceNode's results
+    std::set<std::pair<const Xml*, std::string>>         m_tracing; ///< … and the nodes it is in the middle of
 };
 
 // ============================================================================
@@ -959,8 +1009,36 @@ float clamp01(float v) {
     return std::min(std::max(v, 0.0f), 1.0f);
 }
 
-/// The material of the shading node @p shader (its inputs looked up in @p scope).
-bool buildMaterial(const Xml& shader, Model model, const std::string& name, const Xml& root, MaterialXMaterial& out) {
+/// A `displacement` shader's map and scale, onto the material @p build is putting together —
+/// the SAME build as its surface: the displacement map is one more of the material's maps, so
+/// the rule of the one placement holds for it too (a build of its own knew of no map placed
+/// before it, and its image's tiling replaced the base color's).
+void addDisplacement(const Xml& displacement, const Xml& root, Build& build) {
+    Tracer&            tracer = build.tracer;
+    MaterialXMaterial& material = build.material;
+    const Xml& scope = displacement.parent != nullptr ? *displacement.parent : root;
+    const Xml* height = portOf(displacement, "displacement");
+    const Signal s = height != nullptr ? tracer.input(*height, scope) : Signal();
+    if (s.kind != Signal::Kind::Texture) {
+        return;
+    }
+    build.addTexture(MaterialMap::Displacement, s);
+    float scale = 1.0f;
+    if (const Xml* port = portOf(displacement, "scale")) {
+        const Signal amount = tracer.input(*port, scope);
+        if (amount.kind == Signal::Kind::Constant) {
+            scale = amount.value.x;
+        }
+    }
+    // (Scene units — metres — from the map's black to its white, measured from black; the
+    // material's is centimetres about a mid level.)
+    material.params.displacementStrength = scale * 100.0f;
+    material.params.displacementMidLevel = 0.0f;
+}
+
+/// The material of the shading node @p shader (its inputs looked up in the shader's own scope),
+/// with the map and scale of its `displacement` shader @p displacement where it has one.
+bool buildMaterial(const Xml& shader, Model model, const std::string& name, const Xml& root, const Xml* displacement, MaterialXMaterial& out) {
     out = MaterialXMaterial();
     out.name = name;
     Tracer tracer(root, out.notes);
@@ -1058,36 +1136,27 @@ bool buildMaterial(const Xml& shader, Model model, const std::string& name, cons
     p.specular = std::max(p.specular, 0.0f);
     p.emission = std::max(p.emission, 0.0f);
     p.ior = p.ior > 0.0f ? p.ior : 1.5f;
+    if (displacement != nullptr) {
+        addDisplacement(*displacement, root, build);
+    }
+    // Every value within what the material can hold (materialparams.h): a document may say
+    // anything — an index of refraction of 0.2, a displacement of metres — and arithmetic on
+    // its constants can leave what is no number at all.
+    clampMaterialParams(p);
     return true;
 }
 
-/// A `displacement` shader's map and scale, onto the material.
-void addDisplacement(const Xml& displacement, const Xml& root, MaterialXMaterial& material) {
-    Tracer tracer(root, material.notes);
-    Build  build{material, tracer};
-    const Xml& scope = displacement.parent != nullptr ? *displacement.parent : root;
-    const Xml* height = portOf(displacement, "displacement");
-    const Signal s = height != nullptr ? tracer.input(*height, scope) : Signal();
-    if (s.kind != Signal::Kind::Texture) {
-        return;
-    }
-    build.addTexture(MaterialMap::Displacement, s);
-    float scale = 1.0f;
-    if (const Xml* port = portOf(displacement, "scale")) {
-        const Signal amount = tracer.input(*port, scope);
-        if (amount.kind == Signal::Kind::Constant) {
-            scale = amount.value.x;
-        }
-    }
-    // (Scene units — metres — from the map's black to its white, measured from black; the
-    // material's is centimetres about a mid level.)
-    material.params.displacementStrength = scale * 100.0f;
-    material.params.displacementMidLevel = 0.0f;
-}
+/// How many included documents one read takes in, all levels together. (A library file includes
+/// a handful; without a bound a document that includes itself N times was parsed N to the
+/// eighth times over.)
+constexpr int kMaxIncludes = 256;
 
 /// Splices the documents named by xi:include elements into @p root (their top-level elements
-/// become its own), a few levels deep.
-void spliceIncludes(Xml& root, const MaterialXInclude& include, int depth) {
+/// become its own), a few levels deep and no more than @p budget documents in all (counted
+/// down; an include past it is passed over, like one that cannot be had). What an included
+/// document's root says for all its elements — a `fileprefix`, a `colorspace` — goes onto each
+/// element that does not say its own, since the root itself is left behind.
+void spliceIncludes(Xml& root, const MaterialXInclude& include, int depth, int& budget) {
     if (!include || depth > 8) {
         return;
     }
@@ -1099,9 +1168,10 @@ void spliceIncludes(Xml& root, const MaterialXInclude& include, int depth) {
         }
         std::string text;
         std::string error;
-        if (!include(child->get("href"), text)) {
+        if (budget <= 0 || !include(child->get("href"), text)) {
             continue;
         }
+        --budget;
         std::unique_ptr<Xml> document = parseXml(text, error);
         if (!document) {
             continue;
@@ -1110,8 +1180,13 @@ void spliceIncludes(Xml& root, const MaterialXInclude& include, int depth) {
             if (top->name != "materialx") {
                 continue;
             }
-            spliceIncludes(*top, include, depth + 1);
+            spliceIncludes(*top, include, depth + 1, budget);
             for (auto& element : top->children) {
+                for (const char* key : {"fileprefix", "colorspace"}) {
+                    if (const std::string* value = top->find(key); value != nullptr && element->find(key) == nullptr) {
+                        element->attributes.emplace_back(key, *value);
+                    }
+                }
                 element->parent = &root;
                 merged.push_back(std::move(element));
             }
@@ -1143,7 +1218,8 @@ bool readMaterialXText(const std::string& text, MaterialXDocument& out, std::str
         return false;
     }
     out.version = root->get("version");
-    spliceIncludes(*root, include, 0);
+    int includeBudget = kMaxIncludes;
+    spliceIncludes(*root, include, 0, includeBudget);
 
     std::vector<std::string> unknown; // shading models met that this reader does not read
     const auto               taken = [&out](const std::string& name) {
@@ -1158,11 +1234,8 @@ bool readMaterialXText(const std::string& text, MaterialXDocument& out, std::str
             return;
         }
         MaterialXMaterial material;
-        if (taken(name) || !buildMaterial(shader, model, name, *root, material)) {
+        if (taken(name) || !buildMaterial(shader, model, name, *root, displacement, material)) {
             return;
-        }
-        if (displacement != nullptr) {
-            addDisplacement(*displacement, *root, material);
         }
         out.materials.push_back(std::move(material));
     };

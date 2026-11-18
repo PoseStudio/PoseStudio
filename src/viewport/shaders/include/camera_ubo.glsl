@@ -6,7 +6,8 @@
 // the whole block through this include — a partial-but-misordered subset (e.g. skipping `view`)
 // would put later fields at the wrong std140 offsets, and a full declaration costs nothing.
 //
-// Included by: mesh.vert/frag, background.vert/frag, skeleton.vert. Needs GL_GOOGLE_include_directive.
+// Included by: mesh.vert/frag, background.vert/frag, skeleton.vert, splat.vert. Needs
+// GL_GOOGLE_include_directive.
 
 // One LIGHT OBJECT of the scene (scenelight.h; cameraubo.h's LightUbo).
 struct SceneLightUbo {

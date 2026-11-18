@@ -63,6 +63,20 @@ std::string urlDecode(const std::string& s) {
     return out;
 }
 
+std::string referencedId(const std::string& reference) {
+    const std::size_t hash = reference.find('#');
+    return urlDecode(hash == std::string::npos ? reference : reference.substr(hash + 1));
+}
+
+int axisIndex(char letter) {
+    switch (letter) {
+        case 'x': return 0;
+        case 'y': return 1;
+        case 'z': return 2;
+        default:  return -1;
+    }
+}
+
 std::string toLowerAscii(std::string s) {
     for (char& c : s) {
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -92,6 +106,54 @@ const nlohmann::json* childOf(const nlohmann::json* node, const char* key) {
     return it == node->end() ? nullptr : &(*it);
 }
 
+// (json::find is safe on any type: it returns end() for a value that is no object.)
+
+std::string stringOf(const nlohmann::json& object, const char* key, const std::string& fallback) {
+    const auto it = object.find(key);
+    return (it != object.end() && it->is_string()) ? it->get<std::string>() : fallback;
+}
+
+bool boolOf(const nlohmann::json& object, const char* key, bool fallback) {
+    const auto it = object.find(key);
+    if (it == object.end()) {
+        return fallback;
+    }
+    if (it->is_boolean()) {
+        return it->get<bool>();
+    }
+    return it->is_number() ? it->get<double>() != 0.0 : fallback;
+}
+
+// A BOOLEAN reads as 0 / 1 in the two below, as nlohmann's own get<float>() / get<int>() read
+// it: a channel that is a switch writes its value as true / false, and a corrective's enable gate
+// — a boolean channel whose default is true — must come out as 1 (read as "not a number", every
+// corrective behind such a gate was folded to 0 and dropped).
+float floatOf(const nlohmann::json& object, const char* key, float fallback) {
+    const auto it = object.find(key);
+    return (it != object.end() && (it->is_number() || it->is_boolean())) ? it->get<float>() : fallback;
+}
+
+int intOf(const nlohmann::json& object, const char* key, int fallback) {
+    const auto it = object.find(key);
+    return (it != object.end() && (it->is_number() || it->is_boolean())) ? it->get<int>() : fallback;
+}
+
+bool numberOf(const nlohmann::json& object, const char* key, double& out) {
+    const auto it = object.find(key);
+    if (it == object.end()) {
+        return false;
+    }
+    if (it->is_number()) {
+        out = it->get<double>();
+        return true;
+    }
+    if (it->is_boolean()) {
+        out = it->get<bool>() ? 1.0 : 0.0;
+        return true;
+    }
+    return false;
+}
+
 const nlohmann::json* findGeometryEntry(const nlohmann::json& doc, const std::string& fragment) {
     const auto it = doc.find("geometry_library");
     if (it == doc.end() || !it->is_array() || it->empty()) {
@@ -99,7 +161,7 @@ const nlohmann::json* findGeometryEntry(const nlohmann::json& doc, const std::st
     }
     if (!fragment.empty()) {
         for (const auto& g : *it) {
-            if (g.value("id", std::string()) == fragment) {
+            if (stringOf(g, "id") == fragment) {
                 return &g;
             }
         }
@@ -138,7 +200,7 @@ bool isFigureInstance(const nlohmann::json& node) {
     if (geos == node.end() || !geos->is_array() || geos->empty() || !(*geos)[0].is_object()) {
         return false;
     }
-    const std::string url = (*geos)[0].value("url", std::string());
+    const std::string url = stringOf((*geos)[0], "url");
     return !url.empty() && url.rfind("name:", 0) != 0;
 }
 
@@ -159,15 +221,14 @@ const nlohmann::json* findFigureNode(const nlohmann::json& root) {
 
 std::string findGeometryUri(const nlohmann::json& root) {
     const nlohmann::json* node = findFigureNode(root);
-    return node ? (*node)["geometries"][0].value("url", std::string()) : std::string();
+    return node ? stringOf((*node)["geometries"][0], "url") : std::string();
 }
 
 bool FigureScope::owns(const std::string& reference) const {
     if (!scoped || reference.empty()) {
         return true;
     }
-    const std::size_t hash = reference.find('#');
-    const std::string id = urlDecode(hash == std::string::npos ? reference : reference.substr(hash + 1));
+    const std::string id = referencedId(reference);
     return id == nodeId || std::find(geometryIds.begin(), geometryIds.end(), id) != geometryIds.end();
 }
 
@@ -184,8 +245,8 @@ FigureScope figureScopeOf(const nlohmann::json& root, const nlohmann::json* figu
     if (!figureNode) {
         return scope;
     }
-    const ChannelRef asset = parseChannelRef(figureNode->value("url", std::string()));
-    scope.nodeId = figureNode->value("id", std::string());
+    const ChannelRef asset = parseChannelRef(stringOf(*figureNode, "url"));
+    scope.nodeId = stringOf(*figureNode, "id");
     scope.assetId = asset.decodedKey;
     if (const std::size_t hash = asset.fileUrl.find('#'); hash != std::string::npos && hash > 0) {
         scope.assetFile = asset.fileUrl.substr(0, hash);
@@ -193,7 +254,7 @@ FigureScope figureScopeOf(const nlohmann::json& root, const nlohmann::json* figu
     if (const auto geos = figureNode->find("geometries"); geos != figureNode->end() && geos->is_array()) {
         for (const auto& geo : *geos) {
             if (geo.is_object()) {
-                scope.geometryIds.push_back(geo.value("id", std::string()));
+                scope.geometryIds.push_back(stringOf(geo, "id"));
             }
         }
     }
@@ -211,8 +272,8 @@ FigureScope figureScopeOf(const nlohmann::json& root, const nlohmann::json* figu
             }
             // A second instance of the SAME figure shares the asset id (two characters on one
             // base): only what tells the two apart is recorded.
-            for (const std::string& name : {node.value("id", std::string()),
-                                            parseChannelRef(node.value("url", std::string())).decodedKey}) {
+            for (const std::string& name : {stringOf(node, "id"),
+                                            parseChannelRef(stringOf(node, "url")).decodedKey}) {
                 if (!name.empty() && name != scope.nodeId && name != scope.assetId) {
                     scope.otherFigures.push_back(name);
                 }
@@ -250,30 +311,36 @@ FigureFileKind figureFileKind(std::vector<std::uint8_t> bytes) {
         return FigureFileKind::NotAFigure;
     }
     const nlohmann::json root = nlohmann::json::parse(bytes.begin(), bytes.end(), nullptr, false);
-    if (root.is_discarded() || !isFigureRoot(root)) {
+    // The caller is a GUI slot asking about every file of a folder, with no handler of its own:
+    // whatever a wrongly typed file makes the walk below throw is "not a figure" too.
+    try {
+        if (root.is_discarded() || !isFigureRoot(root)) {
+            return FigureFileKind::NotAFigure;
+        }
+        // A wearable's figure node is fitted onto another figure ("conform_target": the figure it
+        // was saved on, or the scene's selection) or hangs from one of its bones ("parent": a prop
+        // attached to "name://@selection/hip:") — a character's figure node is neither.
+        const nlohmann::json* node = findFigureNode(root);
+        if (!node) {
+            return FigureFileKind::Character; // a base figure file (its geometry_library)
+        }
+        if (node->contains("conform_target") || node->contains("parent")) {
+            return FigureFileKind::Wearable;
+        }
+        // Its skeleton: the scene nodes the file parents within itself ("#hip" under "#Figure" …).
+        // Every human figure generation lists a hundred and more; a prop, none or a hinge or two.
+        constexpr std::size_t kCharacterMinBones = 20;
+        std::size_t bones = 0;
+        for (const auto& n : root.at("scene").at("nodes")) {
+            const auto parent = n.find("parent");
+            if (parent != n.end() && parent->is_string() && parent->get_ref<const std::string&>().rfind('#', 0) == 0) {
+                ++bones;
+            }
+        }
+        return bones >= kCharacterMinBones ? FigureFileKind::Character : FigureFileKind::Prop;
+    } catch (const std::exception&) {
         return FigureFileKind::NotAFigure;
     }
-    // A wearable's figure node is fitted onto another figure ("conform_target": the figure it
-    // was saved on, or the scene's selection) or hangs from one of its bones ("parent": a prop
-    // attached to "name://@selection/hip:") — a character's figure node is neither.
-    const nlohmann::json* node = findFigureNode(root);
-    if (!node) {
-        return FigureFileKind::Character; // a base figure file (its geometry_library)
-    }
-    if (node->contains("conform_target") || node->contains("parent")) {
-        return FigureFileKind::Wearable;
-    }
-    // Its skeleton: the scene nodes the file parents within itself ("#hip" under "#Figure" …).
-    // Every human figure generation lists a hundred and more; a prop, none or a hinge or two.
-    constexpr std::size_t kCharacterMinBones = 20;
-    std::size_t bones = 0;
-    for (const auto& n : root.at("scene").at("nodes")) {
-        const auto parent = n.find("parent");
-        if (parent != n.end() && parent->is_string() && parent->get_ref<const std::string&>().rfind('#', 0) == 0) {
-            ++bones;
-        }
-    }
-    return bones >= kCharacterMinBones ? FigureFileKind::Character : FigureFileKind::Prop;
 }
 
 const nlohmann::json* findModifierById(const nlohmann::json& doc, const std::string& id) {
@@ -282,7 +349,7 @@ const nlohmann::json* findModifierById(const nlohmann::json& doc, const std::str
         return nullptr;
     }
     for (const auto& m : *lib) {
-        if (m.value("id", std::string()) == id) {
+        if (stringOf(m, "id") == id) {
             return &m;
         }
     }
@@ -290,26 +357,12 @@ const nlohmann::json* findModifierById(const nlohmann::json& doc, const std::str
 }
 
 const nlohmann::json* findMorphModifier(const nlohmann::json& doc, const std::string& fragment) {
-    const auto lib = doc.find("modifier_library");
-    if (lib == doc.end() || !lib->is_array()) {
-        return nullptr;
-    }
-    // The modifier the fragment names, when the file defines it: its morph — or nothing, for a
-    // control or a scale (which must not borrow the shape of whatever else the file holds). Only a
-    // reference that names no modifier of this file falls back to the first one carrying a morph.
-    if (!fragment.empty()) {
-        for (const auto& m : *lib) {
-            if (m.value("id", std::string()) == fragment) {
-                return m.contains("morph") ? &m : nullptr;
-            }
-        }
-    }
-    for (const auto& m : *lib) {
-        if (m.contains("morph")) {
-            return &m;
-        }
-    }
-    return nullptr;
+    // The modifier the fragment names, and only that one: its morph — or nothing, for a control or
+    // a scale, and nothing for an id the file does not define. Neither may borrow the shape of
+    // whatever else the file holds: a morph driven by id alone, whose own file was not installed,
+    // was once "found" in the file of the head that drives it and the head baked a second time.
+    const nlohmann::json* modifier = fragment.empty() ? nullptr : findModifierById(doc, fragment);
+    return (modifier && modifier->contains("morph")) ? modifier : nullptr;
 }
 
 float channelScalar(const nlohmann::json& channel, float fallback) {
@@ -317,16 +370,6 @@ float channelScalar(const nlohmann::json& channel, float fallback) {
         const auto it = channel.find(key);
         if (it != channel.end() && it->is_number()) {
             return it->get<float>();
-        }
-    }
-    return fallback;
-}
-
-double channelDouble(const nlohmann::json& channel, double fallback) {
-    for (const char* key : {"current_value", "value"}) {
-        const auto it = channel.find(key);
-        if (it != channel.end() && it->is_number()) {
-            return it->get<double>();
         }
     }
     return fallback;
@@ -350,7 +393,8 @@ bool channelBool(const nlohmann::json& channel, bool fallback) {
 bool channelColor(const nlohmann::json& channel, glm::vec3& out) {
     for (const char* key : {"current_value", "value"}) {
         const auto it = channel.find(key);
-        if (it != channel.end() && it->is_array() && it->size() >= 3) {
+        if (it != channel.end() && it->is_array() && it->size() >= 3 && (*it)[0].is_number() &&
+            (*it)[1].is_number() && (*it)[2].is_number()) {
             out = glm::vec3((*it)[0].get<float>(), (*it)[1].get<float>(), (*it)[2].get<float>());
             return true;
         }

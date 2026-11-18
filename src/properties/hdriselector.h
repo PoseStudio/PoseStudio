@@ -44,10 +44,6 @@ class HdriSelector : public QPushButton {
 public:
     explicit HdriSelector(QWidget* parent = nullptr);
 
-    /// The panorama currently shown as selected — empty when the viewport is on its procedural
-    /// studio environment (no panoramas in the library).
-    QString currentPath() const { return m_currentPath; }
-
     /// Mirrors an environment chosen elsewhere in the caption (basename of @p path, or the
     /// "Procedural Studio" label for an empty path). Emits nothing — this reflects state, it does
     /// not request a load.
@@ -81,7 +77,7 @@ private:
     QIcon thumbnailFor(const QDir& dir, const QString& baseName, IconCache& fresh);
 
     QMenu*    m_menu = nullptr;
-    QString   m_currentPath;
+    QString   m_currentPath; // the panorama shown as selected ("": the procedural studio, no panoramas in the library)
     IconCache m_iconCache; // a member, not a function static: QIcon pixmaps must not outlive
                            // the QApplication (static destruction runs after the platform
                            // integration is gone)

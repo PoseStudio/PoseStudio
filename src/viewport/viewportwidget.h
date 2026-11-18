@@ -75,7 +75,7 @@ public:
     /// degraded to the Vulkan-unavailable message.
     void importFigure(const QString& path);
 
-    /// Imports a Gaussian splat scene (`.ply` / `.splat`) into the 3D scene as a static model.
+    /// Imports a Gaussian splat scene (`.ply` / `.splat` / `.spz`) into the 3D scene as a static model.
     void importSplat(const QString& path);
 
     /// Whether the scene holds a posable figure (gates the pose save/load menu actions).
@@ -94,6 +94,11 @@ public:
     /// still missing (@p missing receives them), -1 on failure with a human-readable @p error.
     int loadProjectFile(const QString& path, const std::map<std::string, std::string>& recovered,
                         std::vector<std::string>& missing, std::string& error);
+    /// True while the viewport has a window whose renderer is not built yet (it is built on the
+    /// first expose): loadProjectFile cannot load until it is, and a project opened at startup
+    /// asks this to know that trying again a moment later will help. False once the renderer
+    /// exists — and for a degraded viewport (no Vulkan), where no retry helps.
+    bool awaitingRenderer() const;
     /// The .pss document this viewport last saved/opened ("" = unsaved) and whether the scene has
     /// changed since (the close prompt and Save's no-op hint read it).
     QString projectPath() const;
@@ -101,10 +106,10 @@ public:
     bool isProjectDirty() const;
     void setProjectClean();
     /// Marks the scene as having unsaved changes (a scene restored across a restart is unsaved
-    /// work again — main.cpp's --restore-scene).
+    /// work again — DocumentActions::openAtStartup).
     void markProjectDirty();
-    /// Sets the viewport shade mode by index into the picker's table (scene/shademode.h — the
-    /// order shaderModeNames() lists). No-op if the viewport degraded.
+    /// Sets the viewport shade mode by index into the picker's table (scene/shademode.h, whose
+    /// order is the picker's). No-op if the viewport degraded.
     void setShadeMode(int mode);
 
     /// Deletes the selected (outlined) object — Edit → Delete; the viewport's own Delete key
@@ -236,19 +241,16 @@ public:
     /// Applies the live lighting/exposure dials (Environment panel). No-op if the viewport degraded.
     void setLightingSettings(const LightingSettings& settings);
 
-    /// Undo/redo the last committed viewport edit — pose changes and Environment-panel lighting
-    /// gestures share one chronological stack. Driven by Edit → Undo/Redo (whose shortcuts make
-    /// Ctrl+Z/Ctrl+Y work app-wide) and the viewport's own key handling. No-op if degraded.
+    /// Undo/redo the last committed viewport edit — pose changes, the Environment tab's lighting
+    /// gestures, material edits and the light objects' edits share one chronological stack.
+    /// Driven by Edit → Undo/Redo (whose shortcuts make Ctrl+Z/Ctrl+Y work app-wide) and the
+    /// viewport's own key handling. No-op if degraded.
     void undo();
     void redo();
 
     /// Registers the pre-edit dial state of a committed Environment-panel gesture on the undo
     /// stack (see VulkanWindow::registerLightingUndo). No-op if the viewport degraded.
     void registerLightingUndo(const LightingSettings& preEdit);
-
-    /// The user-facing shade-mode names in picker order — the names of scene/shademode.h's table,
-    /// which is the single source of truth (each row also says how the scene draws in that mode).
-    static QStringList shaderModeNames();
 
     /// VR Mode (View → VR Mode): the scene in the headset found at startup, live, with the window
     /// mirroring the headset's left eye. Returns whether VR is on afterwards; a start that fails
@@ -283,8 +285,9 @@ signals:
     /// panel can sync its widgets. The settings are already applied renderer-side.
     void lightingRestored(const LightingSettings& settings);
     /// Emitted whenever the skeleton overlay's visibility changes (from the strip's Skeleton
-    /// button or the View menu), so the two controls stay in sync. The renderer state is already
-    /// updated by the time this fires.
+    /// button or the View menu, or because a scene reset — File → New, File → Open — turned it
+    /// off), so the two controls stay in sync. The renderer state is already updated by the time
+    /// this fires.
     void skeletonVisibilityChanged(bool visible);
     /// Re-emitted from the viewport when the selected joint's transform changed — another joint
     /// selected, or its pose moved by any means (VulkanWindow::jointTransformChanged). The
@@ -319,6 +322,17 @@ private:
     void createStrip();
     /// Glues the strip to the container's top-right corner (no-op while hidden / degraded).
     void anchorStrip();
+
+    // The scripted in-app test's hooks (viewportwidget_testhooks.cpp; POSESTUDIO_IK_SCRIPT): what a
+    // script asks of the application AROUND the viewport arrives as the window's signals and is
+    // answered here. connectScriptHooks wires them, and is called only when a script runs.
+    void     connectScriptHooks();
+    QWidget* findTestWidget(const QString& id, int index) const; ///< The index-th widget whose `testId` property is @p id.
+    void     scriptResizeWindow(int width, int height);          ///< `windowsize`
+    void     scriptUiShot(const QString& path);                  ///< `uishot`
+    void     scriptUiAction(const QString& verb, const QString& id, int index, double value, const QString& text); ///< `ui`
+    void     scriptUiQuery(const QString& what, const QString& id, int index, double* value, bool* ok); ///< `uicount.` and its like
+    void     scriptAppInput(const QString& what, const QPointF& delta, int steps);                       ///< `app`
     /// Applies @p f to the window — the body of every facade forwarder. No-op when the viewport
     /// degraded (no window).
     template <class F>
@@ -335,7 +349,6 @@ private:
     QPointF                          m_scriptCursor;            // the scripted test's `app` cursor, global
     QWidget*                         m_container = nullptr;     // the createWindowContainer wrapper
     ViewportStrip*                   m_strip = nullptr;         // the floating top-right control strip
-    QWidget*                         m_filteredWindow = nullptr; // top-level we filter for move/resize
 };
 
 } // namespace pose

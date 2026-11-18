@@ -99,7 +99,8 @@ it back — the standard's grammar first, then the reference generation's. The I
 round trip on every bone of every reference rig, and the test tools accept the standard's names
 beside the reference generation's.
 
-**The names are applied on import** (2026-11-03): the FBX conformer's last step renames every bone
+**The names are applied on import** (2026-11-03): the conformer's last step (see *Conforming a
+rig that carries no anatomy*, below) renames every bone
 the standard names to that name and leaves the rest — the face rig, the helpers, a bone no role was
 found for — as the file had them (a standard name a kept name already uses is not applied, and one
 that two bones would carry — two riders of a side both read as a pectoral — is applied to neither;
@@ -126,27 +127,34 @@ what the rules before it settled.
    (the child with the most mass below it) the twist helpers before the first real joint are
    thigh twists, that joint is the shin, the helpers after it shin twists, the first foot-class
    joint the foot. Leaf helpers beside the chain are the segment's twists too.
-3. **Under the foot**, the first bone with two children or more is the ball (else the deepest
-   bone with a child). The chain from the ankle to the ball is metatarsal. Each of the ball's
-   children starts a toe; a childless, nameless stub among toe chains is no toe. A leaf under the
-   ankle behind it is the heel, as is a leaf at the ankle that says so by its name.
+3. **Under the foot**, the first bone with two children or more is the ball (else the ankle's
+   main child: a single toe bone, or a chain of them). The chain from the ankle to the ball is
+   metatarsal. Each of the ball's children starts a toe; a childless, nameless stub among toe
+   chains is no toe. Of what is left under the ankle, a skinless leaf is a helper, a leaf behind
+   the ankle is the heel (as is a leaf at the ankle that says so by its name), and any other
+   bone is a metatarsal.
 4. **The spine** is the chain of the largest foot-free subtrees up from the hips, ending at the
    first link with side children of real size on both sides: the collars' link, the chest top.
 5. **The collars** are the chest top's heaviest child on each side. Every other side child of a
-   spine link is a pectoral (a skinless leaf, a helper). Down each arm's main chain: upper arm,
-   its twists, forearm, its twists, hand, with the twist helpers as on the legs.
+   spine link is a pectoral, with what hangs below it (a skinless leaf among them a helper), and
+   so is a skinned centre leaf off a spine link (a biped export's last spine link, hung beside
+   the neck). Down each arm's main chain: upper arm, its twists, forearm, its twists, hand, with
+   the twist helpers as on the legs.
 6. **Under the hand**, a skinless leaf is a helper (a prop anchor). A child that carries two
    chains or more, or whose own chain is four bones or longer, is a carpal and the chains below
    it fingers; any other child starts a finger.
-7. **The neck and the head**: from the chest top's heaviest centre child, neck links while a
-   bone has one child, the first with two or more the head (a chain that ends in a leaf ends in
-   the head). Everything under the head is the face rig.
-8. **What is left** of the body is a helper if it is a skinless leaf, else *other*, and listed.
+7. **The neck and the head**: from the chest top's child nearest the midline (of two there, the
+   one with more below it), neck links while a bone has one child, the first with two or more —
+   or a bone named head — the head (a chain that ends in a leaf ends in the head). Everything
+   under the head is the face rig.
+8. **What is left** of the body is a helper if it is a skinless leaf, or a leaf with next to no
+   skin of its own (a corrective bone beside a knee); a skinned leaf at the hips' joint, on a rig
+   with no pelvis bone, is the pelvis; anything else is *other*, and listed.
 
-Two things are read from a bone's **name**, where the geometry does not decide them: which digit
-a finger or a toe is (the tokens thumb, index, mid, ring, pinky; big, index, mid, ring, pinky,
-little), falling back to the digit's place across the hand or the foot when a rig has no such
-tokens — except that **the thumb is the digit whose first joint sits nearest the wrist** where
+Besides the heel and the head above, two things are read from a bone's **name**, where the
+geometry does not decide them: which digit a finger or a toe is (the tokens thumb — big on a
+toe —, index or second, mid or third, ring or fourth, pinky, little or fifth), falling back to
+the digit's place across the hand or the foot when a rig has no such tokens — except that **the thumb is the digit whose first joint sits nearest the wrist** where
 one does by a fifth (a thumb's chain begins at the carpus, a finger's at the knuckle, a palm's
 length out: a biped rig that names its digits Finger0 to Finger4 had its index finger's knuckle,
 further forward than the thumb's base, taken for the thumb by place alone, and its first relaxed
@@ -157,6 +165,16 @@ The inference needs: the hierarchy, the bind positions, the solve root, which jo
 foot-class (low at bind), which bones are twist helpers, each subtree's mass, and the body mesh
 sample (to tell a skinless helper from a joint). All of these the IK rig already has when it
 builds; the roles are built with it and exposed as `IkRig::roles()`.
+
+**Where the file itself says what a bone is, its word is taken over the inference.** A VRM
+avatar carries a humanoid map — this node is the left upper arm, that one the chest. The glTF
+reader hands each mapped bone its role as a hint (`ModelBone::roleHint`, the standard's name for
+it), and after the structural rules have run the hinted bone takes that role, a bone the rules
+had given the same role is left without one, and the required roles are asked again
+(`RigRoles::applyGiven`). The import log lists every bone whose given role differed from the
+structural reading. The structural rules go by mass and place, and an avatar's extra chains can
+mislead them: a skirt's spring bones that outweigh the leg below the thigh were followed in the
+leg's place, and no foot was found.
 
 ### The conformance report
 
@@ -179,15 +197,34 @@ tools speak.
 The reference figures were the measure: with the roles in place of the name lookups, the eight
 reference rigs produce the same poses to the last bit.
 
+Since then, each for a rig the structural rules alone misread (the two sections below say which):
+
+- The mirror pairing, for what the names and the bind positions leave unpaired.
+- The bone classes: what is a digit, and what is the hand's or the foot's own flesh; a helper
+  that is no twist bone is the flesh of the joint it hangs from.
+- The foot model's ball, where the structural search finds none; the seat, on a rig with no
+  pelvis bone; the top spine link, which is never taken for the pelvis girdle; and which grabbed
+  joints are the trunk's when a figure is pulled up off the floor (the hips, the pelvis, a spine
+  or neck link, the head).
+- The balance masses of a standard-named rig, and the conformer itself (limits, frames, rotation
+  orders, drivers and names are all given by role).
+- The soft body: the breast is the Pectoral-role bone that carries it (or, on a rig with none, a
+  field on the trunk's skin — the skin of the Spine, Pectoral, Collar and Neck roles), and the
+  buttocks' field lies on the skin of the Hips, the Pelvis, the Thighs and their twists.
+- A finger's Bend dial on the Transform tab.
+
 ## Conforming a rig that carries no anatomy
 
 A figure in its native scene format arrives with everything the posing engine lives by: a frame
-on every bone, a rotation order, limits, locked twist helpers. A rig from an FBX file arrives
-with none of it — names, a hierarchy, bind positions, skin weights, and whatever the authoring
-tool's local axes happened to be. `scene/ik/rigconformer.{h,cpp}` turns the second kind into the
-first, by role (2026-11-03). It runs inside the FBX import, on the raw skeleton, before the model
-is uploaded; `POSESTUDIO_FBX_NO_CONFORM` is the A/B (the skeleton as read: identity frames, no
-limits, which the engine poses as a static rig).
+on every bone, a rotation order, limits, locked twist helpers. A rig from an interchange file —
+FBX, glTF / GLB, VRM, USD — arrives with none of it: names, a hierarchy, bind positions, skin
+weights, and whatever the authoring tool's local axes happened to be.
+`scene/ik/rigconformer.{h,cpp}` turns the second kind into the first, by role (2026-11-03, for
+FBX; the glTF and USD readers joined it the day after). It runs inside the rigged import
+(`riggedimportservice.cpp`, the one service behind the three readers), on the raw skeleton,
+before the model is uploaded; `POSESTUDIO_RIG_NO_CONFORM` is the A/B (the skeleton as read:
+identity frames, no limits, which the engine poses as a static rig; the older name
+`POSESTUDIO_FBX_NO_CONFORM` is still read).
 
 1. **A provisional armature**, enough structure for the roles: every frame along its bone, no
    limits — except that a bone whose name says *twist* or *roll* and carries nothing real
@@ -206,8 +243,8 @@ limits, which the engine poses as a static rig).
    reference's chain by place, each link's limits interpolated at its relative place and then
    renormalized so the links together carry the reference chain's total range — three links
    that took links 1, 3 and 4 of the four had a third less flexion than the reference's trunk,
-   and the bow rested short by that), the head's, the jaw's and the eyes'. The right side takes the left's with its side
-   and twist channels mirrored. A segment's own twist channel is locked only when a twist
+   and the bow rested short by that), the head's, the jaw's and the eyes'. The right side takes the left's with its y and z
+   channels mirrored. A segment's own twist channel is locked only when a twist
    helper of that segment lies **on the chain** between it and its next joint (the reference's
    thigh twist carries the shin); a helper hanging as a leaf beside the chain carries skin
    alone, and the segment keeps its twist. A helper is locked on every channel; a bone with no
@@ -320,11 +357,10 @@ These are the next steps, in order.
    bend and its twist, and which direction is forward, outward and pointed. The Transform tab's
    dials already derive this by geometry for every joint, and the conformer's limits assume the
    reference's channel layout; the standard will make it a definition.
-2. **The rest of the engine's name lookups**: the balance masses — their SIDE is read by role-
-   grade tokens now, their CLASS still by name fragments, so a game-engine rig's spine weighs a
-   third of the reference's trunk (`spine_01..03` share the one "spine" entry where the reference's
-   four links share "abdomen" and "chest") and its bow rests 4cm short of a cursor the reference
-   reaches: the masses by role are the next round — and the harness alias table itself.
+2. **The rest of the engine's name lookups**: the balance masses of the native figures — a
+   standard-named rig is weighed by role (see *The standard's names*), but a figure that keeps its
+   own names is still classed by fragments of them, the roles filling in only a class the names
+   left empty — and the harness alias table itself.
 3. **The standard's names in the test tools.** The names are decided (see *The standard's
    names*); the harness and the galleries still speak the reference generation's names and will
    move to the standard's.
@@ -332,4 +368,6 @@ These are the next steps, in order.
    prefilled, with a picker per role, and the humanoid limits applied on request. A figure that
    is not humanoid, or not mapped, still poses joint by joint with the dials and the mouse mode;
    the IK is off for it.
-5. **Poses by role.** A pose saved by role loads onto any conforming figure.
+5. **Poses by role.** A pose saved by role loads onto any conforming figure. Between conformed
+   imports this holds already — they share the standard's names, frames, orders and ranges — but
+   a native figure's pose file is keyed to its own bone names and frames.

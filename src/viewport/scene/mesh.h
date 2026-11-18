@@ -6,11 +6,13 @@
  * A Mesh owns device-local vertex + index buffers, its canonical material (materialparams.h —
  * the values as imported and as they stand, packed for the GPU into the owning Model's material
  * buffer), and its TEXTURE SLOTS (MaterialMap): per slot the plain decoded image the material
- * carries now and the one it was imported with, and the eight sampled textures the slots drive
- * through its own descriptor set (set 1: diffuse with the cutout baked into its alpha, the detail
- * normal/bump, the roughness/metalness parameter map, spec mask, translucency, pore normal, a
- * bump beside a normal, emission — each falling back to a shared 1x1 texture when absent). A
- * Model (model.h) groups the meshes of one imported file. Qt-free.
+ * carries now and the one it was imported with, and the ten sampled textures the slots drive
+ * through its own descriptor set (set 1, MaterialBinding below: diffuse with the cutout baked into
+ * its alpha, the detail normal/bump, the parameter map — roughness, metalness, ambient occlusion
+ * and transmission weight packed —, spec mask, translucency, pore normal, a bump beside a normal,
+ * emission, the layer map — coat weight and roughness, sheen weight, thin-film thickness — and
+ * the sheen color; each falling back to a shared 1x1 texture when absent). A Model (model.h)
+ * groups the meshes of one imported file. Qt-free.
  */
 
 #ifndef MESH_H
@@ -39,6 +41,13 @@ struct DecodedImage;
 struct MeshData;
 struct TextureUploadCache; // per-model dedup of texture uploads (textureuploadcache.h)
 
+/// A file's name without its folders (either separator): what the Materials tab shows of a path
+/// — a slot's map (Mesh::slotLabel), the object's heading (Scene::materialView).
+inline std::string fileBaseName(const std::string& path) {
+    const std::size_t slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
 /// The uploads of a model's texture slots AFTER import, shared by the image they were made from:
 /// the zones of one map (a figure's face, lips and ears) that are handed the same derived image —
 /// the map with its overlays painted in — bind ONE texture, as they did at import
@@ -63,6 +72,7 @@ struct MeshPushConstants {
     glm::mat4 model;
     glm::vec4 meta;
 };
+static_assert(sizeof(MeshPushConstants) == 80, "MeshPushConstants must match mesh.vert / mesh.frag");
 
 /// One mesh's material as the shaders read it: an entry of the model's per-frame-in-flight
 /// material storage buffer (set 2 binding 3; Model::uploadMaterialsIfDirty), packed by
@@ -76,36 +86,40 @@ struct MaterialGpu {
                                  //   (floor = mode, fract×8 = strength), z metalness, w specular (F0) weight
     glm::vec4 material2;         // x lobe1 roughness, y lobe2 roughness, z lobe ratio (1 = single-lobe),
                                  //   w translucency weight
-    glm::vec4 material3;         // x top-coat weight (0 = none), y top-coat roughness, z unused,
-                                 //   w micro-detail packed as floor(tiles) + fract(weight) (0 = none)
+    glm::vec4 material3;         // x top-coat weight (0 = none), y top-coat roughness, z the sign the
+                                 //   normal map's green is read with (-1 an OpenGL map, +1 a DirectX
+                                 //   one: Flip Normal), w micro-detail packed as floor(tiles) +
+                                 //   fract(weight) (0 = none)
     glm::vec4 emission;          // rgb emission radiance factor (linear color × luminance), w bump strength
                                  //   (a bump map beside a normal map)
     glm::vec4 uvTransform;       // xy tiling, zw offset
     glm::vec4 specularColor;     // rgb specular tint, w anisotropy
-    glm::vec4 transmission;      // x weight, y depth, z thin-walled (0/1), w index of refraction
-    glm::vec4 transmissionColor; // rgb, w dispersion
-    glm::vec4 subsurface;        // rgb color, w radius scale
+    glm::vec4 transmission;      // x weight, y depth (stored: the viewport shader does not read it),
+                                 //   z thin-walled (0/1), w index of refraction
+    glm::vec4 transmissionColor; // rgb, w dispersion (stored: not read by the viewport shader)
+    glm::vec4 subsurface;        // rgb color, w radius scale (all four stored: not read by the
+                                 //   viewport shader — a render engine's, through renderexport)
     glm::vec4 sheen;             // x weight, y roughness, z anisotropy rotation, w coat ior
     glm::vec4 sheenColor;        // rgb, w thin-film thickness
     glm::vec4 coatColor;         // rgb, w thin-film ior
-    glm::vec4 extra;             // x diffuse roughness, y thin-film weight, z unused, w = 1 when a bump
-                                 //   map is bound beside the normal map (mesh.frag applies it)
+    glm::vec4 extra;             // x diffuse roughness, y thin-film weight, z the ambient-occlusion
+                                 //   MAP's weight, w = 1 when a bump map is bound beside the normal
+                                 //   map (mesh.frag applies it)
     glm::vec4 detail;            // the detail layer's placement: xy tiling, zw offset (repeats)
     glm::vec4 extra2;            // x detail roughness multiplier, y coat anisotropy, z its rotation
                                  //   (radians), w the UV rotation (radians)
 };
 static_assert(sizeof(MaterialGpu) == 16 * sizeof(glm::vec4), "MaterialGpu must match material.glsl");
 
-/// What a Mesh::record draw is for — pushed as meta.y's low bits. Opaque/Transparent select the
-/// alpha semantics (SSS mask vs blend opacity) in the lit passes; Wire is the wireframe overlay
-/// (every edge in a flat grey from the UBO's wire level, through the LINE-polygon-mode
-/// pipeline); DepthOnly is the hidden-line surface fill (its pipeline masks every color write,
-/// so the shader returns at once — the draw exists to lay down depth).
-/// What a draw IS, for the shader (pushed in meta.y's low bits): the lit opaque pass, the
-/// alpha-blended transparent pass, the wireframe edges, the hidden-line depth fill, and the
-/// TRANSMISSION pair — a transmissive zone's two draws in the transparent pass (the frame
+/// What a Mesh::record draw IS, for the shader — pushed as meta.y's low bits. Opaque/Transparent
+/// select the alpha semantics (SSS mask vs blend opacity) in the lit passes; Wire is the
+/// wireframe overlay (every edge in a flat grey from the UBO's wire level, through the
+/// LINE-polygon-mode pipeline); DepthOnly is the hidden-line surface fill (its pipeline masks
+/// every color write, so the shader returns at once — the draw exists to lay down depth); the
+/// TRANSMISSION pair is a transmissive zone's two draws in the transparent pass (the frame
 /// behind it multiplied by what it lets through, then its own light added; see
-/// ScenePipelines::transmitMultiply / transmitAdd).
+/// ScenePipelines::transmitMultiply / transmitAdd); the two DepthCutout kinds are a see-through
+/// mesh drawn as an occluder of the splat layer.
 enum class MeshDrawKind {
     Opaque = 0,
     Transparent = 1,
@@ -124,6 +138,7 @@ struct ShadowPushConstants {
     glm::mat4 viewProj; // the fitted light matrix (shadow) or the camera's (outline mask)
     glm::mat4 model;
 };
+static_assert(sizeof(ShadowPushConstants) == 128, "ShadowPushConstants must match shadow.vert");
 
 /// The set-1 bindings (mesh.frag's samplers), in order.
 enum MaterialBinding : uint32_t {
@@ -272,8 +287,7 @@ public:
     // which smooths a surface across its zones. A smoothed mesh keeps its FILE's geometry beside
     // the uploaded one: what the next angle is computed from, and what "as imported" puts back.
     /// How the uploaded geometry is shaded: by angle (and which), or as its file has it.
-    bool  smoothingApplied() const { return m_smoothApplied; }
-    float smoothAngleApplied() const { return m_smoothAngleApplied; }
+    bool smoothingApplied() const { return m_smoothApplied; }
     /// True while the material asks for another smoothing than the geometry has.
     bool smoothingPending() const {
         return m_material.smoothByAngle != m_smoothApplied || (m_smoothApplied && m_material.smoothAngle != m_smoothAngleApplied);
@@ -339,6 +353,10 @@ private:
     uint32_t                       m_dominantJoint = 0; // see dominantJoint()
     float                          m_opacity = 1.0f;
     bool                           m_hasOpacityMask = false;
+    // The IMPORT's cutout is the alpha of its base color image itself (a glTF alpha mode, a USD
+    // opacity read off the diffuse map) and no Opacity slot holds it: the zone is cut out while
+    // that image is its base color, and no longer once another is chosen (setSlotImage).
+    bool                           m_importedAlphaCutout = false;
     bool                           m_transmissive = false; // see isTransmissive (set by packGpu)
     float                          m_metalBaked = -1.0f;   // see setMetalBaked: the Metallic value baked into the bound map, < 0 = none
     int                            m_normalFlipBaked = -1; // see setNormalFlipBaked: the Flip Normal value the bound normal image's overlays were painted for, -1 = none
@@ -348,9 +366,11 @@ private:
     uint32_t                       m_materialIndex = 0;
     // The texture slots: the plain images now and as imported, their channels, the import's
     // file paths (the tab's labels), and per slot the UPLOADED texture it drives (BaseColor and
-    // Opacity share the baked diffuse; Roughness and Metalness share the parameter map). Textures
-    // are shared_ptr: at import meshes sampling the same DecodedImage share one upload (see the
-    // TextureUploadCache note on the constructor).
+    // Opacity share the baked diffuse; Roughness, Metalness, AmbientOcclusion and
+    // TransmissionWeight the parameter map; CoatWeight, CoatRoughness, SheenWeight and
+    // ThinFilmThickness the layer map; a stored-only slot — materialMapIsRendered — has none).
+    // Textures are shared_ptr: at import meshes sampling the same DecodedImage share one upload
+    // (see the TextureUploadCache note on the constructor).
     std::array<std::shared_ptr<const DecodedImage>, kMaterialMapCount> m_slotPlain{};
     std::array<std::shared_ptr<const DecodedImage>, kMaterialMapCount> m_importedSlotPlain{};
     std::array<int, kMaterialMapCount>                                 m_slotChannel{};

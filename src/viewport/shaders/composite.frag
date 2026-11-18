@@ -321,7 +321,14 @@ bool edgeScaled(vec2 uv, vec3 hdr, vec3 bloom, vec3 toned, out vec3 laid) {
 void main() {
     vec2 uv = vUv * pc.uvRect.xy + pc.uvRect.zw;
     const vec3 hdr = texture(uHdr, uv).rgb;
-    const vec3 bloom = texture(uBloom, uv).rgb * pc.params.y * pc.params.z;
+    // The bloom target is sampled only while bloom is ON. Off, nothing has rendered into it since
+    // it was created (a resize in a stylized mode or the Rendered mode, a headset with reduced
+    // effects): its texels are undefined, and an undefined texel weighted by zero is not zero if
+    // it happens to hold an infinity or a NaN.
+    vec3 bloom = vec3(0.0);
+    if (pc.params.z > 0.5) {
+        bloom = texture(uBloom, uv).rgb * pc.params.y * pc.params.z;
+    }
     vec3 color = toneOf(hdr + bloom);
     // THE PHOTO LAYER: the Gaussian splats, accumulated in the HDR pass as premultiplied color +
     // coverage in the trainers' own display-referred space, laid OVER the tonemapped scene in

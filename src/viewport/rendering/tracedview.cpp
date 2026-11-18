@@ -74,15 +74,26 @@ void TracedView::createImage(uint32_t width, uint32_t height) {
     writeCombinedImageSamplers(m_context.device(), m_set, 0, &info, 1);
 }
 
-void TracedView::setImage(const float* rgba, uint32_t width, uint32_t height) {
-    if (rgba == nullptr || width == 0 || height == 0) {
+float* TracedView::beginImage(uint32_t width, uint32_t height) {
+    if (width == 0 || height == 0) {
+        return nullptr;
+    }
+    if (width != m_pendingWidth || height != m_pendingHeight) {
+        // Another size: a picture committed but not yet uploaded goes with the buffer it was in
+        // (prepare() must never copy a buffer of one size into staging of another); the picture
+        // on the GPU stays what it was until the new one is committed.
+        m_dirty = false;
+        m_pendingWidth = width;
+        m_pendingHeight = height;
+        m_pending.resize(static_cast<std::size_t>(width) * height * 4u);
+    }
+    return m_pending.data();
+}
+
+void TracedView::commitImage() {
+    if (m_pending.empty()) {
         return;
     }
-    const std::size_t count = static_cast<std::size_t>(width) * height * 4u;
-    m_pending.resize(count);
-    std::memcpy(m_pending.data(), rgba, count * sizeof(float));
-    m_pendingWidth = width;
-    m_pendingHeight = height;
     m_dirty = true;
     m_hasImage = true;
 }

@@ -17,10 +17,10 @@
  * represent — a tinted specular on a non-metal, a dielectric far brighter than 4 % — is
  * non-physical, and such a material comes out as the nearest metallic-roughness one.
  *
- * convertSpecGloss does the scalar case (the readers call it for an untextured material); the
- * decode layer runs the same solve per texel when the source carries maps (a diffuse map, a
- * specular color map, a glossiness map), baking a base-color map and a metalness map —
- * ModelImportService::decodeModelTextures, which has the decoded pixels.
+ * convertSpecGloss is the whole solve for one color triple: the readers call it once for an
+ * untextured material, and the decode layer calls it per texel when the source carries maps (a
+ * diffuse map, a specular color map, a glossiness map), baking a base-color map and a metalness
+ * map — decodeModelTextures (viewport/texturedecode.h), which has the decoded pixels.
  *
  * A PHONG material's specular color is NOT a reflectance (Blender exports Ks 0.5 for every
  * default material, Maya 0.5 grey) and is not solved: the readers take only its grey level as
@@ -45,13 +45,6 @@ struct MetallicRoughness {
 /// The Khronos solve on LINEAR colors: @p diffuse and @p specular (F0) in 0..1, @p glossiness
 /// 0 (rough) .. 1 (mirror).
 MetallicRoughness convertSpecGloss(const glm::vec3& diffuse, const glm::vec3& specular, float glossiness);
-
-/// The metalness alone (the per-texel bake's inner loop): the perceived brightness of the linear
-/// diffuse and specular colors, and 1 − max(specular).
-float solveMetallic(float diffuseBrightness, float specularBrightness, float oneMinusSpecularStrength);
-
-/// Perceived brightness of a linear color (the Khronos sample's: sqrt of the weighted squares).
-float perceivedBrightness(const glm::vec3& linear);
 
 /// A PHONG specular color × factor read as a specular WEIGHT (1 = the standard 4 % dielectric,
 /// the cap): its grey level over 0.5, the grey every modelling package exports for a default

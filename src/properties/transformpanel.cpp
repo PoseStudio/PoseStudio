@@ -13,12 +13,24 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QPushButton>
-#include <QScrollArea>
 #include <QSignalBlocker>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 namespace pose {
+
+namespace {
+
+/// The Figure group's position rows, in centimetres. The RANGE is only a bound on what can be
+/// typed — a figure walked or carried far from where it was imported, a splat scene placed a
+/// street away, must be shown where it stands: a box that clamped what it shows (at five metres,
+/// once) read 500 for a figure at 620, and the next scrub, which sets an absolute position from
+/// the value shown, moved her 1.2 m on its first pixel. A full sweep of the box is ten metres
+/// whatever the range (the Lights tab's position rows are built the same way).
+constexpr double kFigurePositionRangeCm = 100000.0;
+constexpr double kFigurePositionScrubCm = 1000.0;
+
+} // namespace
 
 TransformPanel::TransformPanel(ViewportWidget* viewport, QWidget* parent)
     : QWidget(parent), m_viewport(viewport) {
@@ -33,19 +45,8 @@ TransformPanel::TransformPanel(ViewportWidget* viewport, QWidget* parent)
 }
 
 void TransformPanel::buildUi() {
-    auto* outer = new QVBoxLayout(this);
-    outer->setContentsMargins(0, 0, 0, 0);
-
-    auto* scroll = new QScrollArea(this);
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    outer->addWidget(scroll);
-
-    auto* content = new QWidget;
-    content->setObjectName(QStringLiteral("TransformContent"));
-    auto* col = new QVBoxLayout(content);
-    col->setContentsMargins(12, 12, 12, 12);
-    col->setSpacing(12);
+    const propertyrows::ScrollColumn tab = propertyrows::makeScrollColumn(this, QStringLiteral("TransformContent"), 12);
+    QVBoxLayout*                     col = tab.column;
 
     m_jointName = new QLabel;
     m_jointName->setObjectName(QStringLiteral("TransformJointName"));
@@ -66,27 +67,20 @@ void TransformPanel::buildUi() {
         tr("A static model's size (an OBJ, a Gaussian splat scene), in percent of the size it was imported at. A figure keeps her own."),
     };
     for (int i = 0; i < 7; ++i) {
+        // Centimetres to a tenth, whole degrees, whole percent of the imported size.
+        const QString&              label = figureLabels[static_cast<std::size_t>(i)];
+        const QString&              tip = figureTips[static_cast<std::size_t>(i)];
+        const propertyrows::ScrubRow built = i < 3   ? propertyrows::makeScrubRow(label, tip, -kFigurePositionRangeCm, kFigurePositionRangeCm, 1.0, 1)
+                                             : i < 6 ? propertyrows::makeScrubRow(label, tip, -180.0, 180.0, 1.0, 0)
+                                                     : propertyrows::makeScrubRow(label, tip, 1.0, 2000.0, 5.0, 0);
         Row& row = m_figureRows[static_cast<std::size_t>(i)];
-        row.label = new QLabel(figureLabels[static_cast<std::size_t>(i)]);
-        row.label->setToolTip(figureTips[static_cast<std::size_t>(i)]);
-        row.box = new DragNumberBox;
+        row.label = built.label;
+        row.box = built.box;
+        row.restore = built.restore;
+        row.box->setOrigin(i < 6 ? 0.0 : 100.0); // (as imported)
         if (i < 3) {
-            row.box->setRange(-500.0, 500.0);
-            row.box->setSingleStep(1.0);
-            row.box->setDecimals(1);
-            row.box->setOrigin(0.0);
-        } else if (i < 6) {
-            row.box->setRange(-180.0, 180.0);
-            row.box->setSingleStep(1.0);
-            row.box->setDecimals(0);
-            row.box->setOrigin(0.0);
-        } else {
-            row.box->setRange(1.0, 2000.0);
-            row.box->setSingleStep(5.0);
-            row.box->setDecimals(0);
-            row.box->setOrigin(100.0); // (as imported)
+            row.box->setScrubSpan(kFigurePositionScrubCm);
         }
-        row.box->setToolTip(figureTips[static_cast<std::size_t>(i)]);
         row.box->setProperty("testId", QStringLiteral("transform.figure")); // (the scripted test's `ui`: row i)
         connect(row.box, &DragNumberBox::editingStarted, this, [this]() {
             if (m_viewport) {
@@ -110,7 +104,6 @@ void TransformPanel::buildUi() {
                 refresh();
             }
         });
-        row.restore = propertyrows::makeRestoreButton();
         row.restore->setToolTip(i < 3 ? tr("Back to 0: where she was imported")
                                 : i < 6 ? tr("Back to 0: as she was imported")
                                         : tr("Back to 100: the size it was imported at"));
@@ -127,7 +120,7 @@ void TransformPanel::buildUi() {
                 refresh();
             }
         });
-        figure->addRow(row.label, propertyrows::rowWithRestore(row.box, row.restore));
+        figure->addRow(row.label, built.field);
     }
 
     // --- Rotation: the three dials, in JointDialKind order ---
@@ -148,16 +141,13 @@ void TransformPanel::buildUi() {
            "With several joints selected (Shift+click), all of them turn by the same amount."),
     };
     for (int i = 0; i < 3; ++i) {
+        const propertyrows::ScrubRow built =
+            propertyrows::makeScrubRow(labels[static_cast<std::size_t>(i)], tips[static_cast<std::size_t>(i)], -100.0, 100.0, 1.0, 0);
         Row& row = m_rows[static_cast<std::size_t>(i)];
-        row.label = new QLabel(labels[static_cast<std::size_t>(i)]);
-        row.label->setToolTip(tips[static_cast<std::size_t>(i)]);
-
-        row.box = new DragNumberBox;
-        row.box->setRange(-100.0, 100.0);
+        row.label = built.label;
+        row.box = built.box;
+        row.restore = built.restore;
         row.box->setOrigin(0.0); // the rest pose: the bar fills from it, either way
-        row.box->setSingleStep(1.0);
-        row.box->setDecimals(0);
-        row.box->setToolTip(tips[static_cast<std::size_t>(i)]);
         row.box->setProperty("testId", QStringLiteral("transform.dial")); // (the scripted test's `ui`: 0 Bend, 1 Side-Side, 2 Twist)
         // One undo entry per completed gesture (a scrub or a type-in), not one per value it
         // passes through: the box brackets the user's changes with these two signals.
@@ -181,7 +171,6 @@ void TransformPanel::buildUi() {
         });
 
         // Per-row restore: just this dial back to 0, the rest pose.
-        row.restore = propertyrows::makeRestoreButton();
         row.restore->setToolTip(tr("Back to the rest pose (every selected joint's, with several selected)"));
         connect(row.restore, &QToolButton::clicked, this, [this, i]() {
             if (m_viewport && m_viewport->beginJointTransformEdit()) {
@@ -191,7 +180,7 @@ void TransformPanel::buildUi() {
             }
         });
 
-        rotation->addRow(row.label, propertyrows::rowWithRestore(row.box, row.restore));
+        rotation->addRow(row.label, built.field);
     }
 
     m_hint = new QLabel(tr("Click a joint on a figure to select it. Its rotation can then be "
@@ -208,7 +197,7 @@ void TransformPanel::buildUi() {
     connect(m_reset, &QPushButton::clicked, this, &TransformPanel::resetRotation);
 
     col->addStretch(1);
-    scroll->setWidget(content);
+    tab.finish();
 }
 
 void TransformPanel::refresh() {

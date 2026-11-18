@@ -33,11 +33,14 @@
 
 namespace pose {
 
-/// The thumbnail's side in logical pixels.
+/// The side a texture slot's thumbnail picture is SAMPLED at, in logical pixels (the size of the
+/// larger thumbnails the tab once listed its slots with). Every button is kThumbSmallPx now and
+/// draws the picture scaled down to its own side.
 inline constexpr int kThumbPx = 39;
-/// … and its corner radius.
+/// The hover preview's corner radius.
 inline constexpr int kThumbRadiusPx = 6;
-/// The line items' small thumbnail (beside the value its map scales) and its radius.
+/// The thumbnail button: beside the value its map scales, on an overlay card's rows. Its side
+/// and its corner radius.
 inline constexpr int kThumbSmallPx = 24;
 inline constexpr int kThumbSmallRadiusPx = 4;
 /// The hover preview: the map at this size, after this delay.
@@ -57,8 +60,13 @@ public:
         setAttribute(Qt::WA_Hover);
     }
     ~MaterialThumbButton() override { delete m_popup; }
-    /// The map as a plain square pixmap (kThumbPx at the device pixel ratio), or a null pixmap.
+    /// The map as a plain square pixmap (drawn scaled to the button), or a null pixmap for none.
+    /// The picture it already shows costs nothing: a tab's refresh hands every thumbnail its
+    /// picture again at every step of a scrub.
     void setImage(const QPixmap& pixmap) {
+        if (pixmap.cacheKey() == m_image.cacheKey()) {
+            return;
+        }
         m_image = pixmap;
         update();
     }
@@ -68,6 +76,8 @@ public:
         m_preview = std::move(provider);
         m_caption = caption;
     }
+    /// The preview's caption alone (the provider stays).
+    void setCaption(const QString& caption) { m_caption = caption; }
     QSize sizeHint() const override { return QSize(m_px, m_px); }
 
 protected:

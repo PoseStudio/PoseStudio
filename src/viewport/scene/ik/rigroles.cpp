@@ -1034,6 +1034,7 @@ void RigRoles::build(const Input& in) {
     m_tags.clear();
     m_names.clear();
     m_missing.clear();
+    m_overridden.clear(); // (with the rest: a build that returns early below must not keep an earlier build's list)
     m_spineLinks = 0;
     m_neckLinks = 0;
     if (in.parents == nullptr || in.children == nullptr || in.bindPos == nullptr) {

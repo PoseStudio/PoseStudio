@@ -69,7 +69,6 @@ public:
     VulkanContext& operator=(const VulkanContext&) = delete;
 
     // --- Accessors (handles are owned by this object; callers must not destroy them) ---
-    VkInstance       instance()        const { return m_instance; }
     VkSurfaceKHR     surface()         const { return m_surface; }
     VkPhysicalDevice physicalDevice()  const { return m_physicalDevice; }
     VkDevice         device()          const { return m_device; }

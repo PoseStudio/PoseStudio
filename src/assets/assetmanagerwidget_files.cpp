@@ -1,9 +1,11 @@
 /**
  * @file assetmanagerwidget_files.cpp
- * @brief AssetManagerWidget, third translation unit: an asset's FILE OPERATIONS — Rename,
- *        Duplicate, Move To Folder, Delete — and PACKAGES (Export Package, Install Package).
+ * @brief AssetManagerWidget, the file operations' translation unit (assetmanagerwidget.h lists
+ *        the four): an asset's FILE OPERATIONS — Rename, Duplicate, Move To Folder, Delete —
+ *        and PACKAGES (Export Package, Install Package).
  *
- * The work itself is assets/assetstore.h's (headless, and checked there): the asset, its icon
+ * The work itself is the asset store's (assetstore.h for the standard, assetfileops.h and
+ * assetpackage.h for the operations; headless, and checked there): the asset, its icon
  * and the texture files of its folder's `.textures` store move, are named and go together. This
  * file is what the browser adds. Each operation has two halves:
  *
@@ -22,23 +24,34 @@
 #include "assetmanagerwidget.h"
 
 #include "assetdb.h"
+#include "assetfileops.h"
+#include "assetfolderproxymodel.h"
 #include "assetnodeids.h"
+#include "assetpackage.h"
 #include "assetstore.h"
 #include "constants.h"
 #include "preferencesmanager.h"
 
 #include <QAction>
+#include <QApplication>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QLocale>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QStandardPaths>
 
 #include <cstdio>
+
+namespace {
+/// A folder beyond either of these is asked about before it is packed (exportPackageOf).
+constexpr int    kLargePackageFiles = 5000;
+constexpr qint64 kLargePackageBytes = qint64(1) << 30;
+} // namespace
 
 AssetManagerWidget::FileActions AssetManagerWidget::addFileActions(QMenu* menu, const QString& assetPath) {
     FileActions actions;
@@ -74,11 +87,15 @@ bool AssetManagerWidget::handleFileAction(QAction* selected, const FileActions& 
     return true;
 }
 
-void AssetManagerWidget::afterFileOperation(bool foldersChanged) {
+void AssetManagerWidget::afterFileOperation(const QString& folder, bool foldersChanged) {
     if (foldersChanged) {
-        refreshAssetManager();
+        refreshAssetManager(); // (the tree again; it shows the grid's source again itself)
+    } else {
+        // The folder's files changed, not its subfolders: the tree stays, but what it says of
+        // the folder — whether it holds assets, and so whether those above it do — is asked again.
+        proxyModel->refreshFolder(folder);
+        refreshCurrentView();
     }
-    refreshCurrentView();
     emit assetFilesChanged();
 }
 
@@ -88,17 +105,17 @@ void AssetManagerWidget::afterFileOperation(bool foldersChanged) {
 
 AssetStore::Result AssetManagerWidget::renameAssetTo(const QString& assetPath, const QString& name) {
     const AssetStore::Result result = AssetStore::renameAsset(assetPath, name);
-    // (Where it is now — even a rename that could not take the icon along has moved the file.)
+    // (A rename that failed has renamed nothing, and names no path.)
     if (!result.path.isEmpty() && result.path != assetPath) {
         AssetDb::repathItem(assetPath, result.path);
     }
-    afterFileOperation(false);
+    afterFileOperation(QFileInfo(assetPath).absolutePath(), false);
     return result;
 }
 
 AssetStore::Result AssetManagerWidget::duplicateAssetAt(const QString& assetPath) {
     const AssetStore::Result result = AssetStore::duplicateAsset(assetPath);
-    afterFileOperation(false);
+    afterFileOperation(QFileInfo(assetPath).absolutePath(), false);
     return result;
 }
 
@@ -107,7 +124,7 @@ AssetStore::Result AssetManagerWidget::moveAssetTo(const QString& assetPath, con
     if (!result.path.isEmpty() && result.path != assetPath) {
         AssetDb::repathItem(assetPath, result.path);
     }
-    afterFileOperation(true);
+    afterFileOperation(folder, true);
     return result;
 }
 
@@ -115,7 +132,8 @@ AssetStore::Result AssetManagerWidget::deleteAssetAt(const QString& assetPath, b
     const AssetStore::Result result = AssetStore::deleteAsset(assetPath, permanently);
     if (result.ok) {
         AssetDb::forgetItem(assetPath);
-        afterFileOperation(false);
+        proxyModel->refreshCollections(); // (one that held nothing else has no asset left)
+        afterFileOperation(QFileInfo(assetPath).absolutePath(), false);
     }
     return result;
 }
@@ -123,7 +141,7 @@ AssetStore::Result AssetManagerWidget::deleteAssetAt(const QString& assetPath, b
 AssetStore::Result AssetManagerWidget::installPackageFrom(const QString& package, const QString& folderPath, bool replaceExisting) {
     const AssetStore::Result result = AssetStore::installPackage(package, folderPath, replaceExisting);
     if (result.ok || result.files > 0) {
-        afterFileOperation(true);
+        afterFileOperation(folderPath, true);
     }
     return result;
 }
@@ -194,8 +212,9 @@ void AssetManagerWidget::moveAssetFile(const QString& assetPath) {
 void AssetManagerWidget::deleteAssetFile(const QString& assetPath) {
     const QString name = QFileInfo(assetPath).completeBaseName();
     QMessageBox   box(QMessageBox::Question, tr("Delete"), tr("Move \"%1\" to the trash?").arg(name), QMessageBox::NoButton, this);
-    box.setInformativeText(tr("Its icon goes with it, and so do the texture files in this folder's \".textures\" folder that no other "
-                              "asset here uses."));
+    box.setInformativeText(tr("Its icon goes with it, and so do the texture files it uses in this folder's \"%1\" folder that no other "
+                              "asset here uses.")
+                               .arg(AssetStore::texturesFolderName()));
     QPushButton* trash = box.addButton(tr("Move To Trash"), QMessageBox::DestructiveRole);
     box.addButton(QMessageBox::Cancel);
     box.setDefaultButton(QMessageBox::Cancel);
@@ -206,12 +225,43 @@ void AssetManagerWidget::deleteAssetFile(const QString& assetPath) {
     const AssetStore::Result result = deleteAssetAt(assetPath, /*permanently=*/false);
     if (!result.ok) {
         QMessageBox::warning(this, tr("Delete"), result.error);
+    } else if (!result.kept.isEmpty()) {
+        QMessageBox::information(this, tr("Delete"),
+                                 tr("\"%1\" was deleted. %n texture file(s) it used were left in this folder's \"%2\" folder: "
+                                    "another asset here could not be read, and may use them too.",
+                                    nullptr, static_cast<int>(result.kept.size()))
+                                     .arg(name, AssetStore::texturesFolderName()));
     }
 }
 
 void AssetManagerWidget::exportPackageOf(const QString& path) {
     const QFileInfo     info(path);
     const QString       name = info.isDir() ? info.fileName() : info.completeBaseName();
+
+    // A folder is packed with everything in it, and the entry is on every folder of every library
+    // — a content library's root as well, where "everything" is tens of gigabytes read and
+    // compressed with the window not responding. So a folder is counted first, and a large one
+    // asked about. (An asset is itself, its icon and its own textures: never large.)
+    if (info.isDir()) {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        const AssetStore::PackageSize size = AssetStore::packageSize({path});
+        QApplication::restoreOverrideCursor();
+        if (size.files > kLargePackageFiles || size.bytes > kLargePackageBytes) {
+            QMessageBox box(QMessageBox::Question, tr("Export Package"),
+                            tr("\"%1\" holds %n file(s), %2 in all.", nullptr, size.files).arg(name, QLocale().formattedDataSize(size.bytes)),
+                            QMessageBox::NoButton, this);
+            box.setInformativeText(tr("Packing a folder this large takes a while, and PoseStudio does not respond until it is done. "
+                                      "Pack the whole folder?"));
+            QPushButton* pack = box.addButton(tr("Pack Folder"), QMessageBox::AcceptRole);
+            box.addButton(QMessageBox::Cancel);
+            box.setDefaultButton(QMessageBox::Cancel);
+            box.exec();
+            if (box.clickedButton() != pack) {
+                return;
+            }
+        }
+    }
+
     PreferencesManager& prefs = PreferencesManager::instance();
     const QString       key = QString::fromLatin1(Constants::PREF_LAST_PACKAGE_DIR);
     const QString       start = prefs.rememberedDirectory(key, QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
@@ -224,7 +274,9 @@ void AssetManagerWidget::exportPackageOf(const QString& path) {
         target += QStringLiteral(".zip");
     }
     prefs.setValue(key, QFileInfo(target).absolutePath());
+    QApplication::setOverrideCursor(Qt::WaitCursor);
     const AssetStore::Result result = AssetStore::exportPackage({path}, target);
+    QApplication::restoreOverrideCursor();
     if (!result.ok) {
         QMessageBox::warning(this, tr("Export Package"), result.error);
         return;

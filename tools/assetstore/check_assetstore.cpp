@@ -16,6 +16,10 @@
  * - THE FILE OPERATIONS: rename, duplicate, move and delete take the icon and the textures
  *   along, keep every field of the file they do not know, and never remove a texture another
  *   asset of the folder still names.
+ * - AN UNREADABLE NEIGHBOUR: beside an asset that cannot be read (it may name anything) a move and
+ *   a delete remove no texture.
+ * - ALL OR NOTHING: a rename or a move that cannot finish (a file is open elsewhere) leaves the
+ *   asset, its icon and its textures as they were, and takes away what it had written.
  * - PACKAGES: an asset or a folder zipped with what it needs, installed elsewhere and whole
  *   there; a file that is in the way is kept or replaced as asked; an archive whose entry
  *   would leave the destination is refused before anything is written.
@@ -23,6 +27,8 @@
  * Exit code = number of failed checks (0 = green).
  */
 
+#include "assetfileops.h"
+#include "assetpackage.h"
 #include "assetstore.h"
 
 #include <miniz.h>
@@ -173,6 +179,18 @@ void checkFinding(const QString& root) {
     check(AssetStore::resolveTexture(QStringLiteral("old/nowhere.png"), folder, library, &viaName).isEmpty() && !viaName, "a file that is nowhere is not found");
     check(AssetStore::resolveTexture(QStringLiteral("old/pores.png"), folder, QString(), &viaName).isEmpty(), "outside every library only the asset's own folder is searched");
     check(AssetStore::resolveTexture(QString(), folder, library).isEmpty(), "an empty source is nothing");
+
+    // One resolver for all of an asset's sources (what a load keeps): the folders are listed
+    // once, and each source is found as resolveTexture finds it alone.
+    AssetStore::TextureResolver resolver(folder, library);
+    const QString               pores = resolver.resolve(QStringLiteral("old/pores.png"), &viaName);
+    bool                        same = pores == QDir::cleanPath(library + QStringLiteral("/Materials/Near/pores.png")) && viaName;
+    same = same && resolver.resolve(QStringLiteral("C:/Users/SomeoneElse/Desktop/knots.png"), &viaName).endsWith(QLatin1String("/.textures/Oak/knots.png")) && viaName;
+    same = same && resolver.resolve(QStringLiteral(".textures/Renamed/GRAIN.PNG"), &viaName).endsWith(QLatin1String("/.textures/Oak/grain.png")) && viaName;
+    same = same && resolver.resolve(QStringLiteral("old/nowhere.png"), &viaName).isEmpty() && !viaName;
+    same = same && resolver.resolve(QStringLiteral("elsewhere/bark.png"), &viaName) == QDir::cleanPath(library + QStringLiteral("/Shared/bark.png")) && viaName;
+    same = same && resolver.resolve(QStringLiteral(".textures/Oak/grain.png"), &viaName) == QDir::cleanPath(folder + QStringLiteral("/.textures/Oak/grain.png")) && !viaName;
+    check(same, "one resolver for several sources of an asset finds each as it is found alone");
 }
 
 void checkOperations(const QString& root) {
@@ -320,6 +338,98 @@ void checkOperations(const QString& root) {
           "a delete takes the textures the material names and nobody else does; an unlinked file in the store is never touched");
 }
 
+/// AN ASSET THAT CANNOT BE READ MAY NAME ANYTHING: beside one, no texture is removed.
+void checkUnreadableSibling(const QString& root) {
+    const QString folder = root + QStringLiteral("/unread/Fabric");
+    const QString away = root + QStringLiteral("/unread/Away");
+    QDir().mkpath(away);
+    write(folder + QStringLiteral("/.textures/Denim/color.png"), "denim-color");
+    write(folder + QStringLiteral("/.textures/Denim/normal.png"), "shared-normal");
+    write(folder + QStringLiteral("/.textures/Linen/color.png"), "linen-color");
+    write(folder + QStringLiteral("/Denim.psm"),
+          material(QStringLiteral("Denim"), {QStringLiteral("basecolor"), QStringLiteral(".textures/Denim/color.png"), QStringLiteral("normal"),
+                                             QStringLiteral(".textures/Denim/normal.png")}));
+    write(folder + QStringLiteral("/Denim.png"), "denim-icon");
+    write(folder + QStringLiteral("/Linen.psm"), material(QStringLiteral("Linen"), {QStringLiteral("basecolor"), QStringLiteral(".textures/Linen/color.png")}));
+    write(folder + QStringLiteral("/Linen.png"), "linen-icon");
+    // (It named Denim's normal map — but half of it is all that is on the disk just now.)
+    write(folder + QStringLiteral("/Denim Blue.psm"), "{ \"format\": \"posestudio.material\", \"material\": { \"textures\": [ { \"slot\": \"normal\", \"sour");
+    write(folder + QStringLiteral("/Denim Blue.png"), "blue-icon");
+    write(folder + QStringLiteral("/Plain.psm"), material(QStringLiteral("Plain"), {}));
+
+    bool readable = true;
+    bool known = AssetStore::materialSources(folder + QStringLiteral("/Denim Blue.psm"), &readable).isEmpty() && !readable;
+    known = known && AssetStore::materialOwnFiles(folder + QStringLiteral("/Plain.psm"), &readable).isEmpty() && readable;
+    known = known && AssetStore::materialOwnFiles(folder + QStringLiteral("/Denim.psm"), &readable).size() == 2 && readable;
+    check(known, "a material that cannot be read is told apart from one that names nothing");
+
+    AssetStore::Result r = AssetStore::moveAsset(folder + QStringLiteral("/Linen.psm"), away);
+    check(r.ok && exists(away + QStringLiteral("/Linen.psm")) && read(away + QStringLiteral("/.textures/Linen/color.png")) == "linen-color" &&
+              !exists(folder + QStringLiteral("/Linen.psm")) && read(folder + QStringLiteral("/.textures/Linen/color.png")) == "linen-color" &&
+              r.kept == QStringList{QStringLiteral(".textures/Linen/color.png")},
+          "a move beside an asset that cannot be read takes its textures along and removes none from the old store");
+    r = AssetStore::deleteAsset(folder + QStringLiteral("/Denim.psm"), /*permanently=*/true);
+    check(r.ok && r.files == 0 && r.kept.size() == 2 && !exists(folder + QStringLiteral("/Denim.psm")) && !exists(folder + QStringLiteral("/Denim.png")) &&
+              read(folder + QStringLiteral("/.textures/Denim/normal.png")) == "shared-normal" && exists(folder + QStringLiteral("/.textures/Denim/color.png")),
+          "a delete beside it removes the asset and its icon and NO texture: the unreadable one may be what still names them");
+}
+
+/// AN OPERATION THAT CANNOT FINISH CHANGES NOTHING. A step is made to fail the way it fails in
+/// practice: the file is open elsewhere (a sync client, a thumbnail being decoded), and on
+/// Windows a file that is open cannot be renamed or removed. (On other systems it can, so there
+/// is nothing here to hold a step back with: these checks are Windows's.)
+void checkAllOrNothing(const QString& root) {
+#ifdef Q_OS_WIN
+    const QString folder = root + QStringLiteral("/atomic/Fabric");
+    const QString other = root + QStringLiteral("/atomic/Other");
+    QDir().mkpath(other);
+    write(folder + QStringLiteral("/.textures/Wool/color.png"), "wool-color");
+    write(folder + QStringLiteral("/Wool.psm"), material(QStringLiteral("Wool"), {QStringLiteral("basecolor"), QStringLiteral(".textures/Wool/color.png")}));
+    write(folder + QStringLiteral("/Wool.png"), "wool-icon");
+    AssetStore::Result r;
+
+    {
+        QFile held(folder + QStringLiteral("/Wool.png"));
+        const bool holding = held.open(QIODevice::ReadOnly);
+        r = AssetStore::renameAsset(folder + QStringLiteral("/Wool.psm"), QStringLiteral("Felt"));
+        check(holding && !r.ok && !r.error.isEmpty() && r.path.isEmpty() && exists(folder + QStringLiteral("/Wool.psm")) && exists(folder + QStringLiteral("/Wool.png")) &&
+                  !exists(folder + QStringLiteral("/Felt.psm")) && !exists(folder + QStringLiteral("/Felt.png")) &&
+                  read(folder + QStringLiteral("/Wool.psm")).contains("\"name\": \"Wool\""),
+              "a rename whose icon cannot be renamed renames nothing: the asset keeps its name and its picture");
+    }
+    {
+        QFile held(folder + QStringLiteral("/Wool.psm"));
+        const bool holding = held.open(QIODevice::ReadOnly);
+        r = AssetStore::renameAsset(folder + QStringLiteral("/Wool.psm"), QStringLiteral("Felt"));
+        check(holding && !r.ok && exists(folder + QStringLiteral("/Wool.psm")) && read(folder + QStringLiteral("/Wool.png")) == "wool-icon" &&
+                  !exists(folder + QStringLiteral("/Felt.png")) && !exists(folder + QStringLiteral("/Felt.psm")),
+              "… nor does one whose file cannot be renamed: the icon is given its name back");
+    }
+    {
+        QFile held(folder + QStringLiteral("/Wool.psm"));
+        const bool holding = held.open(QIODevice::ReadOnly);
+        r = AssetStore::moveAsset(folder + QStringLiteral("/Wool.psm"), other);
+        check(holding && !r.ok && !r.error.isEmpty() && exists(folder + QStringLiteral("/Wool.psm")) && exists(folder + QStringLiteral("/Wool.png")) &&
+                  exists(folder + QStringLiteral("/.textures/Wool/color.png")) && !exists(other + QStringLiteral("/Wool.psm")) &&
+                  !exists(other + QStringLiteral("/Wool.png")) && !exists(other + QStringLiteral("/.textures")),
+              "a move that cannot remove the old file moves nothing: what it wrote in the new folder is taken away again");
+
+        // (The new folder's store has the texture already: named there, so not the move's to remove.)
+        write(other + QStringLiteral("/.textures/Kept/c.png"), "wool-color");
+        r = AssetStore::moveAsset(folder + QStringLiteral("/Wool.psm"), other);
+        check(!r.ok && read(other + QStringLiteral("/.textures/Kept/c.png")) == "wool-color" && !exists(other + QStringLiteral("/Wool.psm")) &&
+                  !exists(other + QStringLiteral("/.textures/Wool")),
+              "… and a texture the new folder's store already held stays there");
+    }
+    r = AssetStore::moveAsset(folder + QStringLiteral("/Wool.psm"), other);
+    check(r.ok && !exists(folder + QStringLiteral("/Wool.psm")) && !exists(folder + QStringLiteral("/Wool.png")) &&
+              read(other + QStringLiteral("/Wool.png")) == "wool-icon" && read(other + QStringLiteral("/Wool.psm")).contains(".textures/Kept/c.png"),
+          "with the file free again the same move goes through");
+#else
+    Q_UNUSED(root);
+#endif
+}
+
 /// A zip with one entry that climbs out of where it is unpacked.
 QByteArray hostileZip() {
     mz_zip_archive zip;
@@ -376,6 +486,15 @@ void checkPackages(const QString& root) {
     const QString all = root + QStringLiteral("/pack/fabric.zip");
     r = AssetStore::exportPackage({folder}, all);
     check(r.ok && r.files == 6, "a folder is packed with everything in it (not Thumbs.db)");
+    // (What the browser asks before it packs a large folder: counted from the same listing.)
+    const AssetStore::PackageSize whole = AssetStore::packageSize({folder});
+    qint64                        bytes = 0;
+    for (const char* file : {"/Denim.psm", "/Denim.png", "/Canvas.psm", "/Canvas.png", "/.textures/Denim/color.png", "/.textures/Canvas/color.png"}) {
+        bytes += QFileInfo(folder + QLatin1String(file)).size();
+    }
+    check(whole.files == 6 && whole.bytes == bytes && AssetStore::packageSize({folder + QStringLiteral("/Denim.psm")}).files == 3 &&
+              AssetStore::packageSize({root + QStringLiteral("/pack/nothing-here.psm")}).files == 0,
+          "a package is counted before it is packed: the same files, and their size on disk");
     const QString second = root + QStringLiteral("/pack/installed-all");
     QDir().mkpath(second);
     r = AssetStore::installPackage(all, second, false);
@@ -416,6 +535,8 @@ int main(int argc, char** argv) {
     checkCollecting(root);
     checkFinding(root);
     checkOperations(root);
+    checkUnreadableSibling(root);
+    checkAllOrNothing(root);
     checkPackages(root);
 
     std::printf("%d failed\n", failures);

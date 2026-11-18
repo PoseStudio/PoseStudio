@@ -5,7 +5,7 @@
 
 #include "importerregistry.h"
 
-#include "figureutils.h" // toLowerAscii
+#include "asciilower.h"
 #include "obj/objimporter.h"
 
 namespace pose {
@@ -20,7 +20,7 @@ std::string extensionOf(const std::string& path) {
     if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) {
         return std::string();
     }
-    return toLowerAscii(path.substr(dot + 1));
+    return asciiLower(path.substr(dot + 1));
 }
 
 } // namespace

@@ -34,7 +34,7 @@ These are settings of the application, not of a scene: they are not saved in pro
 
 ## Posing
 
-The soft-body switches and dials — on and off, the breasts' Softness and Bounce, the buttocks' Softness — live in the side panel's **Soft Body Physics** tab (see [The Soft Body Physics tab](posing.md#the-soft-body-physics-tab)). They are remembered between sessions like a preference.
+There is no Posing page in the dialog: the soft-body switches and dials — on and off, the breasts' Softness and Bounce, the buttocks' Softness — live in the side panel's **Soft Body Physics** tab (see [The Soft Body Physics tab](posing.md#the-soft-body-physics-tab)). They are remembered between sessions like a preference.
 
 ## VR
 
@@ -60,4 +60,4 @@ The Asset Manager updates as soon as you add or remove a library.
 
 Wipes everything PoseStudio stores about you — asset libraries, collections, favorites and every preference — and restarts the application as if freshly installed. Your files on disk are untouched, including *My PoseStudio Library* and your HDRIs; only the database is reset (the default library is registered again at the restart, and the install ID is regenerated).
 
-The button is disabled until you type **RESET** into the box, in any case. There is no further confirmation and no undo.
+The button is disabled until you type **RESET** into the box, in any case. If the scene has unsaved changes you are asked about them first — **Save**, **Discard Changes** or **Cancel** — before anything is reset, and **Cancel** leaves everything as it was. Otherwise there is no further confirmation, and there is no undo.

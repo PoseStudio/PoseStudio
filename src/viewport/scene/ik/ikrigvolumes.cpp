@@ -5,7 +5,8 @@
  *        spine, the limbs by their median radial distance, the legs by their inner surface, the
  *        head from the skull; from the skeleton's hip spacing without a mesh), the drag-start mask
  *        of pairs already overlapping (maskOverlappingVolumes) and the drag target's clamp out of
- *        them and the floor (clampOutOfVolumes). See ikrig.cpp for the TU layout. Qt-free.
+ *        them (clampOutOfVolumes; the floor's clamp is the Armature's). See ikrig.cpp for the TU
+ *        layout. Qt-free.
  */
 
 #include "ikrig.h"

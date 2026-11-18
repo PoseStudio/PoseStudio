@@ -108,7 +108,7 @@ constexpr int kViewEntryCount = static_cast<int>(sizeof(kViewEntries) / sizeof(k
 // Both picker tables (the shade modes in scene/shademode.h and the view entries above) are
 // looked up at display time via QCoreApplication::translate("ViewportStrip", ...), so no
 // source literal marks their names for the extraction tools. These no-ops keep every name
-// present in a generated .ts catalog - without them an lupdate run would report the 25
+// present in a generated .ts catalog - without them an lupdate run would report the
 // names as vanished and lrelease would drop their translations.
 static const char* const kPickerNoops[] = {
     // Shade-mode picker names (scene/shademode.h's kShadeModes, every row):
@@ -156,8 +156,9 @@ ViewportStrip::ViewportStrip(QWidget* owner)
     setAttribute(Qt::WA_TranslucentBackground, true);
     setAttribute(Qt::WA_ShowWithoutActivating, true);
 
-    // Two rows: the control strip, and under it (right-aligned, usually empty) the transient
-    // axis-rotate badge. Hidden widgets take no space, so the strip is one row until a key is held.
+    // Two rows: the control strip, and under it (usually empty) the Rendered mode's status line
+    // on the left and the joint mouse mode's badge on the right. Hidden widgets take no space, so
+    // the strip is one row until one of the two shows.
     auto* column = new QVBoxLayout(this);
     column->setContentsMargins(0, 0, 0, 0);
     column->setSpacing(6);
@@ -178,7 +179,7 @@ ViewportStrip::ViewportStrip(QWidget* owner)
     m_shaderPicker->setToolTip(tr("Viewport shading mode"));
     m_shaderPicker->setStyleSheet(pickerStyle(QStringLiteral("ShaderModeButton"), 168));
     // The table's names are the single source of truth (Qt-free const char*); they are looked up
-    // at run time, so their .ts entries come from the i18n pipeline's table import, not lupdate.
+    // at run time, and kPickerNoops above is what marks them for the extraction tools.
     QList<MenuPickerButton::Item> shadeItems;
     for (const ShadeMode& mode : kShadeModes) {
         shadeItems.append({QCoreApplication::translate("ViewportStrip", mode.name),
@@ -199,8 +200,8 @@ ViewportStrip::ViewportStrip(QWidget* owner)
     m_viewPicker->setToolTip(tr("Camera view"));
     m_viewPicker->setStyleSheet(pickerStyle(QStringLiteral("ViewPresetButton"), 132));
     QList<MenuPickerButton::Item> viewItems;
-    // Same single-source rule as the shader picker: the table owns the labels, the pipeline's
-    // table import owns their .ts entries.
+    // Same single-source rule as the shader picker: the table owns the labels, kPickerNoops
+    // marks them for extraction.
     for (const ViewEntry& entry : kViewEntries) {
         viewItems.append({QCoreApplication::translate("ViewportStrip", entry.label),
                           entry.separatorAfter, QString()});

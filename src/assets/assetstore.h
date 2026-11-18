@@ -38,16 +38,23 @@
  * by FILE NAME — beside the asset, in its store, and at last anywhere under the library's
  * root. So an asset whose folder was rearranged by hand still finds what is still there.
  *
- * THE FILE OPERATIONS (rename, duplicate, move, delete, export, install) work on an asset of
+ * THE FILE OPERATIONS (assetfileops.h: rename, duplicate, move, delete) work on an asset of
  * PoseStudio's own (isOwnAsset: a saved material today) and take its icon and its textures
  * along. They read the asset as generic JSON — `material.textures[].source` — and rewrite only
  * what they must (a name, a path), so a file written by a newer version keeps every field this
- * build does not know. A texture in the store is removed only when no other asset of the folder
- * still names it.
+ * build does not know. A move and a delete take along only the texture files the asset ITSELF
+ * names in its folder's store, and of those only the ones no other asset of the folder still
+ * names; a file in the store that no asset names is never removed.
  *
- * A PACKAGE is a plain .zip of assets with their icons and textures, laid out as they lie in
- * their folder: installing one is unzipping it into a library folder (installPackage does it
- * with the checks an archive from elsewhere needs: no entry may leave the destination).
+ * A PACKAGE (assetpackage.h) is a plain .zip of assets with their icons and textures, laid out
+ * as they lie in their folder: installing one is unzipping it into a library folder
+ * (installPackage does it with the checks an archive from elsewhere needs: no entry may leave
+ * the destination).
+ *
+ * THE FILES: this header and assetstore.cpp are the store proper — collecting, finding, and
+ * reading what an asset names; assetfileops.{h,cpp} the file operations; assetpackage.{h,cpp}
+ * the packages (the one part that needs miniz); assetstore_detail.h the helpers the three
+ * implementations share.
  */
 
 #ifndef ASSETSTORE_H
@@ -119,69 +126,70 @@ private:
     QHash<QString, Placed>     m_how;
 };
 
-/// Where the texture a saved asset names as @p source is now ("" = nowhere): see FINDING in the
-/// file comment. @p libraryRoot may be empty (an asset outside every library). @p viaName, when
-/// given, is set where the file was found by its name and not at the path as written.
+/**
+ * @class TextureResolver
+ * @brief One load's worth of finding (FINDING in the file comment): each texture source ONE
+ *        asset names is handed over, and where the file is now comes back ("" = nowhere).
+ *
+ * A source that is not where it was written is looked for by its file name, which means listing
+ * folders: the asset's own, its store, and at last the whole library. Each is listed ONCE per
+ * resolver, on first need, so an asset whose maps have all gone costs one walk of its library
+ * and not one per map. The walks share one budget of entries (a library on a slow drive must
+ * not hold a load for minutes): what lies beyond it is not found.
+ */
+class TextureResolver {
+public:
+    /// @p libraryRoot may be empty (an asset outside every library).
+    TextureResolver(const QString& assetFolder, const QString& libraryRoot);
+
+    /// Where @p source is now. @p viaName, when given, is set where the file was found by its
+    /// name and not at the path as written.
+    QString resolve(const QString& source, bool* viaName = nullptr);
+
+private:
+    QString     m_folder;
+    QString     m_library;
+    int         m_budget;                ///< Entries the walks may still visit.
+    bool        m_besideListed = false;
+    bool        m_storeWalked = false;
+    bool        m_libraryWalked = false;
+    QStringList m_beside;                ///< The files beside the asset, in listing order.
+    QStringList m_inStore;               ///< Every file under its store, in walk order.
+    QStringList m_inLibrary;             ///< Every file under the library's root, in walk order.
+};
+
+/// One source resolved by a resolver of its own: TextureResolver(@p assetFolder,
+/// @p libraryRoot).resolve(@p source, @p viaName). For several sources of one asset, keep the
+/// resolver.
 QString resolveTexture(const QString& source, const QString& assetFolder, const QString& libraryRoot, bool* viaName = nullptr);
 
 /// The texture sources the saved material @p materialPath names, as written. Empty for a file
 /// that is not a material (or cannot be read).
-QStringList materialSources(const QString& materialPath);
+QStringList materialSources(const QString& materialPath, bool* readable = nullptr);
 
 /// The files those sources name that EXIST and lie in or under the material's own folder: what
-/// travels with it. Absolute paths, each once.
-QStringList materialOwnFiles(const QString& materialPath);
+/// travels with it. Absolute paths, each once. For both: @p readable, when given, says whether
+/// the file could be read as a material at all — false, what it names is UNKNOWN, which is not
+/// the same as naming nothing (a file that is mid-sync, an online-only placeholder, a damaged
+/// copy).
+QStringList materialOwnFiles(const QString& materialPath, bool* readable = nullptr);
 
 /// The asset's icons: the image files beside it that carry its name.
 QStringList iconsOf(const QString& assetPath);
 
-/// What a file operation did.
+/// What a file operation or a package operation did (assetfileops.h, assetpackage.h).
 struct Result {
     bool        ok = false;
     QString     error;   ///< For people, when !ok.
     QString     path;    ///< The asset where it is now (rename, duplicate, move); the package (export); the folder (install).
     int         files = 0;   ///< Texture files that went along (copied, moved, removed, packed, installed).
     int         reused = 0;  ///< … of a move: textures the destination's store already had.
-    QStringList kept;    ///< install: files that were there with other content and were left as they were.
+    /// Files left as they were. install: the ones that were there with other content. delete,
+    /// move: the asset's own store textures that were NOT removed because another asset of the
+    /// folder could not be read, and may be the one that still names them (paths relative to
+    /// the folder).
+    QStringList kept;
 };
-
-/// True when @p name can be an asset's name: not empty, none of \ / : * ? " < > |, no trailing
-/// dot or space, no leading dot (a hidden name: the asset would vanish from the browser it was
-/// renamed in, with no way to bring it back there). @p why says what is wrong when it cannot.
-bool validAssetName(const QString& name, QString* why = nullptr);
-
-/// The asset under another name, in its folder: the file, its icons, and the name it carries
-/// inside. Its textures stay where they are (it names them by path, not by its own name).
-Result renameAsset(const QString& assetPath, const QString& newName);
-
-/// A second asset beside the first — "<name> copy", "<name> copy 2", … — with a copy of the
-/// icon, naming the same textures (nothing in the store is copied).
-Result duplicateAsset(const QString& assetPath);
-
-/// The asset in another folder: its textures are collected into that folder's store (copied, or
-/// the same bytes found there), the asset rewritten to name them, the icons moved, and what the
-/// old folder's store then holds for nobody is removed.
-Result moveAsset(const QString& assetPath, const QString& destinationFolder);
-
-/// The asset, its icons and the textures of its folder's store that no other asset of the folder
-/// names: to the trash (or, @p permanently, removed for good). Emptied store folders go too.
-Result deleteAsset(const QString& assetPath, bool permanently = false);
-
-/// A package of @p items — asset files and/or whole folders — written to @p zipPath: each asset
-/// with its icons and its own texture files, each folder with everything in it, under paths
-/// relative to the items' common folder.
-Result exportPackage(const QStringList& items, const QString& zipPath);
-
-/// How many files of the package @p zipPath are already in @p destinationFolder with OTHER
-/// content (what installing with @p replaceExisting off would leave as they are). -1 = the
-/// package cannot be read.
-int packageConflicts(const QString& zipPath, const QString& destinationFolder);
-
-/// Unpacks @p zipPath into @p destinationFolder. A file that is there with the same content is
-/// left; one with other content is replaced only with @p replaceExisting, else left and listed
-/// in Result::kept. An entry that would land outside the destination rejects the whole package
-/// before anything is written.
-Result installPackage(const QString& zipPath, const QString& destinationFolder, bool replaceExisting);
 
 } // namespace AssetStore
 

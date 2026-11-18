@@ -11,8 +11,8 @@
  * skeleton and baked into geometry and bones), centred over the origin, standing on the floor
  * (the lowest vertex at y = 0), the bones written out with unique names (finishRiggedModel); the
  * search for a texture file a model refers to (TextureFinder); the import summary every service
- * logs (RiggedImportInfo); the small conversions (sRGB to linear, smooth normals for a mesh
- * without them). Qt-free (std + GLM).
+ * logs (RiggedImportInfo); the sRGB-to-linear conversion of an authored color. (Normals for a
+ * mesh that came without them are format-neutral: import/meshrepair.h.) Qt-free (std + GLM).
  */
 
 #ifndef RIGGEDIMPORT_H
@@ -45,9 +45,10 @@ struct RiggedImportInfo {
     int                      externalTextures = 0;
     int                      missingTextures = 0;
     std::vector<std::string> notes;               ///< Anything worth a line in the log.
-    /// What the FILE says a bone is, where a format carries a humanoid map (a VRM avatar's): the
-    /// bone's index and the rig standard's name for its role. The reader names the bone so
-    /// already; the service checks the conformer's own reading against it and logs a disagreement.
+    /// The bones a file's humanoid map names (a VRM avatar's): the bone's index and the rig
+    /// standard's name for its role. For the LOG alone — the service prints how many there were.
+    /// What the rig's role inference takes as given is each bone's own ModelBone::roleHint, which
+    /// the reader sets from the same map (RawSkeletonBone::roleHint).
     std::vector<std::pair<int, std::string>> roleHints;
     std::string              avatar;              ///< "VRM 1.0" / "VRM 0.x" and the avatar's title, for a VRM file; empty otherwise.
 };
@@ -68,48 +69,47 @@ struct RawSkeletonBone {
 /// Finds a texture's file for a model whose textures are files beside it: the paths the file
 /// gives (absolute, or relative to the model's folder, or to the folder ABOVE it — exports keep
 /// "textures/" beside a "formats/" folder and write the path relative to the project), then a
-/// file of that NAME anywhere under the model's folder (deep) or the folder above (shallower).
+/// file of that NAME — right beside the model first (one folder listing: an FBX names its
+/// textures by its author's absolute paths, and the files usually lie beside it), then anywhere
+/// under the model's folder (deep) or the folder above (shallower), a walk that gives up after
+/// kMaxVisited folder entries and says so.
 class TextureFinder {
 public:
     explicit TextureFinder(std::filesystem::path dir) : m_dir(std::move(dir)) {}
 
-    /// Tries each of @p candidates in order (empty ones skipped), then their basenames against the
-    /// folder index; counts the outcome in @p info and notes the first few misses under
-    /// @p shown (the name to log, usually the first non-empty candidate).
+    /// Tries each of @p candidates in order (empty ones skipped), then their file names beside the
+    /// model, then against the folder index; counts the outcome in @p info and notes the first
+    /// few misses under @p shown (the name to log, usually the first non-empty candidate).
     TextureSource resolve(const std::vector<std::string>& candidates, RiggedImportInfo* info, const std::string& shown);
 
-    /// The model's folder.
-    const std::filesystem::path& directory() const { return m_dir; }
+    /// How many folder entries (files and folders alike) the walk for a name looks at before it
+    /// stops: a model saved at a drive's or a library's root would otherwise list the whole tree
+    /// under it for one missing texture.
+    static constexpr std::size_t kMaxVisited = 200000;
 
 private:
     TextureSource found(const std::filesystem::path& p, RiggedImportInfo* info);
-    void          index();
+    void          indexBeside();
+    void          index(RiggedImportInfo* info);
 
     std::filesystem::path                                      m_dir;
+    bool                                                       m_besideIndexed = false;
     bool                                                       m_indexed = false;
-    std::unordered_map<std::string, std::filesystem::path>     m_byName;
+    std::unordered_map<std::string, std::filesystem::path>     m_beside; ///< the image files in the model's own folder, by lower-case name
+    std::unordered_map<std::string, std::filesystem::path>     m_byName; ///< those under it and under the folder above
     std::unordered_set<std::string>                            m_missingNoted;
 };
 
-/// True for the file extensions the texture finder's index takes as images.
-bool isImageFile(const std::filesystem::path& p);
-
-/// ASCII lower case.
-std::string lowerCopy(std::string s);
-
 /// sRGB -> linear (the renderer's base color is linear; authored colors are often sRGB).
 float srgbToLinear(float c);
-
-/// Gives every vertex without a normal (a zero vector) the smooth normal of the triangles around
-/// it; authored normals are left alone. A mesh's normals are read from the file when it has them.
-void fillMissingNormals(MeshData& mesh);
 
 /// The shared last step of every rigged-character reader. Turns the figure to face +z (the yaw
 /// read off the bones: the lateral axis is the skeleton's widest horizontal spread, the toes give
 /// the sign), centres it over the hips (the first bone with two children or more; the mesh's
 /// centroid for a boneless model), puts its lowest vertex on y = 0, and writes @p model's bones
 /// from @p bones — raw: translation-only binds, identity frames, "XYZ", no limits, unique names.
-/// Fills @p info's bones, height, yaw and grounding, and notes an unusual height.
+/// Fills @p info's bones, height, yaw and grounding, and notes an unusual height for a figure (a
+/// model with a skeleton).
 void finishRiggedModel(ModelData& model, std::vector<RawSkeletonBone>& bones, RiggedImportInfo* info);
 
 } // namespace pose

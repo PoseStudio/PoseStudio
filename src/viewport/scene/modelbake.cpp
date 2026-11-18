@@ -44,8 +44,9 @@ bool Model::bakePosedMesh(std::size_t i, PosedMesh& out) {
         return false;
     }
     // The corrective weights for the pose as it stands (a frame recorded since the pose last
-    // moved has evaluated them already; a bake straight after an edit has not).
-    m_correctives.refresh(m_armature);
+    // moved has evaluated them already; a bake straight after an edit has not). Evaluated once
+    // a pose, not once a mesh: a capture bakes every zone of the model in turn.
+    m_correctives.evaluateIfMoved(m_armature);
 
     const Mesh&                         mesh = m_meshes[i];
     const std::vector<Vertex>&          vertices = mesh.cpuVertices();

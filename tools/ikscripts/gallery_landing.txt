@@ -3,6 +3,10 @@
 # come back up — deeper the higher the drop. Purely aesthetic: the pose she ends in is the pose she
 # was dropped in, exactly. `lift <m>` raises the figure, `ground` is the button, `wait` counts 60 Hz
 # ticks: half a metre falls in 19 of them, and the dip is deepest some 8 later.
+# THE ARMS (running since 2026-11-18): arms that hang swing forward with the landing, the elbows
+# giving, and come to rest after the legs have — the dip takes 22-26 ticks, the whole bounce about
+# 70 / 100 / 115 for a 5 cm / 50 cm / 2 m drop. A press mid-bounce ends it, so a section that goes
+# on to pose her waits the bounce out first.
 
 # 1. Dropped half a metre: mid-fall, at the deepest of the dip, and after.
 view front
@@ -16,6 +20,10 @@ report dip_50cm
 expect euler.lShin.x > 20
 expect euler.rShin.x > 20
 expect meshlow > -3
+# (the hanging arms have swung forward, mirrored, the elbows with them: 8 and 4 degrees here)
+expect euler.lShldr.y < -4
+expect euler.rShldr.y > 4
+expect euler.lForeArm.y < -1
 shot 502_dip_50cm
 wait 45
 report after_50cm
@@ -25,6 +33,11 @@ expect euler.lFoot.x == 0
 expect meshlow > -1
 expect meshlow < 1
 shot 503_after_50cm
+# ... and once the bounce is over the arms hang where they hung, exactly.
+wait 50
+expect euler.lShldr.y == 0
+expect euler.lForeArm.y == 0
+expect euler.rShldr.y == 0
 
 # 2. Dropped 5cm: a slight dip.
 lift 0.05
@@ -48,6 +61,10 @@ shot 505_dip_2m
 wait 50
 expect euler.lShin.x == 0
 expect euler.lThigh.x == 0
+# (the arms swing on after the legs are home: the bounce of a 2 m drop is over 116 ticks after
+# the landing, and the next section begins with a press)
+wait 70
+expect euler.lShldr.y == 0
 
 # 4. A posed figure keeps her pose through it: an arm raised, a knee a little bent.
 view front

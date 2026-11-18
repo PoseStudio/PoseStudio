@@ -22,7 +22,7 @@ body:
     id: confusing
     attributes:
       label: What was the most confusing or frustrating part?
-      placeholder: "I didn't realize a plain drag on a joint moves the whole body and Ctrl+drag rotates just that joint — I only found it in the release notes."
+      placeholder: "I didn't realize a plain drag on a joint moves the whole body and Ctrl+drag moves just that limb — I only found it in the release notes."
     validations:
       required: false
   - type: textarea

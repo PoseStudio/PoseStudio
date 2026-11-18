@@ -33,7 +33,7 @@ Updating is manual: download the new installer or zip from the release page and 
 
 ## What's New after an update
 
-The first time a new version starts, PoseStudio opens **What's New in PoseStudio x.y.z** as soon as you have clicked the splash screen away: the release notes of the version you are now running — what was added, changed and fixed — in a scrollable window of its own. It appears once per version (a fresh install shows it too, for the version installed). **Release Notes** in the window opens the full history in this manual; **Close** (or `Enter` / `Esc`) puts it away.
+The first time a new version starts, PoseStudio opens **What's New in PoseStudio x.y.z** as soon as you have clicked the splash screen away: the release notes of the version you are now running — what was added, changed and fixed — in a scrollable window of its own, followed, under *Also new in …*, by the notes of the release before it, so a version that came out soon after a big one does not hide it. It appears once per version (a fresh install shows it too, for the version installed). **Release Notes** in the window opens the full history in this manual; **Close** (or `Enter` / `Esc`) puts it away.
 
 **Help → What's New…** opens the same window whenever you like. To stop it opening by itself, untick **Show this window after an update** in the window, or **Edit → Preferences → General → Show What's New after an update**.
 
@@ -43,7 +43,7 @@ The first time a new version starts, PoseStudio opens **What's New in PoseStudio
 | --- | --- | --- |
 | Settings, asset libraries, collections, favorites | `%APPDATA%\PoseStudio\posestudio.db` | Never |
 | Your content and HDR environments | Wherever you keep them; `Documents\My PoseStudio Library` by default | Never |
-| Poses | The `.pose` files you save | Never |
+| Poses, projects, rendered images | The `.pose` and `.pss` files and the images you save | Never |
 | The install ID | In the settings database; shown on the General page | Only in the ping, if enabled |
 
 Preferences → Factory Reset deletes the settings database, install ID included.

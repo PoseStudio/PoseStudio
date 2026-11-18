@@ -35,10 +35,12 @@ When reporting a vulnerability, please include as much information as possible t
 ## Scope
 
 The scope of this security policy covers all core software developed by the PoseStudio project, particularly:
-* The core application and Vulkan rendering engine.
-* File I/O parsers handling potentially malicious content — the Wavefront `.obj` importer, the native figure importer (`.duf`/`.dsf`: gzip + JSON + geometry/morph/skin data), image/texture decoding, and the `.hdr`/`.exr` environment loaders.
+* The core application, its Vulkan rendering engine, and the bridge to the optional Cycles render-engine plugin (`engines/cycles/`).
+* File I/O parsers handling potentially malicious content — the Wavefront `.obj` importer, the native figure importer (`.duf`/`.dsf`: gzip + JSON + geometry/morph/skin data), the rigged-character importers (FBX, glTF / GLB / VRM, USD / USDA / USDC / USDZ), the Gaussian splat readers (`.ply` / `.splat` / `.spz`), the MaterialX (`.mtlx`) reader, PoseStudio's own project, material and pose files (`.pss`, `.psm`, `.pose`), image/texture decoding, and the `.hdr`/`.exr` environment loaders.
+* The library browsers' file handling: the content-library scripts (`.dsa`) they read to follow a link (never to run one), and the `.zip` packages they export and install.
 * The local SQLite database and preferences handling.
 
-* The anonymous install ping: the client (`src/core/installping.*` — a signed, fire-and-forget HTTPS POST sent once per launch, off by default in builds without a signing key) and the server-side handler in `server/ping/` (request validation, rate limiting, storage).
+* The anonymous install ping: the client (`src/core/installping.*` — a signed, fire-and-forget HTTPS POST sent once per launch, never by a build without a signing key) and the server-side handler in `server/ping/` (request validation, rate limiting, storage).
+* The update check (`src/core/updatecheck.*` — an unauthenticated HTTPS GET of the repository's latest-release record from GitHub's API, at startup and from Help → Check for Updates).
 
-That ping is the application's only networking component. As future areas ship (plugin APIs, marketplace/network integrations), they will be added to this scope. Third-party plugins or scripts developed by the community will remain outside the scope of this policy and should be reported to their respective authors.
+The ping and the update check are the application's only networking components. As future areas ship (plugin APIs, marketplace/network integrations), they will be added to this scope. Third-party plugins or scripts developed by the community will remain outside the scope of this policy and should be reported to their respective authors.

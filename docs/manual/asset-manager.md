@@ -17,7 +17,15 @@ Add your own with **Edit → Preferences → Assets → Add Asset Folder…**, o
 
 ## What shows up as an asset
 
-PoseStudio does not know your file formats; it knows thumbnails. **A file is an asset when an image with the same name sits beside it in the same folder**: `Elena.duf` next to `Elena.png` is an asset shown with that picture, and so is `chair.obj` next to `chair.jpg`. A file without a matching image is not listed, and an image without a matching file is just an image. Recognised image types are png, jpg, jpeg, bmp, webp, gif, tif and tiff; if several match, the largest is used. Material sidecars (`.mtl`) are never listed as assets of their own.
+PoseStudio does not know your file formats; it knows thumbnails. **A file is an asset when an image with the same name sits beside it in the same folder**: `Elena.duf` next to `Elena.png` is an asset shown with that picture, and so is `chair.obj` next to `chair.jpg`. A file without a matching image is not listed, and an image without a matching file is just an image. Recognised image types are png, jpg, jpeg, bmp, webp, gif, tif and tiff. Material sidecars (`.mtl`) are never listed as assets of their own.
+
+The picture can be named after the file in three ways:
+
+- by the file's name — `Elena.png` for `Elena.duf`;
+- by its whole name, extension included — `Elena.duf.png`;
+- by either of those with `.tip` before the picture's extension — `Elena.tip.png` — which is how some content ships a larger preview beside the small one.
+
+Where several pictures are named after one asset, the largest file is its thumbnail. The grid lists an asset under its whole name without the extension, so `Material.001.psm` and `Material.002.psm` are *Material.001* and *Material.002*, each with its own picture. Whether a file is an asset at all is decided by its name up to the first dot: a `Material.003.psm` with no picture of its own is still listed while one of its neighbours' pictures is there, and wears the largest of them.
 
 Most character content is delivered this way — every preset comes with its own preview — so a content folder added as a library is browsable at once.
 
@@ -47,10 +55,10 @@ Dot names are the convention macOS and Linux use for hidden files, so their file
 Character content often comes with small **scripts** (`.dsa`) among its presets — a thumbnail labelled with the character's name in a *Characters* folder, a vendor's web address in each of the product's folders. Most of them are links: the character's script points at the folder that holds the character, the web-address one at the vendor's site. PoseStudio never runs a script, but it reads a plain-text one for its link and follows it when you double-click it:
 
 - **A link to a folder** shows that folder — in the tree too, when it lies in one of your libraries. When the folder holds exactly **one character**, that character is imported into the viewport as well, as if you had double-clicked it. Clothing, hair and props are not characters: a link to a folder of boots shows the folder and leaves the choice to you, and so does a folder with several characters in it.
-- **A link to a file** — a script that loads a preset — opens that file as its own double-click would.
+- **A link to a file** — a script that loads a preset — imports that file as its own double-click would, when it is a file PoseStudio opens itself: a figure, a model or a Gaussian splat scene. A script that points at any other kind of file — a program, a document — is not followed, and that file is not opened.
 - **A link to a web page** opens in your browser.
 
-A script that is not a link (a program, a tool), an encrypted (`.dse`) or compiled (`.dsb`) script, or a link whose target has gone missing is explained in a message instead, which offers **Open in Default Application** if you want the application that owns the script to run it. The same scripts given to PoseStudio on the command line (or with *Open with*) are followed the same way.
+A script that is not a link (a program, a tool), an encrypted (`.dse`) or compiled (`.dsb`) script, a link whose target has gone missing, or a link to a file PoseStudio does not open is explained in a message instead (**Script Not Followed**), which offers **Open in Default Application** if you want the application that owns the script to run it. The same scripts given to PoseStudio on the command line (or with *Open with*) are followed the same way.
 
 A link written relative to a content library ("/People/…") is looked for in the library the script lies in, then in your asset libraries and the content folders you have located for figures (see [Importing Content](importing.md#when-the-figures-data-cannot-be-found)).
 
@@ -101,6 +109,7 @@ A material saved by PoseStudio (`.psm`) is three things on disk — the file, it
 - **Duplicate** makes "*name* copy" beside it, with a copy of the icon. The copy uses the same texture files; nothing is copied in `.textures`.
 - **Move To Folder…** moves the material and its icon to the folder you choose, and takes the textures it uses along into that folder's `.textures` (a file that folder already has is not copied again). A file another material in the old folder still uses stays there.
 - **Delete** asks, then moves the material and its icon to the trash, together with the texture files it uses — unless another material in the folder uses them too.
+- **When another material in the folder cannot be read** — a damaged file — PoseStudio cannot tell which textures it uses, so nothing is removed from that folder's `.textures`: a deleted material's textures stay, and a message says how many; a moved material's textures are taken along to the new folder and left in the old one as well.
 - **A texture no material uses is never removed** — not by a move, not by a delete, not by a save. A map you took out of a slot and left in `.textures`, or a file you put there yourself, stays until you clear it out in a file manager.
 - **Export Package…** packs it for sharing — see below.
 
@@ -112,7 +121,7 @@ These commands are offered for materials PoseStudio saved. Content from other ap
 
 A **package** is an ordinary `.zip` file that holds materials with their icons and textures, laid out exactly as they lie in the library.
 
-- **Export Package…** on a saved material packs that material, its icon and the texture files it uses. On a folder — in the tree, in the grid, or by right-clicking the grid's empty space for the folder shown — it packs the folder with everything in it, under the folder's name.
+- **Export Package…** on a saved material packs that material, its icon and the texture files it uses. On a folder — in the tree, in the grid, or by right-clicking the grid's empty space for the folder shown — it packs the folder with everything in it, under the folder's name. A very large folder — more than 5,000 files, or more than a gigabyte — is counted first, and you are asked whether to pack all of it: packing that much takes a while, and PoseStudio does not respond until it is done.
 - **Install Package…** on a folder in the tree, or on the grid's empty space, unpacks a package into that folder. Files that are already there and identical are skipped; if some are there with different content, you are asked whether to **Replace** them or **Keep Existing**. A package that would place a file outside the folder you chose is refused, and nothing of it is installed.
 
 Because a package is just a zip of the folder layout, unzipping one into a library folder with any other tool installs it just as well; **Refresh** then shows it.

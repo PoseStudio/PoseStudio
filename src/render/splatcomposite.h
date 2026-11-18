@@ -41,6 +41,8 @@ namespace pose {
 float displayEncode(float linear, bool tonemap);
 /// Its inverse: the linear value that displayEncode takes to @p display (clamped to 0..1).
 float displayDecode(float display, bool tonemap);
+/// A display value (clamped to 0..1) as the 8 bits a picture stores.
+unsigned char displayToByte(float display);
 
 class SplatComposite {
 public:

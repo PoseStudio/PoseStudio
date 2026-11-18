@@ -10,7 +10,7 @@ The viewport's **PBR Shaded** mode is the quick preview of this picture: the sam
 2. Choose **Render → Render Image**, press `F12`, or click the **Render** button at the left end of the viewport's control strip. The **Render window** opens and the picture appears in it as it renders, grainy at first and cleaner with every pass.
 3. When it is done, **Save Image…** (`Ctrl+S`) saves it.
 
-The render is of the scene *as it was when you pressed Render*. The window is separate from the main one: you can go on posing while a render runs, and nothing you change reaches the picture that is being made. Press **Render** again — the button reads **Render Again** while one is running — to start over with the scene as it is now.
+The render is of the scene *as it was when you pressed Render*. The window is separate from the main one: you can go on posing while a render runs, and nothing you change reaches the picture that is being made. Saving a material meanwhile is fine too — its icon is rendered alongside, and both finish. Press **Render** again — the button reads **Render Again** while one is running — to start over with the scene as it is now.
 
 **Render → Show Render Window** brings the window, and the last picture, back without starting a render.
 
@@ -66,7 +66,7 @@ A path tracer has no shortcuts to turn up or down, so a few of the viewport's di
 - The **Specular** dial does not apply: reflections of the environment are as strong as its light.
 - The **Rim** light is not rendered.
 - The backdrop is drawn sharp — the **Blur** dial does not apply — and **Dome** mode renders as **Environment**.
-- **Glass and the eyes' clear surfaces** refract and reflect for real, where the viewport only tints what is behind them.
+- **Glass** refracts and reflects for real, where the viewport only tints what is behind it. The **eyes' clear surfaces** are thin films: a render shows the eye through them, unbent, with their reflections on top.
 - **Displacement** is rendered: a zone with a displacement map is subdivided and really moved by it ([the Displacement section](materials.md#displacement) says how far and how finely). The viewport's other modes do not displace, so a displaced surface's outline differs between PBR Shaded and a render; the Rendered mode shows it.
 - The **Detail** layer of a material is not rendered yet.
 - **Gaussian splat scenes** are not path traced — a capture is a recorded picture, not surfaces a ray can be traced against — but they are *in* the render: see [Gaussian splat scenes in a render](#gaussian-splat-scenes-in-a-render) below.

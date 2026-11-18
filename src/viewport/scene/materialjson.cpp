@@ -12,10 +12,37 @@
 #include <nlohmann/json.hpp>
 
 #include <cmath>
+#include <limits>
 
 namespace pose {
 
 using nlohmann::json;
+
+namespace {
+
+/// The JSON number @p v as the float it is kept as. False for what is no number, or none a
+/// float holds (see readJsonFloat).
+bool numberAsFloat(const json& v, float& out) {
+    if (!v.is_number()) {
+        return false;
+    }
+    const double d = v.get<double>();
+    if (!std::isfinite(d) || std::abs(d) > static_cast<double>(std::numeric_limits<float>::max())) {
+        return false;
+    }
+    out = static_cast<float>(d);
+    return true;
+}
+
+} // namespace
+
+bool readJsonFloat(const json& j, const char* key, float& out) {
+    const auto it = j.find(key);
+    if (it == j.end()) {
+        return true; // absent: what is there stands
+    }
+    return numberAsFloat(*it, out);
+}
 
 /// Reads @p j's [x, y, z] into @p out. False (leaving @p out untouched) if it isn't a three-number
 /// array or any value is non-finite.
@@ -51,25 +78,14 @@ bool readJsonBool(const json& j, const char* field, bool& out) {
     return true;
 }
 
-bool materialFromJson(const json& entry, MaterialParams& params, std::vector<ProjectTexture>& textures) {
+namespace {
+
+/// materialFromJson's reading, without the hold to the values' ranges that ends it.
+bool readMaterialValues(const json& entry, MaterialParams& params, std::vector<ProjectTexture>& textures) {
     if (!entry.is_object()) {
         return false;
     }
-    const auto number = [&entry](const char* key, float& out) -> bool {
-        const auto it = entry.find(key);
-        if (it == entry.end()) {
-            return true; // absent: the default stands
-        }
-        if (!it->is_number()) {
-            return false;
-        }
-        const double v = it->get<double>();
-        if (!std::isfinite(v)) {
-            return false;
-        }
-        out = static_cast<float>(v);
-        return true;
-    };
+    const auto number = [&entry](const char* key, float& out) -> bool { return readJsonFloat(entry, key, out); };
     const auto colorIt = entry.find("baseColor");
     if (colorIt != entry.end() && !readJsonVec3(*colorIt, params.baseColor)) {
         return false;
@@ -113,13 +129,11 @@ bool materialFromJson(const json& entry, MaterialParams& params, std::vector<Pro
         if (!it->is_array() || it->size() != 2) {
             return false;
         }
-        for (std::size_t k = 0; k < 2; ++k) {
-            const json& v = (*it)[k];
-            if (!v.is_number() || !std::isfinite(v.get<double>())) {
-                return false;
-            }
-            out[static_cast<glm::length_t>(k)] = static_cast<float>(v.get<double>());
+        glm::vec2 read(0.0f);
+        if (!numberAsFloat((*it)[0], read.x) || !numberAsFloat((*it)[1], read.y)) {
+            return false;
         }
+        out = read;
         return true;
     };
     if (!number("ior", params.ior) || !number("anisotropy", params.anisotropy) ||
@@ -197,17 +211,7 @@ bool materialFromJson(const json& entry, MaterialParams& params, std::vector<Pro
                 return false;
             }
             MaterialOverlay o;
-            const auto      value = [&oj](const char* key, float& out) -> bool {
-                const auto it = oj.find(key);
-                if (it == oj.end()) {
-                    return true;
-                }
-                if (!it->is_number() || !std::isfinite(it->get<double>())) {
-                    return false;
-                }
-                out = it->get<float>();
-                return true;
-            };
+            const auto      value = [&oj](const char* key, float& out) -> bool { return readJsonFloat(oj, key, out); };
             const auto text = [&oj](const char* key, std::string& out) -> bool {
                 const auto it = oj.find(key);
                 if (it == oj.end()) {
@@ -235,16 +239,45 @@ bool materialFromJson(const json& entry, MaterialParams& params, std::vector<Pro
                 return false;
             }
             overlayBlendByName(blend, o.blend);
+            clampMaterialOverlay(o);
             params.overlays.push_back(std::move(o));
         }
     }
     return true;
 }
 
+} // namespace
+
+bool materialFromJson(const json& entry, MaterialParams& params, std::vector<ProjectTexture>& textures) {
+    if (!readMaterialValues(entry, params, textures)) {
+        return false;
+    }
+    clampMaterialParams(params);
+    return true;
+}
+
+MaterialParams materialWithNamedValues(const MaterialParams& base, const MaterialParams& values, const std::vector<std::string>& named) {
+    // @p values as the codec writes them, cut down to the named keys, read over @p base as the
+    // codec reads. (A float goes into a JSON number and comes back out of it exactly; nothing is
+    // held to a range here — @p values were when they were read, and @p base's are the zone's.)
+    const json all = materialToJson(values, {});
+    json       some = json::object();
+    for (const std::string& key : named) {
+        const auto it = all.find(key);
+        if (it != all.end() && key != "overlays") {
+            some[key] = *it;
+        }
+    }
+    MaterialParams              out = base;
+    std::vector<ProjectTexture> none;
+    readMaterialValues(some, out, none);
+    return out;
+}
+
 json materialToJson(const MaterialParams& p, const std::vector<ProjectTexture>& textures) {
-        const auto vec3 = [](const glm::vec3& v) { return json::array({v.x, v.y, v.z}); };
-    json mat = {
-            {"baseColor", vec3(p.baseColor)},
+    const auto vec3 = [](const glm::vec3& v) { return json::array({v.x, v.y, v.z}); };
+    json       mat = {
+        {"baseColor", vec3(p.baseColor)},
         {"opacity", p.opacity},
         {"roughness", p.roughness},
         {"metalness", p.metalness},

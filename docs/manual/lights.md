@@ -44,7 +44,7 @@ Every value is a scrub field: drag across it, hold **Shift** for fine steps, or 
 | Setting | Kinds | Range | What it does |
 | --- | --- | --- | --- |
 | **Name** | all | | The light's name, as the picker lists it. |
-| **Kind** | all | | Changes the light into another kind, where it stands. |
+| **Kind** | all | | Changes the light into another kind, where it stands. Its Intensity number stays, and means what it means for the new kind: a lamp two metres away turned into a Sun lights the figure four times as brightly until you lower it. |
 | **Switched on** | all | | Off, the light lights nothing and keeps its place and settings. |
 | **Color** | all | | The light's color. Click the swatch to choose one. |
 | **Intensity** | all | 0 – 100 | How bright it is — see below. |

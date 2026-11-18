@@ -156,11 +156,11 @@ void checkCrop() {
     block(*image, 20, 30, 30, 36, 255, 0, 0, 255);
     const auto crop = pose::makeOverlayImage(*image, OverlayImageKind::Color);
     check(crop->fullWidth == 64 && crop->fullHeight == 48 && crop->x == 20 && crop->y == 30 && crop->width == 10 && crop->height == 6 &&
-              crop->hasAlpha && crop->rgba.size() == 10u * 6u * 4u && crop->rgba[0] == 255 && crop->rgba[3] == 255,
+              crop->rgba.size() == 10u * 6u * 4u && crop->rgba[0] == 255 && crop->rgba[3] == 255,
           "crop: a transparent image is kept as its alpha's rectangle");
     check(pose::makeOverlayImage(*solid(16, 16, 9, 9, 9, 0), OverlayImageKind::Color)->empty(), "crop: a fully transparent image is empty");
     const auto whole = pose::makeOverlayImage(*solid(16, 8, 9, 9, 9, 255), OverlayImageKind::Color);
-    check(whole->width == 16 && whole->height == 8 && !whole->hasAlpha, "crop: an opaque color image is kept whole");
+    check(whole->width == 16 && whole->height == 8, "crop: an opaque color image is kept whole");
     auto height = solid(32, 32, 128, 128, 128, 255);
     block(*height, 4, 5, 9, 11, 200, 200, 200, 255);
     const auto ridge = pose::makeOverlayImage(*height, OverlayImageKind::Height);
@@ -733,7 +733,7 @@ void checkMask() {
     block(*grey, 20, 30, 30, 36, 255, 255, 255, 255);
     block(*grey, 30, 30, 34, 36, 128, 128, 128, 255);
     const auto fromGrey = pose::makeOverlayImage(*grey, OverlayImageKind::Mask);
-    check(fromGrey->x == 20 && fromGrey->y == 30 && fromGrey->width == 14 && fromGrey->height == 6 && fromGrey->hasAlpha &&
+    check(fromGrey->x == 20 && fromGrey->y == 30 && fromGrey->width == 14 && fromGrey->height == 6 &&
               fromGrey->rgba[0] == 255 && fromGrey->rgba[3] == 255 && fromGrey->rgba[(10 * 4) + 3] == 128 && fromGrey->rgba[(10 * 4)] == 255,
           "mask image: a grayscale mask is its brightness, cropped to where it is above black");
     auto shape = solid(64, 48, 0, 0, 0, 0);

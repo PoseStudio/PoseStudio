@@ -8,7 +8,7 @@ Every control in one place. "Viewport focus" means you have clicked in the 3D vi
 | --- | --- | --- |
 | Left-drag | on a joint | Full-body IK: the point you grabbed follows the cursor, the body follows anatomically. |
 | Left-drag | on a finger or a toe | That digit alone bends toward the cursor; the hand, the foot and the body stay (with or without Ctrl). |
-| Left-drag | on empty space or a model's body | Orbit the camera. |
+| Left-drag | on empty space, or on an object that is not a figure | Orbit the camera. The view starts to turn once the pointer has moved a few pixels. |
 | Ctrl + left-drag | on a limb, the head or the torso | Scoped IK: only the chain the joint belongs to follows — a limb up to the body, the head and neck, the torso down to the pelvis. Nothing else moves; pinned joints below the chain stay where they are pinned. |
 | Ctrl + left-drag | on the hips | Moves the whole figure as she is posed: nothing is anchored to the floor, no joint turns. Pinned joints stay where they are pinned. |
 | Left-click | on a model | Select it (blue outline); on empty space, deselect. |
@@ -52,7 +52,7 @@ The keys work on the number row and on the numeric keypad. With NumLock off, the
 | `Delete` or `Backspace` | viewport focus, a model selected | Delete the selected model (clears the undo history) |
 | `Delete` or `Backspace` | viewport focus, a light selected | Delete the selected light (an undo step) |
 | `Ctrl+Z` | | Undo |
-| `Ctrl+Y` | | Redo |
+| `Ctrl+Y` or `Ctrl+Shift+Z` | | Redo |
 
 `B`, `S` and `T` work whichever panel has the keyboard focus (they are the keys of **Edit → Turn Joint with Mouse**); `P` and `Delete` need the viewport to have it. Edit → Reset Selected Joint, Reset Limb, Reset Pose, Mirror Pose and Mirror Limb to Other Side have no keys; they are on the Edit menu and (the per-joint ones) on the joint's context menu.
 
@@ -74,7 +74,7 @@ The keys work on the number row and on the numeric keypad. With NumLock off, the
 | --- | --- |
 | `Enter` in the search field | Search |
 | `F2` on a collection | Rename it |
-| Double-click an asset | Import it (`.obj`, `.duf`, `.dsf`) or open it with its application |
+| Double-click an asset | Import it (a model, a figure, a Gaussian splat scene), put it on the selected zone (a saved or MaterialX material), follow it (a script link), or open it with its application |
 | Double-click a folder | Open the folder |
 | Drag a thumbnail | Reorder (in Favorites and Collections), or drop onto Favorites / a Collection in the tree |
 
@@ -84,7 +84,7 @@ The keys work on the number row and on the numeric keypad. With NumLock off, the
 | --- | --- |
 | Drag across a value | Scrub it, in whole steps |
 | Shift + drag across a value | Fine control: a tenth of the step, at a tenth of the speed |
-| Click a value | Type it; `Enter` confirms, `Esc` cancels |
+| Click a value | Type it; `Enter` or a click anywhere else confirms, `Esc` cancels |
 
 ## Environment tab
 

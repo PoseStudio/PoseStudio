@@ -4,27 +4,28 @@
  *        classified, how paths are compared. QtCore only, no widgets, no database.
  *
  * The one rule everything here implements: an ASSET is a non-image file (sidecar extensions
- * such as .mtl excluded) that shares its basename with an image file in the same folder; that
- * image is the asset's thumbnail, and when several qualify the LARGEST wins. A folder that
- * holds such a pair is a DirectHit, one that only has a DirectHit somewhere below it is an
- * IndirectHit, and anything else is NoHit (greyed in the tree). Every scan site in the module
- * (tree lazy-load, grid subfolders, search, hit classification) goes through the filters and
- * helpers below so the symlink and case policies are decided exactly once:
+ * such as .mtl excluded) with a picture beside it that shares its name UP TO THE FIRST DOT.
+ * WHICH picture is its thumbnail is the narrower question: the largest one NAMED AFTER THE
+ * ASSET — for `Name.duf` that is `Name.png`, `Name.duf.png` (the whole file name), or either
+ * with `.tip` before the picture's extension (`Name.tip.png`, the larger preview some content
+ * ships beside the small one; never an asset of its own, being a picture) — and only an asset
+ * with no picture named after it wears the largest picture of the first-dot group. So
+ * `Material.001.psm` and `Material.002.psm` are two assets with an icon each, and a file that
+ * was an asset when the first dot alone decided is one still. An asset is LABELLED by its
+ * whole name without the extension (`Material.001`).
  *
- * - Symlinked/junctioned directories are NEVER followed (kSubdirFilter carries NoSymLinks).
- *   The recursive walkers have no cycle protection (QDirIterator doesn't either), and before
- *   this header the tree included such folders while the grid/search/hit walk excluded them,
- *   so a junction showed in the tree but never as a grid folder and painted its parent "empty".
+ * A folder that holds such a pair is a DirectHit, one that only has a DirectHit somewhere below
+ * it is an IndirectHit, and anything else is NoHit (greyed in the tree). Every scan site in the
+ * module (tree lazy-load, grid subfolders, search, hit classification) goes through the filters
+ * and helpers of assetpaths.h — the symlink, case and picture rules, each decided exactly once —
+ * and through the functions below, so that one more rule holds everywhere:
+ *
  * - HIDDEN NAMES are never listed (core/hiddennames.h): a file or a folder whose name begins
  *   with a dot is not an asset, not a thumbnail, not a folder of the tree or the grid, and a
  *   hidden folder is never walked into, so nothing in it is found either. That is the whole
  *   mechanism for keeping something out of a browser; no folder NAME is special. (What the
  *   operating system marks hidden is left out by the QDir filters themselves, which carry no
  *   QDir::Hidden.)
- * - Paths compare CASE-INSENSITIVELY everywhere (kPathCase). Stored library paths and scanned
- *   paths come from the same QDir/QFileDialog sources, so the only way they differ by case is
- *   the user retyping one; a case-sensitive compare then silently broke breadcrumbs and
- *   "Find In Library" on Windows, where the filesystem itself is case-insensitive.
  *
  * The classification (classifyFolder) is a pure function of the filesystem so the proxy model
  * can run it on a worker thread; it never touches Qt GUI types.
@@ -33,6 +34,7 @@
 #ifndef ASSETSCAN_H
 #define ASSETSCAN_H
 
+#include "assetpaths.h"
 #include "hiddennames.h"
 
 #include <QDateTime>
@@ -55,7 +57,7 @@ namespace AssetScan {
 struct AssetHit {
     QString folderPath;     ///< Absolute path to the directory containing the asset
     QString assetFileName;  ///< Filename of the asset (e.g. model.obj, figure.duf)
-    QString bestImage;      ///< Filename of the paired thumbnail (largest same-basename image), or empty
+    QString bestImage;      ///< Filename of its thumbnail (the file banner's rule), or empty
     qint64 sizeBytes = 0;   ///< Asset file size
     QDateTime lastModified; ///< Asset file mtime
 };
@@ -63,26 +65,6 @@ struct AssetHit {
 /// How a folder relates to assets (see the file banner). The numeric order matters to nobody;
 /// the names do: only DirectHit folders become search results and list assets in the grid.
 enum class HitState { NoHit = 0, IndirectHit = 1, DirectHit = 2 };
-
-/// The subdirectory filter EVERY scan uses: real directories only, never symlinks/junctions.
-inline constexpr QDir::Filters kSubdirFilter = QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks;
-/// The file filter every scan uses.
-inline constexpr QDir::Filters kFileFilter = QDir::Files | QDir::NoSymLinks;
-
-/// The module-wide case policy for comparing paths (see the file banner).
-inline constexpr Qt::CaseSensitivity kPathCase = Qt::CaseInsensitive;
-
-/// cleanPath(fromNativeSeparators(path)): the canonical spelling every comparison works on.
-QString normalizePath(const QString& path);
-
-/// True when the two paths name the same location under the module's case policy.
-bool samePath(const QString& a, const QString& b);
-
-/// True when `folderPath` IS `libRoot` or lies under it. Both are normalized first: a library
-/// registered at a drive root keeps its trailing slash ("D:/"), where a naive `lib + "/"`
-/// prefix test builds "D://" and never matches, silently breaking breadcrumbs and
-/// "Find In Library" for every subfolder of that library.
-bool folderWithinLibrary(const QString& folderPath, const QString& libRoot);
 
 /// The members of `assetPaths` that lie in or under one of `roots`, in input order: what a
 /// browser that looks at part of the disk shows of a list kept for the whole application
@@ -112,10 +94,6 @@ bool hasAncestorIn(const QString& path, const QSet<QString>& set);
 /// when truncated, joined with " / " (the separator AssetTreeDelegate greys the prefix of).
 QString truncateSearchPath(const QString& relPath, int maxSegments = 4);
 
-/// True when `folderPath` directly contains at least one asset (a non-image file with a
-/// same-basename image beside it).
-bool folderHasDirectAssetHit(const QString& folderPath);
-
 /**
  * @brief Classifies `folderPath` (DirectHit / IndirectHit / NoHit), walking into subfolders
  *        only as far as needed: a direct hit ends the walk, and the first subtree with a hit
@@ -129,9 +107,10 @@ bool folderHasDirectAssetHit(const QString& folderPath);
 QHash<QString, HitState> classifyFolder(const QString& folderPath,
                                         const QHash<QString, HitState>& known);
 
-/// The assets directly inside `folderPath` (non-recursive), in directory order: each non-image
-/// file paired with the largest same-basename image. Files without an image are not assets,
-/// and neither is a hidden file (nor is a hidden image a thumbnail).
+/// The assets directly inside `folderPath` (non-recursive), in no particular order: each
+/// non-image file with a picture beside it, paired with its thumbnail (the file banner's rule).
+/// Files without a picture are not assets, and neither is a hidden file (nor is a hidden picture
+/// a thumbnail).
 QList<AssetHit> scanFolderAssets(const QString& folderPath);
 
 /**

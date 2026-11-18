@@ -502,6 +502,19 @@ private:
         m_text = "Failed";
     }
 
+    /// Takes m_session back when a render thread leaves the scope its session lives in, by ANY
+    /// path. status(), setPaused() and cancel() reach the session through that pointer, and an
+    /// exception thrown out of that scope destroys the session during unwinding — before the
+    /// thread's handler runs and finish() clears the pointer. Declared right after the session,
+    /// this goes first.
+    struct SessionUnpublisher {
+        CyclesEngine& engine;
+        ~SessionUnpublisher() {
+            const std::lock_guard<std::mutex> lock(engine.m_mutex);
+            engine.m_session = nullptr;
+        }
+    };
+
     /// The session parameters both kinds of render share: the samples, the threads, the device.
     ccl::SessionParams sessionParams(const Settings& settings) const {
         ccl::SessionParams params;
@@ -539,7 +552,8 @@ private:
             sceneParams.background = true;
             sceneParams.use_texture_cache = false; // (no .tx files are made or looked for)
 
-            auto session = std::make_unique<ccl::Session>(sessionParams, sceneParams);
+            auto                     session = std::make_unique<ccl::Session>(sessionParams, sceneParams);
+            const SessionUnpublisher unpublish{*this}; // (declared after the session: gone before it)
             if (session->device->have_error()) {
                 throw std::runtime_error(session->device->error_message());
             }
@@ -566,12 +580,21 @@ private:
             pass->set_mode(denoise ? ccl::PassMode::DENOISED : ccl::PassMode::NOISY);
 
             session->reset(sessionParams, bufferParamsFor(m_settings.width, m_settings.height));
-            if (!m_cancel) {
-                {
-                    const std::lock_guard<std::mutex> lock(m_mutex);
+            bool render = false;
+            {
+                // The cancel flag is read under the lock the session is published under: cancel()
+                // sets the flag BEFORE it takes that lock, so either it finds the session here and
+                // cancels it, or this finds the flag and never starts. (Read outside the lock, a
+                // cancel between the test and the publication cancelled nothing, and the render
+                // ran to its last sample with the caller blocked in join().)
+                const std::lock_guard<std::mutex> lock(m_mutex);
+                if (!m_cancel) {
                     m_session = session.get();
                     m_state = State::Rendering;
+                    render = true;
                 }
+            }
+            if (render) {
                 session->start();
                 session->wait();
             }
@@ -614,7 +637,8 @@ private:
             sceneParams.background = false;
             sceneParams.use_texture_cache = false;
 
-            auto session = std::make_unique<ccl::Session>(sessionParams, sceneParams);
+            auto                     session = std::make_unique<ccl::Session>(sessionParams, sceneParams);
+            const SessionUnpublisher unpublish{*this}; // (declared after the session: gone before it)
             if (session->device->have_error()) {
                 throw std::runtime_error(session->device->error_message());
             }
@@ -696,6 +720,7 @@ private:
                     const std::lock_guard<std::mutex> frameLock(m_frame->mutex);
                     m_frame->cameraRendering = work.cameraId;
                 }
+                bool start = false;
                 {
                     const std::lock_guard<std::mutex> lock(m_mutex);
                     if (work.scene) {
@@ -705,12 +730,15 @@ private:
                     if (work.lighting) {
                         m_sceneApplied = std::max(m_sceneApplied, work.lightingId);
                     }
-                    if (!started) {
+                    // (The cancel flag read under the publishing lock, as in run(): a cancel that
+                    // came during the first build starts no render — the loop's next wait ends it.)
+                    if (!started && !m_cancel) {
                         m_session = session.get();
                         m_state = State::Rendering;
+                        start = true;
                     }
                 }
-                if (!started) {
+                if (start) {
                     session->start();
                     started = true;
                 }

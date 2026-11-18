@@ -29,15 +29,15 @@ A few seconds after every launch the application sends an anonymous "this instal
 
 ## The window at a glance
 
-- The **menu bar** — File, Edit, View and Help.
-- The **3D viewport** fills most of the window. In its top-right corner floats a strip of controls: the shading picker, the camera-view picker, and the Home, Ground and Skeleton buttons.
+- The **menu bar** — File, Edit, View, Render and Help.
+- The **3D viewport** fills most of the window. In its top-right corner floats a strip of controls, from left to right: the Render button, the shading picker, the camera-view picker, and the VR, Home, Ground, Skeleton and Selection buttons.
 - The **side panel** on the right has seven tabs on its left edge: **Asset Manager** (your content), **Transform** (the selected joint's rotation), **Materials** (the selected object's surfaces), **Materials Library** (your materials on disk), **Soft Body Physics** (how the breasts and the buttocks move), **Environment** (the scene's lighting) and **Lights** (lamps and spotlights of your own). Drag the divider between the viewport and the panel to resize them.
 
 [The Interface](interface.md) describes each part in detail.
 
 ## Your first figure
 
-1. **Import a figure.** Use **File → Import → .DUF (DUF File)** and pick a character preset, or add the folder that holds your figures as an asset library and double-click one in the Asset Manager. A progress dialog shows the stages (reading, decoding textures, baking ambient occlusion, uploading); a fully textured figure takes some seconds. The figure lands standing on the floor, facing you, framed by the camera. If PoseStudio asks you to locate a content folder, see [Importing Content](importing.md#when-the-figures-data-cannot-be-found).
+1. **Import a figure.** Use **File → Import → .DUF (DUF File)** and pick a character preset, or add the folder that holds your figures as an asset library and double-click one in the Asset Manager. A progress dialog shows the stages (reading, decoding textures, baking ambient occlusion, uploading); a fully textured figure takes some seconds. The figure lands standing on the floor, facing you; the camera does not move, and the default view fits a standing figure. If PoseStudio asks you to locate a content folder, see [Importing Content](importing.md#when-the-figures-data-cannot-be-found).
 2. **Look around.** Drag on empty space to orbit, drag with the middle button to pan, roll the wheel to zoom. Press `1`, `3` or `7` for the front, right and top views, `5` to come back to the default view.
 3. **Pose.** Drag any part of the body. Grab a hand and pull it up — the arm raises and the body leans; pull further and she rises on her toes. Grab the hips and pull them down — she crouches. Take the hips back and she steps. Release, and the pose is kept; `Ctrl+Z` undoes it. [Posing](posing.md) explains everything the body does, and [Poses Step by Step](poses.md) shows how to make a kneel, a sit, a lie-down, all fours and more.
 4. **Light it.** Open the **Environment** tab, pick an HDRI from the list, and adjust exposure and the key light. The picture updates live.

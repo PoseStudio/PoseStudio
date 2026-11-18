@@ -5,6 +5,7 @@
 
 #include "splatimporter.h"
 
+#include "asciilower.h"
 #include "figuredocument.h" // gunzip (miniz): an .spz is one gzip stream
 
 #include <glm/gtc/packing.hpp>
@@ -29,11 +30,7 @@ std::string lowerExtension(const std::string& path) {
     if (dot == std::string::npos) {
         return {};
     }
-    std::string ext = path.substr(dot);
-    for (char& c : ext) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-    return ext;
+    return asciiLower(path.substr(dot));
 }
 
 std::vector<char> readWholeFile(const std::string& path) {
@@ -105,6 +102,8 @@ SplatData loadPly(const std::string& path) {
     bool               binaryLittle = false;
     std::size_t        vertexCount = 0;
     bool               inVertex = false;
+    bool               sawVertex = false;
+    std::string        elementBeforeVertex; // an element with data ahead of the vertices' (not read)
     bool               chunked = false;
     std::vector<PlyProperty> props;
     std::size_t        recordSize = 0;
@@ -129,6 +128,9 @@ SplatData loadPly(const std::string& path) {
             inVertex = name == "vertex";
             if (inVertex) {
                 vertexCount = count;
+                sawVertex = true;
+            } else if (!sawVertex && count > 0 && elementBeforeVertex.empty()) {
+                elementBeforeVertex = name;
             }
         } else if (word == "property" && inVertex) {
             std::string type, name;
@@ -172,6 +174,12 @@ SplatData loadPly(const std::string& path) {
     if (vertexCount == 0 || props.empty()) {
         throw std::runtime_error("the PLY has no vertices: " + path);
     }
+    if (!elementBeforeVertex.empty()) {
+        // (The records are read from the first data byte on: another element's data ahead of
+        // them would be read as splats.)
+        throw std::runtime_error("the PLY's vertices are not its first element ('" + elementBeforeVertex +
+                                 "' comes before them), which this reader does not take: " + path);
+    }
     std::unordered_map<std::string, const PlyProperty*> byName;
     for (const PlyProperty& p : props) {
         byName.emplace(p.name, &p);
@@ -210,7 +218,7 @@ SplatData loadPly(const std::string& path) {
         }
     }
     const std::size_t dataBytes = static_cast<std::size_t>(end - headerEnd);
-    if (dataBytes < vertexCount * recordSize) {
+    if (vertexCount > dataBytes / recordSize) { // (a division: the product could wrap for a hostile count)
         throw std::runtime_error("the PLY is truncated (" + std::to_string(dataBytes) + " bytes of vertex data for " +
                                  std::to_string(vertexCount) + " splats of " + std::to_string(recordSize) + "): " + path);
     }
@@ -243,9 +251,14 @@ SplatData loadPly(const std::string& path) {
     data.rotations.resize(vertexCount);
     data.opacities.resize(vertexCount);
     data.sh.resize(vertexCount * static_cast<std::size_t>(coeffs) * 3);
+    // Channel-major: the file's f_rest list is every coefficient of R, then of G, then of B, so a
+    // channel's stride is a third of the LIST — which is longer than the coefficients read here
+    // for a file trained past degree 3 (72 for degree 4; taken as 15 a channel, green and blue
+    // then read red's and green's higher terms).
+    const std::size_t               restPerChannel = static_cast<std::size_t>(rest / 3);
     std::vector<const PlyProperty*> restProps;
     if (degree > 0) {
-        restProps.resize(static_cast<std::size_t>(3 * (coeffs - 1)));
+        restProps.resize(static_cast<std::size_t>(rest));
         for (std::size_t i = 0; i < restProps.size(); ++i) {
             restProps[i] = find(("f_rest_" + std::to_string(i)).c_str());
         }
@@ -271,7 +284,8 @@ SplatData loadPly(const std::string& path) {
         }
         for (int k = 1; k < coeffs; ++k) {
             for (int c = 0; c < 3; ++c) {
-                const PlyProperty* p = restProps[static_cast<std::size_t>(c * (coeffs - 1) + (k - 1))];
+                const std::size_t  at = static_cast<std::size_t>(c) * restPerChannel + static_cast<std::size_t>(k - 1);
+                const PlyProperty* p = at < restProps.size() ? restProps[at] : nullptr;
                 sh[k * 3 + c] = p ? readValue(rec, *p) : 0.0f;
             }
         }
@@ -456,6 +470,45 @@ SplatData loadSpz(const std::string& path) {
     return data;
 }
 
+/// Leaves out every splat with a value that is not finite (SplatData::droppedNonFinite says why
+/// and counts them). A file without one is not touched.
+void dropNonFiniteSplats(SplatData& data) {
+    const std::size_t n = data.count();
+    const std::size_t stride = static_cast<std::size_t>(data.coefficients()) * 3;
+    std::size_t       kept = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        const glm::vec3& p = data.positions[i];
+        const glm::vec3& s = data.scales[i];
+        const glm::vec4& q = data.rotations[i];
+        bool             sound = std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) && std::isfinite(s.x) && std::isfinite(s.y) &&
+                                 std::isfinite(s.z) && std::isfinite(q.x) && std::isfinite(q.y) && std::isfinite(q.z) && std::isfinite(q.w) &&
+                                 std::isfinite(data.opacities[i]);
+        const float* sh = data.sh.data() + i * stride;
+        for (std::size_t k = 0; k < stride && sound; ++k) {
+            sound = std::isfinite(sh[k]);
+        }
+        if (!sound) {
+            continue;
+        }
+        if (kept != i) {
+            data.positions[kept] = p;
+            data.scales[kept] = s;
+            data.rotations[kept] = q;
+            data.opacities[kept] = data.opacities[i];
+            std::copy(sh, sh + stride, data.sh.data() + kept * stride);
+        }
+        ++kept;
+    }
+    data.droppedNonFinite = n - kept;
+    if (kept != n) {
+        data.positions.resize(kept);
+        data.scales.resize(kept);
+        data.rotations.resize(kept);
+        data.opacities.resize(kept);
+        data.sh.resize(kept * stride);
+    }
+}
+
 } // namespace
 
 void turnOverYDown(SplatData& data) {
@@ -491,19 +544,20 @@ void turnOverYDown(SplatData& data) {
 
 SplatData loadSplatFile(const std::string& path) {
     const std::string ext = lowerExtension(path);
+    SplatData         data;
     if (ext == ".ply") {
-        return loadPly(path);
-    }
-    if (ext == ".splat") {
-        return loadSplat(path);
-    }
-    if (ext == ".spz") {
-        return loadSpz(path);
-    }
-    if (ext == ".ksplat") {
+        data = loadPly(path);
+    } else if (ext == ".splat") {
+        data = loadSplat(path);
+    } else if (ext == ".spz") {
+        data = loadSpz(path);
+    } else if (ext == ".ksplat") {
         throw std::runtime_error("the .ksplat format is not supported yet; export a .ply, a .splat or an .spz: " + path);
+    } else {
+        throw std::runtime_error("not a Gaussian splat file (.ply, .splat or .spz): " + path);
     }
-    throw std::runtime_error("not a Gaussian splat file (.ply, .splat or .spz): " + path);
+    dropNonFiniteSplats(data);
+    return data;
 }
 
 } // namespace pose

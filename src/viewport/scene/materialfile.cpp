@@ -32,7 +32,9 @@ std::string materialFileText(const MaterialDocument& doc) {
         {"name", doc.name},
         {"material", std::move(material)},
     };
-    return root.dump(2) + "\n";
+    // (A name that is not valid UTF-8 is written with the replacement character: the strict
+    // default throws on one. See writeProjectFile.)
+    return root.dump(2, ' ', false, json::error_handler_t::replace) + "\n";
 }
 
 bool readMaterialFileText(const std::string& text, MaterialDocument& doc, std::string& error) {

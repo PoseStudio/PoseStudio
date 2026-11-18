@@ -5,8 +5,8 @@
  * Deliberately tiny: just the things every rendering file needs (error checking,
  * a human-readable VkResult string, the global frames-in-flight constant). Keep
  * heavyweight helpers in their own translation units so this stays cheap to include.
- * (Theme colors don't belong here either — the selection accent lives with the outline
- * code in postprocess.h.)
+ * (Colors don't belong here either — the selection's are in selectionstyle.h, the viewport's
+ * background in viewportcolors.h.)
  *
  * NOTE: This subsystem links the Vulkan loader directly (CMake's Vulkan::Vulkan),
  * so we call vkXxx functions normally. QVulkanInstance is used only to create the

@@ -96,10 +96,6 @@ public:
     std::vector<std::string> listFiles(const std::string& directoryUri,
                                        const std::string& extension) const;
 
-    /// Percent-decodes a URL-encoded string ("My%20Figures" -> "My Figures"). Forwards to
-    /// figureutils' urlDecode (kept here so resolver callers read naturally).
-    static std::string urlDecode(const std::string& s);
-
 private:
     /// Resolves `base / tail` tolerating case differences in any component; empty if not found.
     std::string resolveCaseTolerant(const std::string& base, const std::string& tail) const;

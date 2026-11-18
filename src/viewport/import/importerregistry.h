@@ -28,14 +28,14 @@ public:
     /// The shared, lazily-constructed registry. Construction registers every built-in importer.
     static const ImporterRegistry& instance();
 
-    /// Importer whose extensions() include @p extLower (lowercase, no dot), or nullptr if none.
-    const MeshImporter* forExtension(const std::string& extLower) const;
-
     /// Importer for @p path, chosen by its file extension, or nullptr if the format is unsupported.
     const MeshImporter* forPath(const std::string& path) const;
 
 private:
     ImporterRegistry(); // registers the built-in importers
+
+    /// Importer whose extensions() include @p extLower (lowercase, no dot), or nullptr if none.
+    const MeshImporter* forExtension(const std::string& extLower) const;
 
     ImporterRegistry(const ImporterRegistry&) = delete;
     ImporterRegistry& operator=(const ImporterRegistry&) = delete;

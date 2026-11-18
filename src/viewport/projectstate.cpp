@@ -1,3 +1,9 @@
+/**
+ * @file projectstate.cpp
+ * @brief Implementation of ProjectState: the .pss document's path and unsaved flag, each setter
+ *        announcing only a real transition. See projectstate.h.
+ */
+
 #include "projectstate.h"
 
 namespace pose {

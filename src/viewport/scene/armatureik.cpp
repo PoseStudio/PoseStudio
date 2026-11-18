@@ -8,13 +8,14 @@
  *
  * The per-tick SOLVE — the drag's tasks and stiffness model handed to scene/ik/jointsolver.h and
  * applied in full, with the rig's per-tick policy around it — is armatureiksolve.cpp and its
- * stage files (armatureiksolvedrag / posture / rows .cpp, armatureikpost.cpp the post-steps);
+ * stage files (armatureiksolvedrag / posture / pins / cursor / rows .cpp, armatureikpost.cpp the post-steps);
  * the digit drag is armatureikdigit.cpp, the figure move armatureikfigure.cpp, the landing bounce
  * armaturelanding.cpp. Those TUs are the only place the engine and scene/ik/ meet. Vulkan-free
  * like the rest of the Armature, so the IK harness runs this exact loop.
  */
 
 #include "armature.h"
+#include "armatureiksolvetuning.h" // the tick's length, and the traces this file shares with the solve's stages
 #include "balancecontroller.h"  // the centre of mass the weight shift is measured from
 
 #include "ikmath.h"
@@ -35,10 +36,8 @@ namespace pose {
 
 namespace {
 
-// POSESTUDIO_IK_TRACE=1: the per-drag (beginIkDrag) diagnostics (armatureiksolve.cpp prints the
-// per-tick ones).
-const bool kIkTrace = std::getenv("POSESTUDIO_IK_TRACE") != nullptr;
-
+// (POSESTUDIO_IK_TRACE=1 — kIkTrace, armatureiksolvetuning.h — prints the per-drag (beginIkDrag)
+// diagnostics here; armatureiksolve.cpp prints the per-tick ones.)
 
 // IK_DRAG_STATE_TRACE=1: the DETERMINISM probe — a fingerprint of the pose at every press and
 // every tick, so two drags meant to be identical can be compared line by line (the first use
@@ -52,6 +51,16 @@ double poseFingerprint(const std::vector<glm::vec3>& perBone) {
         sum += v.x * 1.0 + v.y * 3.0 + v.z * 7.0;
     }
     return sum;
+}
+
+/// A world rotation's HEADING about the vertical (radians), read off whichever of its lateral and
+/// fore axes lies flatter: a rotation pitched 90 degrees has no fore heading, one rolled 90 no lateral.
+float headingOf(const glm::mat3& world) {
+    glm::vec3 lateral = world * glm::vec3(1.0f, 0.0f, 0.0f);
+    glm::vec3 fore = world * glm::vec3(0.0f, 0.0f, 1.0f);
+    lateral.y = 0.0f;
+    fore.y = 0.0f;
+    return glm::length(lateral) >= glm::length(fore) ? std::atan2(-lateral.z, lateral.x) : std::atan2(fore.x, fore.z);
 }
 
 /// The bone names flagged in a per-bone mask, space-separated, for a trace line.
@@ -74,25 +83,19 @@ bool Armature::ensureIkRig() {
     }
     {
         // First use on this figure: build the rig (body tree, masses, clearances, body volumes)
-        // from the bind skeleton, plus the model-space bind joint positions (the foot contact
-        // model finds the ball of a foot by bind height).
+        // from the bind skeleton (its model-space bind joint positions are build()'s: m_ikBindPos).
         std::vector<IkRigBone> rigBones(m_bones.size());
-        std::vector<glm::vec3> bindPos(m_bones.size(), glm::vec3(0.0f));
         for (std::size_t i = 0; i < m_bones.size(); ++i) {
             const Bone& bone = m_bones[i];
-            const glm::vec3 parentBind =
-                bone.parent >= 0 ? bindPos[static_cast<std::size_t>(bone.parent)] : glm::vec3(0.0f);
-            bindPos[i] = parentBind + glm::vec3(bone.localBind[3]);
             IkRigBone& rigBone = rigBones[i];
             rigBone.name = m_boneNames[i];
             rigBone.roleHint = bone.roleHint;
             rigBone.parent = bone.parent;
-            rigBone.bindPos = bindPos[i];
+            rigBone.bindPos = m_ikBindPos[i];
             rigBone.helper = isTwistBone(static_cast<int>(i)); // (a twist helper is no contact: IkRig::helperNode)
         }
         m_ikRig = std::make_unique<IkRig>();
         m_ikRig->build(rigBones, m_bodyMesh.empty() ? nullptr : &m_bodyMesh);
-        m_ikBindPos = std::move(bindPos);
         pairMirrorsByRole(); // (what the names and the places left unpaired: the roles' twins)
         buildJointSolver();
         classifyBones(); // (the face rig and the digits: found with the rig, by structure)
@@ -229,7 +232,7 @@ bool Armature::isTwistBone(int bone) const {
     int locked = 0;
     int freeAxis = -1;
     for (int a = 0; a < 3; ++a) {
-        if (b.rotLimited[a] && (b.rotMax[a] - b.rotMin[a]) < kLockedRangeDeg) {
+        if (isLockedChannel(bone, a)) {
             ++locked;
         } else {
             freeAxis = a;
@@ -284,11 +287,30 @@ int Armature::foldAxisOf(int b) const {
     return -1;
 }
 
-int Armature::freeChannelCount(int b) const {
+glm::mat3 Armature::channelPrefix(std::size_t b, int axis) const {
+    const Bone& bone = m_bones[b];
+    glm::mat3   prefix(1.0f);
+    for (const char ch : bone.rotationOrder) {
+        const int letter = ch == 'X' ? 0 : ch == 'Y' ? 1 : ch == 'Z' ? 2 : -1;
+        if (letter < 0 || letter == axis) {
+            break;
+        }
+        glm::vec3 e(0.0f);
+        e[letter] = 1.0f;
+        prefix = prefix * glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(m_boneEuler[b][letter]), e));
+    }
+    return prefix;
+}
+
+bool Armature::isLockedChannel(int b, int axis) const {
     const Bone& bone = m_bones[static_cast<std::size_t>(b)];
-    int         count = 0;
+    return bone.rotLimited[axis] && bone.rotMax[axis] - bone.rotMin[axis] < kLockedRangeDeg;
+}
+
+int Armature::freeChannelCount(int b) const {
+    int count = 0;
     for (int a = 0; a < 3; ++a) {
-        count += (bone.rotLimited[a] && bone.rotMax[a] - bone.rotMin[a] < kLockedRangeDeg) ? 0 : 1;
+        count += isLockedChannel(b, a) ? 0 : 1;
     }
     return count;
 }
@@ -331,29 +353,28 @@ float Armature::chainLength(int from, int upTo) const {
     return length;
 }
 
+int Armature::limbTop(int joint, float& length) const {
+    const int junction = m_ikRig->limbJunction(joint);
+    const int root = m_ikRig->rootNode();
+    int       top = joint;
+    length = 0.0f;
+    for (;;) {
+        const int par = m_bones[static_cast<std::size_t>(top)].parent;
+        if (par < 0 || par == junction || par == root) {
+            break;
+        }
+        length += glm::length(glm::vec3(m_bones[static_cast<std::size_t>(top)].localBind[3]));
+        top = par;
+    }
+    return top;
+}
+
 int Armature::mainChild(int bone) const {
-    if (bone < 0 || bone >= static_cast<int>(m_children.size())) {
+    if (bone < 0 || bone >= static_cast<int>(m_mainChild.size())) {
         return -1;
     }
-    // The child with the biggest subtree (children follow parents in the bone order).
-    int best = -1;
-    int bestSize = 0;
-    for (const int c : m_children[static_cast<std::size_t>(bone)]) {
-        int size = 0;
-        std::vector<int> stack{c};
-        while (!stack.empty()) {
-            const int node = stack.back();
-            stack.pop_back();
-            ++size;
-            stack.insert(stack.end(), m_children[static_cast<std::size_t>(node)].begin(),
-                         m_children[static_cast<std::size_t>(node)].end());
-        }
-        if (size > bestSize) {
-            bestSize = size;
-            best = c;
-        }
-    }
-    return best;
+    // The child with the biggest subtree, the first of equals: found once, in build().
+    return m_mainChild[static_cast<std::size_t>(bone)];
 }
 
 bool Armature::sameRigidSegment(int a, int b) const {
@@ -521,7 +542,6 @@ void Armature::resetContactState() {
     m_jsSeatNode = m_ikRig->floorSeatNode();
     m_jsKneelStart = m_ikRig->onKnees();
     m_jsKneelSeatY = m_jsKneelStart ? m_ikRig->kneelSeatHeight() : -1.0f;
-    m_jsKneelSeat = m_jsKneelStart ? m_ikRig->kneelSeat() : glm::vec3(0.0f, -1.0f, 0.0f);
     m_jsHandTipValid.assign(m_bones.size(), 0);
     m_jsContactGone.assign(m_bones.size(), 0.0f);
     m_jsContactRiseBase.assign(m_bones.size(), -1.0f);
@@ -601,17 +621,10 @@ void Armature::captureDragStart(const std::vector<glm::vec3>& positions, float g
     {
         const std::size_t root = static_cast<std::size_t>(m_ikRig->rootNode());
         m_jsRootRiseRoom = (m_ikBindPos[root].y + groundOffsetY) - positions[root].y;
-        // The root UPRIGHT: its world rotation now, reduced to its heading (read off whichever
-        // of its lateral and fore axes lies flatter — a root pitched 90 degrees has no fore
-        // heading, one rolled 90 no lateral), as an Euler pose on this rotation's own branch.
+        // The root UPRIGHT: its world rotation now, reduced to its heading (headingOf), as an Euler
+        // pose on this rotation's own branch.
         const Bone& bone = m_bones[root];
-        const glm::mat3 world(m_poseGlobal[root]);
-        glm::vec3 lateral = world * glm::vec3(1.0f, 0.0f, 0.0f);
-        glm::vec3 fore = world * glm::vec3(0.0f, 0.0f, 1.0f);
-        lateral.y = 0.0f;
-        fore.y = 0.0f;
-        const float yaw = glm::length(lateral) >= glm::length(fore) ? std::atan2(-lateral.z, lateral.x)
-                                                                     : std::atan2(fore.x, fore.z);
+        const float yaw = headingOf(glm::mat3(m_poseGlobal[root]));
         const glm::mat3 upright(glm::mat4_cast(glm::angleAxis(yaw, glm::vec3(0.0f, 1.0f, 0.0f))));
         m_jsRootHeading = yaw;
         m_jsStartGrabFromRoot = positions[static_cast<std::size_t>(m_ikRig->dragEffector())] - positions[root];
@@ -723,7 +736,6 @@ void Armature::findWeightShift() {
         }
         const glm::vec3 com = BalanceController::centerOfMass(m_jsStartPos, parents, rig.masses());
         m_jsWeightShift = centre - glm::vec2(com.x, com.z);
-        static const bool kWeightTrace = std::getenv("IK_JS_WEIGHT_TRACE") != nullptr;
         if (kWeightTrace) {
             const IkEffector& pin = rig.pins()[static_cast<std::size_t>(standing)];
             std::fprintf(stderr, "[weight] standing %s target(%.4f %.4f %.4f) footprint %zu centre(%.4f %.4f) com(%.4f %.4f %.4f) shift(%.4f %.4f)\n",
@@ -864,7 +876,8 @@ bool Armature::beginIkDrag(IkScope scope) {
         // Nothing under the threshold (residuals left the figure hovering, or it was posed
         // airborne): anchor at whatever is LOWEST — combined with the rig's ground-healing pin
         // heights, a slightly-floating figure is pulled back onto the floor by its next drag
-        // instead of drifting further with each one.
+        // instead of drifting further with each one. (Candidates only: the rig decides, and a
+        // figure in the AIR — her lowest foot IkRig::airborneHeight or more up — is left floating.)
         float minY = 1e30f;
         for (std::size_t i = 0; i < m_bones.size(); ++i) {
             minY = std::min(minY, m_boneWorldPos[i].y);
@@ -1223,7 +1236,8 @@ bool Armature::dragIkTo(const glm::vec3& targetWorld) {
     m_jsRawTarget = target;
     m_jsRawTargetValid = true;
     if (!m_ikRig->bodyVolumes().empty()) {
-        std::vector<glm::vec3> current(m_bones.size());
+        std::vector<glm::vec3>& current = m_jsClampPositionsBuf; // (kept across ticks: no allocation)
+        current.resize(m_bones.size());
         for (std::size_t i = 0; i < m_bones.size(); ++i) {
             current[i] = glm::vec3(m_poseGlobal[i][3]);
         }
@@ -1233,10 +1247,19 @@ bool Armature::dragIkTo(const glm::vec3& targetWorld) {
 }
 
 bool Armature::settleIkTick() {
-    if (m_figureMove && m_jsSoftBodyMoving && ++m_ikSettleTicks <= 120) {
-        // THE SOFT BODY'S TAIL after a figure move: she stands where the cursor left her, and the
-        // breasts and the buttocks bounce on by themselves until they rest, as after any drag.
-        m_jsSoftBodyMoving = tickSoftBody(1.0f / 60.0f);
+    // THE SOFT BODY'S TAIL where there is nothing to land. After a figure move she stands where the
+    // cursor left her; after a whole-body drag that ends with NO PIN — a figure lifted off the floor
+    // and let go of while she hangs, a floating figure carried by the hips — the settle below is
+    // never reached (settleIkSolveTick has the tail of every other drag). The breasts and the
+    // buttocks bounce on by themselves until they rest; without this endIkDrag snapped them to
+    // rest in the frame the button came up. No solve: the pose is the one the drag left.
+    // (The POST-STEPS of such a pinless drag are still not finished here — an arm mid-swing toward
+    // plumb stays where the mouse-up found it: finishing them changes the pose a lift is let go of
+    // in, and wants a measured round.)
+    const bool pinlessDrag = !m_digitDrag && !m_figureMove && m_ikRig && m_ikRig->dragActive() && !m_bones.empty() &&
+                             m_ikRig->pins().empty();
+    if ((m_figureMove || pinlessDrag) && m_jsSoftBodyMoving && ++m_ikSettleTicks <= 120) {
+        m_jsSoftBodyMoving = tickSoftBody(kTickSeconds);
         return m_jsSoftBodyMoving;
     }
     if (m_digitDrag || m_figureMove) {
@@ -1323,8 +1346,7 @@ void Armature::captureFlatHold(bool restOrientation) {
         return;
     }
     // THE REST ORIENTATION FACES THE WAY SHE FACES (2026-11-12): the solve root's world rotation
-    // reduced to its heading (read off whichever of its lateral and fore axes lies flatter, as
-    // captureDragStart reads it). It was the bare identity — flat, and facing +z — and a figure
+    // reduced to its heading (headingOf, as captureDragStart reads it). It was the bare identity — flat, and facing +z — and a figure
     // TURNED with the Transform tab's Turn (90 degrees: facing +x), lifted off the floor and
     // lowered again, had her landing soles held to +z at the hold's full weight: both legs
     // wrenched round at the thighs' twist (49 degrees of it in the app) and the ankles, the
@@ -1335,13 +1357,7 @@ void Armature::captureFlatHold(bool restOrientation) {
     if (restOrientation && !kRestIdentity) {
         const int root = m_ikRig->rootNode();
         if (root >= 0 && static_cast<std::size_t>(root) < m_poseGlobal.size()) {
-            const glm::mat3 world(m_poseGlobal[static_cast<std::size_t>(root)]);
-            glm::vec3       lateral = world * glm::vec3(1.0f, 0.0f, 0.0f);
-            glm::vec3       fore = world * glm::vec3(0.0f, 0.0f, 1.0f);
-            lateral.y = 0.0f;
-            fore.y = 0.0f;
-            const float yaw = glm::length(lateral) >= glm::length(fore) ? std::atan2(-lateral.z, lateral.x)
-                                                                         : std::atan2(fore.x, fore.z);
+            const float yaw = headingOf(glm::mat3(m_poseGlobal[static_cast<std::size_t>(root)]));
             if (yaw != 0.0f) {
                 restFacing = glm::mat3(glm::mat4_cast(glm::angleAxis(yaw, glm::vec3(0.0f, 1.0f, 0.0f))));
             }

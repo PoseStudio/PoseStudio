@@ -6,8 +6,10 @@
  * ProjectDocument, reads it back and compares every field bit-for-bit, then
  * feeds the reader the failure cases (bad JSON, wrong marker, higher version,
  * missing file) and a forward-compatibility document with unknown fields. It
- * links only `scene/projectfile.cpp` — no Qt, no Vulkan — so it runs anywhere
- * the app builds, and is registered with CTest (`ctest -R project-file-check`).
+ * links only the codec — `scene/projectfile.cpp` with the material's own
+ * (`materialjson.cpp`, `materialparams.cpp`) — no Qt, no Vulkan — so it runs
+ * anywhere the app builds, and is registered with CTest
+ * (`ctest -R project-file-check`).
  *
  * Exit code = number of failed checks (0 = green).
  */
@@ -230,7 +232,8 @@ void checkRoundTrip() {
               b.materials[0].params.overlays[1].scale == 1.0f,
           "f1 overlays (a tattoo's name, opacity map, metal, place, turn, size and color controls, a disabled relief-only scar, an empty one, in order)");
 
-    check(b.materials.size() == 1 && b.materials[0].hasSmoothing && b.materials[0].params.smoothByAngle && b.materials[0].params.smoothAngle == 42.5f,
+    check(b.materials.size() == 1 && b.materials[0].names("smoothByAngle") && b.materials[0].names("smoothAngle") &&
+              b.materials[0].params.smoothByAngle && b.materials[0].params.smoothAngle == 42.5f,
           "f1 smoothing (by angle, 42.5 degrees — and the file SAYS so)");
     check(b.materials.size() == 1 && b.materials[0].params.flipNormal && !pose::MaterialParams().flipNormal,
           "f1 Flip Normal rides the round trip (and is off where a file does not say)");
@@ -307,7 +310,7 @@ void checkForwardCompatibility() {
           "known values survive");
     // (A zone that says nothing of its smoothing — a project from before there was one — is
     // marked so: the loader then leaves the zone what the import gives it.)
-    check(d.figures.size() == 1 && d.figures[0].materials.size() == 1 && !d.figures[0].materials[0].hasSmoothing &&
+    check(d.figures.size() == 1 && d.figures[0].materials.size() == 1 && !d.figures[0].materials[0].names("smoothByAngle") &&
               !d.figures[0].materials[0].params.smoothByAngle,
           "a zone without a smoothing is read as not saying");
     check(d.figures[0].materials.size() == 1 && d.figures[0].materials[0].zone == "Torso" &&
@@ -361,6 +364,131 @@ void checkForwardCompatibility() {
     check(!pose::readProjectFile(path("badlights.json"), d, error), "lights that are no list reject the file");
 }
 
+/// A NAME THAT IS NOT UTF-8 (a zone or a bone named by a model file in another encoding: an
+/// OBJ's `newmtl M\xE9tal` in Latin-1) must not cost the project: the writer used to open —
+/// and so empty — the file and then throw out of the serializer.
+void checkForeignNames() {
+    ProjectDocument doc;
+    ProjectFigure   fig;
+    fig.source = path("model.obj");
+    fig.pose.emplace_back("Os\xE9", glm::vec3(1.0f, 2.0f, 3.0f)); // (Latin-1: not valid UTF-8)
+    pose::ProjectMaterial metal;
+    metal.zone = "M\xE9tal";
+    metal.params.roughness = 0.25f;
+    fig.materials.push_back(metal);
+    doc.figures.push_back(fig);
+    bool wrote = false;
+    try {
+        wrote = pose::writeProjectFile(path("foreign.pss"), doc);
+    } catch (...) {
+        wrote = false;
+    }
+    ProjectDocument back;
+    std::string     error;
+    check(wrote && pose::readProjectFile(path("foreign.pss"), back, error) && back.figures.size() == 1 &&
+              back.figures[0].materials.size() == 1 && back.figures[0].materials[0].params.roughness == 0.25f &&
+              back.figures[0].materials[0].zone == "M\xEF\xBF\xBDtal" && back.figures[0].pose.size() == 1,
+          "a name that is not valid UTF-8 is written with the replacement character, and the file reads");
+}
+
+/// A PROJECT FROM AN OLDER BUILD names fewer values than this build knows. The reader records
+/// which keys a zone's object names; the loader puts only those over the re-imported zone's own
+/// material (materialWithNamedValues), so a value the file predates stays the import's instead
+/// of becoming the struct's default.
+void checkNamedValues() {
+    // The file of the round trip names every value of the zone.
+    ProjectDocument full;
+    std::string     error;
+    const bool      read = pose::readProjectFile(path("roundtrip.pss"), full, error) && !full.figures.empty() && full.figures[0].materials.size() == 1;
+    check(read, "the round-trip file reads again");
+    if (!read) {
+        return;
+    }
+    const pose::ProjectMaterial& all = full.figures[0].materials[0];
+    // (An imported zone as an importer might leave it: values off the struct's defaults, an eye's
+    // clear shell — its transmission roughness 0, where the default is "the surface's", -1.)
+    pose::MaterialParams imported;
+    imported.transmissionRoughness = 0.0f;
+    imported.roughness = 0.26f;
+    imported.ior = 1.38f;
+    imported.smoothByAngle = true;
+    imported.smoothAngle = 30.0f;
+    imported.uvTiling = glm::vec2(3.0f, 3.0f);
+    imported.coatColor = glm::vec3(0.5f, 0.6f, 0.7f);
+    imported.thinWalled = true;
+    imported.maps[0].source = pose::kImportedTexture;
+    const pose::MaterialParams whole = pose::materialWithNamedValues(imported, all.params, all.named);
+    check(all.names("transmissionRoughness") && all.names("zone") && whole.sameValues(all.params) && whole.maps == imported.maps,
+          "a zone that names every value replaces the zone's own, value for value (the maps stay the zone's)");
+
+    // The same zone as a build before the transmission roughness, the smoothing and the UV
+    // placement wrote it.
+    writeText(path("older.json"),
+              R"({"format":"posestudio.project","version":1,"figures":[{"source":"/x.duf",
+                  "materials":[{"zone":"Cornea","roughness":0.4,"opacity":0.5,"baseColor":[0.1,0.2,0.3],"thinWalled":false}]}]})");
+    ProjectDocument older;
+    const bool      readOlder = pose::readProjectFile(path("older.json"), older, error) && older.figures.size() == 1 &&
+                                older.figures[0].materials.size() == 1;
+    check(readOlder && older.figures[0].materials[0].named.size() == 5 && older.figures[0].materials[0].names("roughness") &&
+              !older.figures[0].materials[0].names("transmissionRoughness"),
+          "the reader records the keys a zone's object names, and no others");
+    if (!readOlder) {
+        return;
+    }
+    const pose::ProjectMaterial& part = older.figures[0].materials[0];
+    const pose::MaterialParams   merged = pose::materialWithNamedValues(imported, part.params, part.named);
+    check(merged.roughness == 0.4f && merged.opacity == 0.5f && merged.baseColor == glm::vec3(0.1f, 0.2f, 0.3f) && !merged.thinWalled,
+          "the values the file names are the file's");
+    check(merged.transmissionRoughness == 0.0f && merged.ior == 1.38f && merged.smoothByAngle && merged.smoothAngle == 30.0f &&
+              merged.uvTiling == glm::vec2(3.0f, 3.0f) && merged.coatColor == glm::vec3(0.5f, 0.6f, 0.7f) &&
+              part.params.transmissionRoughness == -1.0f, // (… which is what the file's own values hold for it: the default)
+          "the values it does not name stay the zone's own, not the struct's defaults (an eye shell's transmission roughness)");
+}
+
+/// A file edited by hand: a number no float holds rejects it whole (1e39 is a finite double
+/// and an infinite float); a number outside the range its value can take is held to the range,
+/// and one inside — a zero, a default, an importer's value past the tab's own row — is kept.
+void checkValueRanges() {
+    ProjectDocument d;
+    std::string     error;
+    const auto      rejected = [&](const char* name, const char* body) {
+        writeText(path(name), std::string(R"({"format":"posestudio.project","version":1,)") + body + "}");
+        return !pose::readProjectFile(path(name), d, error);
+    };
+    check(rejected("huge1.json", R"("figures":[{"source":"/x.duf","materials":[{"zone":"Torso","roughness":1e39}]}])") &&
+              rejected("huge2.json", R"("figures":[{"source":"/x.duf","materials":[{"zone":"Torso","uvTiling":[1,1e39]}]}])") &&
+              rejected("huge3.json", R"("figures":[{"source":"/x.duf","materials":[{"zone":"Torso","overlays":[{"opacity":-1e39}]}]}])"),
+          "a material or overlay value past a float's range rejects the file");
+    check(rejected("huge4.json", R"("environment":{"settings":{"exposure":1e39}})") &&
+              rejected("huge5.json", R"("environment":{"settings":{"backdropMode":1e30}})") &&
+              rejected("huge6.json", R"("camera":{"distance":1e39})") && rejected("huge7.json", R"("lights":[{"intensity":1e39}])"),
+          "a lighting dial, a camera value or a light value past its type's range rejects the file");
+
+    writeText(path("ranges.json"),
+              R"({"format":"posestudio.project","version":1,"figures":[{"source":"/x.duf","materials":[{"zone":"Torso",
+                  "ior":-1,"displacementStrength":1e30,"opacity":3,"metalness":-0.5,"thinFilmIor":40,"smoothAngle":720,
+                  "detailTiles":0,"detailTilesV":0,"normalStrength":8,"bumpStrength":-2,"transmissionRoughness":-1,
+                  "uvTiling":[-1,2],"emission":50,"specular":2.5,"baseColor":[-1,0.5,2],
+                  "overlays":[{"offsetX":1e30,"offsetY":-0.25,"rotation":-1e30,"scale":0,"gamma":100,"bumpStrength":-9,"tint":[2,0.5,-1]}]}]}]})");
+    d = ProjectDocument();
+    const bool read = pose::readProjectFile(path("ranges.json"), d, error) && d.figures.size() == 1 && d.figures[0].materials.size() == 1 &&
+                      d.figures[0].materials[0].params.overlays.size() == 1;
+    check(read, "a file with values outside their ranges reads");
+    if (read) {
+        const pose::MaterialParams& p = d.figures[0].materials[0].params;
+        check(p.ior == 1.0f && p.displacementStrength == 100.0f && p.opacity == 1.0f && p.metalness == 0.0f && p.thinFilmIor == 3.0f &&
+                  p.smoothAngle == 180.0f && vec3Equal(p.baseColor, glm::vec3(0.0f, 0.5f, 2.0f)),
+              "... each held to the range its value can take");
+        check(p.detailTiles == 0.0f && p.detailTilesV == 0.0f && p.normalStrength == 8.0f && p.bumpStrength == -2.0f &&
+                  p.transmissionRoughness == -1.0f && p.uvTiling == glm::vec2(-1.0f, 2.0f) && p.emission == 50.0f && p.specular == 2.5f,
+              "... and what the tab's rows do not reach but a default or an importer holds is kept as it is");
+        const pose::MaterialOverlay& o = p.overlays[0];
+        check(o.offset == glm::vec2(1.0f, -0.25f) && o.rotation == -180.0f && o.scale == pose::kOverlayScaleMin && o.gamma == 5.0f &&
+                  o.bumpStrength == -4.0f && vec3Equal(o.tint, glm::vec3(1.0f, 0.5f, 0.0f)),
+              "... an overlay's controls to their fields' ranges");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -368,6 +496,9 @@ int main() {
     checkRoundTrip();
     checkRejections();
     checkForwardCompatibility();
+    checkForeignNames();
+    checkNamedValues();
+    checkValueRanges();
     std::printf("\n%d failure(s)\n", failures);
     return failures;
 }

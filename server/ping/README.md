@@ -54,7 +54,7 @@ A plain browser visit to `/ping` adds a `method` row to `ping_rejects` and nothi
 the "people hitting the endpoint directly" case: filed, never counted.
 
 To ping from a development build of the app instead, configure it with the same key and build.
-The key is the only switch: any build that has one pings, Debug or Release, and any build without
+The key is the build's only switch: any build that has one pings, Debug or Release, and any build without
 one never does. The setting lives in the CMake cache, so IDE builds pick it up too.
 
 ```powershell
@@ -64,6 +64,10 @@ build\Release\PoseStudio.exe      # a few seconds after the window shows, a row 
 ```
 
 The app logs what it did (`[ping] delivered, HTTP 204`, or the reason it skipped) on stderr.
+Besides a missing key, three things keep a launch from pinging: `POSESTUDIO_NO_PING` in the
+environment, the switch in Preferences → General, and a run that a script or a probe drives
+(`POSESTUDIO_IK_SCRIPT`, `POSESTUDIO_IK_BENCH`, `POSESTUDIO_MANUAL_SHOT`,
+`POSESTUDIO_DUMP_SKELETON` — `src/core/runmode.h`), which is nobody's launch.
 Reset with `cmake -B build -DPOSESTUDIO_PING_KEY=` when you no longer want local launches counted.
 
 **If you build through VS Code's CMake Tools**, put the key in the workspace's git-ignored

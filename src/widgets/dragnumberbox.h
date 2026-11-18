@@ -19,7 +19,9 @@
  *    down or up in the middle of a scrub; the scrub carries on from where it is at the
  *    other pace. A value off the regular grid (set fine, typed, or simply what the scene
  *    has) is shown to the fine step's digits — 17.3 — and a value on it as ever — 17.
- *  - A plain click (press + release with no drag) opens inline type-in editing.
+ *  - A plain click (press + release with no drag) opens inline type-in editing: Enter, or
+ *    the focus going anywhere else, applies what was typed (nothing, if nothing was); Esc
+ *    drops it.
  *
  * Use this for any bounded scalar parameter row (properties panels, future material
  * dials) instead of hand-rolling QSlider/QDoubleSpinBox combos. The API mirrors the
@@ -124,8 +126,9 @@ protected:
 
 private:
     void beginEdit();  // click (no drag): swap in the inline line editor
-    void commitEdit(); // Enter / focus-out: parse, apply, restore the painted look
-    void cancelEdit(); // Esc: discard the typed text
+    void commitEdit(); // Enter / focus-out / hidden: parse, apply if typed in, restore the painted look
+    void cancelEdit(); // Esc, or disabled under the open editor: discard the typed text
+    void closeEditor(); // hide the editor; the focus back to the box only if the editor had it
     void abandonScrub(); // the release is lost: end the press/scrub as if it had arrived
     QString formattedValue() const;
     double fineStep() const;   // the Shift scrub's step in effect (0 = none; see setFineStep)
@@ -152,6 +155,7 @@ private:
     bool       m_hovered = false;
     bool       m_editing = false;
     QLineEdit* m_editor = nullptr; // created lazily on first edit
+    QString    m_editText;         // what the editor opened with: unchanged at the end = nothing typed
 
     // Painted-look properties (QSS-overridable); defaults match the app palette
     // (see _environment.qss's palette comment). The inline editor's stylesheet is built from

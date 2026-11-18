@@ -4,7 +4,7 @@
  *        (POSESTUDIO_IK_BENCH=<bone>[:depth]) — IkDiagnostics' measurements plus the driving
  *        logic on VulkanWindow.
  *
- * One of the seven translation units of VulkanWindow — see vulkanwindow.h and ikdiagnostics.h.
+ * One of the translation units of VulkanWindow — see vulkanwindow.h and ikdiagnostics.h.
  * The benchmark drives the REAL drag loop (the 60 Hz timer, solve, render, present) with a
  * scripted cursor and no desktop input, and its per-phase report is the in-app parity reference
  * for tools/ikharness (`[real] bench path`): the path, the phase boundaries, and the report
@@ -174,7 +174,6 @@ void VulkanWindow::startBench() {
                          ray.origin.z, ray.direction.x, ray.direction.y, ray.direction.z);
         }
     }
-    m_preEditPose = scene().capturePose();
     d.benchStart = m_ik.planePoint;
     d.benchDepth = d.benchSpec.section(QLatin1Char(':'), 1, 1) == QLatin1String("depth");
     d.benchDepthOffset = glm::vec3(0.0f);

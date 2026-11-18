@@ -12,10 +12,14 @@
  * A frame (recordCommandBuffer) is a fixed sequence of passes: the key-light SHADOW map -> the
  * selection OUTLINE mask (only with a selection) -> the offscreen HDR SCENE pass at the context's
  * MSAA count (backdrop, meshes, grid, overlays, resolved to a sampleable RGBA16F image plus a
- * separate specular image) -> the screen-space SSS blur and BLOOM (PBR mode only) -> the
- * single-sample swapchain pass, whose sole draw is the fullscreen COMPOSITE (tonemap + bloom +
- * outline). Sync is per frame-in-flight (kMaxFramesInFlight) for the acquire semaphore and
- * fence, per swapchain image for the render-finished semaphore.
+ * separate specular image) -> the PHOTO pass (Gaussian splats, single-sample, over the resolved
+ * scene depth) -> the screen-space SSS blur and BLOOM (PBR mode only) -> the single-sample
+ * swapchain pass, whose sole draw is the fullscreen COMPOSITE (tonemap + bloom + the photo layer
+ * + outline). Two variants replace the middle of that: the RENDERED mode draws the render
+ * engine's path-traced picture as the scene pass's content (recordTracedPasses), and in VR Mode
+ * the scene passes run once per eye into eye-sized targets (drawVrFrame) while the desktop frame
+ * only composites a MIRROR of the left eye. Sync is per frame-in-flight (kMaxFramesInFlight) for
+ * the acquire semaphore and fence, per swapchain image for the render-finished semaphore.
  *
  * Like the rest of rendering/, this is intentionally Qt-free — it takes a plain
  * std::string shader directory — so the only Qt coupling in the whole viewport lives in
@@ -26,13 +30,13 @@
 #define VULKANRENDERER_H
 
 #include "camera.h"
+#include "gpuframetimer.h"
 #include "selectionstyle.h"
 #include "vreyeview.h"
 #include "vulkancommon.h"
 #include "vulkanhandles.h"
 
 #include <glm/glm.hpp>
-#include <array>
 #include <memory>
 #include <string>
 #include <utility>
@@ -120,7 +124,8 @@ public:
     /// Uploads an already-parsed model (geometry + decoded textures) to the scene. Call from the
     /// GUI thread (the upload blocks briefly). Throws on Vulkan failure. Parsing + image decoding
     /// happen in the Qt layer (VulkanWindow), keeping this core free of file/codec concerns.
-    void addModel(const ModelData& data);
+    /// False — nothing added — for data with nothing to draw (Scene::addModel).
+    bool addModel(const ModelData& data);
     /// Uploads a Gaussian splat scene (splatcloud.h) as a static model at @p transform.
     void addSplatModel(const SplatData& data, const glm::mat4& transform);
 
@@ -147,8 +152,7 @@ public:
     /// color and opacity go to the composite of the desktop chain and of VR Mode's, the joint
     /// highlight's to the Scene's camera block. Takes effect at the next frame; at an outline
     /// opacity of 0 the outline's mask pass is skipped altogether.
-    void                  setSelectionStyle(const SelectionStyle& style);
-    const SelectionStyle& selectionStyle() const { return m_selectionStyle; }
+    void setSelectionStyle(const SelectionStyle& style);
 
     /// Exposed so the window's input handlers can drive the view (orbit/pan/dolly).
     Camera& camera() { return m_camera; }
@@ -164,10 +168,12 @@ public:
     void applyBakedEnvironment(const BakedEnvironment& baked);
 
     // --- THE RENDERED MODE (rendering/tracedview.h) ---------------------------------------------
-    /// The path-traced picture of the scene from now on: @p width × @p height linear RGBA floats,
-    /// row 0 = top, the exposure applied (a render engine's image, as its interface hands it
-    /// over). Copied; drawn from the next frame while setTracedShown(true).
-    void setTracedImage(const float* rgba, uint32_t width, uint32_t height);
+    /// The path-traced picture of the scene from now on, written in place (TracedView::beginImage
+    /// / commitImage): the buffer for @p width × @p height linear RGBA floats — row 0 = top, the
+    /// exposure applied, a render engine's image as its interface hands it over — and, once the
+    /// caller has filled it, the commit. Drawn from the next frame while setTracedShown(true).
+    float* beginTracedImage(uint32_t width, uint32_t height);
+    void   commitTracedImage();
     /// Whether the frame shows the path-traced picture in place of the rasterized scene (it
     /// does only once there is one: until then, and whenever this is off, the scene is drawn as
     /// its shade mode says). The line overlays and the selection outline are drawn either way.
@@ -207,16 +213,10 @@ public:
                      const VkFramebuffer eyeDepthFramebuffers[2] = nullptr);
 
     // --- GPU timing (POSESTUDIO_GPU_PERF / POSESTUDIO_VR_PERF) ----------------------------------
-    /// The GPU time of the last COMPLETED frame of a kind — the whole command buffer, and the
-    /// Gaussian splat draw(s) within it (both eyes' in a VR frame) — in milliseconds, read off
-    /// timestamp queries where that frame's fence is waited for. valid once such a frame has
-    /// completed. Measured whenever the queue has timestamps (a few stamps a frame): the VR
-    /// splat scale reads it; the two environment variables only PRINT it.
-    struct GpuTimings {
-        double frameMs = 0.0;
-        double splatMs = 0.0;
-        bool   valid = false;
-    };
+    /// The GPU time of the last COMPLETED frame of a kind (gpuframetimer.h), read off timestamp
+    /// queries where that frame's fence is waited for. Measured whenever the queue has
+    /// timestamps: the VR splat scale reads it; the two environment variables only PRINT it.
+    using GpuTimings = pose::GpuTimings;
     const GpuTimings& lastGpuTimings() const { return m_gpuTimings; }     ///< the desktop frame's
     const GpuTimings& lastVrGpuTimings() const { return m_vrGpuTimings; } ///< the VR frame's
 
@@ -227,18 +227,23 @@ private:
     void recreateSwapchain();
     /// Records the whole frame graph for one frame — see the file banner and the definition.
     void recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex, VkBuffer captureInto);
-    /// The view-dependent half of the frame graph (steps 2-4 of recordCommandBuffer: the outline
-    /// mask, the HDR scene pass, SSS + bloom) for @p camera into the given targets, writing frame
-    /// slot @p frameSlot's UBOs. Shared by the desktop frame and each VR eye. Returns whether the
-    /// outline mask was drawn (the composite paints no outline otherwise).
+    /// The view-dependent half of the frame graph (steps 2-5 of recordCommandBuffer: the outline
+    /// mask, the HDR scene pass, the photo pass, SSS + bloom) for @p camera into the given
+    /// targets, writing frame slot @p frameSlot's UBOs. Shared by the desktop frame and each VR
+    /// eye. Returns whether the outline mask was drawn (the composite paints no outline otherwise).
     bool recordScenePasses(VkCommandBuffer cmd, const Camera& camera, uint32_t frameSlot, HdrTarget& hdr,
                            OutlineMask& outline, PostProcess& post, VkExtent2D extent,
                            bool postEffects = true, bool asyncSplatSort = false);
     /// THE RENDERED MODE's half of the frame graph, in place of recordScenePasses: the outline
     /// mask, then the HDR scene pass holding the path-traced picture and the line overlays over
-    /// it (no shadow map, no meshes, no grid, no subsurface blur, no bloom — the picture has its
-    /// own light). Returns whether the outline mask was drawn.
+    /// it, then the photo pass (no shadow map, no meshes, no grid, no subsurface blur, no bloom —
+    /// the picture has its own light). Returns whether the outline mask was drawn.
     bool recordTracedPasses(VkCommandBuffer cmd, const Camera& camera, uint32_t frameSlot, VkExtent2D extent);
+    /// THE PHOTO PASS (hdrtarget.h) of one scene pass: the Gaussian splats through @p camera into
+    /// @p hdr's photo layer, bracketed by the GPU timer's splat stamps — or, with no splat scene,
+    /// the pass run empty, which clears the layer (the composite samples it either way).
+    void recordPhotoLayer(VkCommandBuffer cmd, const Camera& camera, uint32_t frameSlot, HdrTarget& hdr,
+                          bool asyncSplatSort);
 
     VulkanContext& m_context;
 
@@ -260,23 +265,10 @@ private:
     float                            m_uiScale = 1.0f; // see setUiScale
     SelectionStyle                   m_selectionStyle;  // see setSelectionStyle
 
-    // GPU timestamps (lastGpuTimings): kTimingQueries queries per SLOT — the frame's first stamp,
-    // the splat draw's begin/end for each of up to two scene passes (the desktop's one; an eye
-    // each in VR), the frame's last stamp — a slot per desktop frame in flight and one for the
-    // VR frame; written only while timing is on, read back after the slot's fence.
-    static constexpr uint32_t kTimingQueries = 6;
+    // GPU timestamps (lastGpuTimings): a timer slot per desktop frame in flight and one for the
+    // VR frame, each read back after its own fence.
     static constexpr uint32_t kVrTimingSlot = static_cast<uint32_t>(kMaxFramesInFlight);
-    void createTimingPool();
-    void timingBegin(VkCommandBuffer cmd, uint32_t slot); // resets the slot (outside any render pass) + stamp 0
-    void timingMark(VkCommandBuffer cmd, uint32_t query); // one of the slot's inner stamps
-    void timingEnd(VkCommandBuffer cmd);                  // the slot's last stamp
-    void timingRead(uint32_t slot, GpuTimings& into);     // after the slot's fence
-    bool            m_gpuTimingOn = false;
-    float           m_timestampPeriodNs = 0.0f;
-    UniqueQueryPool m_timingPool;
-    std::array<bool, kMaxFramesInFlight + 1> m_timingWritten{};
-    uint32_t        m_timingSlot = 0; // the slot the frame being recorded stamps
-    uint32_t        m_timingPass = 0; // its scene passes so far (recordScenePasses)
+    GpuFrameTimer   m_timer;
     GpuTimings      m_gpuTimings;
     GpuTimings      m_vrGpuTimings;
 

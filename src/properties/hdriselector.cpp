@@ -7,6 +7,7 @@
 
 #include "constants.h"
 #include "librarypaths.h"
+#include "propertyrows.h"
 
 #include <QColor>
 #include <QDesktopServices>
@@ -102,15 +103,9 @@ public:
 } // namespace
 
 HdriSelector::HdriSelector(QWidget* parent) : QPushButton(parent) {
-    setObjectName(QStringLiteral("EnvironmentHdriButton"));
-    setCursor(Qt::PointingHandCursor);
-    // Qt's style engine ignores padding-left for a left-aligned QPushButton label (the text is laid
-    // out from the border box regardless of the QSS padding), so a transparent spacer icon provides
-    // the left inset for the environment name instead — icon + icon/text spacing ≈ a 16px indent.
-    QPixmap spacer(10, 10);
-    spacer.fill(Qt::transparent);
-    setIcon(QIcon(spacer));
-    setIconSize(QSize(10, 10));
+    // The side panel's picker field: the object name the style sheet styles, and the spacer icon
+    // that insets the environment's name (propertyrows.h says why an icon and not QSS padding).
+    propertyrows::stylePickerField(this);
     m_menu = new QMenu(this); // inherits the app-wide QMenu styling like every other menu
     setMenu(m_menu);
     // Rebuild on every open so .hdr files added/removed while the app runs show up immediately.
@@ -277,7 +272,13 @@ void HdriSelector::rebuildMenu() {
             if (path.isEmpty()) {
                 return; // a category heading (disabled anyway — belt and braces)
             }
-            choose(path, item->text());
+            // The entry that is already the environment only closes the menu (restoreDefault's
+            // rule): choosing it again would bake the same panorama again, re-aim the key light
+            // over an azimuth and elevation the user may have dialled by hand since, and mark
+            // the project changed — for a click that changed nothing.
+            if (path.compare(m_currentPath, Qt::CaseInsensitive) != 0) {
+                choose(path, item->text());
+            }
             m_menu->close();
         });
         column->addWidget(list);

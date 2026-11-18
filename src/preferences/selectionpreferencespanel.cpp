@@ -5,12 +5,12 @@
 
 #include "selectionpreferencespanel.h"
 
+#include "constants.h"
 #include "dragnumberbox.h"
 #include "propertyrows.h"
 #include "selectionsettings.h"
 
 #include <QCheckBox>
-#include <QColorDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -36,10 +36,11 @@ void paintSwatch(QPushButton* swatch, const QColor& c, int height) {
         QStringLiteral("QPushButton#SelectionColorButton { background-color: %1; color: %2; border: 1px solid #4a4b4d; "
                        "border-radius: 4px; padding: 0px 8px; font-size: 12px; "
                        "min-width: %3px; max-width: %3px; min-height: %4px; max-height: %4px; }"
-                       "QPushButton#SelectionColorButton:hover { border-color: #5b87cc; }")
+                       "QPushButton#SelectionColorButton:hover { border-color: %5; }")
             .arg(c.name(QColor::HexRgb), dark ? QStringLiteral("#e0e0e0") : QStringLiteral("#1b1c1e"))
             .arg(kFieldWidth - 18)
-            .arg(height - 2));
+            .arg(height - 2)
+            .arg(QLatin1String(Constants::COLOR_ACCENT)));
 }
 
 /// A row's field: the control at its fixed width, its restore button snug on the right, the rest
@@ -190,31 +191,26 @@ void SelectionPreferencesPanel::announce(Mark mark) {
 }
 
 void SelectionPreferencesPanel::pickColor(Mark mark) {
-    if (m_colorDialog) {
-        m_colorDialog->raise();
-        m_colorDialog->activateWindow();
+    if (m_colorPick.isOpen()) {
+        m_colorPick.raise();
         return;
     }
     m_picking = mark;
     m_colorAtOpen = m_marks[mark].color;
-    // The app's own themed dialog (the native one ignores the dark theme). Every color it passes
-    // through is shown in the viewport as it is picked; only an accepted one is stored.
-    m_colorDialog = new QColorDialog(m_colorAtOpen, this);
-    m_colorDialog->setOption(QColorDialog::DontUseNativeDialog, true);
-    m_colorDialog->setWindowTitle(mark == Outline ? tr("Object Outline Color") : tr("Joint Highlight Color"));
-    m_colorDialog->setAttribute(Qt::WA_DeleteOnClose);
-    connect(m_colorDialog, &QColorDialog::currentColorChanged, this,
-            [this](const QColor& c) { setColor(m_picking, c, false); });
-    connect(m_colorDialog, &QColorDialog::finished, this, [this](int result) {
-        if (result == QDialog::Accepted) {
-            const QColor chosen = m_colorDialog ? m_colorDialog->selectedColor() : QColor();
-            setColor(m_picking, chosen.isValid() ? chosen : m_marks[m_picking].color, true);
-        } else {
-            setColor(m_picking, m_colorAtOpen, false); // Cancel: the color as it was (what is stored never changed)
-        }
-        m_colorDialog = nullptr;
-    });
-    m_colorDialog->open();
+    // The properties tabs' own pick (colorswatch.h: the app's themed dialog, one at a time).
+    // Every color it passes through is shown in the viewport as it is picked; only an accepted
+    // one is stored.
+    m_colorPick.open(
+        this, mark == Outline ? tr("Object Outline Color") : tr("Joint Highlight Color"), m_colorAtOpen,
+        [this](const QColor& c) { setColor(m_picking, c, false); },
+        [this](pose::colorswatch::ColorPick::Outcome outcome) {
+            if (outcome == pose::colorswatch::ColorPick::Outcome::Accepted) {
+                // (The color last passed through is the one accepted: it is on the swatch already.)
+                setColor(m_picking, m_marks[m_picking].color, true);
+            } else {
+                setColor(m_picking, m_colorAtOpen, false); // Cancel: the color as it was (what is stored never changed)
+            }
+        });
 }
 
 void SelectionPreferencesPanel::setOutlineRgb(int rgb) {

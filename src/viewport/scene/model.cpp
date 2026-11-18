@@ -1,7 +1,8 @@
 /**
  * @file model.cpp
- * @brief Model construction (upload, correctives, armature, descriptors), the record paths, and
- *        the picking/grounding queries. See model.h.
+ * @brief Model construction (upload, correctives, armature, descriptors), the record paths, the
+ *        bounds and picking/grounding queries, and the zones' materials, texture slots and
+ *        smoothing (the Materials tab's Model side). See model.h.
  */
 
 #include "model.h"
@@ -28,9 +29,138 @@
 
 namespace pose {
 
+namespace {
+
+/// The joint that weighs most on vertex @p v — whose skin it is, for the body mesh sample and
+/// the soft-body fields — or -1 for an unweighted vertex or a joint index past @p boneCount.
+int dominantJointOf(const Vertex& v, std::size_t boneCount) {
+    int best = 0;
+    for (int j = 1; j < 4; ++j) {
+        if (v.weights[j] > v.weights[best]) {
+            best = j;
+        }
+    }
+    return (v.weights[best] > 0.0f && v.joints[best] < boneCount) ? static_cast<int>(v.joints[best]) : -1;
+}
+
+/// The importer's bones as the armature takes them. Bind transforms are translation-only, so
+/// each bone's local rest offset is the difference of the global rest positions.
+std::vector<ArmatureBone> armatureBonesOf(const ModelData& data) {
+    std::vector<ArmatureBone> armatureBones(data.bones.size());
+    for (std::size_t i = 0; i < data.bones.size(); ++i) {
+        const ModelBone& src = data.bones[i];
+        ArmatureBone& dst = armatureBones[i];
+        dst.name = src.name;
+        dst.parent = src.parent;
+        const glm::vec3 parentGlobal =
+            (src.parent >= 0 && src.parent < static_cast<int>(data.bones.size()))
+                ? glm::vec3(data.bones[static_cast<std::size_t>(src.parent)].bindGlobal[3])
+                : glm::vec3(0.0f);
+        dst.localBindTranslation = glm::vec3(src.bindGlobal[3]) - parentGlobal;
+        dst.orientation = src.orientation;
+        dst.rotationOrder = src.rotationOrder;
+        dst.rotationMin = src.rotationMin;
+        dst.rotationMax = src.rotationMax;
+        dst.rotationLimited = src.rotationLimited;
+        dst.drivenBy = src.drivenBy;
+        dst.driveFactor = src.driveFactor;
+        dst.roleHint = src.roleHint;
+    }
+    return armatureBones;
+}
+
+/// The BODY MESH SAMPLE for the self-collision volumes (bodymesh.h): every skinned vertex's
+/// bind position with the bone that weighs most on it.
+std::vector<BodyMeshPoint> bodyMeshOf(const ModelData& data) {
+    std::vector<BodyMeshPoint> bodyMesh;
+    for (const MeshData& meshData : data.meshes) {
+        if (meshData.indices.empty()) {
+            continue;
+        }
+        for (const Vertex& v : meshData.vertices) {
+            const int bone = dominantJointOf(v, data.bones.size());
+            if (bone >= 0) {
+                bodyMesh.push_back({v.pos, bone});
+            }
+        }
+    }
+    return bodyMesh;
+}
+
+/// THE SOFT-BODY DELTA FIELDS: per cheek two correctives (armaturebuttocks.cpp) — a delta of
+/// the field's weight along the lateral axis and one along the trunk — and per BONELESS BREAST
+/// three (armaturebreastfield.cpp: sideways, along the chest, out along the tether; none on a
+/// figure whose breasts ride pectoral bones), on every render vertex the field reaches, blended
+/// by the GPU at the mass's displacement. The indices are the armature's (softBodyWeight).
+/// Per non-empty mesh of @p data (@p meshCount of them, in the Model's order); empty when no
+/// field reaches a vertex. @p armature has its rig and its body mesh sample by now.
+std::vector<SoftBodyField> softBodyFieldsOf(const ModelData& data, const Armature& armature, uint32_t meshCount) {
+    std::vector<SoftBodyField> softFields;
+    constexpr std::size_t kButtockFields = Armature::kSoftBodyButtockFields;
+    constexpr std::size_t kBreastBase = Armature::kSoftBodyBreastBase;
+    softFields.resize(kButtockFields + Armature::kSoftBodyBreastFields);
+    for (std::size_t f = 0; f < softFields.size(); ++f) {
+        if (f < kButtockFields) {
+            softFields[f].id = std::string("softbody:buttock_") + (f < 2 ? "l_" : "r_") + (f % 2 == 0 ? "x" : "y");
+        } else {
+            const std::size_t b = f - kBreastBase;
+            softFields[f].id = std::string("softbody:breast_") + (b < 3 ? "l_" : "r_") + "xyz"[b % 3];
+        }
+        softFields[f].softIndex = static_cast<int>(f);
+        softFields[f].perMesh.resize(meshCount);
+    }
+    uint32_t k = 0;
+    bool     any = false;
+    for (const MeshData& meshData : data.meshes) {
+        if (meshData.indices.empty()) {
+            continue;
+        }
+        for (uint32_t lv = 0; lv < meshData.vertices.size(); ++lv) {
+            const Vertex& v = meshData.vertices[lv];
+            const int     bone = dominantJointOf(v, data.bones.size());
+            int           side = -1;
+            const float   w = armature.softBodyFieldWeight(v.pos, bone, side);
+            if (w > 1e-3f && side >= 0) {
+                softFields[static_cast<std::size_t>(side) * 2].perMesh[k].push_back({lv, glm::vec3(w, 0.0f, 0.0f)});
+                softFields[static_cast<std::size_t>(side) * 2 + 1].perMesh[k].push_back({lv, glm::vec3(0.0f, w, 0.0f)});
+                any = true;
+            }
+            float breast[2] = {0.0f, 0.0f};
+            armature.breastFieldWeights(v.pos, bone, breast);
+            for (std::size_t s = 0; s < 2; ++s) {
+                if (breast[s] > 1e-3f) {
+                    for (int axis = 0; axis < 3; ++axis) {
+                        glm::vec3 delta(0.0f);
+                        delta[axis] = breast[s];
+                        softFields[kBreastBase + s * 3 + static_cast<std::size_t>(axis)].perMesh[k].push_back({lv, delta});
+                    }
+                    any = true;
+                }
+            }
+        }
+        ++k;
+    }
+    if (!any) {
+        softFields.clear();
+    }
+    return softFields;
+}
+
+} // namespace
+
 Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayout materialSetLayout,
              VkDescriptorSetLayout poseSetLayout, const VulkanTexture& fallbackDiffuse,
              const VulkanTexture& fallbackNormal) {
+    // THE ORDER IS LOAD-BEARING. Each step needs the ones before it:
+    //   1. the bounds and the descriptor pool (sized by the non-empty meshes);
+    //   2. the armature, its body mesh sample, its rig and its soft-body setup — before the
+    //      meshes, because
+    //   3. the soft-body fields and the pose correctives are resolved into per-vertex ranges
+    //      that ride in the vertex data as it uploads;
+    //   4. the meshes (and the CPU surface beside them) and the corrective buffers, in ONE
+    //      upload batch, submitted once;
+    //   5. the mesh partition, then the per-frame pose + material buffers and their sets, which
+    //      bind the correctives' buffers and are sized by the meshes.
     uint32_t meshCount = 0;
     for (const MeshData& meshData : data.meshes) {
         if (!meshData.indices.empty()) {
@@ -38,7 +168,11 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
         }
     }
     if (meshCount == 0) {
-        return; // nothing to draw; no pool/sets needed
+        // Nothing to draw; no pool/sets needed. The armature is built all the same — static:
+        // the identity joint and the model transform — so that no Model exists with an unbuilt
+        // one (armature.h's one contract). Scene::addModel does not keep such a model.
+        m_armature.build({});
+        return;
     }
 
     // Compute a local-space AABB over every (non-empty) mesh's vertices for mouse picking.
@@ -83,56 +217,12 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
     // (empty for a static model: one identity joint) BEFORE the meshes upload: the soft-body delta
     // fields it lays over the skin (the buttocks, armaturebuttocks.cpp) ride in the vertex data
     // as the pose correctives' ranges do, and they need the rig's roles and the body mesh sample.
-    // Bind transforms are translation-only, so each bone's local rest offset is the difference of
-    // the global rest positions.
     for (const MeshData& mesh : data.meshes) {
         m_linearSkinning = m_linearSkinning || mesh.linearSkinning; // (an FBX importer sets it on every mesh)
     }
-    std::vector<ArmatureBone> armatureBones(data.bones.size());
-    for (std::size_t i = 0; i < data.bones.size(); ++i) {
-        const ModelBone& src = data.bones[i];
-        ArmatureBone& dst = armatureBones[i];
-        dst.name = src.name;
-        dst.parent = src.parent;
-        const glm::vec3 parentGlobal =
-            (src.parent >= 0 && src.parent < static_cast<int>(data.bones.size()))
-                ? glm::vec3(data.bones[static_cast<std::size_t>(src.parent)].bindGlobal[3])
-                : glm::vec3(0.0f);
-        dst.localBindTranslation = glm::vec3(src.bindGlobal[3]) - parentGlobal;
-        dst.orientation = src.orientation;
-        dst.rotationOrder = src.rotationOrder;
-        dst.rotationMin = src.rotationMin;
-        dst.rotationMax = src.rotationMax;
-        dst.rotationLimited = src.rotationLimited;
-        dst.drivenBy = src.drivenBy;
-        dst.driveFactor = src.driveFactor;
-        dst.roleHint = src.roleHint;
-    }
-    m_armature.build(armatureBones);
-    // The BODY MESH SAMPLE for the self-collision volumes (bodymesh.h): every skinned vertex's
-    // bind position with the bone that weighs most on it, handed to the armature.
-    auto dominantJoint = [&](const Vertex& v) -> int {
-        int best = 0;
-        for (int j = 1; j < 4; ++j) {
-            if (v.weights[j] > v.weights[best]) {
-                best = j;
-            }
-        }
-        return (v.weights[best] > 0.0f && v.joints[best] < data.bones.size()) ? static_cast<int>(v.joints[best]) : -1;
-    };
+    m_armature.build(armatureBonesOf(data));
     if (skinned) {
-        std::vector<BodyMeshPoint> bodyMesh;
-        for (const MeshData& meshData : data.meshes) {
-            if (meshData.indices.empty()) {
-                continue;
-            }
-            for (const Vertex& v : meshData.vertices) {
-                const int bone = dominantJoint(v);
-                if (bone >= 0) {
-                    bodyMesh.push_back({v.pos, bone});
-                }
-            }
-        }
+        std::vector<BodyMeshPoint> bodyMesh = bodyMeshOf(data);
         if (!bodyMesh.empty()) {
             m_armature.setBodyMesh(std::move(bodyMesh));
         }
@@ -147,61 +237,9 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
         m_armature.dump(dumpPath);
     }
 
-    // THE SOFT-BODY DELTA FIELDS: per cheek two correctives (armaturebuttocks.cpp) — a delta of
-    // the field's weight along the lateral axis and one along the trunk — and per BONELESS BREAST
-    // three (armaturebreastfield.cpp: sideways, along the chest, out along the tether; none on a
-    // figure whose breasts ride pectoral bones), on every render vertex the field reaches, blended
-    // by the GPU at the mass's displacement. The indices are the armature's (softBodyWeight).
-    std::vector<SoftBodyField> softFields;
-    if (skinned) {
-        constexpr std::size_t kButtockFields = Armature::kSoftBodyButtockFields;
-        constexpr std::size_t kBreastBase = Armature::kSoftBodyBreastBase;
-        softFields.resize(kButtockFields + Armature::kSoftBodyBreastFields);
-        for (std::size_t f = 0; f < softFields.size(); ++f) {
-            if (f < kButtockFields) {
-                softFields[f].id = std::string("softbody:buttock_") + (f < 2 ? "l_" : "r_") + (f % 2 == 0 ? "x" : "y");
-            } else {
-                const std::size_t b = f - kBreastBase;
-                softFields[f].id = std::string("softbody:breast_") + (b < 3 ? "l_" : "r_") + "xyz"[b % 3];
-            }
-            softFields[f].softIndex = static_cast<int>(f);
-            softFields[f].perMesh.resize(meshCount);
-        }
-        uint32_t k = 0;
-        bool     any = false;
-        for (const MeshData& meshData : data.meshes) {
-            if (meshData.indices.empty()) {
-                continue;
-            }
-            for (uint32_t lv = 0; lv < meshData.vertices.size(); ++lv) {
-                const Vertex& v = meshData.vertices[lv];
-                const int     bone = dominantJoint(v);
-                int           side = -1;
-                const float   w = m_armature.softBodyFieldWeight(v.pos, bone, side);
-                if (w > 1e-3f && side >= 0) {
-                    softFields[static_cast<std::size_t>(side) * 2].perMesh[k].push_back({lv, glm::vec3(w, 0.0f, 0.0f)});
-                    softFields[static_cast<std::size_t>(side) * 2 + 1].perMesh[k].push_back({lv, glm::vec3(0.0f, w, 0.0f)});
-                    any = true;
-                }
-                float breast[2] = {0.0f, 0.0f};
-                m_armature.breastFieldWeights(v.pos, bone, breast);
-                for (std::size_t s = 0; s < 2; ++s) {
-                    if (breast[s] > 1e-3f) {
-                        for (int axis = 0; axis < 3; ++axis) {
-                            glm::vec3 delta(0.0f);
-                            delta[axis] = breast[s];
-                            softFields[kBreastBase + s * 3 + static_cast<std::size_t>(axis)].perMesh[k].push_back({lv, delta});
-                        }
-                        any = true;
-                    }
-                }
-            }
-            ++k;
-        }
-        if (!any) {
-            softFields.clear();
-        }
-    }
+    // The soft-body delta fields the armature lays over the skin (softBodyFieldsOf).
+    const std::vector<SoftBodyField> softFields =
+        skinned ? softBodyFieldsOf(data, m_armature, meshCount) : std::vector<SoftBodyField>();
     // Pose correctives (and the soft-body fields) resolve BEFORE the meshes upload: each touched
     // vertex's packed range into the GPU delta table rides in its vertex data (see Mesh's
     // correctiveRanges parameter).
@@ -254,6 +292,11 @@ Model::Model(VulkanContext& context, const ModelData& data, VkDescriptorSetLayou
     repartitionMeshes();
     m_jointCount = m_armature.jointCount();
 
+    createPoseBuffers(context, poseSetLayout);
+}
+
+void Model::createPoseBuffers(VulkanContext& context, VkDescriptorSetLayout poseSetLayout) {
+    const VkDevice device = context.device();
     // Host-mapped storage buffers of skinning DUAL QUATERNIONS (2 vec4 per joint — see
     // Armature::skinDualQuats) — ONE PER FRAME IN FLIGHT (a single shared buffer raced the GPU
     // and tore skinned frames). Each frame slot gets its own buffer + set-2 descriptor;
@@ -490,6 +533,30 @@ glm::vec3 Model::posedCentroid(const Mesh& mesh) const {
 }
 
 bool Model::worldBounds(glm::vec3& outMin, glm::vec3& outMax) const {
+    return boundsThrough(m_armature.transform(), outMin, outMax);
+}
+
+bool Model::posedBounds(glm::vec3& outMin, glm::vec3& outMax) const {
+    // WHERE THE FIGURE IS: her bind box goes with her HIPS. A figure's place is her root's pose
+    // translation (the Ctrl figure move, the Ground button, a hip walk, the Transform tab's
+    // Figure group) and her heading its rotation — the model transform of a figure stays the
+    // identity — so a bind box taken through the model transform alone stays where she was
+    // IMPORTED: moved three metres, her "bounds" spanned both places, and a light added or
+    // aimed at her pointed between them, Frame Selected framed the gap. The root's skin
+    // transform (poseGlobal · inverseBind) is exactly the identity while the root is at bind,
+    // so an unmoved figure's box is worldBounds' to the bit.
+    glm::mat4 boxToWorld = m_armature.transform();
+    if (m_armature.hasSkeleton()) {
+        const int root = m_armature.figureRoot();
+        if (root >= 0 && static_cast<std::size_t>(root) < m_armature.boneCount()) {
+            const auto r = static_cast<std::size_t>(root);
+            boxToWorld = boxToWorld * (m_armature.poseGlobal(r) * m_armature.inverseBind(r));
+        }
+    }
+    return boundsThrough(boxToWorld, outMin, outMax);
+}
+
+bool Model::boundsThrough(const glm::mat4& boxToWorld, glm::vec3& outMin, glm::vec3& outMax) const {
     if (!m_hasBounds) {
         return false;
     }
@@ -501,7 +568,7 @@ bool Model::worldBounds(glm::vec3& outMin, glm::vec3& outMax) const {
         const glm::vec3 corner((i & 1) ? m_boundsMax.x : m_boundsMin.x,
                                (i & 2) ? m_boundsMax.y : m_boundsMin.y,
                                (i & 4) ? m_boundsMax.z : m_boundsMin.z);
-        const glm::vec3 world = glm::vec3(m_armature.transform() * glm::vec4(corner, 1.0f));
+        const glm::vec3 world = glm::vec3(boxToWorld * glm::vec4(corner, 1.0f));
         outMin = glm::min(outMin, world);
         outMax = glm::max(outMax, world);
     }
@@ -512,17 +579,61 @@ bool Model::worldBounds(glm::vec3& outMin, glm::vec3& outMax) const {
     // the head joint, toes past the toe joints). Static models are exact via the box alone.
     if (m_armature.hasSkeleton()) {
         constexpr float kFleshMargin = 0.25f;
-        glm::vec3 boneMin(std::numeric_limits<float>::max());
-        glm::vec3 boneMax(std::numeric_limits<float>::lowest());
-        for (std::size_t i = 0; i < m_armature.boneCount(); ++i) {
-            const glm::vec3& p = m_armature.boneWorldPosition(i);
-            boneMin = glm::min(boneMin, p);
-            boneMax = glm::max(boneMax, p);
-        }
+        glm::vec3 boneMin;
+        glm::vec3 boneMax;
+        jointWorldBox(boneMin, boneMax);
         outMin = glm::min(outMin, boneMin - glm::vec3(kFleshMargin));
         outMax = glm::max(outMax, boneMax + glm::vec3(kFleshMargin));
     }
     return true;
+}
+
+void Model::jointWorldBox(glm::vec3& lo, glm::vec3& hi) const {
+    lo = glm::vec3(std::numeric_limits<float>::max());
+    hi = glm::vec3(std::numeric_limits<float>::lowest());
+
+    // THE BONES THAT DO NOT HANG FROM THE FIGURE'S ROOT GO WITH IT. A figure's place is her
+    // root's pose translation (posedBounds), and a real skeleton has bones the root does not
+    // carry: the figure node above the hips, standing at the origin, and a merged follower's
+    // scene node beside them. They stay where she was IMPORTED when she is moved in her pose,
+    // and counted as they stand they kept every box built from the joints spanning both places
+    // — a light added after a three-metre move was still aimed half way between the two, and
+    // the box a click is tested against still covered the empty spot. They are taken through
+    // the root's own motion (its skin transform), as the bind box is. While the root is at its
+    // bind place that motion is exactly the identity and every bone is read as it stands.
+    const int       root = m_armature.figureRoot();
+    const bool      haveRoot = root >= 0 && static_cast<std::size_t>(root) < m_armature.boneCount();
+    const glm::mat4 rootMotion = haveRoot ? m_armature.poseGlobal(static_cast<std::size_t>(root)) *
+                                                m_armature.inverseBind(static_cast<std::size_t>(root))
+                                          : glm::mat4(1.0f);
+    const bool      rootMoved = haveRoot && rootMotion != glm::mat4(1.0f);
+    const glm::mat4 carried = rootMoved ? m_armature.transform() * rootMotion : glm::mat4(1.0f);
+    const auto      hangsFromRoot = [&](std::size_t bone) {
+        int node = static_cast<int>(bone);
+        for (std::size_t guard = 0; node >= 0 && guard <= m_armature.boneCount(); ++guard) {
+            if (node == root) {
+                return true;
+            }
+            node = m_armature.boneParent(static_cast<std::size_t>(node));
+        }
+        return false;
+    };
+
+    for (std::size_t i = 0; i < m_armature.boneCount(); ++i) {
+        glm::vec3 p = m_armature.boneWorldPosition(i);
+        if (rootMoved && !hangsFromRoot(i)) {
+            // (Its place in the model's own space — the pose matrix's translation — carried.)
+            p = glm::vec3(carried * glm::vec4(glm::vec3(m_armature.poseGlobal(i)[3]), 1.0f));
+        }
+        lo = glm::min(lo, p);
+        hi = glm::max(hi, p);
+    }
+}
+
+bool Model::eyeInsideSplatBox(const Ray& ray) const {
+    glm::vec3 lo, hi;
+    return m_splats && worldBounds(lo, hi) && glm::all(glm::greaterThanEqual(ray.origin, lo)) &&
+           glm::all(glm::lessThanEqual(ray.origin, hi));
 }
 
 bool Model::intersectRay(const Ray& ray, float& tOut) const {
@@ -536,48 +647,18 @@ bool Model::intersectRay(const Ray& ray, float& tOut) const {
         // bind bounds — a right-click on the character found its joints (those are picked by
         // live position) but not the model, and the context menu lost its Delete entry.
         constexpr float kFleshMargin = 0.16f; // metres: the torso's depth around the spine
-        glm::vec3 lo(std::numeric_limits<float>::max());
-        glm::vec3 hi(std::numeric_limits<float>::lowest());
-        for (std::size_t i = 0; i < m_armature.boneCount(); ++i) {
-            const glm::vec3& p = m_armature.boneWorldPosition(i);
-            lo = glm::min(lo, p);
-            hi = glm::max(hi, p);
-        }
+        glm::vec3 lo;
+        glm::vec3 hi;
+        jointWorldBox(lo, hi);
         lo -= glm::vec3(kFleshMargin);
         hi += glm::vec3(kFleshMargin);
-        float tMin = 0.0f;
-        float tMax = std::numeric_limits<float>::max();
-        for (int axis = 0; axis < 3; ++axis) {
-            if (std::abs(ray.direction[axis]) < 1e-8f) {
-                if (ray.origin[axis] < lo[axis] || ray.origin[axis] > hi[axis]) {
-                    return false;
-                }
-                continue;
-            }
-            const float invD = 1.0f / ray.direction[axis];
-            float t1 = (lo[axis] - ray.origin[axis]) * invD;
-            float t2 = (hi[axis] - ray.origin[axis]) * invD;
-            if (t1 > t2) {
-                std::swap(t1, t2);
-            }
-            tMin = std::max(tMin, t1);
-            tMax = std::min(tMax, t2);
-            if (tMin > tMax) {
-                return false;
-            }
-        }
-        tOut = tMin;
-        return true;
+        return rayHitsBox(ray.origin, ray.direction, lo, hi, tOut);
     }
-    if (m_splats) {
-        // A splat scene is an environment the camera usually stands INSIDE: from within its box
-        // no click is on it (what the user means is the figure in it), so it neither steals the
-        // selection nor the context menu.
-        glm::vec3 lo, hi;
-        if (worldBounds(lo, hi) && glm::all(glm::greaterThanEqual(ray.origin, lo)) &&
-            glm::all(glm::lessThanEqual(ray.origin, hi))) {
-            return false;
-        }
+    // A splat scene is an environment the camera usually stands INSIDE: from within its box
+    // no click is on it (what the user means is the figure in it), so it neither steals the
+    // selection nor the context menu.
+    if (eyeInsideSplatBox(ray)) {
+        return false;
     }
     // Transform the ray into local space so we can slab-test the AABB directly (equivalent to an
     // oriented-box test in world space, but cheaper). The transform is affine, so the ray
@@ -585,31 +666,7 @@ bool Model::intersectRay(const Ray& ray, float& tOut) const {
     const glm::mat4 inv = glm::inverse(m_armature.transform());
     const glm::vec3 o = glm::vec3(inv * glm::vec4(ray.origin, 1.0f));
     const glm::vec3 d = glm::vec3(inv * glm::vec4(ray.direction, 0.0f));
-
-    float tMin = 0.0f; // ignore hits behind the ray origin
-    float tMax = std::numeric_limits<float>::max();
-    for (int axis = 0; axis < 3; ++axis) {
-        if (std::abs(d[axis]) < 1e-8f) {
-            // Ray parallel to this slab: miss unless the origin is already within it.
-            if (o[axis] < m_boundsMin[axis] || o[axis] > m_boundsMax[axis]) {
-                return false;
-            }
-            continue;
-        }
-        const float invD = 1.0f / d[axis];
-        float t1 = (m_boundsMin[axis] - o[axis]) * invD;
-        float t2 = (m_boundsMax[axis] - o[axis]) * invD;
-        if (t1 > t2) {
-            std::swap(t1, t2);
-        }
-        tMin = std::max(tMin, t1);
-        tMax = std::min(tMax, t2);
-        if (tMin > tMax) {
-            return false;
-        }
-    }
-    tOut = tMin;
-    return true;
+    return rayHitsBox(o, d, m_boundsMin, m_boundsMax, tOut);
 }
 
 bool Model::groundGap(float& lowestY) const {
@@ -628,9 +685,7 @@ bool Model::pickExact(const Ray& ray, ModelHit& hit) const {
     }
     if (m_splats) {
         // (From inside its box a splat scene is the place the user stands in: see intersectRay.)
-        glm::vec3 lo, hi;
-        if (worldBounds(lo, hi) && glm::all(glm::greaterThanEqual(ray.origin, lo)) &&
-            glm::all(glm::lessThanEqual(ray.origin, hi))) {
+        if (eyeInsideSplatBox(ray)) {
             return false;
         }
         // The ray in the cloud's own frame; the unit world direction is taken through the inverse
@@ -844,15 +899,13 @@ std::vector<Model::MaterialOverride> Model::materialOverrides() const {
     return out;
 }
 
-bool Model::applyMaterialOverride(const std::string& zone, const MaterialParams& params, bool keepSmoothing) {
+bool Model::applyMaterialOverride(const std::string& zone, const MaterialParams& params, const std::vector<std::string>* named) {
     bool any = false;
     for (std::size_t i = 0; i < m_meshes.size(); ++i) {
         if (zoneKey(i) == zone) {
-            MaterialParams next = params;
-            if (keepSmoothing) {
-                next.smoothByAngle = m_meshes[i].material().smoothByAngle;
-                next.smoothAngle = m_meshes[i].material().smoothAngle;
-            }
+            // The values the file named, over the zone's own (materialparams.h): what the file
+            // says nothing of — a value newer than the file — stays the zone's.
+            const MaterialParams next = named != nullptr ? materialWithNamedValues(m_meshes[i].material(), params, *named) : params;
             any = setMeshMaterial(i, next) || any;
         }
     }

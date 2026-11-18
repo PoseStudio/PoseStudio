@@ -1,10 +1,12 @@
 #version 450
 
-// Shared fullscreen-triangle vertex stage for every post-processing pass: the SSS blur (H and
-// V), the bloom bright-extract and blur (H and V), and the composite — six passes, one vertex
-// shader. One oversized triangle covers the screen; vUv is the [0,1] screen UV.
+// Shared fullscreen-triangle vertex stage for every fullscreen pass: the SSS blur (H and V), the
+// bloom bright-extract and blur (H and V), the composite, the Rendered mode's picture
+// (traced.frag), the photo pass's depth + coverage resolves (photoresolve.frag) and the headset's
+// depth resolve (depthresolve.frag). One oversized triangle covers the screen; vUv is the [0,1]
+// screen UV.
 //
-// Pass:    every PostProcess pass (the bloom render pass and the swapchain composite).
+// Pass:    every PostProcess pass, TracedView, and HdrTarget's resolves.
 // Inputs:  none (gl_VertexIndex into the fullscreen triangle).
 // Outputs: vUv, the screen UV for the fragment stage.
 

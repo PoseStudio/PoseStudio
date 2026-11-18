@@ -22,8 +22,9 @@
 // (depth only; its pipeline masks the color writes).
 //
 // Pass:    the HDR scene pass (HdrTarget), opaque + transparent + wire + hidden-line variants.
-// Inputs:  set 0.0 the camera/lighting UBO (camera_ubo.glsl); set 1.0-5 the material maps; set 3
-//          the IBL maps + shadow map; push: the 128-byte MeshPushConstants block (mesh.h).
+// Inputs:  set 0.0 the camera/lighting UBO (camera_ubo.glsl); set 1.0-9 the material maps
+//          (MaterialBinding, mesh.h); set 2.3 the model's material buffer (material.glsl); set 3
+//          the IBL maps + shadow map; push: MeshPushConstants (mesh.h: the model matrix + meta).
 // Outputs: location 0 -> color attachment 0 (scene; alpha = SSS mask in the opaque pass),
 //          location 1 -> color attachment 1 (the PBR opaque pass's specular; masked elsewhere).
 
@@ -396,7 +397,7 @@ void shade() {
 
     // Micro-detail (pore) normal: the newer skin shader's tiled grain layer, applied over the base
     // perturbation. material3.w packs it (integer part = UV tiling, fraction = weight; 0 = none —
-    // the push block is at its 128-byte limit, so the pair shares one float).
+    // a packing kept from when the material rode the push block, so the arithmetic is unchanged).
     float detailPacked = surf.material3.w;
     if (detailPacked >= 1.0) {
         // Its placement rides material.detail (xy tiling — x the count the packing floors — zw
@@ -537,7 +538,7 @@ void shade() {
     // The environment does the heavy lifting: SH-reconstructed diffuse irradiance gives the soft,
     // directional, color-bleeding ambient a flat term never could, and one analytic key light adds
     // crisp form + a highlight on top. No fill/rim lights — the environment supplies wrap + rim.
-    // Mode 14 (the Roughness / Specular Map view) runs this same path and outputs only the
+    // Mode 14 (the Specular Only view) runs this same path and outputs only the
     // material specular it accumulates (see the end of the branch).
     if (mode == 1 || mode == 14) {
         // Live dials from the Environment panel (via the UBO).
@@ -929,7 +930,7 @@ void shade() {
             specSum += irradiance * (1.0 / PI) * shColor * shE * specScale * ao;
         }
 
-        // The Roughness / Specular Map view: everything the MATERIAL reflects — the key light's
+        // The Specular Only view: everything the MATERIAL reflects — the key light's
         // GGX lobes, the environment's split-sum specular, the top coat — and nothing else (no
         // diffuse, and no rim, which is a light rather than a material property). Highlight
         // breadth shows the roughness map, highlight strength the specular weight and its mask,

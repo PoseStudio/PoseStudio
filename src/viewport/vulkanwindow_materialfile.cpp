@@ -28,8 +28,9 @@
  * APPLYING (applyMaterialFile) is one undoable material edit on the zone the Materials tab
  * shows: every slot becomes what the file says (a slot the file does not list is emptied — the
  * file is the whole surface), then the values. The zone's overlays stay. A map that is not
- * where the file says is LOOKED FOR (AssetStore::resolveTexture): by its name beside the
- * material, in its store, and through the library the material lies in.
+ * where the file says is LOOKED FOR (AssetStore::TextureResolver): by its name beside the
+ * material, in its store, and through the library the material lies in. The slots change as
+ * one batch (applySlotSources), so a packed binding is made once for all of its slots.
  */
 
 #include "vulkanwindow.h"
@@ -46,8 +47,6 @@
 #include "materialparams.h"
 #include "materialxfile.h"
 #include "model.h"
-#include "preferencesmanager.h"
-#include "constants.h"
 #include "renderexport.h"
 #include "rendersession.h"
 #include "rendersnapshot.h"
@@ -386,6 +385,7 @@ bool VulkanWindow::applyMaterialFile(const QString& path, QString* error, int* m
     // folder), or is LOOKED FOR: through the material's library, and by its name (assetstore.h).
     const QString                          folder = QFileInfo(path).absolutePath();
     const QString                          library = LibraryPaths::libraryRootOf(folder);
+    AssetStore::TextureResolver            resolver(folder, library); // (one walk of the library serves all of the material's maps)
     std::array<QString, kMaterialMapCount> wanted;
     for (const ProjectTexture& texture : doc.textures) {
         MaterialMap map = MaterialMap::BaseColor;
@@ -395,7 +395,7 @@ bool VulkanWindow::applyMaterialFile(const QString& path, QString* error, int* m
         int           channel = 0; // (a MaterialX map may be one channel of a packed image)
         const QString source = QString::fromStdString(textureSourcePath(texture.source, &channel));
         bool          viaName = false;
-        const QString found = AssetStore::resolveTexture(source, folder, library, &viaName);
+        const QString found = resolver.resolve(source, &viaName);
         if (found.isEmpty()) {
             qWarning().noquote() << "[materials] a map of" << QFileInfo(path).fileName() << "is missing:" << QDir::toNativeSeparators(source);
             if (missingMaps != nullptr) {
@@ -418,6 +418,10 @@ bool VulkanWindow::applyMaterialFile(const QString& path, QString* error, int* m
     if (opened && !beginMaterialEdit()) {
         return fail(tr("The material could not be applied while another edit is in progress."));
     }
+    // Every slot that changes, as ONE batch: the slots that share a packed binding — the
+    // parameter map's four, the layer map's four, the base color and its cutout — then make and
+    // upload it once, not once a slot (applySlotSources).
+    std::vector<std::pair<MaterialMap, std::string>> changes;
     for (int i = 0; i < kMaterialMapCount; ++i) {
         const std::size_t slot = static_cast<std::size_t>(i);
         const MaterialMap map = static_cast<MaterialMap>(i);
@@ -425,14 +429,35 @@ bool VulkanWindow::applyMaterialFile(const QString& path, QString* error, int* m
         const QString     want = wanted[slot];
         if (want.isEmpty()) {
             if (has) {
-                setMaterialTexture(map, QString());
+                changes.emplace_back(map, std::string());
             }
         } else if (!has || !samePath(QString::fromStdString(view.params.maps[slot].source), want)) {
-            setMaterialTexture(map, want);
+            changes.emplace_back(map, want.toStdString());
         }
     }
-    // The values last: they are the file's whatever a slot's change set on its way (a detail map
-    // put into an empty layer brings defaults with it).
+    // (Decoded for the material the file brings — its Tiling decides the maps' gutter fill —
+    // since the values are set after the slots.)
+    OverlayBake                    bake;
+    const std::vector<MaterialMap> unread =
+        applySlotSources(scene().selectedModelIndex(), scene().selectedZoneIndex(), changes, bake, &doc.params);
+    // A map that was FOUND and could not be READ — a truncated file, a format the decoder does
+    // not have (an .exr) — is a missing map like one that was not found: its slot is emptied and
+    // it is counted. (Left as it was, the slot kept the PREVIOUS material's map under the new
+    // material's values, and the message after applying said nothing.)
+    if (!unread.empty()) {
+        std::vector<std::pair<MaterialMap, std::string>> emptied;
+        for (const MaterialMap map : unread) {
+            qWarning().noquote() << "[materials] a map of" << QFileInfo(path).fileName() << "could not be read: the" << materialMapName(map)
+                                 << "slot is left empty";
+            emptied.emplace_back(map, std::string());
+            if (missingMaps != nullptr) {
+                ++*missingMaps;
+            }
+        }
+        applySlotSources(scene().selectedModelIndex(), scene().selectedZoneIndex(), emptied, bake, &doc.params);
+    }
+    // The values last: they are the file's, all of them (the detail layer's too, which a detail
+    // map chosen on the tab would have brought defaults for).
     // (All but THE SMOOTHING, which is the object's: the zone keeps its own.)
     MaterialParams values = doc.params;
     const MaterialParams own = materialView().params;
@@ -461,6 +486,20 @@ QImage VulkanWindow::renderMaterialIcon(int size, QString* renderer) {
     }
     const LightingSettings lighting = iconStudioLighting();
     const IconEnvironment  light = iconEnvironment();
+
+    // What the built-in shader needs, read NOW: the engine's render below waits in a nested event
+    // loop, in which the renderer can go (a device lost by a frame drawn meanwhile) — the
+    // fallback after it must touch no scene state.
+    const MaterialParams ballMaterial = owner->mesh(static_cast<std::size_t>(mesh)).material();
+    BallMaps             maps;
+    const auto           slot = [&](MaterialMap map, int* channel) {
+        return scene().meshSlotImage(model, mesh, map, /*imported=*/false, channel);
+    };
+    maps.baseColor = slot(MaterialMap::BaseColor, nullptr);
+    maps.roughness = slot(MaterialMap::Roughness, &maps.roughnessChannel);
+    maps.metalness = slot(MaterialMap::Metalness, &maps.metalnessChannel);
+    maps.specular = slot(MaterialMap::SpecularMask, &maps.specularChannel);
+    maps.emission = slot(MaterialMap::Emission, nullptr);
 
     // --- With a render engine: the ball path traced --------------------------------------------
     static const bool builtInOnly = qEnvironmentVariableIsSet("POSESTUDIO_MATERIAL_ICON_BUILTIN");
@@ -494,7 +533,7 @@ QImage VulkanWindow::renderMaterialIcon(int size, QString* renderer) {
         // the ball and no floor under it.
         snapshot->environmentPixels = light.pixels;
         renderapi::Image studio;
-        studio.id = 3; // (no DecodedImage has this address; 1 is the procedural studio's)
+        studio.id = RenderSnapshot::kIconStudioImageId;
         studio.pixels = snapshot->environmentPixels->data();
         studio.width = light.width;
         studio.height = light.height;
@@ -544,14 +583,7 @@ QImage VulkanWindow::renderMaterialIcon(int size, QString* renderer) {
         options.samples = samples;
         options.denoise = denoise;
         options.transparent = true;
-        // The device the Render window uses, if it is still there; else the best one there is.
-        options.deviceId = RenderSession::defaultDeviceId();
-        const QString chosen = PreferencesManager::instance().getValue(Constants::PREF_RENDER_DEVICE).toString();
-        for (const RenderDevice& device : RenderSession::devices()) {
-            if (!chosen.isEmpty() && device.id == chosen) {
-                options.deviceId = chosen;
-            }
-        }
+        options.deviceId = preferredRenderDevice(); // the Render window's, if it is still there
 
         RenderSession session;
         QEventLoop    loop;
@@ -581,21 +613,12 @@ QImage VulkanWindow::renderMaterialIcon(int size, QString* renderer) {
                              << "): the built-in ball shader draws it";
     }
 
-    // --- Without one: the built-in ball shader ---------------------------------------------------
-    BallMaps   maps;
-    const auto slot = [&](MaterialMap map, int* channel) {
-        return scene().meshSlotImage(model, mesh, map, /*imported=*/false, channel);
-    };
-    maps.baseColor = slot(MaterialMap::BaseColor, nullptr);
-    maps.roughness = slot(MaterialMap::Roughness, &maps.roughnessChannel);
-    maps.metalness = slot(MaterialMap::Metalness, &maps.metalnessChannel);
-    maps.specular = slot(MaterialMap::SpecularMask, &maps.specularChannel);
-    maps.emission = slot(MaterialMap::Emission, nullptr);
+    // --- Without one: the built-in ball shader (from what was read before the render) ------------
     EnvironmentImage studio;
     studio.width = light.width;
     studio.height = light.height;
     studio.pixels = *light.pixels;
-    const std::vector<std::uint8_t> pixels = shadeMaterialBall(owner->mesh(static_cast<std::size_t>(mesh)).material(), maps, studio, lighting, size);
+    const std::vector<std::uint8_t> pixels = shadeMaterialBall(ballMaterial, maps, studio, lighting, size);
     QImage                          icon(size, size, QImage::Format_RGBA8888);
     for (int y = 0; y < size; ++y) {
         std::copy_n(&pixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(size) * 4u], static_cast<std::size_t>(size) * 4u, icon.scanLine(y));

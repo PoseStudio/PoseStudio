@@ -1,19 +1,49 @@
 /**
  * @file propertyrows.cpp
- * @brief Implementation of the shared properties-tab row builders. See propertyrows.h.
+ * @brief Implementation of the shared properties-tab builders. See propertyrows.h.
  */
 
 #include "propertyrows.h"
+
+#include "dragnumberbox.h"
 
 #include <QFormLayout>
 #include <QFrame>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QLabel>
+#include <QPixmap>
+#include <QPushButton>
+#include <QScrollArea>
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 namespace pose::propertyrows {
+
+ScrollColumn makeScrollColumn(QWidget* panel, const QString& contentName, int spacing) {
+    auto* outer = new QVBoxLayout(panel);
+    outer->setContentsMargins(0, 0, 0, 0);
+
+    ScrollColumn out;
+    out.scroll = new QScrollArea(panel);
+    out.scroll->setWidgetResizable(true);
+    out.scroll->setFrameShape(QFrame::NoFrame);
+    outer->addWidget(out.scroll);
+
+    out.content = new QWidget;
+    out.content->setObjectName(contentName);
+    out.column = new QVBoxLayout(out.content);
+    out.column->setContentsMargins(12, 12, 12, 12);
+    out.column->setSpacing(spacing);
+    return out;
+}
+
+void ScrollColumn::finish() const {
+    scroll->setWidget(content);
+}
 
 QFormLayout* addGroup(QVBoxLayout* parent, const QString& title) {
     auto* box = new QGroupBox(title);
@@ -27,7 +57,7 @@ QFormLayout* addGroup(QVBoxLayout* parent, const QString& title) {
     return form;
 }
 
-QFormLayout* addCollapsibleGroup(QVBoxLayout* parent, const QString& title, bool expanded) {
+CollapsibleGroup addCollapsibleGroup(QVBoxLayout* parent, const QString& title, bool expanded) {
     auto* box = new QFrame;
     box->setObjectName(QStringLiteral("PropertyCollapsible"));
     auto* col = new QVBoxLayout(box);
@@ -62,7 +92,14 @@ QFormLayout* addCollapsibleGroup(QVBoxLayout* parent, const QString& title, bool
         header->setArrowType(on ? Qt::DownArrow : Qt::RightArrow);
     });
     parent->addWidget(box);
-    return form;
+
+    CollapsibleGroup group;
+    group.form = form;
+    group.header = header;
+    group.body = body;
+    group.box = box;
+    group.column = col;
+    return group;
 }
 
 QToolButton* makeRestoreButton() {
@@ -84,6 +121,46 @@ QWidget* rowWithRestore(QWidget* main, QToolButton* restore) {
     row->addWidget(main, 1);
     row->addWidget(restore, 0);
     return field;
+}
+
+ScrubRow makeScrubRow(const QString& label, const QString& tip, double min, double max, double step, int decimals) {
+    ScrubRow row;
+    row.label = new QLabel(label);
+    row.label->setToolTip(tip);
+    row.box = new DragNumberBox;
+    row.box->setRange(min, max);
+    row.box->setSingleStep(step);
+    row.box->setDecimals(decimals);
+    row.box->setToolTip(tip);
+    row.restore = makeRestoreButton();
+    row.field = rowWithRestore(row.box, row.restore);
+    return row;
+}
+
+void stylePickerField(QPushButton* button) {
+    button->setObjectName(QStringLiteral("EnvironmentHdriButton"));
+    button->setCursor(Qt::PointingHandCursor);
+    // (Icon + icon/text spacing come to about a 16 px indent of the caption.)
+    QPixmap spacer(10, 10);
+    spacer.fill(Qt::transparent);
+    button->setIcon(QIcon(spacer));
+    button->setIconSize(QSize(10, 10));
+}
+
+void alignLabelColumn(const std::vector<QLabel*>& labels) {
+    int widest = 0;
+    for (QLabel* label : labels) {
+        if (label == nullptr) {
+            continue;
+        }
+        label->ensurePolished();
+        widest = std::max(widest, label->fontMetrics().horizontalAdvance(label->text()) + 2);
+    }
+    for (QLabel* label : labels) {
+        if (label != nullptr) {
+            label->setMinimumWidth(widest);
+        }
+    }
 }
 
 } // namespace pose::propertyrows

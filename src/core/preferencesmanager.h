@@ -57,6 +57,10 @@ public:
     /// a remembered folder that was since moved or deleted must never leave a dialog stranded.
     QString rememberedDirectory(const QString& key, const QString& fallback) const;
 
+    /// rememberedDirectory() with the user's Documents folder as the fallback: where the File
+    /// menu's dialogs (Import, pose and project save / open) start until a folder is remembered.
+    QString rememberedDirectoryOrDocuments(const QString& key) const;
+
 private:
     PreferencesManager() = default;
     ~PreferencesManager() = default;

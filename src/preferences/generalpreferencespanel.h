@@ -8,7 +8,10 @@
 
 #include "preferencespanel.h"
 
-/// General application settings. Today: the anonymous install ping toggle (see installping.h).
+/// General application settings, each a toggle: the anonymous install ping (installping.h, with
+/// its disclosure and the install ID), the update check at startup (updatecheck.h), the What's
+/// New window after an update (whatsnewdialog.h), and whether camera moves count as unsaved
+/// changes of the project.
 class GeneralPreferencesPanel : public PreferencesPanel {
     Q_OBJECT
 

@@ -6,8 +6,8 @@
 #include "assetspreferencespanel.h"
 
 #include "assetlibraries.h"
+#include "assetlibraryprompt.h"
 #include "constants.h"
-#include "librarypaths.h"
 #include "preferencesmanager.h"
 
 #include <QCheckBox>
@@ -17,10 +17,6 @@
 #include <QSize>
 #include <QAbstractItemView>
 #include <QPushButton>
-#include <QFileDialog>
-#include <QDir>
-#include <QFileInfo>
-#include <QMessageBox>
 
 // QListWidgetItem data roles used in m_libraryList:
 //   Qt::UserRole     — AssetLibraryID (int)
@@ -99,34 +95,8 @@ void AssetsPreferencesPanel::reloadLibraries() {
 }
 
 void AssetsPreferencesPanel::promptAddLibrary() {
-    // Start the browser in the parent of the last folder added (persisted in Preferences), so
-    // adding several sibling libraries doesn't mean re-navigating from home each time; a stored
-    // folder that was since moved/deleted falls back to home.
-    const QString startDir = PreferencesManager::instance().rememberedDirectory(
-        Constants::PREF_LAST_ASSET_FOLDER_PARENT, QDir::homePath());
-
-    const QString folderPath = QFileDialog::getExistingDirectory(
-        this, tr("Select Asset Library Folder"), startDir);
-    if (folderPath.isEmpty()) return;
-
-    switch (AssetLibraries::add(folderPath)) {
-    case AssetLibraries::AddResult::Failed:
-        return; // logged by the repository
-    case AssetLibraries::AddResult::AlreadyRegistered:
-        // Tell the user instead of silently doing nothing — without feedback a re-add of an
-        // existing folder looks like the add simply failed.
-        QMessageBox::information(this, tr("Already Added"),
-                                 tr("That folder is already registered as an asset "
-                                    "library:\n%1").arg(folderPath));
-        return;
-    case AssetLibraries::AddResult::Added:
-        break;
-    }
-
-    // Remember this folder's parent as the default location for the next add.
-    PreferencesManager::instance().setValue(Constants::PREF_LAST_ASSET_FOLDER_PARENT,
-                                            QFileInfo(folderPath).absolutePath());
-    LibraryPaths::invalidateCache(); // the new folder may BE "My PoseStudio Library"
+    // (The dialog flow is shared with the Asset Manager's own link: assetlibraryprompt.h.)
+    if (!AssetLibraryPrompt::addLibrary(this)) return;
     reloadLibraries();
     emit librariesChanged();
 }
@@ -139,7 +109,6 @@ void AssetsPreferencesPanel::removeSelectedLibrary() {
         return; // logged by the repository
     }
 
-    LibraryPaths::invalidateCache(); // the removed folder may have been the resolved user library
     reloadLibraries();
     emit librariesChanged();
 }

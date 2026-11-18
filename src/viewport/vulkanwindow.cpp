@@ -3,7 +3,7 @@
  * @brief VulkanWindow lifecycle: construction, Vulkan init / teardown / device loss, the scene
  *        state remembered on the renderer's behalf, the import queue, and the event-driven frame.
  *
- * One of the seven translation units of VulkanWindow — see vulkanwindow.h for the map. This one
+ * One of the translation units of VulkanWindow — see vulkanwindow.h for the map. This one
  * owns everything that exists BEFORE and AFTER the renderer: the timers are created here, the
  * renderer is built on first expose and released when the platform surface goes away or the
  * device is lost (failDevice is the single device-loss path, so every failure resets the
@@ -205,8 +205,8 @@ void VulkanWindow::initializeVulkan() {
         syncTracedMode(); // (a Rendered mode chosen before the renderer existed)
         m_renderer->setSelectionStyle(m_selectionStyle); // Preferences → Selection, as handed over so far
         m_renderer->setUiScale(static_cast<float>(devicePixelRatio())); // outline width in logical px
-        noteView(ViewPreset::Home); // a fresh camera starts at its default framing (a rebuilt
-                                    // renderer after a device loss must not keep a stale view)
+        noteView(ViewPreset::Home); // a fresh camera starts at its default framing (a renderer
+                                    // rebuilt on a re-created surface must not keep a stale view)
 
         // Image-based lighting: bake a real HDR panorama over the renderer's built-in procedural
         // studio — the environment the user picked before first expose, else the default. A
@@ -287,29 +287,36 @@ void VulkanWindow::releaseVulkan() {
     // VR Mode first: its session holds swapchain images on the device, and its wait thread
     // must be gone before the renderer it renders through.
     stopVr(QString());
-    // A pending IK drag or release settle dies with the renderer (nothing left to settle or
-    // commit) — the DRAG flags must clear too, or a rebuilt renderer inherits a phantom drag
-    // whose eventual release would settle-and-commit against a stale pre-teardown pose. The
-    // button mask and FK flag clear with them: a later press must start clean.
-    m_ik.settling = false;
-    m_ik.dragging = false;
-    m_ik.hasTarget = false;
-    m_ik.poseChanged = false;
-    m_leftClickCandidate = false;
-    m_activeDragButtons = Qt::NoButton;
-    m_transformEdit = false; // (an open dial edit dies with the figure it turned)
-    m_modalSwallow = Qt::NoButton;
-    if (m_modalKind >= 0) {
-        m_modalKind = -1; // the joint the mouse turned is going away with the renderer
-        emit jointModalChanged(-1);
+    // Every interaction state machine dies with the renderer it acted on — nothing is left to
+    // settle or commit. ALL of each one's state goes, or a renderer rebuilt later (on a re-created
+    // surface) inherits a phantom: a drag whose eventual release would settle-and-commit against
+    // a pre-teardown pose, a fall flagged as a landed "soft tail" that would keep the next Ground
+    // drop from falling, an open bracket whose snapshot is of a figure that is gone. The pointer
+    // state clears with them: a later press must start clean.
+    const bool hadScene = m_renderer != nullptr;
+    m_ik = IkDragState{};
+    m_pointer = PointerState{};
+    m_lightDrag = LightDrag{}; // (a marker's drag; an open light EDIT stays — the lights are remembered, not the renderer's)
+    m_transformEdit = false;   // (an open dial edit dies with the figure it turned)
+    m_editStaticModel = -1;
+    for (bool& valid : m_dialAskedValid) {
+        valid = false;
+    }
+    m_preEditPose.clear();
+    m_materialEdit = false; // (... and an open material edit with its object)
+    m_materialEditModel = -1;
+    m_preEditMaterials.clear();
+    const bool modalWasOn = m_modal.kind >= 0;
+    m_modal = JointModal{};
+    if (modalWasOn) {
+        emit jointModalChanged(-1); // the joint the mouse turned is going away with the renderer
     }
     if (m_fall.timer) {
-        m_fall.timer->stop(); // the figure is going away with the renderer
-        m_fall.height = 0.0f;
-        m_fall.dropped = 0.0f;
-        m_fall.bouncing = false; // (... and its landing bounce with it: nothing left to restore)
-        m_fall.figure = -1;
+        m_fall.timer->stop(); // the figure is going away with the renderer (and its landing bounce)
     }
+    QTimer* const fallTimer = m_fall.timer;
+    m_fall = GroundFall{};
+    m_fall.timer = fallTimer;
     if (m_ikTimer) {
         m_ikTimer->stop();
     }
@@ -318,6 +325,16 @@ void VulkanWindow::releaseVulkan() {
     m_renderer.reset();
     m_context.reset();
     m_initialized = false;
+    if (hadScene) {
+        // The models went with the renderer and nothing re-imports them: the history's entries
+        // index models that no longer exist, and the document's path names a file this window
+        // no longer shows — a renderer rebuilt on a re-created surface starts on an empty scene,
+        // and File → Save would have written that over the project. As after File → New.
+        m_undoStack.clear();
+        m_redoStack.clear();
+        setProjectPath(QString());
+        setProjectClean();
+    }
 }
 
 bool VulkanWindow::runImport(const PendingImport& import, bool showProgress) {
@@ -446,6 +463,10 @@ bool VulkanWindow::event(QEvent* e) {
     case QEvent::Wheel:
     case QEvent::KeyPress:
     case QEvent::KeyRelease:
+    case QEvent::FocusOut:
+        // (FocusOut with them: focusOutEvent keeps what the joint mouse mode made and clears the
+        // button mask, and a real focus change in the middle of a script's `modal` section ended
+        // the mode under it.)
         // A scripted test drives the gestures itself (POSESTUDIO_IK_SCRIPT) and runs on a desktop
         // in use: real input that happens to reach the window is not part of it. A wheel notch
         // from the user's own scrolling, the cursor merely passing over the window, dollied the

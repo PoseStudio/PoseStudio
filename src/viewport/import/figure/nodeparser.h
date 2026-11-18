@@ -21,6 +21,9 @@ namespace pose {
 
 /// Parses @p nodeLibrary into an ordered bone list (only `figure`/`bone` nodes; cameras/lights are
 /// skipped). Each bone's `parent` is resolved to an index into the returned list (-1 for the root).
+/// The list is PARENTS FIRST — a bone's parent always has a lower index, which the engine's
+/// armature requires: the file's own order where that already holds (every file seen), re-ordered
+/// stably where it does not, a parent cycle cut.
 std::vector<FigureBone> parseSkeleton(const nlohmann::json& nodeLibrary);
 
 } // namespace pose

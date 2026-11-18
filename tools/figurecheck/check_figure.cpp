@@ -19,6 +19,11 @@
  *       that is how a change to the importer is checked against a whole content library.
  *       With no content root given, the folder above the preset that contains "data" is used.
  *       POSESTUDIO_MORPH_TRACE=1 adds the walk itself (which dial drives what) on stderr.
+ *
+ *   PoseStudioFigureCheck --dump <preset> [content root …]
+ *       The same import printed WHOLE — every material field, every bone's frame and limits, every
+ *       corrective's formulas, a hash of each zone's vertices. For proving a change neutral: two
+ *       dumps that compare equal are two imports a caller cannot tell apart.
  */
 
 #include "figureimporter.h"
@@ -29,6 +34,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -51,22 +57,11 @@ std::string baseName(const std::string& path) {
     return path.empty() ? std::string("-") : fs::path(path).filename().string();
 }
 
-// The folder above @p file that directly contains "data" — the content root a preset's
-// "/data/…" references resolve against (what the application detects for an imported file).
+// The content root a preset's "/data/…" references resolve against, as the application detects
+// it for an imported file (none: an empty list).
 std::vector<std::string> detectRoots(const std::string& file) {
-    std::vector<std::string> roots;
-    std::error_code ec;
-    for (fs::path dir = fs::absolute(fs::path(file), ec).parent_path(); !dir.empty();
-         dir = dir.parent_path()) {
-        if (fs::is_directory(dir / "data", ec)) {
-            roots.push_back(dir.string());
-            break;
-        }
-        if (dir == dir.root_path()) {
-            break;
-        }
-    }
-    return roots;
+    const std::string root = pose::FigureImporter::contentRootOf(file);
+    return root.empty() ? std::vector<std::string>() : std::vector<std::string>{root};
 }
 
 int report(const std::string& preset, std::vector<std::string> roots) {
@@ -91,6 +86,9 @@ int report(const std::string& preset, std::vector<std::string> roots) {
     }
     for (const std::string& missing : fig.shape.missing) {
         std::printf("  MISSING %s\n", missing.c_str());
+    }
+    for (const std::string& skipped : fig.skipped) {
+        std::printf("  LEFT OUT %s\n", skipped.c_str());
     }
 
     glm::dvec3 originSum(0.0);
@@ -128,6 +126,229 @@ int report(const std::string& preset, std::vector<std::string> roots) {
                     static_cast<double>(mat.roughness), static_cast<double>(mat.specularWeight),
                     baseName(mat.diffuseMapPath).c_str(), baseName(mat.normalMapPath).c_str(),
                     baseName(mat.bumpMapPath).c_str(), baseName(mat.opacityMapPath).c_str());
+    }
+    return 0;
+}
+
+// ================================================================================================
+// --dump
+// ================================================================================================
+//
+// Everything the importer hands on, to the last bit: every field of every material, every bone
+// with its frame and limits, every corrective with its formulas, and a hash of each zone's
+// vertices and indices. Two dumps of one preset that compare equal are two imports that differ in
+// nothing a caller can see — the test for a change that must be NEUTRAL (--report prints what a
+// person reads; a moved roughness lobe or a re-ordered vertex does not show there).
+
+// FNV-1a over a byte range, chained through @p hash.
+void hashBytes(std::uint64_t& hash, const void* data, std::size_t size) {
+    const unsigned char* bytes = static_cast<const unsigned char*>(data);
+    for (std::size_t i = 0; i < size; ++i) {
+        hash ^= bytes[i];
+        hash *= 1099511628211ull;
+    }
+}
+
+int dump(const std::string& preset, std::vector<std::string> roots) {
+    if (roots.empty()) {
+        roots = detectRoots(preset);
+    }
+    pose::FigureData fig;
+    try {
+        fig = pose::FigureImporter().load(preset, roots);
+    } catch (const std::exception& e) {
+        std::printf("FAILED %s\n", e.what());
+        return 1;
+    }
+    const auto num = [](const char* name, double value) { std::printf(" %s %.9g", name, value); };
+    const auto vec = [](const char* name, const glm::vec3& v) {
+        std::printf(" %s %.9g %.9g %.9g", name, static_cast<double>(v.x), static_cast<double>(v.y),
+                    static_cast<double>(v.z));
+    };
+    const auto vec2 = [](const char* name, const glm::vec2& v) {
+        std::printf(" %s %.9g %.9g", name, static_cast<double>(v.x), static_cast<double>(v.y));
+    };
+    const auto text = [](const char* name, const std::string& value) {
+        if (!value.empty()) {
+            std::printf("\n      %s %s", name, value.c_str()); // (a map: only where there is one)
+        }
+    };
+
+    std::printf("scale %.9g baseVertexCount %zu graft %d node '%s' '%s' zonesOnOwnUvSet %d\n",
+                static_cast<double>(fig.figureScale), fig.baseVertexCount, fig.graftPopulated ? 1 : 0,
+                fig.figureNodeId.c_str(), fig.figureNodeName.c_str(), fig.zonesOnOwnUvSet);
+
+    std::printf("shape %zu morphs, %d joints moved\n", fig.shape.applied.size(), fig.shape.jointsMoved);
+    for (const pose::ShapeReport::Morph& m : fig.shape.applied) {
+        std::printf("  morph %s weight %.9g deltas %zu\n", m.id.c_str(), static_cast<double>(m.weight), m.deltas);
+    }
+    for (const std::string& missing : fig.shape.missing) {
+        std::printf("  MISSING %s\n", missing.c_str());
+    }
+    for (const std::string& skipped : fig.skipped) {
+        std::printf("  LEFT OUT %s\n", skipped.c_str());
+    }
+
+    std::printf("bones %zu\n", fig.bones.size());
+    for (const pose::FigureBone& b : fig.bones) {
+        std::printf("  bone %s '%s' parent %d order %s", b.name.c_str(), b.nodeName.c_str(), b.parent,
+                    b.rotationOrder.c_str());
+        vec("origin", b.origin);
+        vec("orientation", b.orientation);
+        vec("min", b.rotationMin);
+        vec("max", b.rotationMax);
+        std::printf(" limited %d%d%d\n", b.rotationLimited.x ? 1 : 0, b.rotationLimited.y ? 1 : 0,
+                    b.rotationLimited.z ? 1 : 0);
+    }
+
+    std::printf("correctives %zu\n", fig.correctives.size());
+    for (const pose::PoseCorrective& c : fig.correctives) {
+        std::uint64_t hash = 14695981039346656037ull;
+        for (const auto& [index, delta] : c.deltas) {
+            hashBytes(hash, &index, sizeof(index));
+            hashBytes(hash, &delta, sizeof(delta));
+        }
+        std::printf("  corrective %s gate %.9g clamped %d %.9g %.9g deltas %zu %016llx\n", c.id.c_str(),
+                    static_cast<double>(c.gateScale), c.clamped ? 1 : 0, static_cast<double>(c.clampMin),
+                    static_cast<double>(c.clampMax), c.deltas.size(), static_cast<unsigned long long>(hash));
+        for (const pose::CorrectiveFormula& f : c.sumFormulas) {
+            std::printf("    formula");
+            for (const pose::CorrectiveOp& op : f.ops) {
+                switch (op.kind) {
+                    case pose::CorrectiveOp::Kind::PushRotation:
+                        std::printf(" rot(%s,%d)", op.bone.c_str(), op.axis);
+                        break;
+                    case pose::CorrectiveOp::Kind::PushConst:
+                        std::printf(" const(%.9g)", static_cast<double>(op.value));
+                        break;
+                    case pose::CorrectiveOp::Kind::Spline:
+                        std::printf(op.linear ? " linear(" : " spline(");
+                        for (const pose::CorrectiveKnot& k : op.knots) {
+                            std::printf("%.9g:%.9g ", static_cast<double>(k.x), static_cast<double>(k.y));
+                        }
+                        std::printf(")");
+                        break;
+                    case pose::CorrectiveOp::Kind::Mult:
+                        std::printf(" mult");
+                        break;
+                    case pose::CorrectiveOp::Kind::Add:
+                        std::printf(" add");
+                        break;
+                }
+            }
+            std::printf("\n");
+        }
+    }
+
+    std::printf("meshes %zu\n", fig.meshes.size());
+    for (const pose::FigureMesh& m : fig.meshes) {
+        std::uint64_t vertexHash = 14695981039346656037ull;
+        std::uint64_t indexHash = 14695981039346656037ull;
+        std::uint64_t baseHash = 14695981039346656037ull;
+        if (!m.vertices.empty()) {
+            hashBytes(vertexHash, m.vertices.data(), m.vertices.size() * sizeof(pose::Vertex));
+        }
+        if (!m.indices.empty()) {
+            hashBytes(indexHash, m.indices.data(), m.indices.size() * sizeof(std::uint32_t));
+        }
+        if (!m.baseVertex.empty()) {
+            hashBytes(baseHash, m.baseVertex.data(), m.baseVertex.size() * sizeof(std::uint32_t));
+        }
+        std::printf("  mesh %s verts %zu %016llx indices %zu %016llx base %zu %016llx\n", m.materialZone.c_str(),
+                    m.vertices.size(), static_cast<unsigned long long>(vertexHash), m.indices.size(),
+                    static_cast<unsigned long long>(indexHash), m.baseVertex.size(),
+                    static_cast<unsigned long long>(baseHash));
+        const pose::FigureMaterial& mat = m.material;
+        std::printf("    material");
+        vec("base", mat.baseColor);
+        num("opacity", mat.opacity);
+        num("rough", mat.roughness);
+        num("spec", mat.specularWeight);
+        num("specWithMap", mat.specularWeightWithMap);
+        num("metallic", mat.metallic);
+        num("lobe1", mat.lobe1Roughness);
+        num("lobe2", mat.lobe2Roughness);
+        num("lobeRatio", mat.lobeRatio);
+        num("normalStrength", mat.normalStrength);
+        num("bumpStrength", mat.bumpStrength);
+        std::printf("\n     ");
+        num("coat", mat.topCoatWeight);
+        num("coatOn", mat.topCoatEnabled ? 1.0 : 0.0);
+        num("coatRough", mat.topCoatRoughness);
+        vec("coatColor", mat.coatColor);
+        num("coatIor", mat.coatIor);
+        num("coatAniso", mat.coatAnisotropy);
+        num("coatAnisoRot", mat.coatAnisotropyRotation);
+        num("coatBump", mat.coatBumpStrength);
+        std::printf("\n     ");
+        num("translucency", mat.translucencyWeight);
+        num("detail", mat.detailWeight);
+        num("detailTiles", mat.detailTiles);
+        num("detailTilesV", mat.detailTilesV);
+        vec2("detailOffset", mat.detailOffset);
+        num("detailRough", mat.detailRoughness);
+        num("disp", mat.displacementStrength);
+        num("dispMid", mat.displacementMidLevel);
+        num("dispSubdiv", mat.displacementSubdiv);
+        std::printf("\n     ");
+        vec("emissionColor", mat.emissionColor);
+        num("emission", mat.emission);
+        num("ior", mat.ior);
+        num("transmission", mat.transmission);
+        vec("transmissionColor", mat.transmissionColor);
+        num("transmissionDepth", mat.transmissionDepth);
+        num("transmissionRough", mat.transmissionRoughness);
+        num("thinWalled", mat.thinWalled ? 1.0 : 0.0);
+        std::printf("\n     ");
+        vec("sssColor", mat.subsurfaceColor);
+        vec("sssRadiusColor", mat.subsurfaceRadiusColor);
+        num("sssRadius", mat.subsurfaceRadius);
+        num("sssAniso", mat.subsurfaceAnisotropy);
+        num("sheen", mat.sheen);
+        vec("sheenColor", mat.sheenColor);
+        num("sheenRough", mat.sheenRoughness);
+        std::printf("\n     ");
+        num("thinFilm", mat.thinFilm);
+        num("thinFilmThickness", mat.thinFilmThickness);
+        num("thinFilmIor", mat.thinFilmIor);
+        num("aniso", mat.anisotropy);
+        num("anisoRot", mat.anisotropyRotation);
+        num("diffuseRough", mat.diffuseRoughness);
+        vec2("uvTiling", mat.uvTiling);
+        vec2("uvOffset", mat.uvOffset);
+        text("diffuse", mat.diffuseMapPath);
+        text("normal", mat.normalMapPath);
+        text("bump", mat.bumpMapPath);
+        text("cutout", mat.opacityMapPath);
+        text("roughness", mat.roughnessMapPath);
+        text("specMask", mat.specMaskMapPath);
+        text("translucency", mat.translucencyMapPath);
+        text("translucencyWeight", mat.translucencyWeightMapPath);
+        text("detailNormal", mat.detailNormalMapPath);
+        text("detailWeight", mat.detailWeightMapPath);
+        text("detailRoughness", mat.detailRoughnessMapPath);
+        text("displacement", mat.displacementMapPath);
+        text("emission", mat.emissionMapPath);
+        text("transmissionColor", mat.transmissionColorMapPath);
+        text("transmissionWeight", mat.transmissionWeightMapPath);
+        text("coatAnisotropy", mat.coatAnisotropyMapPath);
+        text("coatAnisotropyRotation", mat.coatAnisotropyRotationMapPath);
+        text("sheenWeight", mat.sheenWeightMapPath);
+        text("sheenColor", mat.sheenColorMapPath);
+        text("sheenRoughness", mat.sheenRoughnessMapPath);
+        text("thinFilmThickness", mat.thinFilmThicknessMapPath);
+        text("diffuseRoughness", mat.diffuseRoughnessMapPath);
+        text("coatWeight", mat.coatWeightMapPath);
+        text("coatColor", mat.coatColorMapPath);
+        text("coatRoughness", mat.coatRoughnessMapPath);
+        text("coatReflectivity", mat.coatReflectivityMapPath);
+        text("coatBump", mat.coatBumpMapPath);
+        text("specularColor", mat.specularColorMapPath);
+        text("anisotropy", mat.anisotropyMapPath);
+        text("anisotropyRotation", mat.anisotropyRotationMapPath);
+        text("lobe2Roughness", mat.lobe2RoughnessMapPath);
+        text("lobeRatio", mat.lobeRatioMapPath);
+        std::printf("\n");
     }
     return 0;
 }
@@ -279,6 +500,20 @@ void writeModifier(const fs::path& library, const std::string& folder, const std
                {"modifier_library", json::array({modifier})}});
 }
 
+// The folder of the synthetic library's pose-corrective pack (under the figure's Morphs/Maker).
+const char* kPack = "Base Correctives";
+
+// A corrective's driver: "<id> += the hip's bend x 0.01" (the "sum" stage).
+json hipDriven(const std::string& id) {
+    return {{"output", "Figure:#" + encoded(id) + "?value"},
+            {"operations", json::array({push(std::string("hip:") + kFigureFile + "#hip?rotation/x"), push(0.01), kMult})}};
+}
+
+// A corrective's gate: "<id> x= @p operations" (the "mult" stage).
+json gatedBy(const std::string& id, json operations) {
+    return {{"output", "Figure:#" + encoded(id) + "?value"}, {"stage", "mult"}, {"operations", std::move(operations)}};
+}
+
 // A scene modifier: the dial a preset sets on the figure node @p parent.
 json dial(const std::string& folder, const std::string& file, const std::string& id, double value,
           const std::string& parent = "Figure") {
@@ -369,6 +604,148 @@ void writeLibrary(const fs::path& library) {
                 json::array({{{"id", "Lash Length"},
                               {"channel", {{"id", "value"}, {"value", 0}, {"min", 0}, {"max", 1}, {"clamped", true}}},
                               {"morph", {{"vertex_count", 4}, {"deltas", {{"count", 1}, {"values", {{0, 9.0, 9.0, 9.0}}}}}}}}})}});
+
+    // A morph file that is not well typed: a delta whose x is a string, and — beside one formula
+    // that drives the body — two entries that are no formulas at all.
+    writeJson(library / "data/Maker/Figure/Morphs/Maker/Base/Broken.dsf",
+              {{"file_version", "0.6.0.0"},
+               {"modifier_library",
+                json::array({{{"id", "Broken"},
+                              {"channel", {{"id", "value"}, {"value", 0}, {"min", 0}, {"max", 1}, {"clamped", true}}},
+                              {"morph", {{"vertex_count", 8},
+                                         {"deltas", {{"count", 1}, {"values", json::array({json::array({4, "0.1", 0, 0})})}}}}},
+                              {"formulas", json::array({nullptr,
+                                                        {{"output", 7}},
+                                                        drives("Broken", valueOf(character, "Some Character Body", "Some Character Body"), 1.0)})}}})}});
+
+    // A head that drives, by id ALONE, a morph no file of the library defines.
+    writeModifier(library, "Base", "Lone Head", "Lone Head", 4,
+                  json::array({drives("Lone Head", "Figure:#Nowhere?value", 0.5)}));
+
+    // A shape that is ON by default (its file's value is 1).
+    writeJson(library / "data/Maker/Figure/Morphs/Maker/Base/Default On.dsf",
+              {{"file_version", "0.6.0.0"},
+               {"modifier_library",
+                json::array({{{"id", "Default On"},
+                              {"channel", {{"id", "value"}, {"value", 1}, {"min", 0}, {"max", 1}, {"clamped", true}}},
+                              {"morph", {{"vertex_count", 8}, {"deltas", {{"count", 1}, {"values", {{6, 1.0, 2.0, 3.0}}}}}}}}})}});
+
+    // A shader file: a base material (its id has a space in it) that scene materials extend.
+    writeJson(library / "data/Maker/Shaders/Shader.dsf",
+              {{"file_version", "0.6.0.0"},
+               {"material_library",
+                json::array({{{"id", "Skin Base"},
+                              {"diffuse", {{"channel", {{"id", "diffuse"}, {"type", "float_color"}, {"value", {0.9, 0.1, 0.1}}}}}}}})}});
+
+    // A pose-corrective PACK — a folder the scan always reads, by its name — and the switch that
+    // gates it: a boolean channel, on by default, in a file of its own.
+    writeJson(library / "data/Maker/Figure/Morphs/Maker/Base/Correctives On.dsf",
+              {{"file_version", "0.6.0.0"},
+               {"modifier_library",
+                json::array({{{"id", "Correctives On"},
+                              {"channel", {{"id", "value"}, {"type", "bool"}, {"value", true}}}}})}});
+    writeModifier(library, kPack, "Gated Corrective", "Gated Corrective", 2,
+                  json::array({hipDriven("Gated Corrective"),
+                               gatedBy("Gated Corrective", json::array({push(valueOf("Base", "Correctives On", "Correctives On"))}))}));
+
+    // A corrective of the pack that was made for a geometry of 99 vertices.
+    writeModifier(library, kPack, "Foreign Corrective", "Foreign Corrective", 2,
+                  json::array({hipDriven("Foreign Corrective")}), 0.0, 1.0, 99);
+
+    // A dial (2 by default, 0 to 4) that a corrective's weight is DIVIDED by: a gate of
+    // "push <dial>, inv".
+    writeJson(library / "data/Maker/Figure/Morphs/Maker/Base/Fit.dsf",
+              {{"file_version", "0.6.0.0"},
+               {"modifier_library",
+                json::array({{{"id", "Fit"},
+                              {"channel", {{"id", "value"}, {"value", 2}, {"min", 0}, {"max", 4}, {"clamped", true}}}}})}});
+    writeModifier(library, kPack, "Divided Corrective", "Divided Corrective", 2,
+                  json::array({hipDriven("Divided Corrective"),
+                               gatedBy("Divided Corrective",
+                                       json::array({push(valueOf("Base", "Fit", "Fit")), {{"op", "inv"}}}))}));
+
+    // A control whose formulas use the rest of the vocabulary — a reciprocal, a negation, a step
+    // between two knots — and one operation nobody knows.
+    const std::string ratio = "Figure:#Ratio?value";
+    writeModifier(library, "Base", "Ratio", "Ratio", -1,
+                  json::array({{{"output", valueOf("Base", "Reciprocal", "Reciprocal")},
+                                {"operations", json::array({push(ratio), {{"op", "inv"}}})}},
+                               {{"output", valueOf("Base", "Negated", "Negated")},
+                                {"operations", json::array({push(ratio), {{"op", "neg"}}})}},
+                               {{"output", valueOf("Base", "Stepped", "Stepped")},
+                                {"operations", json::array({push(ratio),
+                                                            {{"op", "push"}, {"val", {0, 0}}},
+                                                            {{"op", "push"}, {"val", {8, 1}}},
+                                                            push(2.0), {{"op", "spline_constant"}}})}},
+                               {{"output", valueOf("Base", "Mystery", "Mystery")},
+                                {"operations", json::array({push(ratio), {{"op", "frobnicate"}}})}}}),
+                  0.0, 8.0);
+    writeModifier(library, "Base", "Reciprocal", "Reciprocal", 1);
+    writeModifier(library, "Base", "Negated", "Negated", 3, json::array(), -8.0, 8.0);
+    writeModifier(library, "Base", "Stepped", "Stepped", 5);
+    writeModifier(library, "Base", "Mystery", "Mystery", 7);
+
+    // Correctives of the pack that cannot be carried — one whose driver ends in an operation
+    // nobody knows, one that takes the reciprocal of a joint's angle — and two that can: a
+    // straight ramp (spline_linear) and a smooth one (spline_tcb) over the hip's bend.
+    const std::string hipBend = std::string("hip:") + kFigureFile + "#hip?rotation/x";
+    json odd = hipDriven("Odd Corrective");
+    odd["operations"].push_back({{"op", "frobnicate"}});
+    writeModifier(library, kPack, "Odd Corrective", "Odd Corrective", 2, json::array({odd}));
+    writeModifier(library, kPack, "Inverse Corrective", "Inverse Corrective", 2,
+                  json::array({{{"output", "Figure:#Inverse%20Corrective?value"},
+                                {"operations", json::array({push(hipBend), {{"op", "inv"}}})}}}));
+    writeModifier(library, kPack, "Linear Corrective", "Linear Corrective", 2,
+                  json::array({{{"output", "Figure:#Linear%20Corrective?value"},
+                                {"operations", json::array({push(hipBend),
+                                                            {{"op", "push"}, {"val", {0, 0}}},
+                                                            {{"op", "push"}, {"val", {90, 1}}},
+                                                            push(2.0), {{"op", "spline_linear"}}})}}}));
+    writeModifier(library, kPack, "Smooth Corrective", "Smooth Corrective", 2,
+                  json::array({{{"output", "Figure:#Smooth%20Corrective?value"},
+                                {"operations", json::array({push(hipBend),
+                                                            {{"op", "push"}, {"val", {0, 0, 0, 0, 0}}},
+                                                            {{"op", "push"}, {"val", {90, 1, 0, 0, 0}}},
+                                                            push(2.0), {{"op", "spline_tcb"}}})}}}));
+
+    // A figure with a joint whose id has a space in it, and a corrective of its own pack that the
+    // joint drives: the driver's url spells the id percent-encoded.
+    json spaced = baseFigure();
+    spaced["node_library"].push_back(bone("Left Arm", "bone", "chest", 85));
+    writeJson(library / "data/Maker/Spaced/Spaced.dsf", spaced);
+    writeJson(library / "data/Maker/Spaced/Morphs/Maker/Base Correctives/Arm Corrective.dsf",
+              {{"file_version", "0.6.0.0"},
+               {"modifier_library",
+                json::array({{{"id", "Arm Corrective"},
+                              {"channel", {{"id", "value"}, {"value", 0}, {"min", 0}, {"max", 1}, {"clamped", true}}},
+                              {"morph", {{"vertex_count", 8}, {"deltas", {{"count", 1}, {"values", {{2, 1.0, 2.0, 3.0}}}}}}},
+                              {"formulas",
+                               json::array({{{"output", "Figure:#Arm%20Corrective?value"},
+                                             {"operations",
+                                              json::array({push("Left%20Arm:/data/Maker/Spaced/Spaced.dsf#Left%20Arm?rotation/x"),
+                                                           push(0.01), kMult})}}})}}})}});
+
+    // The base figure again, its skeleton listed CHILDREN FIRST.
+    json unordered = baseFigure();
+    unordered["node_library"] = json::array({bone("chest", "bone", "hip", 80), bone("hip", "bone", "Figure", 50),
+                                             bone("Figure", "figure", "", 0)});
+    writeJson(library / "data/Maker/Unordered/Unordered.dsf", unordered);
+
+    // The base figure once more, its geometry listing NO material zones (every face is then one
+    // unnamed zone), and mapped: a UV per vertex, u from 0.1 to 0.8.
+    json untagged = baseFigure();
+    untagged["geometry_library"][0].erase("polygon_material_groups");
+    untagged["geometry_library"][0]["default_uv_set"] = "/data/Maker/Untagged/UV/Layout.dsf#Layout";
+    writeJson(library / "data/Maker/Untagged/Untagged.dsf", untagged);
+    json uvs = json::array();
+    for (int v = 0; v < 8; ++v) {
+        uvs.push_back({0.1 + 0.1 * v, 0.25});
+    }
+    writeJson(library / "data/Maker/Untagged/UV/Layout.dsf",
+              {{"file_version", "0.6.0.0"},
+               {"uv_set_library", json::array({{{"id", "Layout"},
+                                                {"vertex_count", 8},
+                                                {"uvs", {{"count", 8}, {"values", uvs}}}}})}});
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -414,6 +791,22 @@ const pose::FigureMesh* zone(const pose::FigureData& fig, const std::string& nam
         }
     }
     return nullptr;
+}
+
+const pose::PoseCorrective* corrective(const pose::FigureData& fig, const std::string& id) {
+    for (const pose::PoseCorrective& c : fig.correctives) {
+        if (c.id == id) {
+            return &c;
+        }
+    }
+    return nullptr;
+}
+
+// A corrective's folded gate (what its driven weight is multiplied by); -1 where the figure has no
+// such corrective.
+double gateOf(const pose::FigureData& fig, const std::string& id) {
+    const pose::PoseCorrective* c = corrective(fig, id);
+    return c ? static_cast<double>(c->gateScale) : -1.0;
 }
 
 const pose::FigureBone* boneNamed(const pose::FigureData& fig, const std::string& name) {
@@ -600,6 +993,203 @@ int runChecks() {
               "… and a bone under a root node whose id has a space in it keeps its parent");
     }
 
+    // --- 9. A morph file that is not well typed costs that morph, never the figure ----------------
+    {
+        writeJson(presets / "Broken.duf",
+                  preset(json::array({figureNode()}), json::array({dial("Base", "Broken", "Broken", 1.0)})));
+        std::string error;
+        const pose::FigureData fig = load(library, presets / "Broken.duf", &error);
+        check(zone(fig, "Skin") != nullptr,
+              "a morph file with a wrongly typed delta and entries that are no formulas does not fail the import" +
+                  (error.empty() ? std::string() : " (" + error + ")"));
+        check(about(applied(fig, "Some Character Body"), 1.0),
+              "… the one formula of it that can be read still drives what it names");
+        check(!wasApplied(fig, "Broken") && missingMentions(fig, "Broken: its deltas could not be read"),
+              "… and the morph itself is left out, and said");
+    }
+
+    // --- 10. A skeleton listed children first comes out parents first ------------------------------
+    {
+        std::string error;
+        const pose::FigureData fig = load(library, library / "data/Maker/Unordered/Unordered.dsf", &error);
+        bool parentsFirst = fig.bones.size() == 3;
+        for (std::size_t i = 0; i < fig.bones.size(); ++i) {
+            parentsFirst = parentsFirst && fig.bones[i].parent < static_cast<int>(i);
+        }
+        check(parentsFirst, "every bone's parent has a lower index than the bone (the engine's contract)" +
+                                (error.empty() ? std::string() : " (" + error + ")"));
+        const pose::FigureBone* chest = boneNamed(fig, "chest");
+        const pose::FigureBone* hip = boneNamed(fig, "hip");
+        check(chest && hip && chest->parent >= 0 && fig.bones[static_cast<std::size_t>(chest->parent)].name == "hip" &&
+                  hip->parent >= 0 && fig.bones[static_cast<std::size_t>(hip->parent)].name == "Figure",
+              "… and each keeps the parent its file names");
+    }
+
+    // --- 11. A corrective's gate reads what the PRESET set its switch to ---------------------------
+    {
+        writeJson(presets / "Plain.duf", preset(json::array({figureNode()}), json::array()));
+        const pose::FigureData plain = load(library, presets / "Plain.duf");
+        check(about(gateOf(plain, "Gated Corrective"), 1.0),
+              "a corrective behind a switch that is on by default (a boolean channel) is live");
+        writeJson(presets / "Correctives Off.duf",
+                  preset(json::array({figureNode()}),
+                         json::array({dial("Base", "Correctives On", "Correctives On", 0.0)})));
+        const pose::FigureData off = load(library, presets / "Correctives Off.duf");
+        check(corrective(off, "Gated Corrective") == nullptr,
+              "… and dropped where the preset switches it OFF: the dial at zero, not the file's default");
+    }
+
+    // --- 12. A driven morph that is nowhere is reported — not found in its driver's file -----------
+    {
+        writeJson(presets / "Lone Head.duf",
+                  preset(json::array({figureNode()}), json::array({dial("Base", "Lone Head", "Lone Head", 1.0)})));
+        const pose::FigureData fig = load(library, presets / "Lone Head.duf");
+        check(about(applied(fig, "Lone Head"), 1.0) && fig.shape.applied.size() == 1,
+              "a head that drives a morph no file defines is applied once, and nothing else is");
+        check(!wasApplied(fig, "Nowhere") && missingMentions(fig, "Nowhere: named by id alone"),
+              "… the missing morph is reported, and not baked from the head's own deltas");
+    }
+
+    // --- 13. A scene entry that carries no value is no dial ----------------------------------------
+    {
+        const json limitsOnly = {{"id", "Default On"},
+                                 {"url", std::string(kMorphs) + "/Base/Default%20On.dsf#Default%20On"},
+                                 {"parent", "#Figure"},
+                                 {"channel", {{"id", "value"}, {"min", -2}, {"max", 2}}}};
+        writeJson(presets / "Limits Only.duf", preset(json::array({figureNode()}), json::array({limitsOnly})));
+        const pose::FigureData fig = load(library, presets / "Limits Only.duf");
+        check(about(applied(fig, "Default On"), 1.0),
+              "a channel the scene lists with new limits and no value keeps its file's default (1), not 0");
+    }
+
+    // --- 14. A material's base in ANOTHER file is not shadowed by a same-named one of the preset ----
+    {
+        json shadowed = preset(json::array({figureNode()}), json::array());
+        shadowed["material_library"] = json::array(
+            {{{"id", "Skin Base"},
+              {"diffuse", {{"channel", {{"id", "diffuse"}, {"type", "float_color"}, {"value", {0.1, 0.9, 0.1}}}}}}}});
+        shadowed["scene"]["materials"] = json::array(
+            {{{"id", "Skin-1"},
+              {"url", "/data/Maker/Shaders/Shader.dsf#Skin%20Base"},
+              {"geometry", "#geometry"},
+              {"groups", {"Skin"}}}});
+        writeJson(presets / "Shadowed.duf", shadowed);
+        const pose::FigureData fig = load(library, presets / "Shadowed.duf");
+        const pose::FigureMesh* skin = zone(fig, "Skin");
+        check(skin && about(skin->material.baseColor.r, 0.9) && about(skin->material.baseColor.g, 0.1),
+              "a material that extends a base of another file gets THAT base, whatever the preset's own "
+              "material_library calls its entries");
+    }
+
+    // --- 15. A geometry that lists no material zones keeps its UVs ---------------------------------
+    {
+        std::string error;
+        const pose::FigureData fig = load(library, library / "data/Maker/Untagged/Untagged.dsf", &error);
+        bool mapped = fig.meshes.size() == 1 && !fig.meshes[0].vertices.empty();
+        if (mapped) {
+            // Every corner's u lies between the layout's 0.1 and 0.8, and v is the flipped 0.25:
+            // read through no set at all, every vertex sat at (0, 1).
+            for (const pose::Vertex& v : fig.meshes[0].vertices) {
+                mapped = mapped && v.uv.x > 0.09f && v.uv.x < 0.81f && about(v.uv.y, 0.75);
+            }
+        }
+        check(mapped, "a geometry with no material zones is one zone, read through its default UV set" +
+                          (error.empty() ? std::string() : " (" + error + ")"));
+    }
+
+    // --- 16. A corrective made for another geometry is refused, and said ---------------------------
+    {
+        const pose::FigureData plain = load(library, presets / "Plain.duf");
+        const bool said = std::any_of(plain.skipped.begin(), plain.skipped.end(), [](const std::string& s) {
+            return s.find("Foreign Corrective") != std::string::npos &&
+                   s.find("made for another geometry (99 vertices, this one has 8)") != std::string::npos;
+        });
+        check(corrective(plain, "Foreign Corrective") == nullptr && said &&
+                  corrective(plain, "Gated Corrective") != nullptr,
+              "a corrective whose morph was made for another geometry is left out and reported; its "
+              "neighbour in the pack is carried");
+    }
+
+    const auto leftOut = [](const pose::FigureData& fig, const std::string& id, const std::string& why) {
+        return std::any_of(fig.skipped.begin(), fig.skipped.end(), [&](const std::string& s) {
+            return s.find(id) != std::string::npos && s.find(why) != std::string::npos;
+        });
+    };
+
+    // --- 17. A corrective's weight DIVIDED by a dial: the gate "push <dial>, inv" ------------------
+    {
+        const pose::FigureData plain = load(library, presets / "Plain.duf");
+        check(about(gateOf(plain, "Divided Corrective"), 0.5),
+              "a corrective gated by 'push <dial>, inv' is DIVIDED by the dial: its default of 2 gives a half");
+        writeJson(presets / "Fit Four.duf",
+                  preset(json::array({figureNode()}), json::array({dial("Base", "Fit", "Fit", 4.0)})));
+        check(about(gateOf(load(library, presets / "Fit Four.duf"), "Divided Corrective"), 0.25),
+              "… and the dial at 4 a quarter (read without the inv, it was multiplied by 4)");
+        writeJson(presets / "Fit Zero.duf",
+                  preset(json::array({figureNode()}), json::array({dial("Base", "Fit", "Fit", 0.0)})));
+        check(corrective(load(library, presets / "Fit Zero.duf"), "Divided Corrective") == nullptr,
+              "… and a divisor of 0 switches the corrective off: the reciprocal of 0 reads 0");
+    }
+
+    // --- 18. The walk's inv, neg and step spline; an operation nobody knows -------------------------
+    {
+        writeJson(presets / "Ratio.duf",
+                  preset(json::array({figureNode()}), json::array({dial("Base", "Ratio", "Ratio", 4.0)})));
+        const pose::FigureData fig = load(library, presets / "Ratio.duf");
+        check(about(applied(fig, "Reciprocal"), 0.25), "a control's 'inv' is the reciprocal: a dial of 4 drives a quarter");
+        check(about(applied(fig, "Negated"), -4.0), "… and its 'neg' the negative: -4");
+        check(!wasApplied(fig, "Stepped"),
+              "a spline_constant holds its earlier knot between two knots: 0 at 4 of 8, not the curve's half");
+        check(!wasApplied(fig, "Mystery") && missingMentions(fig, "Mystery: a formula that drives it uses an "
+                                                                  "operation this importer does not know (frobnicate)"),
+              "a formula with an operation outside the vocabulary is not run: what it drives is left alone, and said");
+    }
+
+    // --- 19. A corrective whose driver cannot be read or said is refused whole ----------------------
+    {
+        const pose::FigureData plain = load(library, presets / "Plain.duf");
+        check(corrective(plain, "Odd Corrective") == nullptr &&
+                  leftOut(plain, "Odd Corrective", "an operation this importer does not know (frobnicate)"),
+              "a corrective whose driver uses an unknown operation is left out and reported, not carried without it");
+        check(corrective(plain, "Inverse Corrective") == nullptr &&
+                  leftOut(plain, "Inverse Corrective", "applies 'inv' to a joint's angle"),
+              "… as is one that takes the reciprocal of a joint's angle, which the pose-time program cannot say");
+    }
+
+    // --- 20. A spline_linear driver stays linear at pose time --------------------------------------
+    {
+        const pose::FigureData plain = load(library, presets / "Plain.duf");
+        const auto splineOf = [&](const std::string& id) -> const pose::CorrectiveOp* {
+            const pose::PoseCorrective* c = corrective(plain, id);
+            if (!c || c->sumFormulas.size() != 1) {
+                return nullptr;
+            }
+            for (const pose::CorrectiveOp& op : c->sumFormulas[0].ops) {
+                if (op.kind == pose::CorrectiveOp::Kind::Spline) {
+                    return &op;
+                }
+            }
+            return nullptr;
+        };
+        const pose::CorrectiveOp* linear = splineOf("Linear Corrective");
+        const pose::CorrectiveOp* smooth = splineOf("Smooth Corrective");
+        check(linear && linear->linear && linear->knots.size() == 2 && smooth && !smooth->linear &&
+                  smooth->knots.size() == 2,
+              "a corrective driven through spline_linear is marked linear for the engine; a spline_tcb one is not");
+    }
+
+    // --- 21. A driver joint whose id has a space in it ---------------------------------------------
+    {
+        std::string error;
+        const pose::FigureData fig = load(library, library / "data/Maker/Spaced/Spaced.dsf", &error);
+        const pose::PoseCorrective* arm = corrective(fig, "Arm Corrective");
+        check(arm && arm->sumFormulas.size() == 1 && !arm->sumFormulas[0].ops.empty() &&
+                  arm->sumFormulas[0].ops[0].kind == pose::CorrectiveOp::Kind::PushRotation &&
+                  arm->sumFormulas[0].ops[0].bone == "Left Arm",
+              "a corrective driven by a joint whose id has a space in it is carried, the joint named as the "
+              "skeleton names it" + (error.empty() ? std::string() : " (" + error + ")"));
+    }
+
     fs::remove_all(library, ec);
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures;
@@ -608,16 +1198,18 @@ int runChecks() {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc >= 3 && std::string(argv[1]) == "--report") {
+    if (argc >= 3 && (std::string(argv[1]) == "--report" || std::string(argv[1]) == "--dump")) {
         std::vector<std::string> roots;
         for (int i = 3; i < argc; ++i) {
             roots.emplace_back(argv[i]);
         }
-        return report(argv[2], std::move(roots));
+        return std::string(argv[1]) == "--dump" ? dump(argv[2], std::move(roots))
+                                                : report(argv[2], std::move(roots));
     }
     if (argc > 1) {
         std::printf("usage: PoseStudioFigureCheck                                   the checks\n"
-                    "       PoseStudioFigureCheck --report <preset> [content root ...]\n");
+                    "       PoseStudioFigureCheck --report <preset> [content root ...]\n"
+                    "       PoseStudioFigureCheck --dump <preset> [content root ...]\n");
         return 2;
     }
     return runChecks();

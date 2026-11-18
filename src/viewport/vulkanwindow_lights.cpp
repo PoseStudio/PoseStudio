@@ -14,8 +14,9 @@
  * entry if the list ended other than it began. Adding and removing are their own brackets.
  *
  * THE MOUSE: a left press on a light's marker selects the light and begins a drag of it in the
- * camera-parallel plane through where it stands — the posing drag's own geometry, wheel for
- * depth included — and a press released without a move is the selection alone.
+ * camera-parallel plane through where it stands — the posing drag's own geometry
+ * (cameraPlaneHit, steppedPlanePoint: vulkanwindow_ik.cpp), wheel for depth included — and a
+ * press released without a move is the selection alone.
  */
 
 #include "vulkanwindow.h"
@@ -83,7 +84,7 @@ int VulkanWindow::addLight(LightKind kind) {
     SceneLight              light;
     light.kind = kind;
     light.name = nextLightName(list, kind);
-    light.intensity = kind == LightKind::Sun ? 1.0f : 4.0f;
+    light.intensity = defaultLightIntensity(kind);
 
     // Where a new light stands: two metres from the subject and above it, on the VIEWER's side
     // — the first a key light's place, 40 degrees to the left of where the user looks from, so
@@ -118,6 +119,10 @@ void VulkanWindow::removeLight(int index) {
     if (index < 0 || static_cast<std::size_t>(index) >= m_deferred.lights.size() || dragInFlight()) {
         return;
     }
+    // A marker's drag ends here, whichever light goes: the drag holds an INDEX into the list,
+    // and the next mouse move would carry whatever light the removal moved into it (its entry,
+    // if it moved the light, is committed first).
+    endLightGesture();
     closeSettlingEdits();
     const std::vector<SceneLight> before = m_deferred.lights;
     std::vector<SceneLight>       list = before;
@@ -223,7 +228,7 @@ bool VulkanWindow::beginLightGesture(const QPointF& localPos) {
     // (The marker is picked within a finger's width of its point: the light keeps its offset
     // from the cursor, so a press beside the point does not make it jump.)
     glm::vec3 hit;
-    m_lightDrag.grabOffset = lightPlaneHit(localPos, hit) ? m_lightDrag.planePoint - hit : glm::vec3(0.0f);
+    m_lightDrag.grabOffset = cameraPlaneHit(localPos, m_lightDrag.planePoint, hit) ? m_lightDrag.planePoint - hit : glm::vec3(0.0f);
     // A LIGHT AIMED AT THE SUBJECT STAYS AIMED AT IT: carried round the figure it goes on
     // lighting her — a lamp is moved to light its subject from somewhere else — where a spotlight
     // that kept its angles shone past her after a hand's width of travel. One the user has turned
@@ -238,29 +243,13 @@ bool VulkanWindow::beginLightGesture(const QPointF& localPos) {
     return true;
 }
 
-bool VulkanWindow::lightPlaneHit(const QPointF& localPos, glm::vec3& outWorld) const {
-    const glm::mat4 view = m_renderer->camera().view();
-    const glm::vec3 planeNormal(view[0][2], view[1][2], view[2][2]); // toward the camera
-    const Ray       ray = cursorRay(localPos);
-    const float     denom = glm::dot(ray.direction, planeNormal);
-    if (std::abs(denom) <= 1e-4f) {
-        return false;
-    }
-    const float t = glm::dot(m_lightDrag.planePoint - ray.origin, planeNormal) / denom;
-    if (t <= 0.0f) {
-        return false;
-    }
-    outWorld = ray.origin + ray.direction * t;
-    return true;
-}
-
 void VulkanWindow::lightDragMove(const QPointF& localPos) {
     if (!m_lightDrag.active || !m_renderer) {
         return;
     }
     const std::size_t index = static_cast<std::size_t>(m_lightDrag.index);
     glm::vec3         hit;
-    if (index >= m_deferred.lights.size() || !lightPlaneHit(localPos, hit)) {
+    if (index >= m_deferred.lights.size() || !cameraPlaneHit(localPos, m_lightDrag.planePoint, hit)) {
         return;
     }
     SceneLight light = m_deferred.lights[index];
@@ -283,14 +272,7 @@ void VulkanWindow::lightDragDepth(float notches, const QPointF& cursorPos) {
         return;
     }
     // The posing drag's depth control (stepIkDepth), for the plane the light is dragged in.
-    Camera&         camera = m_renderer->camera();
-    const glm::mat4 view = camera.view();
-    const glm::vec3 towardCamera(view[0][2], view[1][2], view[2][2]);
-    const float     distance = glm::dot(m_lightDrag.planePoint - camera.position(), -towardCamera);
-    constexpr float kMinPlaneDistance = 0.10f;
-    float           push = notches * kIkDepthPerWheelNotch * std::max(distance, kMinPlaneDistance);
-    push = std::max(push, kMinPlaneDistance - distance);
-    m_lightDrag.planePoint -= towardCamera * push;
+    m_lightDrag.planePoint = steppedPlanePoint(m_lightDrag.planePoint, notches);
     lightDragMove(cursorPos);
 }
 
@@ -359,10 +341,11 @@ bool lampNumber(SceneLight& light, const QString& field, float*& value, float& s
     return true;
 }
 
+/// A light kind by its key (scenelight.h's: "point", "spot", "area", "sun"); a word that is none is a Point.
 LightKind lampKind(const QString& word) {
-    const QString k = word.toLower();
-    return k == QLatin1String("spot") ? LightKind::Spot : k == QLatin1String("area") ? LightKind::Area
-                                                         : k == QLatin1String("sun") ? LightKind::Sun : LightKind::Point;
+    LightKind kind = LightKind::Point;
+    lightKindFromKey(word.toLower().toStdString(), kind);
+    return kind;
 }
 
 } // namespace

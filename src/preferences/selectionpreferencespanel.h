@@ -7,13 +7,12 @@
 #ifndef SELECTIONPREFERENCESPANEL_H
 #define SELECTIONPREFERENCESPANEL_H
 
+#include "colorswatch.h"
 #include "preferencespanel.h"
 
 #include <QColor>
-#include <QPointer>
 
 class QCheckBox;
-class QColorDialog;
 class QPushButton;
 namespace pose {
 class DragNumberBox;
@@ -72,10 +71,10 @@ private:
     /// Opens the color dialog on the mark (one dialog at a time; a second click raises it).
     void pickColor(Mark mark);
 
-    MarkRows               m_marks[MarkCount];
-    QPointer<QColorDialog> m_colorDialog;
-    Mark                   m_picking = Outline;
-    QColor                 m_colorAtOpen;
+    MarkRows                     m_marks[MarkCount];
+    pose::colorswatch::ColorPick m_colorPick; ///< the one color dialog (shared with the properties tabs)
+    Mark                         m_picking = Outline;
+    QColor                       m_colorAtOpen;
 };
 
 #endif // SELECTIONPREFERENCESPANEL_H

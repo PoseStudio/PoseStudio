@@ -6,6 +6,7 @@
 #include "installping.h"
 #include "constants.h"
 #include "preferencesmanager.h"
+#include "runmode.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -125,6 +126,12 @@ void InstallPing::send() {
     }
     if (!qEnvironmentVariableIsEmpty("POSESTUDIO_NO_PING")) {
         qDebug() << "[ping] POSESTUDIO_NO_PING set; skipped";
+        return;
+    }
+    if (RunMode::probing()) {
+        // A run a script or a probe drives is not somebody's launch (and its runner must not
+        // have to remember POSESTUDIO_NO_PING for the count to stay honest).
+        qDebug() << "[ping] a scripted or probing run; skipped";
         return;
     }
     if (!isEnabled()) {

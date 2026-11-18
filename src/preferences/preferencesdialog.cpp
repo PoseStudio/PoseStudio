@@ -97,7 +97,10 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
              new PlaceholderPreferencesPanel(
                  tr("System"),
                  tr("System, performance, and storage settings will appear here."), this));
-    addPanel(tr("Factory Reset"), new FactoryResetPreferencesPanel(this));
+    auto* factoryResetPanel = new FactoryResetPreferencesPanel(this);
+    connect(factoryResetPanel, &FactoryResetPreferencesPanel::factoryResetRequested,
+            this, &PreferencesDialog::factoryResetRequested);
+    addPanel(tr("Factory Reset"), factoryResetPanel);
 
     m_nav->setCurrentRow(0);
 }

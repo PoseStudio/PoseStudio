@@ -1,24 +1,27 @@
 /**
  * @file menumanager.cpp
- * @brief Builds the application's top menu bar (File / Edit / View / Help).
+ * @brief Builds the application's top menu bar (File / Edit / View / Render / Help).
  *
- * Live today: File → New (a fresh launch), Import (.OBJ meshes and .DUF character figures),
- * Edit → Undo/Redo (the viewport's unified pose + lighting stack), Delete Selected Object, the
- * pose utilities (reset joint/limb/pose, mirror pose/limb) and Preferences; the whole View menu
+ * Live today: File → New / Open / Save / Save As (the .pss project: DocumentActions does the
+ * work), Import (one entry per format), Save / Load Pose and Quit; Edit → Undo/Redo (the
+ * viewport's unified edit stack), Delete Selected Object, Add Light, the pose utilities (reset
+ * joint/limb/pose, mirror pose/limb), Turn Joint with Mouse and Preferences; the whole View menu
  * (Show Skeleton, the axis views, Flip, Frame Selected and Home View — all with app-wide
- * shortcuts in Blender's numpad convention); Help → the User Manual (F1), the release notes, the
- * website link and About. The remaining
- * entries (Open/Save, the other import formats, Export, clipboard, docs) are disabled
- * placeholders that establish the menu structure and icon conventions those features will slot
- * into — enabling one means replacing its disabled entry with a real handler here.
+ * shortcuts in Blender's numpad convention — and VR Mode); Render → Render Image / Show Render
+ * Window; Help → the User Manual (F1), What's New, the release notes, the website link, Check
+ * for Updates and About. The remaining entries (Open Recent, Save Copy, Export, Undo History,
+ * Copy / Paste, Tutorials, Support) are disabled placeholders that establish the menu structure
+ * and icon conventions those features will slot into — enabling one means replacing its
+ * disabled entry with a real handler here.
  */
 
 #include "menumanager.h"
+#include "documentactions.h"
 #include "splashoverlay.h"
 #include "preferencesdialog.h"
 #include "assetmanagerwidget.h"
-#include "environmentpanel.h"
 #include "preferencesmanager.h"
+#include "importformats.h"
 #include "constants.h"
 #include "updatecheck.h"
 #include "helpwindow.h"
@@ -26,11 +29,8 @@
 #include "renderwindow.h"    // Render → Render Image: the Render window and its session
 #include "viewport/viewportwidget.h"
 #include "jointtransform.h" // pose::JointTransform: which of the joint-mode keys are live
-#include "scene/shademode.h" // kDefaultShadeMode (File → New's picker reset)
 #include "vrsettings.h"      // VR Mode: can it start, and why not
-#include <QDir>
 #include <QMenu>
-#include <QProcess>
 #include <QMenuBar>
 #include <QAction>
 #include <QApplication>
@@ -41,7 +41,6 @@
 #include <QIcon>
 #include <QMessageBox>
 #include <QDesktopServices>
-#include <QStandardPaths>
 #include <QUrl>
 
 /**
@@ -60,11 +59,11 @@ static QIcon loadDualStateIcon(const QString& baseName) {
  * was moved/deleted. Shared by every File → Import and pose I/O entry point.
  */
 static QString rememberedStartDir(const char* prefKey) {
-    return PreferencesManager::instance().rememberedDirectory(
-        QLatin1String(prefKey), QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
+    return PreferencesManager::instance().rememberedDirectoryOrDocuments(QLatin1String(prefKey));
 }
 
-MenuManager::MenuManager(QMainWindow *parent) : QObject(parent), mainWindow(parent) {}
+MenuManager::MenuManager(QMainWindow *parent, DocumentActions *documents)
+    : QObject(parent), mainWindow(parent), m_documents(documents) {}
 
 void MenuManager::setupMenus() {
     if (!mainWindow) return;
@@ -75,58 +74,85 @@ void MenuManager::setupMenus() {
     QMenu *fileMenu = mainWindow->menuBar()->addMenu(tr("File"));
 
     // File → New: a fresh launch — the scene, its lighting and the Environment tab all go back to
-    // the startup defaults (see newScene). Ctrl+N, window-level like Quit's Ctrl+Q.
+    // the startup defaults (DocumentActions::newScene). Ctrl+N, window-level like Quit's Ctrl+Q.
     QAction *newSceneAction = fileMenu->addAction(loadDualStateIcon("new"), tr("New"));
     newSceneAction->setShortcut(QKeySequence::New);
-    QObject::connect(newSceneAction, &QAction::triggered, mainWindow, [this]() { newScene(); });
+    QObject::connect(newSceneAction, &QAction::triggered, mainWindow, [this]() { m_documents->newScene(); });
     // File → Open / Save / Save As: the .pss project document (the whole scene — figures with
     // their poses, transforms, environment and camera). Shortcuts follow the platform convention.
     QAction *openProjectAction = fileMenu->addAction(loadDualStateIcon("open"), tr("Open..."));
     openProjectAction->setShortcut(QKeySequence::Open);
     QObject::connect(openProjectAction, &QAction::triggered, mainWindow,
-                     [this]() { openProjectFile(); });
+                     [this]() { m_documents->openProjectWithDialog(); });
     fileMenu->addAction(tr("Open Recent..."))->setEnabled(false);
     fileMenu->addSeparator();
 
     QAction *saveProjectAction = fileMenu->addAction(loadDualStateIcon("save"), tr("Save"));
     saveProjectAction->setShortcut(QKeySequence::Save);
     QObject::connect(saveProjectAction, &QAction::triggered, mainWindow,
-                     [this]() { saveProject(); });
+                     [this]() { m_documents->saveProject(); });
     QAction *saveProjectAsAction = fileMenu->addAction(tr("Save As..."));
     saveProjectAsAction->setShortcut(QKeySequence::SaveAs);
     QObject::connect(saveProjectAsAction, &QAction::triggered, mainWindow,
-                     [this]() { saveProjectAs(); });
+                     [this]() { m_documents->saveProjectAs(); });
     fileMenu->addAction(tr("Save Copy..."))->setEnabled(false);
     fileMenu->addSeparator();
 
-    // Import submenu: one entry per supported file format, kept alphabetical. Every entry is live
-    // (a handler of nullptr would be a disabled placeholder, the form the formats took before
-    // their importers landed; the Alembic, BVH, Collada, PLY and STL placeholders were dropped on
-    // 2026-11-04 — none is a character format worth the menu room). .DUF is the rigged character
-    // figure: its own native scene format + pipeline (geometry + skeleton + morphs + materials),
-    // listed as a file format alongside the mesh formats.
+    // Import submenu: one entry per supported file format, kept alphabetical — every one the same
+    // function (importWithDialog) with its own dialog title, file filter and viewport entry
+    // point. The filters' extensions come from core/importformats.h, the one place that says
+    // which extensions a format has. (The Alembic, BVH, Collada, PLY and STL placeholders were
+    // dropped on 2026-11-04 — none is a character format worth the menu room.)
     QMenu *importMenu = fileMenu->addMenu(loadDualStateIcon("import"), tr("Import"));
+    namespace Formats = pose::ImportFormats;
     struct ImportFormat {
-        const char *label;
-        void (MenuManager::*handler)(); // nullptr = importer not built yet
+        const char *label;  // the menu entry (QT_TR_NOOP: translated where it is shown)
+        QString     title;  // the file dialog's title
+        QString     filter; // … and its filter
+        ImportRoute route;  // where the chosen file goes
     };
     const ImportFormat importFormats[] = {
-        {".DUF (DUF File)",                   &MenuManager::importFigureFile},
-        {".FBX (FBX File)",                   &MenuManager::importFbxFile},
-        {".GLB (GL Transmission Format .glTF)", &MenuManager::importGltfFile},
-        {".OBJ (Wavefront)",                  &MenuManager::importObjFile},
-        {".PLY / .SPLAT / .SPZ (Gaussian Splat)",    &MenuManager::importSplatFile},
-        {".USD (Universal Scene Description)", &MenuManager::importUsdFile},
-        {".VRM (VRM Avatar)",                 &MenuManager::importVrmFile},
+        // .DUF is the rigged character figure: its own native scene format + pipeline (geometry
+        // + skeleton + morphs + materials), listed as a file format alongside the mesh formats.
+        {QT_TR_NOOP(".DUF (DUF File)"), tr("Import Character Figure"),
+         Formats::dialogFilter(tr("Figure Files"), Formats::nativeFigureExtensions()),
+         &pose::ViewportWidget::importFigure},
+        // A rigged character in an FBX file: imported through the figure route (VulkanWindow
+        // dispatches by extension), conformed to the rig standard on the way in. A static FBX
+        // mesh imports too, as a model without a skeleton.
+        {QT_TR_NOOP(".FBX (FBX File)"), tr("Import FBX Character"),
+         Formats::dialogFilter(tr("FBX Files"), Formats::fbxExtensions()),
+         &pose::ViewportWidget::importFigure},
+        // A rigged character in a glTF file — the binary .glb, or a .gltf with its buffers and
+        // images beside it — through the same route as FBX.
+        {QT_TR_NOOP(".GLB (GL Transmission Format .glTF)"), tr("Import glTF Character"),
+         Formats::dialogFilter(tr("glTF Files"), Formats::gltfExtensions()),
+         &pose::ViewportWidget::importFigure},
+        {QT_TR_NOOP(".OBJ (Wavefront)"), tr("Import OBJ"),
+         Formats::dialogFilter(tr("Wavefront OBJ"), Formats::modelExtensions()),
+         &pose::ViewportWidget::importObj},
+        // A Gaussian splat scene — the trained .ply, the compact .splat or the compressed .spz —
+        // as a static, unlit model (SplatImportService; drawn by the scene's splat pass).
+        {QT_TR_NOOP(".PLY / .SPLAT / .SPZ (Gaussian Splat)"), tr("Import Gaussian Splat"),
+         Formats::dialogFilter(tr("Gaussian Splat Files"), Formats::splatExtensions()),
+         &pose::ViewportWidget::importSplat},
+        // A rigged character in a USD file — ASCII, crate, or a USDZ package — through the
+        // figure route as well.
+        {QT_TR_NOOP(".USD (Universal Scene Description)"), tr("Import USD Character"),
+         Formats::dialogFilter(tr("USD Files"), Formats::usdExtensions()),
+         &pose::ViewportWidget::importFigure},
+        // A VRM avatar: a GLB with a humanoid bone map, read by the glTF reader through the same
+        // route.
+        {QT_TR_NOOP(".VRM (VRM Avatar)"), tr("Import VRM Avatar"),
+         Formats::dialogFilter(tr("VRM Avatars"), Formats::vrmExtensions()),
+         &pose::ViewportWidget::importFigure},
     };
     for (const ImportFormat &format : importFormats) {
-        QAction *action = importMenu->addAction(format.label);
-        if (format.handler) {
-            QObject::connect(action, &QAction::triggered, mainWindow,
-                             [this, handler = format.handler]() { (this->*handler)(); });
-        } else {
-            action->setEnabled(false); // importer not built yet
-        }
+        QAction *action = importMenu->addAction(tr(format.label));
+        QObject::connect(action, &QAction::triggered, mainWindow,
+                         [this, title = format.title, filter = format.filter, route = format.route]() {
+                             importWithDialog(title, filter, route);
+                         });
     }
 
     fileMenu->addAction(loadDualStateIcon("export"), tr("Export..."))->setEnabled(false);
@@ -141,9 +167,15 @@ void MenuManager::setupMenus() {
     fileMenu->addSeparator();
 
     QAction *quitAction = fileMenu->addAction(tr("Quit"));
-    // Ctrl+Q covers Windows/Linux explicitly; QKeySequence::Quit adds the platform-standard
-    // binding too (e.g. Cmd+Q on macOS), so both are listed rather than picking just one.
-    quitAction->setShortcuts({QKeySequence("Ctrl+Q"), QKeySequence::Quit});
+    // The platform's own Quit bindings, with Ctrl+Q in front where it is not among them: Windows
+    // has none, while the X11 desktops and macOS (where Qt's Ctrl is Cmd) bind that very key —
+    // and one sequence listed twice on an action is two entries in the shortcut map, which Qt
+    // reports as ambiguous instead of triggering.
+    QList<QKeySequence> quitKeys = QKeySequence::keyBindings(QKeySequence::Quit);
+    if (!quitKeys.contains(QKeySequence(Qt::CTRL | Qt::Key_Q))) {
+        quitKeys.prepend(QKeySequence(Qt::CTRL | Qt::Key_Q));
+    }
+    quitAction->setShortcuts(quitKeys);
     QObject::connect(quitAction, &QAction::triggered, QApplication::instance(), &QApplication::quit);
 
     // =========================================================================
@@ -162,7 +194,11 @@ void MenuManager::setupMenus() {
         if (viewportWidget) viewportWidget->undo();
     });
     QAction *redoAction = editMenu->addAction(loadDualStateIcon("redo"), tr("Redo"));
-    redoAction->setShortcut(QKeySequence::Redo);
+    // EVERY redo key of the platform, not its first alone: setShortcut(QKeySequence::Redo) binds
+    // the primary one (Ctrl+Y on Windows), and Ctrl+Shift+Z — the second standard redo key, and
+    // the 3D tools' usual one — then redid only while the viewport had the keyboard, through its
+    // own key handler; pressed after a dial edit in a panel it did nothing.
+    redoAction->setShortcuts(QKeySequence::keyBindings(QKeySequence::Redo));
     QObject::connect(redoAction, &QAction::triggered, mainWindow, [this]() {
         if (viewportWidget) viewportWidget->redo();
     });
@@ -523,7 +559,7 @@ void MenuManager::explainVrUnavailable() {
             VrSettings::setEnabled(true);
         }
         if (box.clickedButton() == restart) {
-            relaunchApplication();
+            m_documents->relaunchApplication();
         }
         return;
     }
@@ -536,61 +572,8 @@ void MenuManager::explainVrUnavailable() {
     box.addButton(tr("OK"), QMessageBox::RejectRole);
     box.exec();
     if (box.clickedButton() == restart) {
-        relaunchApplication();
+        m_documents->relaunchApplication();
     }
-}
-
-void MenuManager::relaunchApplication() {
-    // THE SCENE SURVIVES THE RESTART: it is saved to a temporary project the new process reopens
-    // (main.cpp's --restore-scene), deletes, and re-attaches to the document it belonged to —
-    // unsaved as it was — so a restart costs the user nothing and asks nothing. Only when that
-    // temporary file cannot be written does the unsaved-changes prompt stand in.
-    QStringList args;
-    bool preserved = false;
-    if (viewportWidget) {
-        const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-        const QString temp = dir + QStringLiteral("/restart-scene.pss");
-        if (QDir().mkpath(dir) && viewportWidget->saveProjectFile(temp)) {
-            preserved = true;
-            args << QStringLiteral("--restore-scene") << temp;
-            if (!viewportWidget->projectPath().isEmpty()) {
-                args << QStringLiteral("--project") << viewportWidget->projectPath();
-            }
-            if (!viewportWidget->isProjectDirty()) {
-                args << QStringLiteral("--project-clean");
-            }
-        }
-    }
-    if (!preserved && !confirmDiscardChanges()) {
-        return; // Save cancelled, or the user changed their mind
-    }
-    if (viewportWidget) {
-        viewportWidget->setProjectClean(); // preserved, saved or let go of: no second prompt on the way out
-    }
-    // The Factory Reset relaunch (factoryresetpreferencespanel.cpp), with only the restore
-    // arguments: the new process must not replay this one's "open-with" paths.
-    QProcess::startDetached(QApplication::applicationFilePath(), args);
-    QApplication::quit();
-}
-
-void MenuManager::newScene() {
-    if (!viewportWidget) return;
-    if (!confirmDiscardChanges()) {
-        return; // the user cancelled: the dirty scene stays as it was
-    }
-    // 1. The two picker mirrors first — the panel's restore gesture below does not touch them, and
-    //    these go through the sync signals (pss-shade-mode-sync), so the shader picker and the
-    //    View → Show Skeleton check mark land on their defaults too.
-    viewportWidget->setShowSkeleton(false);
-    viewportWidget->setShadeMode(pose::kDefaultShadeMode);
-    // 2. The Environment tab: dials / backdrop mode back to the startup values, and the HDRI
-    //    caption to the stock panorama (its environmentChosen re-bakes it; resetToEmptyScene's own
-    //    bake supersedes it if it lands later — the request id discards the stale one).
-    if (environmentPanel) {
-        environmentPanel->resetToStartupDefaults();
-    }
-    // 3. The scene itself: models, camera home, deferred state to startup defaults, history cleared.
-    viewportWidget->resetToEmptyScene();
 }
 
 void MenuManager::renderImage(bool start) {
@@ -613,86 +596,18 @@ void MenuManager::renderImage(bool start) {
     }
 }
 
-void MenuManager::setEnvironmentPanel(pose::EnvironmentPanel *panel) {
-    environmentPanel = panel;
-}
-
-void MenuManager::importObjFile() {
+void MenuManager::importWithDialog(const QString &title, const QString &filter, ImportRoute route) {
     if (!viewportWidget) return;
     // (No unsaved-changes prompt: an import ADDS to the scene, it replaces nothing.)
 
-    const QString path = QFileDialog::getOpenFileName(
-        mainWindow, tr("Import OBJ"), rememberedStartDir(Constants::PREF_LAST_IMPORT_DIR),
-        tr("Wavefront OBJ (*.obj)"));
-    if (path.isEmpty()) return; // user cancelled
-
-    // Remember the folder this model came from for the next import.
-    PreferencesManager::instance().setValue(Constants::PREF_LAST_IMPORT_DIR,
-                                            QFileInfo(path).absolutePath());
-    viewportWidget->importObj(path);
-}
-
-void MenuManager::importFigureFile() {
-    if (!viewportWidget) return;
-    // (No unsaved-changes prompt: an import ADDS to the scene, it replaces nothing.)
-
-    const QString path = QFileDialog::getOpenFileName(
-        mainWindow, tr("Import Character Figure"),
-        rememberedStartDir(Constants::PREF_LAST_IMPORT_DIR),
-        tr("Figure Files (*.duf *.dsf)"));
-    if (path.isEmpty()) return; // user cancelled
-
-    PreferencesManager::instance().setValue(Constants::PREF_LAST_IMPORT_DIR,
-                                            QFileInfo(path).absolutePath());
-    viewportWidget->importFigure(path);
-}
-
-void MenuManager::importFbxFile() {
-    // A rigged character in an FBX file: imported through the figure route (VulkanWindow dispatches
-    // by extension), conformed to the rig standard on the way in. A static FBX mesh imports too, as
-    // a model without a skeleton.
-    importRiggedFile(tr("Import FBX Character"), tr("FBX Files (*.fbx)"));
-}
-
-void MenuManager::importGltfFile() {
-    // A rigged character in a glTF file — the binary .glb, or a .gltf with its buffers and
-    // images beside it — through the same route as FBX.
-    importRiggedFile(tr("Import glTF Character"), tr("glTF Files (*.glb *.gltf)"));
-}
-
-void MenuManager::importUsdFile() {
-    // A rigged character in a USD file — ASCII, crate, or a USDZ package — through the same route.
-    importRiggedFile(tr("Import USD Character"), tr("USD Files (*.usd *.usda *.usdc *.usdz)"));
-}
-
-void MenuManager::importVrmFile() {
-    // A VRM avatar: a GLB with a humanoid bone map, read by the glTF reader through the same route.
-    importRiggedFile(tr("Import VRM Avatar"), tr("VRM Avatars (*.vrm)"));
-}
-
-void MenuManager::importSplatFile() {
-    // A Gaussian splat scene — the trained .ply or the compact .splat — as a static, unlit model
-    // (SplatImportService; drawn by the scene's splat pass).
-    if (!viewportWidget) return;
-    const QString path = QFileDialog::getOpenFileName(
-        mainWindow, tr("Import Gaussian Splat"), rememberedStartDir(Constants::PREF_LAST_IMPORT_DIR),
-        tr("Gaussian Splat Files (*.ply *.splat *.spz)"));
-    if (path.isEmpty()) return; // user cancelled
-
-    PreferencesManager::instance().setValue(Constants::PREF_LAST_IMPORT_DIR,
-                                            QFileInfo(path).absolutePath());
-    viewportWidget->importSplat(path);
-}
-
-void MenuManager::importRiggedFile(const QString &title, const QString &filter) {
-    if (!viewportWidget) return;
     const QString path = QFileDialog::getOpenFileName(
         mainWindow, title, rememberedStartDir(Constants::PREF_LAST_IMPORT_DIR), filter);
     if (path.isEmpty()) return; // user cancelled
 
+    // Remember the folder this file came from for the next import.
     PreferencesManager::instance().setValue(Constants::PREF_LAST_IMPORT_DIR,
                                             QFileInfo(path).absolutePath());
-    viewportWidget->importFigure(path);
+    (viewportWidget->*route)(path);
 }
 
 void MenuManager::savePoseFile() {
@@ -739,147 +654,6 @@ void MenuManager::loadPoseFile() {
     }
 }
 
-void MenuManager::saveProjectAs() {
-    if (!viewportWidget) return;
-
-    QString path = QFileDialog::getSaveFileName(mainWindow, tr("Save Project"),
-                                                rememberedStartDir(Constants::PREF_LAST_PROJECT_DIR),
-                                                tr("PoseStudio Projects (*.pss)"));
-    if (path.isEmpty()) return; // user cancelled
-    if (!path.endsWith(QStringLiteral(".pss"), Qt::CaseInsensitive)) {
-        path += QStringLiteral(".pss");
-    }
-    // Remember the project folder for the next save/open, like Import remembers its folder.
-    PreferencesManager::instance().setValue(Constants::PREF_LAST_PROJECT_DIR,
-                                            QFileInfo(path).absolutePath());
-    if (!viewportWidget->saveProjectFile(path)) {
-        QMessageBox::warning(mainWindow, tr("Save Project"),
-                             tr("Could not write the project file."));
-        return;
-    }
-    viewportWidget->setProjectPath(path); // Save As adopts the document path: plain Save now writes here
-    viewportWidget->setProjectClean(); // a successful save is what clears the dirty flag
-}
-
-void MenuManager::saveProject() {
-    if (!viewportWidget) return;
-    const QString path = viewportWidget->projectPath();
-    if (path.isEmpty()) {
-        saveProjectAs(); // no document path yet: Save falls back to Save As
-        return;
-    }
-    PreferencesManager::instance().setValue(Constants::PREF_LAST_PROJECT_DIR,
-                                            QFileInfo(path).absolutePath());
-    if (!viewportWidget->saveProjectFile(path)) {
-        QMessageBox::warning(mainWindow, tr("Save Project"),
-                             tr("Could not write the project file."));
-        return;
-    }
-    viewportWidget->setProjectClean();
-}
-
-bool MenuManager::confirmDiscardChanges() {
-    if (!viewportWidget || !viewportWidget->isProjectDirty()) {
-        return true; // nothing to lose
-    }
-    // Explicit button labels: the platform theme's stock text for Discard is a long sentence
-    // that the message box truncates ("lose without..."). Custom buttons keep the wording ours.
-    QMessageBox box(mainWindow);
-    box.setIcon(QMessageBox::Question);
-    box.setWindowTitle(tr("Unsaved Changes"));
-    box.setText(tr("The current scene has unsaved changes."));
-    QAbstractButton *save = box.addButton(tr("Save"), QMessageBox::AcceptRole);
-    QAbstractButton *discard = box.addButton(tr("Discard Changes"),
-                                            QMessageBox::DestructiveRole);
-    // The box sizes itself to the text line, which is narrower than the button row needs;
-    // guarantee the full label stays visible.
-    discard->setMinimumWidth(150);
-    box.addButton(tr("Cancel"), QMessageBox::RejectRole);
-    box.exec();
-    if (box.clickedButton() == save) {
-        saveProject();                           // its own dialog (Save As for a new document)
-        return !viewportWidget->isProjectDirty(); // a cancelled Save As or a failed write: nothing
-    }                                            // was saved, so the scene is NOT let go of
-    return box.clickedButton() == discard;
-}
-
-void MenuManager::openProjectFile() {
-    if (!viewportWidget) return;
-
-    const QString path = QFileDialog::getOpenFileName(mainWindow, tr("Open Project"),
-                                                      rememberedStartDir(Constants::PREF_LAST_PROJECT_DIR),
-                                                      tr("PoseStudio Projects (*.pss)"));
-    if (path.isEmpty()) return; // user cancelled
-    if (!confirmDiscardChanges()) {
-        return;
-    }
-
-    PreferencesManager::instance().setValue(Constants::PREF_LAST_PROJECT_DIR,
-                                            QFileInfo(path).absolutePath());
-
-    // First pass: parse + link pre-flight. A missing source stops here — the scene is untouched.
-    std::vector<std::string> missing;
-    std::string error;
-    const int status = viewportWidget->loadProjectFile(path, {}, missing, error);
-    if (status == 0) {
-        return; // loaded clean
-    }
-    if (status != 1) {
-        QMessageBox::warning(mainWindow, tr("Open Project"),
-                             tr("Could not read the project file:\n%1")
-                                             .arg(QString::fromStdString(error)));
-        return;
-    }
-
-    // LINK RECOVERY — one consolidated dialog: a row per missing source, each with its own
-    // re-point picker. A declined row is skipped with a warning naming the file.
-    std::map<std::string, std::string> recovered;
-    QStringList skipped;
-    for (const std::string& src : missing) {
-        const QString original = QString::fromStdString(src);
-        QMessageBox box(mainWindow);
-        box.setWindowTitle(tr("Missing Figure File"));
-        box.setText(tr("The figure file referenced by this project is missing:"));
-        box.setInformativeText(original);
-        QAbstractButton *pickButton = box.addButton(tr("Choose File..."),
-                                                 QMessageBox::ActionRole);
-        QAbstractButton *skipButton = box.addButton(tr("Skip"), QMessageBox::ActionRole);
-        box.addButton(QMessageBox::Cancel);
-        box.exec();
-        if (box.clickedButton() == pickButton) {
-            const QString replacement = QFileDialog::getOpenFileName(
-                mainWindow, tr("Locate Figure File"),
-                rememberedStartDir(Constants::PREF_LAST_IMPORT_DIR),
-                tr("Figure Files (*.duf *.dsf *.obj)"));
-            if (replacement.isEmpty()) {
-                skipped << original;
-                recovered[src] = std::string(); // "" = leave this figure out of the load
-                continue;
-            }
-            recovered[src] = replacement.toStdString();
-        } else if (box.clickedButton() == skipButton) {
-            skipped << original; // the row is skipped, the rest of the project still loads
-            recovered[src] = std::string(); // (the load's pre-flight no longer reports it missing)
-        } else if (box.clickedButton() &&
-                   box.buttonRole(box.clickedButton()) == QMessageBox::RejectRole) {
-            return; // Cancel: the whole open is aborted, the scene stays as it was
-        }
-    }
-    if (!skipped.isEmpty()) {
-        QMessageBox::warning(mainWindow, tr("Open Project"),
-                             tr("Skipped missing figure files:\n%1")
-                                             .arg(skipped.join(QLatin1Char('\n'))));
-    }
-
-    // Second pass: the recovered paths are applied, everything else is imported as saved.
-    std::vector<std::string> stillMissing;
-    if (viewportWidget->loadProjectFile(path, recovered, stillMissing, error) != 0) {
-        QMessageBox::warning(mainWindow, tr("Open Project"),
-                             tr("Could not load the project:\n%1")
-                                             .arg(QString::fromStdString(error)));
-    }
-}
-
 void MenuManager::openPreferencesDialog(const QString &initialTab) {
     PreferencesDialog dialog(mainWindow);
     if (!initialTab.isEmpty()) dialog.selectTab(initialTab);
@@ -903,5 +677,8 @@ void MenuManager::openPreferencesDialog(const QString &initialTab) {
         QObject::connect(&dialog, &PreferencesDialog::jointHighlightChanged,
                           viewportWidget, &pose::ViewportWidget::setJointHighlight);
     }
+    // The Factory Reset page asks; the document's keeper does it (prompt, wipe, relaunch).
+    QObject::connect(&dialog, &PreferencesDialog::factoryResetRequested,
+                      m_documents, &DocumentActions::factoryReset);
     dialog.exec();
 }

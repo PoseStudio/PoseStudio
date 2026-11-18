@@ -85,8 +85,6 @@ public:
     bool  begin(); ///< xrBeginSession (after a Ready event). False on failure.
     void  end();   ///< xrEndSession (after a Stopping event, with the frame thread stopped).
     bool  running() const { return m_running; }
-    /// Asks the runtime to end the session: a Stopping event follows, then Gone.
-    void  requestExit();
 
     // --- The frame loop ------------------------------------------------------------------------
     /// Blocks until the runtime wants the next frame rendered. May run on a thread of its own.
@@ -105,7 +103,6 @@ public:
     bool syncInput(int64_t time, VrInput& out);
     /// A short vibration on hand @p hand (0 left, 1 right); no-op without controllers.
     void hapticPulse(int hand, float seconds, float amplitude);
-    bool hasControllers() const { return m_input != nullptr; }
     /// Acquires (and waits for) eye @p eye's next swapchain image — and its depth image, with a
     /// depth swapchain; its index selects the framebuffer to render into. False on failure.
     bool acquireEye(int eye, uint32_t& imageIndex);
@@ -149,7 +146,6 @@ private:
     bool       m_floorLevel = false;
     XrEnvironmentBlendMode m_blendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 
-    XrSessionState m_state = XR_SESSION_STATE_UNKNOWN;
     bool           m_running = false;
     std::unique_ptr<OpenXrInput> m_input; // the controllers; null when the runtime offers none
 

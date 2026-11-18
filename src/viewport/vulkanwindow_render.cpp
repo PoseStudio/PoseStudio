@@ -20,6 +20,7 @@
 
 #include "vulkanwindow.h"
 
+#include "constants.h" // PREF_RENDER_DEVICE
 #include "environment.h"
 #include "environmentsource.h" // loadEnvironmentImage (a render's backdrop behind a splat scene)
 #include "importformats.h"
@@ -28,6 +29,7 @@
 #include "meshdisplace.h"
 #include "model.h"
 #include "ikscript.h" // the scripted test's `render`
+#include "preferencesmanager.h"
 #include "renderexport.h"
 #include "renderscene.h"
 #include "rendersession.h"
@@ -55,6 +57,16 @@
 #include <utility>
 
 namespace pose {
+
+QString VulkanWindow::preferredRenderDevice() {
+    const QString chosen = PreferencesManager::instance().getValue(Constants::PREF_RENDER_DEVICE).toString();
+    for (const RenderDevice& device : RenderSession::devices()) {
+        if (!chosen.isEmpty() && device.id == chosen) {
+            return chosen;
+        }
+    }
+    return RenderSession::defaultDeviceId();
+}
 
 const std::vector<glm::vec3>& VulkanWindow::studioEnvironmentPixels() const {
     // (Made once: see RenderSnapshot::environmentPixels.)
@@ -85,7 +97,7 @@ void VulkanWindow::captureRenderLighting(RenderSnapshot& snapshotRef) const {
         studioEnvironmentPixels(); // (made once: see RenderSnapshot::environmentPixels)
         snapshot->environmentPixels = m_studioEnvironment;
         renderapi::Image image;
-        image.id = 1; // (no DecodedImage has this address)
+        image.id = RenderSnapshot::kStudioEnvironmentImageId;
         image.pixels = snapshot->environmentPixels->data();
         image.width = m_studioEnvironmentWidth;
         image.height = m_studioEnvironmentHeight;
@@ -370,6 +382,11 @@ void VulkanWindow::displaceCapturedZones(RenderSnapshot& snapshot, OverlayBake& 
 }
 
 std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
+    OverlayBake bake; // (one capture's: the zones of one map share one composite)
+    return captureRenderSceneWith(bake);
+}
+
+std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderSceneWith(OverlayBake& bake) {
     if (!m_renderer) {
         return nullptr;
     }
@@ -378,7 +395,9 @@ std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
     Scene&                  live = scene();
     const LightingSettings& lighting = live.lightingSettings();
     auto                    snapshot = std::make_shared<RenderSnapshot>();
-    OverlayBake             bake;
+    if (bake.kept) {
+        bake.beginPass();
+    }
 
     for (std::size_t mi = 0; mi < live.modelCount(); ++mi) {
         Model* model = live.modelAt(mi);
@@ -419,6 +438,10 @@ std::shared_ptr<RenderSceneHolder> VulkanWindow::captureRenderScene() {
         // DISPLACEMENT: the zones with a displacement map, subdivided and moved by it — the
         // surface a render traces (the rasterized viewport modes do not displace).
         displaceCapturedZones(*snapshot, bake, modelIndex, captured);
+    }
+
+    if (bake.kept) {
+        bake.dropUnused(); // (what this capture uses, the snapshot holds too: imageOwners)
     }
 
     captureRenderLighting(*snapshot); // the environment, the key light, the light objects, the floor

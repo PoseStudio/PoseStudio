@@ -1,28 +1,33 @@
 # Project Files
 
-A project file (`.pss`) saves the whole scene — every figure with its pose and position, the environment, your lights, and the camera — as one small document you can reopen later or share. It is the way to keep a work in progress: close the app, come back, open the project, and the scene is exactly where you left it.
+A project file (`.pss`) saves the whole scene — every figure with its pose and position, every model and Gaussian splat scene with its placement, the environment, your lights, and the camera — as one small document you can reopen later or share. It is the way to keep a work in progress: close the app, come back, open the project, and the scene is exactly where you left it.
 
 ## Saving and opening
 
 - **File → Save** (`Ctrl+S`) writes the scene to the project's file. The first save (and every save after **Save As**) asks for a place; afterwards it reuses the remembered path. If no path has been set, Save behaves as Save As.
 - **File → Save As…** (`Ctrl+Shift+S`) picks a new `.pss` location and becomes the project's file from then on. The dialog opens in the folder you used last time; `.pss` is added to the name if you leave it off.
 - **File → Open** (`Ctrl+O`) loads a `.pss` project. Everything currently in the scene is replaced by the project's content.
+- A `.pss` file given to PoseStudio on the command line — with *Open with*, or dropped onto `PoseStudio.exe` — is opened the same way once the window is up: if it cannot be read a message says why, and files that have moved are asked for as described below.
 
 A save is tiny — kilobytes, not megabytes: the file stores references and numbers, never geometry or textures. Opening a project re-imports the figure files it names through the normal import pipeline and restores their poses, transforms, [material edits](materials.md) (the zones whose material differs from the import, by zone name — every value, and each texture slot that was replaced by a file or cleared, and each zone's [overlays](materials.md#overlays-tattoos-marks-and-makeup) with their controls; a replaced map and an overlay image are referenced by their paths, like the figure file itself), the environment (HDRI and every lighting dial), your [lights](lights.md) (each with its kind, place, direction, color and settings) and the camera framing on top.
 
+The shading mode and the skeleton overlay belong to the view, not to the scene: they are not saved, and a project opens in PBR Shaded with the overlay off.
+
 ## If a figure file has moved
 
-A project names each figure's source file by path. If one of those files is missing when you open — moved, renamed, on another machine — PoseStudio asks for each missing file:
+A project names every file it was built from — each figure, model and Gaussian splat scene — by its path. If one of those files is missing when you open the project — moved, renamed, on another machine — PoseStudio asks for each missing file:
 
-- **Choose File…** re-points the entry at the file you pick;
-- **Skip** leaves that figure out and opens the rest of the project (a warning names what was skipped);
+- **Choose File…** re-points the entry at the file you pick; the file dialog lists every figure, model and capture format PoseStudio imports;
+- **Skip** leaves that object out and opens the rest of the project (a message afterwards names what was skipped);
 - **Cancel** aborts the open entirely.
 
 The scene you had stays untouched until every referenced file is found or explicitly skipped, so a cancelled open never costs you anything.
 
+A file that is found but can no longer be imported — a damaged file, or one with nothing in it to show — is left out as well: the import's own message says what went wrong ([Import problems](importing.md#import-problems)), and the rest of the project opens. Saving the project afterwards writes it without that object, as after a **Skip**.
+
 ## Unsaved changes
 
-PoseStudio tracks whether the scene has changed since the last save — posing, moving a figure, editing a material, importing, deleting, changing the environment, and adding or changing a light all count; moving the camera does not (see [Preferences](preferences.md) to make it count). When there are unsaved changes, **New**, **Open** and closing the window ask first:
+PoseStudio tracks whether the scene has changed since the last save — posing, moving a figure, moving, turning or scaling a model or a capture on the Transform tab, editing a material, importing, deleting, changing the environment, and adding or changing a light all count; moving the camera does not (see [Preferences](preferences.md) to make it count). When there are unsaved changes, **New**, **Open** and closing the window ask first:
 
 - **Save** writes the project and continues;
 - **Discard Changes** discards the changes and continues;
@@ -83,4 +88,4 @@ The file is versioned JSON and can be read by hand:
 }
 ```
 
-Each figure row carries its pose the same way a `.pose` file does (bone rotations, the root's `@trans:` offset, pins), plus its transform — translation, rotation as a quaternion `[x, y, z, w]`, scale. A light's `kind` is `point`, `spot`, `area` or `sun`; its `position` and sizes are in metres, its angles in degrees, its `color` in linear values; an area light also has `width` and `height`, a sun `sunAngleDeg`. The camera's `yaw` and `pitch` are in radians. Figure and panorama paths are absolute: a project opened on another computer, or after the files were moved, asks where each one is (above). Unknown fields are ignored on load, so files written by a newer version open in an older one; a file from a newer major version is rejected with an explanation rather than guessed at. A damaged file — bad JSON, a missing section, a non-numeric value — is rejected whole: the current scene is never half-replaced.
+Each figure row carries its pose the same way a `.pose` file does (bone rotations, the root's `@trans:` offset, pins), plus its transform — translation, rotation as a quaternion `[x, y, z, w]`, scale. A light's `kind` is `point`, `spot`, `area` or `sun`; its `position` and sizes are in metres, its angles in degrees, its `color` in linear values; an area light also has `width` and `height`, a sun `sunAngleDeg`. The camera's `yaw` and `pitch` are in radians. Figure and panorama paths are absolute: a project opened on another computer, or after the files were moved, asks where each figure, model or capture file is (above), and a panorama that is no longer there leaves the default environment in its place. Unknown fields are ignored on load, so files written by a newer version open in an older one; a file from a newer major version is rejected with an explanation rather than guessed at. A damaged file — bad JSON, a missing section, a non-numeric value, a number too large to be one — is rejected whole: the current scene is never half-replaced. A material or overlay value that a hand edit has put outside the range its setting can take — an index of refraction below 1, say — is held to that range rather than refused.

@@ -11,8 +11,18 @@
  * the viewport's PBR mode, path traced. The scene the render was started with is HELD for as
  * long as the engine may read from it — that is this class's part of the interface's promise.
  *
- * The engine library itself is loaded on first use and shared by every session of the process
- * (RenderSession::engine): an application started to pose pays nothing for the renderer.
+ * The engine library itself is loaded on first use (RenderSession::engine): an application
+ * started to pose pays nothing for the renderer.
+ *
+ * WHOSE ENGINE. An engine instance renders ONE thing at a time, and starting it ends what it was
+ * rendering (renderengineapi.h). The process has one shared instance, which a session renders on
+ * while no OTHER session's render is on it; while one is — the Render window's render running,
+ * and a material saved meanwhile whose icon is a render of its own, or a script's `render` — the
+ * session renders on an instance of its own instead (RenderEngineLibrary::createEngine), beside
+ * the first. So no session's start ever ends another session's render, and a session reads the
+ * status and the pixels of the engine ITS render runs on and of no other. (The viewport's
+ * Rendered mode has an instance of its own from the start, and pauses for every final render:
+ * activity().)
  */
 
 #ifndef RENDERSESSION_H
@@ -67,8 +77,10 @@ public:
     explicit RenderSession(QObject* parent = nullptr);
     ~RenderSession() override;
 
-    /// The process's render engine, loaded on first call. Null — with @p error saying why — in
-    /// a build without one or when it will not load.
+    /// The process's shared render engine, loaded on first call. Null — with @p error saying
+    /// why — in a build without one or when it will not load. For what an engine can be ASKED
+    /// (its name, its devices): a render is started through a session, which knows whether this
+    /// instance is free (see the file comment).
     static renderapi::Engine* engine(QString* error = nullptr);
     /// A further engine of the same library, the caller's own (the viewport's interactive render:
     /// renderenginelibrary.h). Null without an engine.
@@ -89,7 +101,8 @@ public:
     static QString defaultDeviceId();
 
     /// Starts rendering @p scene (held until the render has ended). False with @p error when
-    /// there is no engine or it refuses. A render already running is stopped first.
+    /// there is no engine or it refuses. A render THIS session is running is stopped first;
+    /// another session's goes on, and this one renders beside it.
     bool start(std::shared_ptr<RenderSceneHolder> scene, const RenderOptions& options, QString* error = nullptr);
     /// Stops the render (the image so far stays).
     void stop();
@@ -124,6 +137,10 @@ private:
 
     QTimer                             m_timer;
     std::shared_ptr<RenderSceneHolder> m_scene; // held while the engine may read it
+    // An engine instance of this session's own, made the first time the shared one was busy.
+    // (Declared after m_scene: destroyed before the scene its last render read.)
+    std::unique_ptr<RenderEngineInstance> m_ownEngine;
+    renderapi::Engine*                 m_engine = nullptr; // the engine this session's render is running on (null: none is)
     RenderOptions                      m_options;
     QByteArray                         m_deviceId; // (the UTF-8 the engine is handed)
     renderapi::Status                  m_status;

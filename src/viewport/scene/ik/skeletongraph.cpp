@@ -4,9 +4,9 @@
  *        BFS re-rooting into the parent/traversal view the solver walks, and active-path marking.
  *
  * build() roots at the first parentless node only as a placeholder: the rig re-roots at the
- * PELVIS as soon as it is built and re-asserts that rooting per drag (the contact-rooted design
- * this class was written for was abandoned — see the header). markActivePaths is what confines a
- * solve to the effector and pin chains; everything else rides along rigidly. Qt-free (std only).
+ * PELVIS as soon as it is built, once (the contact-rooted design this class was written for was
+ * abandoned — see the header). markActivePaths is what confines a solve to the effector and pin
+ * chains; everything else rides along rigidly. Qt-free (std only).
  */
 #include "skeletongraph.h"
 
@@ -30,8 +30,8 @@ void SkeletonGraph::build(const std::vector<int>& parents) {
         }
     }
     if (hierarchyRoot >= 0) {
-        // Placeholder rooting only: the rig re-roots at the pelvis as soon as it is built and
-        // re-asserts that rooting per drag (contact re-rooting was abandoned — see the header).
+        // Placeholder rooting only: the rig re-roots at the pelvis as soon as it is built
+        // (contact re-rooting was abandoned — see the header).
         setRoot(hierarchyRoot);
     }
 }

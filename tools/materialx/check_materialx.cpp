@@ -247,6 +247,58 @@ void checkTextures() {
           "the displacement shader's map (outside the nodegraph: no prefix), its scale in centimetres from black");
     check(about(p.ior, 1.5f) && noted(m, "index of refraction"), "an image on an input the material has no map for is said, and the value keeps its default");
 
+    // THE ONE PLACEMENT, and the displacement map: the base color's stands whatever the
+    // displacement image is tiled by; with no map placed before it, the displacement's is the
+    // first and is the material's.
+    const auto displaced = [](const char* colorTiling) {
+        return read(wrap(std::string(R"(
+  <tiledimage name="color" type="color3">
+    <input name="file" type="filename" value="brick_color.png" />
+    )") + colorTiling + R"(
+  </tiledimage>
+  <tiledimage name="height" type="float">
+    <input name="file" type="filename" value="brick_height.png" />
+    <input name="uvtiling" type="vector2" value="2, 2" />
+  </tiledimage>
+  <standard_surface name="SR" type="surfaceshader">
+    <input name="base_color" type="color3" nodename="color" />
+  </standard_surface>
+  <displacement name="disp" type="displacementshader">
+    <input name="displacement" type="float" nodename="height" />
+  </displacement>
+  <surfacematerial name="Brick" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="SR" />
+    <input name="displacementshader" type="displacementshader" nodename="disp" />
+  </surfacematerial>
+)"));
+    };
+    const MaterialXDocument tiledBoth = displaced(R"(<input name="uvtiling" type="vector2" value="4, 4" />)");
+    check(tiledBoth.materials.size() == 1 && hasMap(tiledBoth.materials[0], MaterialMap::Displacement, "brick_height.png") &&
+              about(tiledBoth.materials[0].params.uvTiling.x, 4.0f) && about(tiledBoth.materials[0].params.uvTiling.y, 4.0f),
+          "a displacement image's tiling does not replace the base color's (the material has one placement)");
+    const MaterialXDocument tiledHeight = displaced("");
+    check(tiledHeight.materials.size() == 1 && about(tiledHeight.materials[0].params.uvTiling.x, 2.0f) &&
+              about(tiledHeight.materials[0].params.uvTiling.y, 2.0f),
+          "... and is the material's where no map before it was placed");
+
+    // What a document says past what the material can hold is held to it — and so is what
+    // arithmetic on its constants leaves that is no number at all (inf - inf).
+    const MaterialXDocument wild = read(wrap(R"(
+  <multiply name="big" type="float"><input name="in1" type="float" value="3e38" /><input name="in2" type="float" value="3e38" /></multiply>
+  <subtract name="none" type="float"><input name="in1" type="float" nodename="big" /><input name="in2" type="float" nodename="big" /></subtract>
+  <standard_surface name="Wild" type="surfaceshader">
+    <input name="specular_IOR" type="float" value="0.2" />
+    <input name="coat_IOR" type="float" value="12" />
+    <input name="specular_roughness" type="float" nodename="none" />
+    <input name="specular_anisotropy" type="float" nodename="big" />
+    <input name="subsurface_scale" type="float" value="5" />
+  </standard_surface>
+)"));
+    check(wild.materials.size() == 1 && wild.materials[0].params.ior == 1.0f && wild.materials[0].params.coatIor == 3.0f &&
+              wild.materials[0].params.roughness == 0.0f && wild.materials[0].params.lobe1Roughness == 0.0f &&
+              wild.materials[0].params.anisotropy == 1.0f && wild.materials[0].params.subsurfaceRadius == 100.0f,
+          "values past what the material holds are held to it, and what is no number becomes one");
+
     // A height read as relief, a file read from its alpha, and a placement node.
     const MaterialXDocument more = read(wrap(R"(
   <texcoord name="uv" type="vector2" />
@@ -423,8 +475,79 @@ void checkDocuments() {
     check(ok && included.materials.size() == 1 && included.materials[0].name == "Uses" && about(included.materials[0].params.roughness, 0.6f),
           "a shading node in an included document is found (an include that cannot be had is passed over)");
 
+    // What an included document's ROOT says for its elements stays theirs: its file prefix and
+    // its color space (the including document here says neither, then says its own).
+    const pose::MaterialXInclude library = [](const std::string& href, std::string& text) {
+        if (href != "library/wood.mtlx") {
+            return false;
+        }
+        text = wrap(R"(
+  <image name="wood" type="color3"><input name="file" type="filename" value="wood_color.png" /></image>
+  <standard_surface name="Wood" type="surfaceshader">
+    <input name="base_color" type="color3" nodename="wood" />
+    <input name="specular_color" type="color3" value="0.5, 0.5, 0.5" />
+  </standard_surface>
+)", "version=\"1.38\" fileprefix=\"textures/\" colorspace=\"srgb_texture\"");
+        return true;
+    };
+    for (const char* attributes : {"version=\"1.38\"", "version=\"1.38\" fileprefix=\"other/\" colorspace=\"lin_rec709\""}) {
+        const MaterialXDocument uses = read(wrap(R"(
+  <xi:include href="library/wood.mtlx" />
+  <surfacematerial name="Plank" type="material"><input name="surfaceshader" type="surfaceshader" nodename="Wood" /></surfacematerial>
+)", attributes), &ok, &error, library);
+        check(ok && uses.materials.size() == 1 && hasMap(uses.materials[0], MaterialMap::BaseColor, "textures/wood_color.png") &&
+                  about(uses.materials[0].params.specularColor.x, 0.21404f),
+              attributes[14] == '\0' ? "an included document's own file prefix and color space go with its elements"
+                                     : "... whatever the including document says for its own");
+    }
+
     read("<materialx version=\"1.38\"><standard_surface name=\"A\" type=\"surfaceshader\">", &ok, &error);
     check(!ok && error.find("not valid XML") != std::string::npos, "markup that is not closed is refused, with the reason");
+
+    // A MALFORMED document must be refused or read, at once — never crash or hang the reader.
+    std::string deep = "<materialx version=\"1.38\">";
+    for (int i = 0; i < 100000; ++i) {
+        deep += "<a>";
+    }
+    read(deep, &ok, &error);
+    check(!ok && error.find("nested too deeply") != std::string::npos, "a hundred thousand unclosed elements are refused (no stack overflow)");
+    // Nodes that name themselves as their inputs, and a chain of thirty that each name the one
+    // before twice: traced afresh along every path that is two to the thirtieth traces.
+    std::string chain = R"(<image name="m0" type="color3"><input name="file" type="filename" value="wood.png" /></image>)";
+    for (int k = 1; k <= 30; ++k) {
+        const std::string self = "m" + std::to_string(k), before = "m" + std::to_string(k - 1);
+        chain += "<multiply name=\"" + self + "\" type=\"color3\"><input name=\"in1\" type=\"color3\" nodename=\"" + before +
+                 "\" /><input name=\"in2\" type=\"color3\" nodename=\"" + before + "\" /></multiply>";
+    }
+    const MaterialXDocument tangled = read(wrap(chain + R"(
+  <mix name="loop" type="color3">
+    <input name="fg" type="color3" nodename="loop" /><input name="bg" type="color3" nodename="loop" /><input name="mix" type="float" nodename="loop" />
+  </mix>
+  <standard_surface name="Tangled" type="surfaceshader">
+    <input name="base_color" type="color3" nodename="m30" />
+    <input name="specular_color" type="color3" nodename="loop" />
+    <input name="specular_roughness" type="float" value="0.4" />
+  </standard_surface>
+)"), &ok);
+    check(ok && tangled.materials.size() == 1 && about(tangled.materials[0].params.roughness, 0.4f),
+          "nodes that name themselves, or each other twice over, are traced once (the read returns)");
+    const MaterialXDocument numbers = read(wrap(R"(
+  <standard_surface name="NoNumbers" type="surfaceshader">
+    <input name="specular_roughness" type="float" value="nan" />
+    <input name="metalness" type="float" value="1e40" />
+    <input name="coat" type="float" value="inf" />
+    <input name="specular_IOR" type="float" value="1.4" />
+  </standard_surface>
+)"), &ok);
+    check(ok && numbers.materials.size() == 1 && about(numbers.materials[0].params.roughness, 0.2f) &&
+              about(numbers.materials[0].params.metalness, 0.0f) && about(numbers.materials[0].params.topCoat, 0.0f) &&
+              about(numbers.materials[0].params.ior, 1.4f),
+          "a value that is no finite number (nan, inf, 1e40) is no value: the input keeps its default");
+    const MaterialXDocument entities = read(wrap(R"(
+  <standard_surface name="A&#0;B&#xD800;C&#x110000;D&#233;" type="surfaceshader" />
+)"), &ok);
+    check(ok && entities.materials.size() == 1 && entities.materials[0].name == "A&#0;B&#xD800;C&#x110000;D\xC3\xA9",
+          "a character reference that is no character stays as written (no NUL, no invalid UTF-8 in a name)");
     read("<materialx version=\"1.38\"><input name=broken /></materialx>", &ok, &error);
     check(!ok && error.find("not quoted") != std::string::npos, "an attribute without its quotes is refused");
     read("<?xml version=\"1.0\"?><svg><rect/></svg>", &ok, &error);

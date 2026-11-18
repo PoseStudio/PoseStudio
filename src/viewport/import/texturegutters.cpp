@@ -85,10 +85,18 @@ void rasterizeCoverage(const std::vector<Vertex>& vertices, const std::vector<ui
         const auto floorTile = [](long long v, long long tile) { return (v >= 0 ? v / tile : -((-v + tile - 1) / tile)) * tile; };
         for (int t = 0; t < triCount; ++t) {
             long long lx[3], ly[3];
+            bool      finite = true;
             for (int c = 0; c < 3; ++c) {
                 const glm::vec2& uv = vertices[indices[3 * t + c]].uv;
+                finite = finite && std::isfinite(uv.x) && std::isfinite(uv.y);
+                if (!finite) {
+                    break;
+                }
                 lx[c] = std::llround(static_cast<double>(uv.x) * scale.x * 4.0);
                 ly[c] = std::llround(static_cast<double>(uv.y) * scale.y * 4.0);
+            }
+            if (!finite) {
+                continue; // (a NaN UV: nothing to rasterize, and rounding one to an integer is not defined)
             }
             const long long shiftX = floorTile(std::min({lx[0], lx[1], lx[2]}), qw);
             const long long shiftY = floorTile(std::min({ly[0], ly[1], ly[2]}), qh);

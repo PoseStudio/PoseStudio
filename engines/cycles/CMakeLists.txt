@@ -39,7 +39,6 @@ cycles_external_libraries_append(LIB)
 add_library(PoseStudioCycles SHARED ${SRC})
 target_include_directories(PoseStudioCycles PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
-  ${CMAKE_CURRENT_SOURCE_DIR}/..   # (unused in the Cycles tree; harmless)
   ${PROJECT_SOURCE_DIR}/src        # Cycles's own headers: "scene/scene.h", "session/session.h"
   ${POSESTUDIO_RENDER_API_DIR}
 )

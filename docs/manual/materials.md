@@ -10,7 +10,7 @@ PoseStudio has **one material model**: a physically based surface in the metalli
 
 Click an object in the viewport to select it — the blue outline shows which — and the tab shows its name and its **zones**. A zone is one material group of the object: a figure has a dozen or more (Torso, Face, Lips, Legs, Irises, Cornea, Teeth …), a prop has one per material in its file. The **Zone** picker lists them; pick one and the sections below show its material.
 
-Clicking a surface selects its zone. Click the figure's cheek and the tab shows **Face**; click her thigh and it shows **Legs**; click the eye and it shows the sclera or the iris (the cornea is clear, so the click lands on what is behind it). The same click selects the joint under the cursor for posing, so the two tabs follow one gesture.
+Clicking a surface selects its zone. Click the figure's cheek and the tab shows **Face**; click her thigh and it shows **Legs**; click the eye and it shows the sclera or the iris (the cornea is clear, so the click lands on what is behind it). The same click selects the joint under the cursor for posing, so the two tabs follow one gesture. A prop works the same way: click one of its surfaces and the tab shows the zone that surface belongs to.
 
 Nothing on the tab applies to a Gaussian splat scene: a capture carries its own color and light and has no material to edit.
 
@@ -157,7 +157,7 @@ The material is laid out in collapsible sections; click a heading to fold or unf
 
 Every value is a **scrub field** like the Environment tab's dials: drag left or right across it to change it — with **Shift** held, in steps a tenth the size — or click it once to type a number (`Enter` confirms, `Esc` cancels). A color is a **swatch**: click it for a color picker, and the color changes on the figure as you choose (`Cancel` puts it back). The small button beside each row returns that one value to what the file imported with — never to a generic default. The figure changes as you scrub.
 
-A row marked *stored for rendering engines* is saved with the material and written to the project file, but the viewport does not draw it. A **render** ([Rendering](rendering.md)) reads the material itself, and uses some of what the viewport cannot show: glass really bends and blurs what is behind it and takes its **Transmission Color** over the **Depth** you give it; skin scatters light under its surface as far as its **Scattering Distance**, **Scattering Direction** and the transmission color at its depth say. Displacement, the Detail layer, dispersion and the maps marked as stored are not rendered yet.
+A row marked *stored for rendering engines* is saved with the material and written to the project file, but the viewport does not draw it. A **render** ([Rendering](rendering.md)) reads the material itself, and uses some of what the viewport cannot show: glass really bends and blurs what is behind it and takes its **Transmission Color** over the **Depth** you give it; skin scatters light under its surface as far as its **Scattering Distance**, **Scattering Direction** and the transmission color at its depth say; a displacement map really moves the surface (see [Displacement](#displacement)). The Detail layer, dispersion and the maps marked as stored are not rendered yet.
 
 ### Base
 
@@ -178,7 +178,7 @@ The dielectric reflection — what a non-metal's surface mirrors. A metal's refl
 | **Specular Color** | a color | A tint on the dielectric reflection — white for nearly every real material; a colored tint is the look of some stylized or coated surfaces. The PBR Shaded mode tints its reflection with it. |
 | **IOR** | 1.0 – 3.0 | The index of refraction: 1.5 is glass and the standard dielectric, water 1.33, skin about 1.4, a diamond 2.4. The viewport's reflectance follows it together with Specular: 1.5 is the 4 % the Specular row describes, 2.4 a diamond's 17 %. |
 | **Anisotropy** / **Anisotropy Rotation** | 0 – 100 / 0 – 360° | How much the highlight is stretched along the surface's grain (brushed metal, hair) and which way the grain runs: 0° is along the texture's horizontal, 90° its vertical. The key light's highlight and the environment's reflection both stretch; the maps for the two are stored for rendering engines. |
-| **Lobe 1 Roughness** / **Lobe 2 Roughness** / **Lobe Ratio** | 0 – 100 | Shown for a **dual-lobe** material only — skin, whose specular is a tight reflection (lobe 1) over a broad soft sheen (lobe 2), blended by the ratio (100 is lobe 1 alone; skin imports around 85). The PBR Shaded mode renders the two lobes; Roughness above scales both together, these set each. Lobe 1's map is the Roughness slot (shown on both lines), which scales both lobes. The source app's Dual Lobe Specular group maps onto these three plus Specular (its weight and reflectivity) and the Specular Mask, Roughness, Lobe 2 Roughness and Lobe Ratio slots (its maps). |
+| **Lobe 1 Roughness** / **Lobe 2 Roughness** / **Lobe Ratio** | 0 – 100 | Shown for a **dual-lobe** material only — skin, whose specular is a tight reflection (lobe 1) over a broad soft sheen (lobe 2), blended by the ratio (100 is lobe 1 alone; skin imports around 85). The PBR Shaded mode renders the two lobes; Roughness above scales both together, these set each. Lobe 1's map is the Roughness slot (shown on both lines), which scales both lobes. A `.duf` material's Dual Lobe Specular group maps onto these three plus Specular (its weight and reflectivity) and the Specular Mask, Roughness, Lobe 2 Roughness and Lobe Ratio slots (its maps). |
 
 ### Top Coat
 
@@ -231,9 +231,9 @@ Light passing *through* the material — glass, water, gems. The viewport shows 
 | --- | --- | --- |
 | **Translucency Weight** | 0 – 200 | How much light passes under the surface and comes back softened and reddened: skin's translucency, the warm light through ears and nostrils. 100 is the shader's full amount, 0 an opaque material. Scaled by the translucency color map's brightness where the zone has one; its Translucency Weight map (the per-region thickness: ears, nostrils, fingertips) is stored for rendering engines. |
 | **Translucency Color** | a color | The color light takes on under the surface: reddish for skin, warm for wax, green for jade. With a translucency color map it tints the map. Stored for rendering engines; the viewport's skin profile is fixed. |
-| **Scattering Color** | a color | How far each color of light scatters relative to the others — red deepest in skin, so its scattering color is reddish; white scatters all colors alike (the source app's SSS Color). Stored for rendering engines. |
-| **Scattering Distance** | 0 – 100 cm | How far light travels under the surface before it comes back (the source app's Scattering Measurement Distance; skin about 0.1 – 0.3, wax a few centimetres). Stored for rendering engines. |
-| **Scattering Direction** | −100 – 100 | Which way light scatters inside: 0 evenly, forward towards 100, back towards −100 (the source app's SSS Direction). Stored for rendering engines. |
+| **Scattering Color** | a color | How far each color of light scatters relative to the others — red deepest in skin, so its scattering color is reddish; white scatters all colors alike (a `.duf` material's SSS Color). Stored for rendering engines. |
+| **Scattering Distance** | 0 – 100 cm | How far light travels under the surface before it comes back (a `.duf` material's Scattering Measurement Distance; skin about 0.1 – 0.3, wax a few centimetres). Stored for rendering engines. |
+| **Scattering Direction** | −100 – 100 | Which way light scatters inside: 0 evenly, forward towards 100, back towards −100 (a `.duf` material's SSS Direction). Stored for rendering engines. |
 
 ### Emission
 
@@ -305,7 +305,7 @@ A small tiling normal map layered over the surface — a skin's pores, a cloth's
 
 | Row | Range | What it does |
 | --- | --- | --- |
-| **Weight** | 0 – 99 | The strength of the Detail Normal Map. Greyed without one. The source app's Detail Weight map is kept as the Detail Weight Mask slot, stored for rendering engines. |
+| **Weight** | 0 – 99 | The strength of the Detail Normal Map. Greyed without one. A `.duf` material's Detail Weight map is kept as the Detail Weight Mask slot, stored for rendering engines. |
 | **Roughness** | 0 – 400 | A roughness multiplier by the layer's weight, so the pores read a little rougher than the skin between them; 100 is none. Its map is stored for rendering engines. |
 | **Horizontal Tiles** / **Vertical Tiles** | 1 – 512 | How many times the detail map repeats across the zone, each way. |
 | **Horizontal Offset** / **Vertical Offset** | −1000 – 1000 | Shifts the detail map across the zone, in repeats. |
@@ -380,7 +380,7 @@ So a material's folder is all the material needs. Move the folder, copy it to an
 
 - **A file is stored once.** A second material saved into the same folder that uses the same image — a color variant that shares its normal map — refers to the file that is already there, whatever it is called; nothing is copied twice. A *different* image that happens to have the same name is given a name of its own (`color_2.png`), never written over the first.
 - **A map that is already in place stays there**: one that lies right beside the material, or in that folder's `.textures`.
-- **An image that has no file of its own is written out** as a PNG named after the material and the slot (`Denim_roughness.png`): an image that lives inside a model's file (a `.glb`'s), and a map that is one channel of a packed image (a glTF file keeps roughness and metalness in one picture). Such an image is saved as PoseStudio holds it, which is at most 4096 pixels on a side.
+- **An image that has no file of its own is written out** as a PNG named after the material and the slot (`Denim_roughness.png`): an image that lives inside a model's file (a `.glb`'s), a map that is one channel of a packed image (a glTF file keeps roughness and metalness in one picture), and a map PoseStudio made when it converted a specular / glossiness model at import (the slot's tooltip and preview call such a map *embedded*, since no file holds it). Such an image is saved as PoseStudio holds it, which is at most 4096 pixels on a side.
 - **Saving never removes a texture file.** A material saved again under its own name with other maps gets the new ones copied in, and the maps it used before stay where they are: a map taken out of a slot is not a map you are done with. A texture that no material uses any more is never removed by PoseStudio — deleting a material takes only the textures that material itself uses. Clearing out the ones you no longer want is yours to do, in a file manager (the folder is `.textures`, beside the material).
 - The folder's name begins with a dot, and that is all that keeps it out of the library browsers: [anything named that way is hidden](asset-manager.md#hiding-files-and-folders). It holds pictures, not materials. Windows Explorer shows the folder like any other; the macOS Finder and most Linux file managers hide dot names until told to show them (`Cmd+Shift+.` in the Finder).
 
@@ -397,12 +397,12 @@ Select an object, click the surface you want — the Materials tab shows which z
 - It is **one undo step**: `Ctrl+Z` gives the zone back exactly as it was.
 - Only the zone shown is changed, whatever *Edit matching zones together* says: a material is put on one surface at a time.
 - With nothing selected, a message says so and nothing happens.
-- A map that is not where the material says is **looked for**: beside the material, in its `.textures` folder, and then by its file name anywhere in the library the material lies in (the nearest one, if there are several). Only a map that is found nowhere leaves its slot empty, and a message says how many were missing.
+- A map that is not where the material says is **looked for**: beside the material, in its `.textures` folder, and then by its file name anywhere in the library the material lies in (the nearest one, if there are several). Only a map that is found nowhere — or that is found but cannot be read, such as a damaged file or an image format PoseStudio does not decode — leaves its slot empty, and a message says how many were missing.
 - **Reset Zone** still returns the zone to what its own file imported with.
 
 **MaterialX materials** (`.mtlx`, the format material libraries are published in) are applied the same way — double-click one in a library, or click **Import** at the top of the tab: see [MaterialX materials](importing.md#materialx-materials-mtlx). Save one after applying it and it becomes a material of your own library, with its images copied in beside it.
 
-A material file is plain text (JSON) and can be read, compared or kept under version control.
+A material file is plain text (JSON) and can be read, compared or kept under version control. If you edit one by hand, a value outside the range its setting can take is held to that range when the material is applied, and a file with a number too large to be one is refused.
 
 ## Undo and projects
 

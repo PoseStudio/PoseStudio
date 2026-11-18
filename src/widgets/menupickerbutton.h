@@ -47,7 +47,6 @@ public:
 
     /// Replaces the menu's entries. The current index resets to 0 (no signal).
     void setItems(const QList<Item>& items);
-    int itemCount() const { return m_items.size(); }
 
     /// Text placed before the caption — the viewport strip uses two spaces so a left-aligned
     /// caption keeps off the border (QPushButton ignores QSS padding-left for left-aligned text).

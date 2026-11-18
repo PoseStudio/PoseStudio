@@ -12,6 +12,12 @@
  * their height are the pose she landed in. What little the solve may still leave different (a
  * foot the rig healed flat) is blended home over the bounce's tail, and the end restores the
  * landing pose exactly. The window drives it from the fall's timer (VulkanWindow::onFallTick).
+ *
+ * ON TOP OF THE DIP, forward kinematics on bones the dip's solve does not have: THE ARMS' BOUNCE —
+ * every arm that hung at the landing swings forward and back as a damped oscillation kicked by
+ * it, its elbow bending with the forward swing (kLandingArm* below) — and the soft body's ride
+ * (the landing's kick, one tick a frame). Both run on through a TAIL after the dip, the pose home
+ * under them, until they are still; the end restores the landing pose exactly all the same.
  * Qt-free (std + GLM).
  */
 
@@ -20,6 +26,8 @@
 #include "armatureiksolvetuning.h"
 
 #include "ikrig.h"
+
+#include <glm/gtc/constants.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -46,15 +54,24 @@ float landingShape(float seconds, float duration) {
     }
     const float down = kLandingDownShare * duration;
     const float phase = seconds < down ? seconds / down : 1.0f + (seconds - down) / (duration - down);
-    const float wave = std::sin(1.57079633f * phase); // (0 at the landing, 1 at the deepest, 0 at the end)
+    const float wave = std::sin(glm::half_pi<float>() * phase); // (0 at the landing, 1 at the deepest, 0 at the end)
     return wave * wave;
+}
+
+/// The arm swing's natural frequency (rad/s), and its ENVELOPE at @p seconds for an amplitude of
+/// @p swingDeg (deg): e^(-zeta w t), scaled so that the oscillation's first peak is the amplitude.
+float landingArmOmega() {
+    return glm::two_pi<float>() * kLandingArmHz;
+}
+float landingArmEnvelope(float swingDeg, float seconds) {
+    return swingDeg / kLandingArmPeak * std::exp(-kLandingArmDamping * landingArmOmega() * seconds);
 }
 
 } // namespace
 
 bool Armature::beginLandingBounce(float impactSpeed) {
     static const bool kNoBounce = std::getenv("POSESTUDIO_NO_LANDING_BOUNCE") != nullptr; // A/B probe
-    if (kNoBounce || m_landing.active || m_digitDrag || m_bones.empty() || !ensureIkRig() || m_ikRig->dragActive()) {
+    if (kNoBounce || m_landing.active || m_digitDrag || m_figureMove || m_bones.empty() || !ensureIkRig() || m_ikRig->dragActive()) {
         return false;
     }
     static const float kPerSpeed = envOr("POSESTUDIO_LANDING_DIP", kLandingDipPerSpeed); // metres per m/s
@@ -123,8 +140,26 @@ bool Armature::beginLandingBounce(float impactSpeed) {
     m_landing.seconds = kLandingSeconds * glm::mix(kLandingShortest, 1.0f, dip / most);
     m_landing.hipStart = m_boneWorldPos[static_cast<std::size_t>(root)];
     m_landing.euler = m_ikStartEuler; // (the drag's own snapshot of the pose: beginIkDrag)
-    // THE ARMS' BOUNCE: every arm that hangs (the press found them: findHangArms) swings forward
-    // over the dip and back, by kLandingArmSwingDeg at the deepest dip the drop makes.
+    // THE ARMS' BOUNCE: every arm that hangs swings forward over the dip and back, by
+    // kLandingArmSwingDeg at the deepest dip the drop makes. The arms are FOUND HERE, as a press
+    // finds them at its first tick (hangIdleArms sizes the hang's memory and calls findHangArms):
+    // the bounce's own drag is a scoped one, which runs no post-step, and beginIkDrag has just
+    // emptied the list. (Read as it stood, this loop never had an arm to swing.)
+    // POSESTUDIO_NO_LANDING_ARMS=1 is the A/B: the landing as every build before 2026-11-18 made
+    // it — the legs' dip alone, the arms riding still.
+    static const bool kNoArms = std::getenv("POSESTUDIO_NO_LANDING_ARMS") != nullptr;
+    if (!kNoArms) {
+        const std::size_t n = m_bones.size();
+        if (m_hangSwingDeg.size() != n) {
+            m_hangSwingDeg.assign(n, 0.0f);
+            m_hangBaseValid.assign(n, 0);
+        }
+        if (m_hangElbowValid.size() != n) {
+            m_hangElbowDeg.assign(n, 0.0f);
+            m_hangElbowValid.assign(n, 0);
+        }
+        findHangArms();
+    }
     m_landing.arms.clear();
     m_landing.armSwingDeg = kLandingArmSwingDeg * (dip / most);
     m_landing.lastSeconds = 0.0f;
@@ -157,16 +192,15 @@ bool Armature::beginLandingBounce(float impactSpeed) {
 
 float Armature::landingArmAngle(float seconds) const {
     // e^(-zeta w t) sin(wd t), scaled so its first peak is the swing's amplitude.
-    const float omega = 2.0f * 3.14159265f * kLandingArmHz;
-    const float wd = omega * std::sqrt(1.0f - kLandingArmDamping * kLandingArmDamping);
-    return m_landing.armSwingDeg / kLandingArmPeak * std::exp(-kLandingArmDamping * omega * seconds) * std::sin(wd * seconds);
+    const float wd = landingArmOmega() * std::sqrt(1.0f - kLandingArmDamping * kLandingArmDamping);
+    return landingArmEnvelope(m_landing.armSwingDeg, seconds) * std::sin(wd * seconds);
 }
 
 bool Armature::landingBounceTick(float seconds) {
     if (!m_landing.active) {
         return false;
     }
-    const float dt = seconds > m_landing.lastSeconds ? seconds - m_landing.lastSeconds : 1.0f / 60.0f;
+    const float dt = seconds > m_landing.lastSeconds ? seconds - m_landing.lastSeconds : kTickSeconds;
     m_landing.lastSeconds = seconds;
     // THE ARMS' SWING: a damped oscillation kicked by the landing — forward to its peak in a fifth
     // of a second, back past hanging by a quarter of that, and out over a second; the elbow bends
@@ -193,7 +227,10 @@ bool Armature::landingBounceTick(float seconds) {
         // THE TAIL: the dip is over and the pose is home; the arms' swing and the breasts' spring
         // run on, for up to kLandingTailSeconds, then the bounce ends (endLandingBounce rests it
         // exactly).
-        const bool armsSwinging = !m_landing.arms.empty() && std::abs(armAngle) > kLandingArmRestDeg;
+        // (By the swing's ENVELOPE, not its angle at this moment: the angle passes through zero
+        // twice a period, and read there the tail ended at the oscillation's first zero crossing
+        // that fell in it — the swing back past hanging cut off.)
+        const bool armsSwinging = !m_landing.arms.empty() && landingArmEnvelope(m_landing.armSwingDeg, seconds) > kLandingArmRestDeg;
         if (seconds >= m_landing.seconds + kLandingTailSeconds || (!armsSwinging && !softbody::breastMotion() && !softbody::buttockMotion())) {
             return false;
         }
@@ -214,10 +251,7 @@ bool Armature::landingBounceTick(float seconds) {
         return armsSwinging || soft;
     }
     dragIkTo(m_landing.hipStart - glm::vec3(0.0f, m_landing.dip * landingShape(seconds, m_landing.seconds), 0.0f));
-    if (applyArms()) {
-        computeSkinMatrices();
-    }
-    tickSoftBody(dt); // (THE SOFT BODY feels the landing's deceleration and bounces; at once when off)
+    tickSoftBody(dt); // (THE SOFT BODY feels the landing's deceleration and bounces — its ONE tick of this frame: dragIkTick stands its own down through a bounce; at once when off)
     // The tail: blended home to the pose she landed in.
     const float home = glm::smoothstep(kLandingBlendFrom * m_landing.seconds, m_landing.seconds, seconds);
     if (home > 0.0f && m_landing.euler.size() == m_bones.size() && m_landing.translation.size() == m_bones.size()) {
@@ -234,6 +268,12 @@ bool Armature::landingBounceTick(float seconds) {
         if (moved) {
             computeSkinMatrices();
         }
+    }
+    // THE ARMS LAST: the blend above takes EVERY bone toward the landing pose, the swinging arms'
+    // channels with the rest — applied before it, the swing was blended away over the dip's last
+    // stretch and jumped back to its full angle at the tail's first tick.
+    if (applyArms()) {
+        computeSkinMatrices();
     }
     return true;
 }

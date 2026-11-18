@@ -66,7 +66,7 @@ RenderPassBuilder& RenderPassBuilder::depth(VkFormat format, VkSampleCountFlagBi
 RenderPassBuilder& RenderPassBuilder::depthReadOnly(VkFormat format, VkSampleCountFlagBits samples,
                                                     VkImageLayout layout) {
     if (m_hasDepth) {
-        throw VulkanError("RenderPassBuilder::depth() called twice.");
+        throw VulkanError("RenderPassBuilder: a depth attachment was already added (depthReadOnly).");
     }
     const uint32_t index = attachmentCount();
     VkAttachmentDescription a = describe(format, samples, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, layout);

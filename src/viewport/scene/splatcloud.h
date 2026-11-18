@@ -4,8 +4,8 @@
  *        draw order sorted on the CPU, and the one instanced-quad draw the splat pipeline makes
  *        of them (shaders/splat.vert + splat.frag; the pipeline and its set layout are
  *        ScenePipelines'). A Model holds one (Model::splats) in place of meshes — a splat scene
- *        is static, unlit and never a figure — and the Scene draws every model's cloud after the
- *        opaque meshes, before the transparent ones.
+ *        is static, unlit and never a figure — and the Scene draws every model's cloud in the
+ *        photo pass, after the scene pass (Scene::recordSplats).
  *
  * THE DATA: per splat three vec4 (set 1 binding 0) — the centre with its opacity, then the 3D
  * covariance Σ = R S Sᵀ Rᵀ from its rotation and scales (xx xy xz yy | yz zz) in the splat's own
@@ -75,7 +75,6 @@ public:
     SplatCloud& operator=(const SplatCloud&) = delete;
 
     std::size_t      count() const { return m_count; }
-    int              shDegree() const { return m_shDegree; }
     const glm::vec3& boundsMin() const { return m_boundsMin; } ///< The centres' local AABB.
     const glm::vec3& boundsMax() const { return m_boundsMax; }
 
@@ -89,8 +88,9 @@ public:
 
     /// Records the draw: binds this frame slot's set at index 1 (the caller has bound the splat
     /// pipeline and the camera set at 0), pushes the constants (the focal lengths off the
-    /// camera's projection and viewport, the eye in the splat frame) and draws six vertices a
-    /// splat (into the pass's photo layer: the colors as trained, the composite lays them over).
+    /// camera's projection and viewport, the eye in the splat frame) and draws a four-vertex
+    /// strip a splat (into the pass's photo layer: the colors as trained, the composite lays
+    /// them over).
     /// @p cut is the push block's floor cut (SplatPushConstants::cut): zero draws every splat.
     void record(VkCommandBuffer cmd, VkPipelineLayout layout, uint32_t frameIndex, const Camera& camera,
                 const glm::mat4& model, const glm::vec4& cut = glm::vec4(0.0f)) const;
@@ -116,12 +116,11 @@ private:
     void sortForView(const glm::vec3& viewDir, const glm::mat4& model, std::vector<uint32_t>& out, int chunks);
     void workerLoop();
 
-    VulkanContext& m_context;
-    std::size_t    m_count = 0;
-    int            m_shDegree = 0;
-    uint32_t       m_shStride = 2; ///< Harmonics uints per splat.
-    glm::vec3      m_boundsMin{0.0f};
-    glm::vec3      m_boundsMax{0.0f};
+    std::size_t m_count = 0;
+    int         m_shDegree = 0;
+    uint32_t    m_shStride = 2; ///< Harmonics uints per splat.
+    glm::vec3   m_boundsMin{0.0f};
+    glm::vec3   m_boundsMax{0.0f};
 
     // The CPU side of a click (pick): per splat the covariance (xx xy xz yy yz zz, as the GPU has
     // it), the opacity and the footprint's reach (three of its largest standard deviation) —

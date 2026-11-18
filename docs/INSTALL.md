@@ -52,11 +52,11 @@ At the end, leave **Launch PoseStudio** checked and click **Finish**.
 
 ## Step 3 — First launch
 
-You should see the PoseStudio window: a 3D viewport with a floor grid on the left and a side panel on the right with two tabs, **Asset Manager** and **Environment**. Some things to try (the built-in manual — **Help → User Manual**, or **F1** — has the rest):
+PoseStudio opens under its splash screen — click anywhere to dismiss it (the first time a version starts, a **What's New** window with that version's release notes opens next). You should then see the PoseStudio window: a 3D viewport with a floor grid on the left and a side panel on the right with its tabs — **Asset Manager**, **Transform**, **Materials**, **Materials Library**, **Soft Body Physics**, **Environment** and **Lights**. Some things to try (the built-in manual — **Help → User Manual**, or **F1** — has the rest):
 
 - **Orbit the camera** — left-drag in the viewport; scroll to zoom; middle-drag to pan. Blender-style view keys: **1** / **3** / **7** for the front / right / top view (**Ctrl** for the opposite side; these are flat orthographic views — orbit to return to perspective), **9** flips the view, **5** is the Home view, **.** frames the selected object.
 - **Import a figure or model** — File → Import, or double-click an asset in the Asset Manager. The selected object wears a blue outline; click another object to select it, or empty space to clear the selection.
-- **Pose a figure** — grab any part of the figure (a hand, a foot, the hips, the head…) and drag: the whole body follows with full-body IK — the feet stay planted, she balances and steps, and the hips taken down and forward kneel her, down and back sit her. **Ctrl+drag** rotates just that one joint, or hold **X**, **Y**, or **Z** and roll the mouse wheel to dial it about that axis. **P** pins the selected joint. The manual's *Poses Step by Step* page shows how to make every pose.
+- **Pose a figure** — grab any part of the figure (a hand, a foot, the hips, the head…) and drag: the whole body follows with full-body IK — the feet stay planted, she balances and steps, and the hips taken down and forward kneel her, down and back sit her. **Ctrl+drag** moves just the limb you grabbed (on the torso it bends the torso alone; on the hips it moves the whole figure as she is posed). To turn one joint, select it and press **B**, **S** or **T**, then move the mouse to bend, tilt or twist it (click to keep, **Esc** to cancel) — or set it by number on the **Transform** tab. **P** pins the selected joint. The manual's *Poses Step by Step* page shows how to make every pose.
 - **Change the lighting** — open the **Environment** tab (right side) and pick a different HDRI environment from the thumbnail picker. The stock set of 33 lighting environments was installed for you.
 
 ### Where things end up
@@ -72,6 +72,8 @@ You should see the PoseStudio window: a 3D viewport with a floor grid on the lef
 Each time it starts, PoseStudio sends one small request to `posestudio.io` saying that this installation exists. It carries a random install ID (generated on first launch, not tied to you), the app version, your operating system and CPU type, whether the app was installed or runs portable, the Qt library version it was built with, and the time of the ping — nothing else. No names, no file names, no usage data, and it never slows the app down or blocks anything. It's how we count active installs and see which versions people are on.
 
 To switch it off: **Edit → Preferences → General** and untick *Send an anonymous install ping*. The same page shows your install ID and exactly what is sent.
+
+A few seconds after it starts, PoseStudio also asks GitHub whether a newer release exists, and shows a message with a link to the download page when one does. Nothing but the request itself is sent. *Check for updates at startup*, on the same Preferences page, switches it off.
 
 ---
 

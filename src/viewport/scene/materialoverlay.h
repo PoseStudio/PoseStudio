@@ -41,7 +41,8 @@
  *
  * A zone carries any number of overlays, composited in order (the first is the lowest). They are
  * part of the zone's material (MaterialParams::overlays): undoable, saved with the project. The
- * compositing itself is overlaycompositor.h's. Qt-free plain data, like materialparams.h.
+ * compositing itself is overlaycompositor.h's. Qt-free plain data, like materialparams.h (whose
+ * materialparams.cpp defines this header's name tables and field setters too).
  */
 
 #ifndef MATERIALOVERLAY_H
@@ -49,10 +50,6 @@
 
 #include <glm/glm.hpp>
 
-#include <algorithm>
-#include <cctype>
-#include <cmath>
-#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -72,51 +69,15 @@ enum class OverlayBlend {
 };
 
 /// The blend's name in a script and a project file.
-inline const char* overlayBlendName(OverlayBlend blend) {
-    switch (blend) {
-    case OverlayBlend::Multiply: return "multiply";
-    case OverlayBlend::Normal: return "normal";
-    case OverlayBlend::SoftLight: return "softlight";
-    case OverlayBlend::Overlay: return "overlay";
-    case OverlayBlend::Screen: return "screen";
-    case OverlayBlend::Darken: return "darken";
-    case OverlayBlend::Lighten: return "lighten";
-    default: return "";
-    }
-}
-inline bool overlayBlendByName(const std::string& name, OverlayBlend& out) {
-    for (int i = 0; i < static_cast<int>(OverlayBlend::Count); ++i) {
-        if (name == overlayBlendName(static_cast<OverlayBlend>(i))) {
-            out = static_cast<OverlayBlend>(i);
-            return true;
-        }
-    }
-    return false;
-}
+const char* overlayBlendName(OverlayBlend blend);
+bool overlayBlendByName(const std::string& name, OverlayBlend& out);
 
 /// The images an overlay can carry, one per element.
 enum class OverlayElement { Color, Opacity, Metallic, Bump, Normal, Displacement, Count };
 
-inline const char* overlayElementName(OverlayElement element) {
-    switch (element) {
-    case OverlayElement::Color: return "color";
-    case OverlayElement::Opacity: return "opacity";
-    case OverlayElement::Metallic: return "metallic";
-    case OverlayElement::Bump: return "bump";
-    case OverlayElement::Normal: return "normal";
-    case OverlayElement::Displacement: return "displacement";
-    default: return "";
-    }
-}
-inline bool overlayElementByName(const std::string& name, OverlayElement& out) {
-    for (int i = 0; i < static_cast<int>(OverlayElement::Count); ++i) {
-        if (name == overlayElementName(static_cast<OverlayElement>(i))) {
-            out = static_cast<OverlayElement>(i);
-            return true;
-        }
-    }
-    return false;
-}
+/// The element's name in a script (`overlay <n> map <element> <image>`), and its inverse.
+const char* overlayElementName(OverlayElement element);
+bool overlayElementByName(const std::string& name, OverlayElement& out);
 
 /// The range of an overlay's scale: a tenth of its painted size to five times it.
 inline constexpr float kOverlayScaleMin = 0.1f;
@@ -226,17 +187,7 @@ inline const std::string& overlayTitle(const MaterialOverlay& o) {
 /// The number a NEW overlay's default name takes: its PLACE in the stack — the third overlay is
 /// "Overlay 3" whatever the two before it have been renamed to — or the next number after that
 /// which no overlay of the stack already carries (one was removed from the middle).
-inline int nextOverlayNumber(const std::vector<MaterialOverlay>& overlays, const std::string& prefix) {
-    int number = static_cast<int>(overlays.size()) + 1;
-    const auto taken = [&](int n) {
-        const std::string name = prefix + " " + std::to_string(n);
-        return std::any_of(overlays.begin(), overlays.end(), [&](const MaterialOverlay& o) { return o.name == name; });
-    };
-    while (taken(number)) {
-        ++number;
-    }
-    return number;
-}
+int nextOverlayNumber(const std::vector<MaterialOverlay>& overlays, const std::string& prefix);
 
 /// The overlay's SCALAR controls as fields with their DISPLAY units (percent, degrees, a plain
 /// gamma), so the tab and the scripted test read and set the same numbers through one definition
@@ -262,87 +213,21 @@ enum class OverlayField {
     Count
 };
 
-inline float overlayFieldValue(const MaterialOverlay& o, OverlayField field) {
-    switch (field) {
-    case OverlayField::Enabled: return o.enabled ? 1.0f : 0.0f;
-    case OverlayField::Blend: return static_cast<float>(o.blend);
-    case OverlayField::Opacity: return o.opacity * 100.0f;
-    case OverlayField::Brightness: return o.brightness * 100.0f;
-    case OverlayField::Contrast: return o.contrast * 100.0f;
-    case OverlayField::Gamma: return o.gamma;
-    case OverlayField::Hue: return o.hue;
-    case OverlayField::Saturation: return o.saturation * 100.0f;
-    case OverlayField::Gloss: return o.gloss * 100.0f;
-    case OverlayField::BumpStrength: return o.bumpStrength * 100.0f;
-    case OverlayField::NormalStrength: return o.normalStrength * 100.0f;
-    case OverlayField::DisplacementStrength: return o.displacementStrength * 100.0f;
-    case OverlayField::OffsetX: return o.offset.x * 100.0f;
-    case OverlayField::OffsetY: return o.offset.y * 100.0f;
-    case OverlayField::Rotation: return o.rotation;
-    case OverlayField::Scale: return o.scale * 100.0f;
-    case OverlayField::Metallic: return o.metallic * 100.0f;
-    default: return 0.0f;
-    }
-}
+/// A field's display value off @p o, and the change a display value makes to it (clamped to
+/// the field's range).
+float overlayFieldValue(const MaterialOverlay& o, OverlayField field);
 
-inline void setOverlayField(MaterialOverlay& o, OverlayField field, float v) {
-    switch (field) {
-    case OverlayField::Enabled: o.enabled = v >= 0.5f; break;
-    case OverlayField::Blend:
-        o.blend = static_cast<OverlayBlend>(std::clamp(static_cast<int>(std::lround(v)), 0, static_cast<int>(OverlayBlend::Count) - 1));
-        break;
-    case OverlayField::Opacity: o.opacity = std::clamp(v / 100.0f, 0.0f, 1.0f); break;
-    case OverlayField::Brightness: o.brightness = std::clamp(v / 100.0f, -1.0f, 1.0f); break;
-    case OverlayField::Contrast: o.contrast = std::clamp(v / 100.0f, -1.0f, 1.0f); break;
-    case OverlayField::Gamma: o.gamma = std::clamp(v, 0.2f, 5.0f); break;
-    case OverlayField::Hue: o.hue = std::clamp(v, -180.0f, 180.0f); break;
-    case OverlayField::Saturation: o.saturation = std::clamp(v / 100.0f, -1.0f, 1.0f); break;
-    case OverlayField::Gloss: o.gloss = std::clamp(v / 100.0f, -1.0f, 1.0f); break;
-    case OverlayField::BumpStrength: o.bumpStrength = std::clamp(v / 100.0f, -4.0f, 4.0f); break;
-    case OverlayField::NormalStrength: o.normalStrength = std::clamp(v / 100.0f, 0.0f, 4.0f); break;
-    case OverlayField::DisplacementStrength: o.displacementStrength = std::clamp(v / 100.0f, -4.0f, 4.0f); break;
-    // (A whole map either way: beyond it nothing of the overlay is left on the map.)
-    case OverlayField::OffsetX: o.offset.x = std::clamp(v / 100.0f, -1.0f, 1.0f); break;
-    case OverlayField::OffsetY: o.offset.y = std::clamp(v / 100.0f, -1.0f, 1.0f); break;
-    case OverlayField::Rotation: o.rotation = std::clamp(v, -180.0f, 180.0f); break;
-    case OverlayField::Scale: o.scale = std::clamp(v / 100.0f, kOverlayScaleMin, kOverlayScaleMax); break;
-    case OverlayField::Metallic: o.metallic = std::clamp(v / 100.0f, -1.0f, 1.0f); break;
-    default: break;
-    }
-}
+void setOverlayField(MaterialOverlay& o, OverlayField field, float v);
+
+/// Holds every control of @p o to its field's range (setOverlayField's; the Base Color to 0..1).
+/// An overlay is made on the tab alone, so those ranges are everything one can be: a FILE's
+/// value outside them — an offset of 1e30, which the compositor turns into a count of texels —
+/// is held to them. A value inside its range is left bit for bit.
+void clampMaterialOverlay(MaterialOverlay& o);
 
 /// The field's name in the scripted test (`overlay <n> <name> <value>`, `overlay.<n>.<name>`).
-inline const char* overlayFieldName(OverlayField field) {
-    switch (field) {
-    case OverlayField::Enabled: return "enabled";
-    case OverlayField::Blend: return "blend";
-    case OverlayField::Opacity: return "opacity";
-    case OverlayField::Brightness: return "brightness";
-    case OverlayField::Contrast: return "contrast";
-    case OverlayField::Gamma: return "gamma";
-    case OverlayField::Hue: return "hue";
-    case OverlayField::Saturation: return "saturation";
-    case OverlayField::Gloss: return "gloss";
-    case OverlayField::BumpStrength: return "bumpstrength";
-    case OverlayField::NormalStrength: return "normalstrength";
-    case OverlayField::DisplacementStrength: return "displacementstrength";
-    case OverlayField::OffsetX: return "offsetx";
-    case OverlayField::OffsetY: return "offsety";
-    case OverlayField::Rotation: return "rotation";
-    case OverlayField::Scale: return "scale";
-    case OverlayField::Metallic: return "metallic";
-    default: return "";
-    }
-}
-inline bool overlayFieldByName(const std::string& name, OverlayField& out) {
-    for (int i = 0; i < static_cast<int>(OverlayField::Count); ++i) {
-        if (name == overlayFieldName(static_cast<OverlayField>(i))) {
-            out = static_cast<OverlayField>(i);
-            return true;
-        }
-    }
-    return false;
-}
+const char* overlayFieldName(OverlayField field);
+bool overlayFieldByName(const std::string& name, OverlayField& out);
 
 } // namespace pose
 

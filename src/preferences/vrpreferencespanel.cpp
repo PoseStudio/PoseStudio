@@ -12,6 +12,22 @@
 #include <QLabel>
 #include <QVBoxLayout>
 
+namespace {
+
+/// Stores a scale box's value when a gesture on it ENDS — a scrub's release, a typed value's
+/// commit — and only if it moved, not at every step of a scrub: both scales are read when VR
+/// Mode next starts, so nothing needs the values in between, and each store is a database write.
+void storeAtGestureEnd(pose::DragNumberBox* box, void (*store)(double)) {
+    QObject::connect(box, &pose::DragNumberBox::editingFinished, box, [box, store, stored = box->value()]() mutable {
+        if (box->value() != stored) {
+            stored = box->value();
+            store(stored);
+        }
+    });
+}
+
+} // namespace
+
 VrPreferencesPanel::VrPreferencesPanel(QWidget* parent)
     : PreferencesPanel(tr("VR"), parent) {
 
@@ -51,9 +67,7 @@ VrPreferencesPanel::VrPreferencesPanel(QWidget* parent)
         tr("The per-eye render resolution as a fraction of the headset's recommended size. 1.00 is the "
            "headset's own; lower it if the headset image stutters, raise it on a strong GPU for a sharper "
            "picture. Applies when VR Mode next starts."));
-    connect(scaleBox, &pose::DragNumberBox::valueChanged, this, [](double value) {
-        VrSettings::setRenderScale(value);
-    });
+    storeAtGestureEnd(scaleBox, &VrSettings::setRenderScale);
 
     // --- Reduced effects ---
     auto* reducedToggle = new QCheckBox(tr("Reduced effects in the headset"), this);
@@ -87,7 +101,5 @@ VrPreferencesPanel::VrPreferencesPanel(QWidget* parent)
            "afford at the moment, softening as you walk up to it; 0.50 is half the eye's size in each direction, "
            "a quarter of the work. Lower it if the headset image still stutters with a capture loaded; Reduced "
            "effects gives the splats the most room. Applies when VR Mode next starts."));
-    connect(splatBox, &pose::DragNumberBox::valueChanged, this, [](double value) {
-        VrSettings::setSplatScale(value);
-    });
+    storeAtGestureEnd(splatBox, &VrSettings::setSplatScale);
 }

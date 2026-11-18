@@ -18,6 +18,7 @@
 
 #include "figuredocument.h"
 #include "figureutils.h"
+#include "formulaops.h"
 #include "uriresolver.h"
 
 #include <nlohmann/json.hpp>
@@ -43,18 +44,12 @@ namespace {
 const bool kTrace = std::getenv("POSESTUDIO_MORPH_TRACE") != nullptr;
 const bool kNoLimits = std::getenv("POSESTUDIO_MORPH_NO_LIMITS") != nullptr;
 
-// One knot of a formula's spline: at input x the output is y. (The format writes TCB knots as
-// [x, y, tension, continuity, bias] with the last three ~0, and linear ones as [x, y].)
-struct Knot {
-    double x = 0.0;
-    double y = 0.0;
-};
-
 // The spline through @p knots (ascending in x) at @p x: flat outside the knot range; inside it a
-// straight line for spline_linear, else a Catmull-Rom Hermite clamped to its segment's end values
-// — the corrective evaluator's reading of the same knots (scene/correctiveset.cpp), so a control
-// and a corrective written alike come out alike.
-double evalSpline(const std::vector<Knot>& knots, double x, bool linear) {
+// straight line for spline_linear, the earlier knot's value for spline_constant, else a
+// Catmull-Rom Hermite clamped to its segment's end values — the corrective evaluator's reading of
+// the same knots (scene/correctiveset.cpp), so a control and a corrective written alike come out
+// alike.
+double evalSpline(const std::vector<FormulaKnot>& knots, double x, FormulaOp::Interpolation interpolation) {
     if (knots.empty()) {
         return x;
     }
@@ -68,14 +63,17 @@ double evalSpline(const std::vector<Knot>& knots, double x, bool linear) {
     while (i + 1 < knots.size() && x > knots[i + 1].x) {
         ++i;
     }
-    const Knot&  p1 = knots[i];
-    const Knot&  p2 = knots[i + 1];
-    const double h = p2.x - p1.x;
+    const FormulaKnot& p1 = knots[i];
+    const FormulaKnot& p2 = knots[i + 1];
+    const double       h = p2.x - p1.x;
     if (h <= 1e-12) {
         return p1.y;
     }
+    if (interpolation == FormulaOp::Interpolation::Step) {
+        return x >= p2.x ? p2.y : p1.y; // a knot's value holds from the knot on
+    }
     const double u = (x - p1.x) / h;
-    if (linear) {
+    if (interpolation == FormulaOp::Interpolation::Linear) {
         return p1.y + (p2.y - p1.y) * u;
     }
     const double y0 = (i > 0) ? knots[i - 1].y : p1.y; // one-sided at the ends
@@ -92,12 +90,12 @@ double evalSpline(const std::vector<Knot>& knots, double x, bool linear) {
 // One pre-compiled formula operation. The evaluation runs several fixed-point rounds over every
 // reachable formula, so a formula's operations are translated ONCE at discovery into this form.
 struct CompiledOp {
-    enum class Kind { PushValue, PushChannel, Mult, Add, Sub, Div, Spline, Other };
-    Kind              kind = Kind::Other;
-    double            value = 0.0;    ///< PushValue: the constant.
-    int               channel = -1;   ///< PushChannel: the channel read (an index into the walk's list).
-    bool              linear = false; ///< Spline: spline_linear (else the smooth one).
-    std::vector<Knot> knots;          ///< Spline: ascending in x.
+    enum class Kind { PushValue, PushChannel, Mult, Add, Sub, Div, Inv, Neg, Spline };
+    Kind                     kind = Kind::PushValue;
+    double                   value = 0.0;  ///< PushValue: the constant.
+    int                      channel = -1; ///< PushChannel: the channel read (an index into the walk's list).
+    FormulaOp::Interpolation interpolation = FormulaOp::Interpolation::Smooth; ///< Spline.
+    std::vector<FormulaKnot> knots;        ///< Spline: ascending in x.
 };
 
 // Evaluates a compiled formula — a small stack machine — against the current channel values.
@@ -137,31 +135,18 @@ double evalOperations(const std::vector<CompiledOp>& operations, const std::vect
                 stack.push_back(b != 0.0 ? pop() / b : (pop(), 0.0));
                 break;
             }
-            case CompiledOp::Kind::Spline:
-                stack.push_back(evalSpline(op.knots, pop(), op.linear));
+            case CompiledOp::Kind::Inv:
+                stack.push_back(invert(pop()));
                 break;
-            case CompiledOp::Kind::Other:
-                break; // an op outside the vocabulary leaves the stack as it is
+            case CompiledOp::Kind::Neg:
+                stack.push_back(-pop());
+                break;
+            case CompiledOp::Kind::Spline:
+                stack.push_back(evalSpline(op.knots, pop(), op.interpolation));
+                break;
         }
     }
     return stack.empty() ? 0.0 : stack.back();
-}
-
-// A number out of a channel field that may be written as a number or (a switch) as a boolean.
-bool numberOf(const nlohmann::json& object, const char* key, double& out) {
-    const auto it = object.find(key);
-    if (it == object.end()) {
-        return false;
-    }
-    if (it->is_number()) {
-        out = it->get<double>();
-        return true;
-    }
-    if (it->is_boolean()) {
-        out = it->get<bool>() ? 1.0 : 0.0;
-        return true;
-    }
-    return false;
 }
 
 // A channel's limits as its file (and then the scene, where it overrides them) states them.
@@ -225,15 +210,7 @@ struct CompiledFormula {
 
 // Maps a channel property's trailing axis ("center_point/x" -> 0, ".../y" -> 1, ".../z" -> 2).
 int axisIndexOf(const std::string& property) {
-    if (property.empty()) {
-        return -1;
-    }
-    switch (property.back()) {
-        case 'x': return 0;
-        case 'y': return 1;
-        case 'z': return 2;
-        default:  return -1;
-    }
+    return property.empty() ? -1 : axisIndex(property.back());
 }
 
 // What a non-`value` property reads at the bind pose: a scale is 1, everything else (a rotation,
@@ -316,21 +293,25 @@ private:
     void seed(const nlohmann::json& modifiers) {
         for (const auto& mod : modifiers) {
             const auto ch = mod.find("channel");
-            const std::string url = mod.value("url", std::string());
+            const std::string url = stringOf(mod, "url");
             if (ch == mod.end() || !ch->is_object() || url.empty()) {
                 continue;
             }
-            if (!m_scope.owns(mod.value("parent", std::string()))) {
+            if (!m_scope.owns(stringOf(mod, "parent"))) {
                 continue; // another figure's dial: its eyelashes', its hair's, a second character's
             }
-            double value = 0.0;
-            if (!numberOf(*ch, "current_value", value)) {
-                numberOf(*ch, "value", value); // the DIALED value: current_value over value
-            }
+            double     value = 0.0;
+            const bool hasValue = numberOf(*ch, "current_value", value) ||
+                                  numberOf(*ch, "value", value); // the DIALED value: current_value over value
             const int index = channelFor(parseChannelRef(url), std::string());
             Channel&  c = m_channels[static_cast<std::size_t>(index)];
-            c.dialed = true;
-            c.dial = value;
+            // A block that carries NO value sets no dial — a scene that only changed a channel's
+            // limits writes just those — and the channel keeps its file's default: taken for a
+            // dial of 0, it switched a default-on channel off.
+            if (hasValue) {
+                c.dialed = true;
+                c.dial = value;
+            }
             c.sceneChannel = &(*ch);
             reach(index);
         }
@@ -420,73 +401,94 @@ private:
         }
     }
 
-    // Translates a formula's `operations`. Sets @p poseDriven when it reads anything but a
-    // channel's value — a joint's rotation: the mark of a pose corrective.
+    // Translates a formula's operations (read by formulaops) into the walk's program: a pushed
+    // channel VALUE becomes a read of that channel of the walk. Sets @p poseDriven when a push
+    // reads anything else — a joint's rotation: the mark of a pose corrective — and @p unknownOp
+    // to the first operation outside the vocabulary (the program is then not one to run).
     std::vector<CompiledOp> compile(const nlohmann::json& operations, const std::string& ownerUrl,
-                                    bool& poseDriven) {
+                                    bool& poseDriven, std::string& unknownOp) {
+        FormulaProgram          program = readFormulaOps(operations);
+        unknownOp = program.unknownOp;
         std::vector<CompiledOp> out;
-        std::vector<Knot>       pendingKnots; // knots accumulate until the spline op consumes them
-        for (std::size_t i = 0; i < operations.size(); ++i) {
-            const nlohmann::json& op = operations[i];
-            const std::string     name = op.value("op", std::string());
-            CompiledOp            c;
-            if (name == "push") {
-                const auto val = op.find("val");
-                const auto url = op.find("url");
-                if (val != op.end() && val->is_array()) {
-                    Knot k;
-                    if (val->size() > 0 && (*val)[0].is_number()) k.x = (*val)[0].get<double>();
-                    if (val->size() > 1 && (*val)[1].is_number()) k.y = (*val)[1].get<double>();
-                    pendingKnots.push_back(k);
-                    continue;
-                }
-                if (val != op.end() && val->is_number()) {
-                    // A bare number directly before a spline op is the knot count, not an operand.
-                    if (i + 1 < operations.size() &&
-                        operations[i + 1].value("op", std::string()).rfind("spline", 0) == 0) {
-                        continue;
-                    }
-                    c.kind = CompiledOp::Kind::PushValue;
-                    c.value = val->get<double>();
-                } else if (url != op.end() && url->is_string()) {
-                    const ChannelRef ref = parseChannelRef(url->get<std::string>());
-                    if (ref.property == "value") {
+        out.reserve(program.ops.size());
+        for (FormulaOp& op : program.ops) {
+            CompiledOp c;
+            switch (op.kind) {
+                case FormulaOp::Kind::PushUrl:
+                    if (op.ref.property == "value") {
                         c.kind = CompiledOp::Kind::PushChannel;
-                        c.channel = channelFor(ref, ownerUrl);
+                        c.channel = channelFor(op.ref, ownerUrl);
                     } else {
                         poseDriven = true;
                         c.kind = CompiledOp::Kind::PushValue;
-                        c.value = bindValueOf(ref.property);
+                        c.value = bindValueOf(op.ref.property);
                     }
-                } else {
+                    break;
+                case FormulaOp::Kind::PushConst:
                     c.kind = CompiledOp::Kind::PushValue;
-                    c.value = 0.0;
-                }
-            } else if (name.rfind("spline", 0) == 0) {
-                c.kind = CompiledOp::Kind::Spline;
-                c.linear = name == "spline_linear";
-                c.knots = std::move(pendingKnots);
-                pendingKnots.clear();
-                std::stable_sort(c.knots.begin(), c.knots.end(),
-                                 [](const Knot& a, const Knot& b) { return a.x < b.x; });
-            } else if (name == "mult") {
-                c.kind = CompiledOp::Kind::Mult;
-            } else if (name == "add") {
-                c.kind = CompiledOp::Kind::Add;
-            } else if (name == "sub") {
-                c.kind = CompiledOp::Kind::Sub;
-            } else if (name == "div") {
-                c.kind = CompiledOp::Kind::Div;
+                    c.value = op.value;
+                    break;
+                case FormulaOp::Kind::Spline:
+                    c.kind = CompiledOp::Kind::Spline;
+                    c.interpolation = op.interpolation;
+                    c.knots = std::move(op.knots);
+                    break;
+                case FormulaOp::Kind::Mult:
+                    c.kind = CompiledOp::Kind::Mult;
+                    break;
+                case FormulaOp::Kind::Add:
+                    c.kind = CompiledOp::Kind::Add;
+                    break;
+                case FormulaOp::Kind::Sub:
+                    c.kind = CompiledOp::Kind::Sub;
+                    break;
+                case FormulaOp::Kind::Div:
+                    c.kind = CompiledOp::Kind::Div;
+                    break;
+                case FormulaOp::Kind::Inv:
+                    c.kind = CompiledOp::Kind::Inv;
+                    break;
+                case FormulaOp::Kind::Neg:
+                    c.kind = CompiledOp::Kind::Neg;
+                    break;
+                case FormulaOp::Kind::Unknown:
+                    continue; // named in unknownOp: the caller does not run this program
             }
             out.push_back(std::move(c));
         }
         return out;
     }
 
+    // Loads the files of the channels @p indices names that have not been looked for yet, across
+    // cores, into the resolver's cache — where look() then finds them. Reading, inflating and
+    // parsing a morph file is the walk's whole cost, and a scene of a hundred dials reaches a
+    // hundred files; one at a time on this thread they were a large slice of such an import.
+    // Changes nothing but the time: the same files are read, and looked at in the same order.
+    template <typename Indices>
+    void prefetch(const Indices& indices) {
+        std::vector<std::string> urls;
+        for (const int index : indices) {
+            const Channel& c = m_channels[static_cast<std::size_t>(index)];
+            if (!c.looked && !c.url.empty() && c.url[0] != '#') {
+                urls.push_back(c.url);
+            }
+        }
+        if (urls.size() > 1) {
+            m_resolver.prefetchDocuments(urls, m_presetDir);
+        }
+    }
+
     // 2. Walk the driver graph from the dials: each reached channel's formulas are compiled, and
-    // each `?value` they drive is reached in turn.
+    // each `?value` they drive is reached in turn. Breadth first, a WAVE at a time — everything
+    // queued when a pass begins — so that each wave's files can be loaded together (prefetch).
     void discover() {
+        std::size_t wave = 0; // channels left of the wave being walked
         while (!m_queue.empty()) {
+            if (wave == 0) {
+                prefetch(m_queue);
+                wave = m_queue.size();
+            }
+            --wave;
             const int index = m_queue.front();
             m_queue.pop_front();
             look(m_channels[static_cast<std::size_t>(index)]);
@@ -501,7 +503,7 @@ private:
                 continue;
             }
             for (const auto& formula : *formulas) {
-                const ChannelRef output = parseChannelRef(formula.value("output", std::string()));
+                const ChannelRef output = parseChannelRef(stringOf(formula, "output"));
                 if (output.decodedKey.empty()) {
                     continue;
                 }
@@ -541,24 +543,46 @@ private:
                 if (operations == formula.end() || !operations->is_array()) {
                     continue;
                 }
-                bool poseDriven = false;
-                cf.ops = compile(*operations, ownerUrl, poseDriven);
-                cf.mult = formula.value("stage", std::string("sum")) == "mult";
+                bool        poseDriven = false;
+                std::string unknownOp;
+                cf.ops = compile(*operations, ownerUrl, poseDriven, unknownOp);
+                cf.mult = stringOf(formula, "stage", "sum") == "mult";
                 if (poseDriven && cf.target == CompiledFormula::Target::Channel && !cf.mult) {
                     // A morph a JOINT drives is a pose corrective: correctivescan finds it and the
                     // engine blends it live. Baked here as well, it would be applied twice.
+                    continue;
+                }
+                if (!unknownOp.empty()) {
+                    // Run without the operation, the formula gives another number altogether (a
+                    // "divide by" dropped is a "multiply by"): what it drives goes without it, and
+                    // the report names it.
+                    const std::string driven =
+                        cf.target == CompiledFormula::Target::Channel
+                            ? m_channels[static_cast<std::size_t>(cf.channel)].id
+                            : cf.target == CompiledFormula::Target::JointCenter ? cf.bone + " (its joint centre)"
+                                                                               : std::string("the figure's scale");
+                    const std::string line = driven + ": a formula that drives it uses an operation this "
+                                                      "importer does not know (" + unknownOp + ")";
+                    if (std::find(m_unreadable.begin(), m_unreadable.end(), line) == m_unreadable.end()) {
+                        m_unreadable.push_back(line);
+                    }
                     continue;
                 }
                 m_formulas.push_back(std::move(cf));
             }
         }
         // What the formulas merely READ: its own value where nothing dials or drives it.
+        std::vector<int> read;
         for (const CompiledFormula& f : m_formulas) {
             for (const CompiledOp& op : f.ops) {
                 if (op.kind == CompiledOp::Kind::PushChannel) {
-                    look(m_channels[static_cast<std::size_t>(op.channel)]);
+                    read.push_back(op.channel);
                 }
             }
+        }
+        prefetch(read);
+        for (const int index : read) {
+            look(m_channels[static_cast<std::size_t>(index)]);
         }
     }
 
@@ -631,22 +655,34 @@ private:
         m_values = std::move(values);
     }
 
-    // Every reached channel with a meaningful value and a file: the caller loads each and applies
-    // its deltas (a control has none). In the walk's order — the dials first, as the scene lists
+    // Every reached channel with a meaningful value that was FOUND in a file: the caller loads each
+    // and applies its deltas (a control has none); one that was not found is reported, and that is
+    // all. In the walk's order — the dials first, as the scene lists
     // them — so the bake adds the same deltas in the same order from one run to the next.
     void emit(ResolvedShape& out) const {
         for (std::size_t i = 0; i < m_channels.size(); ++i) {
             const Channel& c = m_channels[i];
-            if (!c.reached || std::abs(m_values[i]) < 1e-4) {
+            const bool     negligible = std::abs(m_values[i]) < 1e-4;
+            // What the walk KNOWS a channel to be — for the corrective scan's gates, ZERO
+            // included: a switch the preset turns off must read 0 there, not its file's default.
+            // A channel no file was found for is known only as far as the preset dials it or
+            // something drives it away from zero (its own default is anybody's guess).
+            if (c.modifier || c.dialed || (c.reached && !negligible)) {
+                out.channelValues.emplace(c.id, static_cast<float>(m_values[i]));
+            }
+            if (!c.reached || negligible) {
                 continue;
             }
             if (!c.modifier) {
+                // Nothing was found to bake — and where no reference named a file, `url` is only a
+                // guess: the file the reference STOOD in, whose own morph must not be taken for
+                // this one's.
                 out.missing.push_back(c.id + ": " + c.why);
+                continue;
             }
-            if (!c.url.empty()) {
-                out.morphs.push_back({c.url, static_cast<float>(m_values[i]), c.id});
-            }
+            out.morphs.push_back({c.url, static_cast<float>(m_values[i]), c.id});
         }
+        out.missing.insert(out.missing.end(), m_unreadable.begin(), m_unreadable.end());
     }
 
     const nlohmann::json& m_presetRoot;
@@ -658,6 +694,7 @@ private:
     std::unordered_map<std::string, int>               m_index; ///< decoded id -> m_channels index
     std::deque<int>                                    m_queue; ///< reached, not yet walked
     std::vector<CompiledFormula>                       m_formulas;
+    std::vector<std::string>                           m_unreadable; ///< formulas left out, for the report
     std::vector<std::shared_ptr<const FigureDocument>> m_documents; ///< keeps the walked files alive
     std::vector<double>                                m_values;
     bool                                               m_nameIndexBuilt = false;
@@ -668,7 +705,16 @@ private:
 
 ResolvedShape resolveDialedMorphs(const nlohmann::json& presetRoot, UriResolver& resolver,
                                   const std::string& presetDir, const FigureScope& scope) {
-    return Walk(presetRoot, resolver, presetDir, scope).run();
+    try {
+        return Walk(presetRoot, resolver, presetDir, scope).run();
+    } catch (const std::exception& e) {
+        // Every read of the walk is a tolerant one (figureutils' stringOf / numberOf, formulaops),
+        // so no file of any shape is known to get here. Should one: the base figure, and why —
+        // never no figure at all for the sake of an optional shape.
+        ResolvedShape none;
+        none.missing.push_back(std::string("the preset's dials could not be evaluated (") + e.what() + ")");
+        return none;
+    }
 }
 
 } // namespace pose

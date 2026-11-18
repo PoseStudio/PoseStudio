@@ -138,8 +138,8 @@ reset
 # kick dips the breast a few millimetres into the floor and springs it UP past the rest, once (the
 # base female: the float +24 — the fall is a fast motion, and the faster the move the more the
 # mass feels of it — the dip -2, the bounce back up to +25; a full bust's +37-42, the wall's
-# ceiling; wall-clock timed, so the shot is wherever the bounce is, and the gates are the floor's
-# give and the bounce's ceiling).
+# ceiling; under a script the landing runs on the `wait` ticks, so the shot falls on the same
+# tick every run, and the gates are the floor's give and the bounce's ceiling).
 view home
 lift 0.5
 ground

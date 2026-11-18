@@ -5,10 +5,12 @@
 
 #include "preferencesmanager.h"
 #include "database.h"
+#include "runmode.h"
 #include <QDir>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlError>
+#include <QStandardPaths>
 #include <QVariant>
 #include <QDebug>
 
@@ -43,8 +45,12 @@ QString PreferencesManager::rememberedDirectory(const QString& key, const QStrin
     return stored;
 }
 
+QString PreferencesManager::rememberedDirectoryOrDocuments(const QString& key) const {
+    return rememberedDirectory(key, QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
+}
+
 bool PreferencesManager::isolatedRun() {
-    static const bool isolated = qEnvironmentVariableIsSet("POSESTUDIO_IK_SCRIPT") &&
+    static const bool isolated = RunMode::scripted() &&
                                  qEnvironmentVariableIntValue("POSESTUDIO_IK_SCRIPT_PREFS") == 0;
     return isolated;
 }

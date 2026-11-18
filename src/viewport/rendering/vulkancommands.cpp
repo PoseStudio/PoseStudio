@@ -19,7 +19,9 @@ ImmediateBatch::ImmediateBatch(VulkanContext& context) : m_context(&context) {
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     poolInfo.queueFamilyIndex = context.graphicsFamily();
-    VK_CHECK(vkCreateCommandPool(device, &poolInfo, nullptr, &m_pool));
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateCommandPool(device, &poolInfo, nullptr, &pool));
+    m_pool.reset(device, pool); // owned from here: a throw below frees it
 
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -34,20 +36,13 @@ ImmediateBatch::ImmediateBatch(VulkanContext& context) : m_context(&context) {
     VK_CHECK(vkBeginCommandBuffer(m_cmd, &begin));
 }
 
-ImmediateBatch::~ImmediateBatch() {
-    if (!m_submitted) {
-        try {
-            submitAndWait();
-        } catch (...) {
-            // Never let an exception escape a destructor. submitAndWait() flips m_submitted first,
-            // so this won't loop; the pool is freed below as a fallback.
-        }
-    }
-    if (m_pool != VK_NULL_HANDLE && m_context != nullptr) {
-        vkDestroyCommandPool(m_context->device(), m_pool, nullptr);
-        m_pool = VK_NULL_HANDLE;
-    }
-}
+// A batch that was never submitted is DISCARDED: the pool goes (and the command buffer with it),
+// the staging buffers go, and nothing was ever queued. It must not be submitted here — the
+// destructor also runs when an exception unwinds past the batch, and by then the objects its
+// recorded commands name may already be destroyed (a Mesh whose vertex-buffer copy is recorded
+// and whose next allocation then fails; a recorder that threw inside an open render pass).
+// Submitting that names dead handles on exactly the path that should end in "import failed".
+ImmediateBatch::~ImmediateBatch() = default;
 
 void ImmediateBatch::retain(VulkanBuffer&& staging) {
     m_retained.push_back(std::move(staging));
@@ -69,25 +64,23 @@ void ImmediateBatch::submitAndWait() {
 
     VkFenceCreateInfo fenceInfo{};
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence fence = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateFence(device, &fenceInfo, nullptr, &fence));
+    VkFence rawFence = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateFence(device, &fenceInfo, nullptr, &rawFence));
+    const UniqueFence fence(device, rawFence);
 
     try {
-        VK_CHECK(vkQueueSubmit(m_context->graphicsQueue(), 1, &submit, fence));
-        VK_CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
+        VK_CHECK(vkQueueSubmit(m_context->graphicsQueue(), 1, &submit, rawFence));
+        VK_CHECK(vkWaitForFences(device, 1, &rawFence, VK_TRUE, UINT64_MAX));
     } catch (...) {
-        // Don't leak the fence on the throw path — and since the submit may have reached the
-        // queue, drain the whole device before rethrowing: the destructor is about to free
-        // m_retained, and a failed wait says nothing about whether the GPU is done reading the
-        // staging buffers. (Ignore the wait-idle result; on device-lost there's nothing better.)
+        // The submit may have reached the queue, so drain the whole device before rethrowing:
+        // the destructor is about to free m_retained, and a failed wait says nothing about
+        // whether the GPU is done reading the staging buffers. (Ignore the wait-idle result; on
+        // device-lost there's nothing better.)
         vkDeviceWaitIdle(device);
-        vkDestroyFence(device, fence, nullptr);
         throw;
     }
 
-    vkDestroyFence(device, fence, nullptr);
-    vkDestroyCommandPool(device, m_pool, nullptr); // also frees the command buffer
-    m_pool = VK_NULL_HANDLE;
+    m_pool.reset(); // also frees the command buffer
     m_cmd = VK_NULL_HANDLE;
     m_retained.clear(); // the GPU is done reading the staging buffers; release them now
 }

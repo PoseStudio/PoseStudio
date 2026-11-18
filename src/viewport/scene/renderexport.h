@@ -4,7 +4,7 @@
  *        a zone's canonical material, the orbit camera, the lighting dials.
  *
  * THE RULES OF THE TRANSLATION live here, in one Qt-free place both the application's snapshot
- * (the window's captureRenderSnapshot) and a test can call: what a layer switch means to a
+ * (VulkanWindow::captureRenderScene) and a test can call: what a layer switch means to a
  * renderer, how the viewport's subsurface dial becomes a scattering weight, which sun stands for
  * the key light, what color the camera sees with the backdrop off. The TEXTURES are not here —
  * they are the window's (it owns the decoded images and paints the overlays into them).
@@ -59,9 +59,6 @@ renderapi::Light renderLight(const SceneLight& light);
 /// the radiance that is that grey under the exposure (the viewport tonemaps its background with
 /// the rest of the frame, and so does a render's display transform).
 void renderEnvironment(const LightingSettings& lighting, float luminanceScale, renderapi::Environment& environment);
-
-/// The display transform the viewport's PBR mode ends with — the ACES fit of color.glsl.
-float tonemapAces(float linear);
 
 } // namespace pose
 

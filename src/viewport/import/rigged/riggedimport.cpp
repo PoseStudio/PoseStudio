@@ -7,21 +7,27 @@
 
 #include "riggedimport.h"
 
+#include "asciilower.h"
+#include "meshrepair.h"
+
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <stdexcept>
 
 namespace pose {
 
 namespace fs = std::filesystem;
 
+namespace {
+
+/// True for the file extensions the texture finder's index takes as images.
 bool isImageFile(const fs::path& p) {
     static const char* const kExt[] = {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".tif", ".tiff", ".webp", ".exr", ".hdr", ".dds", ".psd", ".gif"};
-    const std::string ext = lowerCopy(p.extension().string());
+    const std::string ext = asciiLower(p.extension().string());
     for (const char* e : kExt) {
         if (ext == e) {
             return true;
@@ -30,48 +36,23 @@ bool isImageFile(const fs::path& p) {
     return false;
 }
 
-std::string lowerCopy(std::string s) {
-    for (char& c : s) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+/// The file-name part of a path as a MODEL FILE spells it. An FBX names its textures by its
+/// author's paths — Windows ones as often as not — and std::filesystem splits a path by the
+/// host's rules: elsewhere `C:\maps\skin.png` would be one long name, so what follows the last
+/// backslash is taken there too (on Windows there is none left).
+std::string fileNameOf(const std::string& candidate) {
+    std::string name = fs::path(candidate).filename().string();
+    if (const std::size_t slash = name.find_last_of('\\'); slash != std::string::npos) {
+        name = name.substr(slash + 1);
     }
-    return s;
+    return name;
 }
+
+} // namespace
 
 float srgbToLinear(float c) {
     c = std::max(0.0f, std::min(1.0f, c));
     return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
-}
-
-void fillMissingNormals(MeshData& mesh) {
-    std::vector<char> missing(mesh.vertices.size(), 0);
-    bool              any = false;
-    bool              all = !mesh.vertices.empty();
-    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
-        missing[i] = glm::dot(mesh.vertices[i].normal, mesh.vertices[i].normal) < 1e-12f ? 1 : 0;
-        any = any || missing[i];
-        all = all && missing[i];
-    }
-    if (!any) {
-        return;
-    }
-    mesh.normalsGenerated = all; // (a file with no normals at all: the import smooths it by angle, smoothnormals.h)
-    std::vector<glm::vec3> accum(mesh.vertices.size(), glm::vec3(0.0f));
-    for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
-        const uint32_t  i0 = mesh.indices[i];
-        const uint32_t  i1 = mesh.indices[i + 1];
-        const uint32_t  i2 = mesh.indices[i + 2];
-        const glm::vec3 faceNormal = glm::cross(mesh.vertices[i1].pos - mesh.vertices[i0].pos, mesh.vertices[i2].pos - mesh.vertices[i0].pos);
-        accum[i0] += faceNormal;
-        accum[i1] += faceNormal;
-        accum[i2] += faceNormal;
-    }
-    for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
-        if (!missing[i]) {
-            continue;
-        }
-        const float len = glm::length(accum[i]);
-        mesh.vertices[i].normal = len > 1e-8f ? accum[i] / len : glm::vec3(0.0f, 1.0f, 0.0f);
-    }
 }
 
 // ---- TextureFinder ----------------------------------------------------------------------------
@@ -98,15 +79,25 @@ TextureSource TextureFinder::resolve(const std::vector<std::string>& candidates,
             return found(above, info);
         }
     }
+    // By NAME: beside the model first — one folder's listing, where the walk below would have to
+    // list the whole tree under the model's folder to find the file that lies next to it.
     for (const std::string& c : candidates) {
-        if (c.empty()) {
-            continue;
-        }
-        const std::string name = lowerCopy(fs::path(c).filename().string());
+        const std::string name = asciiLower(fileNameOf(c));
         if (name.empty()) {
             continue;
         }
-        index();
+        indexBeside();
+        const auto it = m_beside.find(name);
+        if (it != m_beside.end()) {
+            return found(it->second, info);
+        }
+    }
+    for (const std::string& c : candidates) {
+        const std::string name = asciiLower(fileNameOf(c));
+        if (name.empty()) {
+            continue;
+        }
+        index(info);
         const auto it = m_byName.find(name);
         if (it != m_byName.end()) {
             return found(it->second, info);
@@ -130,7 +121,25 @@ TextureSource TextureFinder::found(const fs::path& p, RiggedImportInfo* info) {
     return out;
 }
 
-void TextureFinder::index() {
+void TextureFinder::indexBeside() {
+    if (m_besideIndexed) {
+        return;
+    }
+    m_besideIndexed = true;
+    std::error_code ec;
+    if (m_dir.empty() || !fs::is_directory(m_dir, ec)) {
+        return;
+    }
+    fs::directory_iterator       it(m_dir, fs::directory_options::skip_permission_denied, ec);
+    const fs::directory_iterator end;
+    for (; !ec && it != end; it.increment(ec)) {
+        if (it->is_regular_file(ec) && isImageFile(it->path())) {
+            m_beside.emplace(asciiLower(it->path().filename().string()), it->path());
+        }
+    }
+}
+
+void TextureFinder::index(RiggedImportInfo* info) {
     if (m_indexed) {
         return;
     }
@@ -141,14 +150,16 @@ void TextureFinder::index() {
     // sits beside a character — the walk is capped either way).
     const fs::path above = m_dir.parent_path();
     const struct { fs::path dir; int depth; } roots[] = {{m_dir, 8}, {above, 3}};
-    std::size_t files = 0;
+    std::size_t files = 0;   // image files indexed
+    std::size_t visited = 0; // entries looked at, of any kind: what the walk's time goes by
     for (const auto& r : roots) {
         if (r.dir.empty() || !fs::is_directory(r.dir, ec)) {
             continue;
         }
         fs::recursive_directory_iterator       it(r.dir, fs::directory_options::skip_permission_denied, ec);
         const fs::recursive_directory_iterator end;
-        for (; it != end && files < 20000; it.increment(ec)) {
+        for (; it != end && files < 20000 && visited < kMaxVisited; it.increment(ec)) {
+            ++visited;
             if (ec) {
                 ec.clear();
                 continue;
@@ -161,8 +172,12 @@ void TextureFinder::index() {
                 continue;
             }
             ++files;
-            m_byName.emplace(lowerCopy(it->path().filename().string()), it->path()); // (the first found wins: the file's own folder)
+            m_byName.emplace(asciiLower(it->path().filename().string()), it->path()); // (the first found wins: the model's folder is walked first)
         }
+    }
+    if (visited >= kMaxVisited && info != nullptr) {
+        info->notes.push_back("the search for texture files by name stopped after " + std::to_string(kMaxVisited) +
+                              " folder entries: a texture reported missing may lie deeper under the model's folder");
     }
 }
 
@@ -170,6 +185,29 @@ void TextureFinder::index() {
 
 void finishRiggedModel(ModelData& model, std::vector<RawSkeletonBone>& bones, RiggedImportInfo* info) {
     const int boneCount = static_cast<int>(bones.size());
+
+    // ---- WHAT IS NOT A NUMBER GOES FIRST: everything below is measured over the vertices and the
+    // bones, and one NaN or infinity among them (a binary file can carry either) would make the
+    // centre, the floor shift — and with it every vertex and bone — non-finite. A vertex goes
+    // with its triangles; a joint cannot be left out of a skeleton, so one refuses the file.
+    const auto finite = [](const glm::vec3& p) { return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z); };
+    if (const std::size_t removed = removeNonFiniteVertices(model); removed > 0) {
+        if (model.meshes.empty()) {
+            throw std::runtime_error("no vertex of the file has a finite position (they are NaN or infinite): the file is damaged");
+        }
+        if (info != nullptr) {
+            info->notes.push_back(std::to_string(removed) + " vertices whose position is not a number (NaN or infinity) were left out with their triangles");
+        }
+    }
+    for (RawSkeletonBone& b : bones) {
+        if (!finite(b.position)) {
+            throw std::runtime_error("the skeleton's joint '" + b.name + "' stands at a position that is not a number (NaN or infinity): the file is damaged");
+        }
+        if (b.hasTip && !finite(b.tip)) {
+            b.tip = glm::vec3(0.0f); // (a tip is a hint: without it the bone's direction is read off the skeleton)
+            b.hasTip = false;
+        }
+    }
 
     // ---- FACING, CENTRE AND FLOOR. The figure faces +z with her left at +x, stands over the origin,
     // and her lowest point rests on y = 0 — what every reader of the bind pose takes for granted.
@@ -326,7 +364,7 @@ void finishRiggedModel(ModelData& model, std::vector<RawSkeletonBone>& bones, Ri
         info->heightMetres = highest - lowest;
         info->yawDegrees = yawDeg;
         info->groundedMm = -lowest * 1000.0f;
-        if (info->heightMetres < 1.2f || info->heightMetres > 2.4f) {
+        if (boneCount > 0 && (info->heightMetres < 1.2f || info->heightMetres > 2.4f)) { // (a prop is as tall as it is)
             char line[160];
             std::snprintf(line, sizeof(line), "the figure stands %.2f m tall after the unit conversion: an unusual height for a human",
                           static_cast<double>(info->heightMetres));

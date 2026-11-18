@@ -5,10 +5,13 @@
  * Four routes exist: a static model (ModelImportService: `.obj`), a Gaussian splat scene
  * (SplatImportService: `.ply` / `.splat` / `.spz`), a native figure preset
  * (FigureImportService: `.duf` / `.dsf`), and a rigged character in an interchange format
- * (RiggedImportService: `.fbx`, `.glb` / `.gltf`, `.usd` / `.usda` / `.usdc` / `.usdz`), the
- * last two sharing the "figure" entry points (ViewportWidget::importFigure, the Asset Manager's
- * importFigureRequested, the command line). The menu, the Asset Manager's double-click, the
- * command line and the viewport's dispatch all read these, so a new format is added here once.
+ * (RiggedImportService: `.fbx`, `.glb` / `.gltf` / `.vrm`, `.usd` / `.usda` / `.usdc` /
+ * `.usdz`), the last two sharing the "figure" entry points (ViewportWidget::importFigure, the
+ * Asset Manager's importFigureRequested, the command line). The File → Import dialogs' filters,
+ * the Asset Manager's double-click, the command line and the viewport's dispatch all read
+ * these, so a new format is added here once. Each family's extensions are listed ONCE — the
+ * `…Extensions()` functions — and both the `is…File()` tests and the dialogs' filters
+ * (dialogFilter) are made from those lists.
  */
 
 #ifndef IMPORTFORMATS_H
@@ -19,30 +22,9 @@
 
 namespace pose::ImportFormats {
 
-/// A static model file: Wavefront OBJ.
-inline bool isModelFile(const QString& path) {
-    return path.endsWith(QStringLiteral(".obj"), Qt::CaseInsensitive);
-}
-
-/// A native figure preset or data file (`.duf` / `.dsf`).
-inline bool isNativeFigureFile(const QString& path) {
-    return path.endsWith(QStringLiteral(".duf"), Qt::CaseInsensitive) ||
-           path.endsWith(QStringLiteral(".dsf"), Qt::CaseInsensitive);
-}
-
-/// The extensions of the rigged-character interchange formats, lowercase with the dot.
-inline const QStringList& riggedExtensions() {
-    static const QStringList kExtensions = {
-        QStringLiteral(".fbx"),
-        QStringLiteral(".glb"), QStringLiteral(".gltf"), QStringLiteral(".vrm"),
-        QStringLiteral(".usd"), QStringLiteral(".usda"), QStringLiteral(".usdc"), QStringLiteral(".usdz"),
-    };
-    return kExtensions;
-}
-
-/// A rigged character (or a plain mesh) in an interchange format: FBX, glTF / GLB / VRM, USD.
-inline bool isRiggedFile(const QString& path) {
-    for (const QString& ext : riggedExtensions()) {
+/// True when @p path ends in one of @p extensions (lowercase, with the dot), whatever its case.
+inline bool hasExtension(const QString& path, const QStringList& extensions) {
+    for (const QString& ext : extensions) {
         if (path.endsWith(ext, Qt::CaseInsensitive)) {
             return true;
         }
@@ -50,12 +32,85 @@ inline bool isRiggedFile(const QString& path) {
     return false;
 }
 
+/// A file dialog's filter for @p extensions under the name @p name:
+/// ("glTF Files", {".glb", ".gltf"}) -> "glTF Files (*.glb *.gltf)".
+inline QString dialogFilter(const QString& name, const QStringList& extensions) {
+    QStringList patterns;
+    for (const QString& ext : extensions) {
+        patterns << QLatin1Char('*') + ext;
+    }
+    return QStringLiteral("%1 (%2)").arg(name, patterns.join(QLatin1Char(' ')));
+}
+
+/// A static model file: Wavefront OBJ.
+inline const QStringList& modelExtensions() {
+    static const QStringList kExtensions = {QStringLiteral(".obj")};
+    return kExtensions;
+}
+inline bool isModelFile(const QString& path) {
+    return hasExtension(path, modelExtensions());
+}
+
+/// A native figure preset or data file (`.duf` / `.dsf`).
+inline const QStringList& nativeFigureExtensions() {
+    static const QStringList kExtensions = {QStringLiteral(".duf"), QStringLiteral(".dsf")};
+    return kExtensions;
+}
+inline bool isNativeFigureFile(const QString& path) {
+    return hasExtension(path, nativeFigureExtensions());
+}
+
+/// FBX (`.fbx`): among the rigged formats the one with no test of its own — the rigged import
+/// service takes whatever is neither glTF nor USD for it.
+inline const QStringList& fbxExtensions() {
+    static const QStringList kExtensions = {QStringLiteral(".fbx")};
+    return kExtensions;
+}
+
+/// glTF, binary or JSON (`.glb` / `.gltf`) …
+inline const QStringList& gltfExtensions() {
+    static const QStringList kExtensions = {QStringLiteral(".glb"), QStringLiteral(".gltf")};
+    return kExtensions;
+}
+/// … and a VRM avatar (`.vrm`): a GLB with a humanoid map, read by the glTF reader.
+inline const QStringList& vrmExtensions() {
+    static const QStringList kExtensions = {QStringLiteral(".vrm")};
+    return kExtensions;
+}
+/// What the glTF reader reads: glTF itself, or a VRM avatar.
+inline bool isGltfFile(const QString& path) {
+    return hasExtension(path, gltfExtensions()) || hasExtension(path, vrmExtensions());
+}
+
+/// USD in any of its encodings (`.usd` / `.usda` / `.usdc`) or a USDZ package.
+inline const QStringList& usdExtensions() {
+    static const QStringList kExtensions = {QStringLiteral(".usd"), QStringLiteral(".usda"),
+                                            QStringLiteral(".usdc"), QStringLiteral(".usdz")};
+    return kExtensions;
+}
+inline bool isUsdFile(const QString& path) {
+    return hasExtension(path, usdExtensions());
+}
+
+/// The extensions of the rigged-character interchange formats, lowercase with the dot.
+inline const QStringList& riggedExtensions() {
+    static const QStringList kExtensions = fbxExtensions() + gltfExtensions() + vrmExtensions() + usdExtensions();
+    return kExtensions;
+}
+
+/// A rigged character (or a plain mesh) in an interchange format: FBX, glTF / GLB / VRM, USD.
+inline bool isRiggedFile(const QString& path) {
+    return hasExtension(path, riggedExtensions());
+}
+
 /// A Gaussian splat scene: the trained `.ply`, the compact `.splat` or the compressed `.spz`
 /// (SplatImportService).
+inline const QStringList& splatExtensions() {
+    static const QStringList kExtensions = {QStringLiteral(".ply"), QStringLiteral(".splat"), QStringLiteral(".spz")};
+    return kExtensions;
+}
 inline bool isSplatFile(const QString& path) {
-    return path.endsWith(QStringLiteral(".ply"), Qt::CaseInsensitive) ||
-           path.endsWith(QStringLiteral(".splat"), Qt::CaseInsensitive) ||
-           path.endsWith(QStringLiteral(".spz"), Qt::CaseInsensitive);
+    return hasExtension(path, splatExtensions());
 }
 
 /// The extension of a saved material (scene/materialfile.h), lowercase with its dot.
@@ -82,26 +137,6 @@ inline bool isAppliedMaterialFile(const QString& path) {
 /// Anything the figure route imports: a native figure or a rigged interchange file.
 inline bool isFigureRouteFile(const QString& path) {
     return isNativeFigureFile(path) || isRiggedFile(path);
-}
-
-/// FBX (`.fbx`).
-inline bool isFbxFile(const QString& path) {
-    return path.endsWith(QStringLiteral(".fbx"), Qt::CaseInsensitive);
-}
-
-/// glTF, binary or JSON (`.glb` / `.gltf`), or a VRM avatar (`.vrm`: a GLB with a humanoid map).
-inline bool isGltfFile(const QString& path) {
-    return path.endsWith(QStringLiteral(".glb"), Qt::CaseInsensitive) ||
-           path.endsWith(QStringLiteral(".gltf"), Qt::CaseInsensitive) ||
-           path.endsWith(QStringLiteral(".vrm"), Qt::CaseInsensitive);
-}
-
-/// USD in any of its encodings (`.usd` / `.usda` / `.usdc`) or a USDZ package.
-inline bool isUsdFile(const QString& path) {
-    return path.endsWith(QStringLiteral(".usd"), Qt::CaseInsensitive) ||
-           path.endsWith(QStringLiteral(".usda"), Qt::CaseInsensitive) ||
-           path.endsWith(QStringLiteral(".usdc"), Qt::CaseInsensitive) ||
-           path.endsWith(QStringLiteral(".usdz"), Qt::CaseInsensitive);
 }
 
 } // namespace pose::ImportFormats

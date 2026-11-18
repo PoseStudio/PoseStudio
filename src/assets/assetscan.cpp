@@ -9,14 +9,38 @@
 #include <QFileInfo>
 
 namespace {
-// Image file extensions treated as thumbnail candidates throughout the asset manager. An asset
-// (any non-image file) is paired with the largest same-basename image in its folder.
-const QSet<QString> kImageExtensions = {"png", "jpg", "jpeg", "bmp", "webp", "gif", "tif", "tiff"};
-
 // Extensions that are never listed as assets in their own right: sidecar/companion files that
 // belong to another asset rather than being one (e.g. a Wavefront .mtl material library ships
 // alongside its .obj). Compared lower-case.
 const QSet<QString> kIgnoredAssetExtensions = {"mtl"};
+
+// A picture of a folder listing, as the choice of a thumbnail needs it.
+struct ImageFile {
+    QString fileName;
+    QString stem;      ///< its name without the image extension, lower-cased ("name", "name.duf", "name.tip")
+    qint64  bytes = 0;
+};
+
+// THE THUMBNAIL RULE (assetscan.h). `images` are the pictures that share the asset's name up to
+// the first dot — what made the file an asset. Among them the asset's own come first: a picture
+// NAMED AFTER IT, by its name ("Name.png") or its whole file name ("Name.duf.png"), either also
+// with ".tip" before the picture's extension ("Name.tip.png": the larger preview some content
+// ships beside the small one). The largest of its own is its thumbnail; an asset with none of
+// its own wears the largest picture of the group, as every asset did before names with a dot in
+// them ("Material.001", "Material.002") were told apart.
+QString thumbnailFor(const QString& assetFileName, const QList<ImageFile>& images) {
+    const QString whole = assetFileName.toLower();                            // "name.duf"
+    const QString stem = QFileInfo(assetFileName).completeBaseName().toLower(); // "name"
+    static const QString kTip = QStringLiteral(".tip");
+    const ImageFile* own = nullptr;
+    const ImageFile* largest = nullptr;
+    for (const ImageFile& image : images) {
+        if (!largest || image.bytes > largest->bytes) largest = &image;
+        const bool named = image.stem == stem || image.stem == whole || image.stem == stem + kTip || image.stem == whole + kTip;
+        if (named && (!own || image.bytes > own->bytes)) own = &image;
+    }
+    return own ? own->fileName : (largest ? largest->fileName : QString());
+}
 
 // Recursive body of classifyFolder: `out` collects every state established during this walk
 // (consulted before `known` so a folder reached twice in one walk is classified once).
@@ -29,16 +53,17 @@ AssetScan::HitState classifyInto(const QString& folderPath,
 
     // ONE listing per folder: files and subdirectories together. The old code listed files
     // first and directories second, doubling the syscalls on every folder without a direct hit.
-    const QFileInfoList entries = QDir(folderPath).entryInfoList(
-        QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot | QDir::NoSymLinks, QDir::NoSort);
+    const QFileInfoList entries = QDir(folderPath).entryInfoList(AssetScan::kEntryFilter, QDir::NoSort);
 
+    // (Whether a file IS an asset is the first-dot question alone — a picture shares its name up
+    // to the first dot; which picture it then wears is thumbnailFor's and changes no state.)
     QSet<QString> images, nonImages;
     for (const QFileInfo& f : entries) {
         if (f.isDir() || HiddenNames::isHidden(f.fileName())) continue;
         const QString suffix = f.suffix().toLower();
         if (kIgnoredAssetExtensions.contains(suffix)) continue; // sidecar file, not an asset
         const QString base = f.baseName();
-        if (kImageExtensions.contains(suffix)) {
+        if (AssetScan::isImageSuffix(suffix)) {
             images.insert(base);
             if (nonImages.contains(base)) { out.insert(folderPath, HitState::DirectHit); return HitState::DirectHit; }
         } else {
@@ -62,22 +87,6 @@ AssetScan::HitState classifyInto(const QString& folderPath,
 } // namespace
 
 namespace AssetScan {
-
-QString normalizePath(const QString& path) {
-    return QDir::cleanPath(QDir::fromNativeSeparators(path));
-}
-
-bool samePath(const QString& a, const QString& b) {
-    return normalizePath(a).compare(normalizePath(b), kPathCase) == 0;
-}
-
-bool folderWithinLibrary(const QString& folderPath, const QString& libRoot) {
-    const QString root = normalizePath(libRoot);
-    const QString folder = normalizePath(folderPath);
-    if (folder.compare(root, kPathCase) == 0) return true;
-    const QString prefix = root.endsWith(QLatin1Char('/')) ? root : root + QLatin1Char('/');
-    return folder.startsWith(prefix, kPathCase);
-}
 
 QStringList pathsWithin(const QStringList& assetPaths, const QStringList& roots) {
     QStringList within;
@@ -133,26 +142,6 @@ QString truncateSearchPath(const QString& relPath, int maxSegments) {
     return segments.join(" / ");
 }
 
-bool folderHasDirectAssetHit(const QString& folderPath) {
-    const QFileInfoList files = QDir(folderPath).entryInfoList(kFileFilter, QDir::NoSort);
-
-    QSet<QString> images, nonImages;
-    for (const QFileInfo& f : files) {
-        if (HiddenNames::isHidden(f.fileName())) continue;
-        const QString suffix = f.suffix().toLower();
-        if (kIgnoredAssetExtensions.contains(suffix)) continue; // sidecar file, not an asset
-        const QString base = f.baseName();
-        if (kImageExtensions.contains(suffix)) {
-            images.insert(base);
-            if (nonImages.contains(base)) return true;
-        } else {
-            nonImages.insert(base);
-            if (images.contains(base)) return true;
-        }
-    }
-    return false;
-}
-
 QHash<QString, HitState> classifyFolder(const QString& folderPath,
                                         const QHash<QString, HitState>& known) {
     QHash<QString, HitState> out;
@@ -163,12 +152,11 @@ QHash<QString, HitState> classifyFolder(const QString& folderPath,
 QList<AssetHit> scanFolderAssets(const QString& folderPath) {
     const QFileInfoList files = QDir(folderPath).entryInfoList(kFileFilter);
 
-    // Only the LARGEST same-basename image is kept: it's the one thumbnail the grid shows,
-    // so tracking the runners-up was pure allocation for data nothing read.
+    // The files that share a name up to the first dot: the assets among them and the pictures
+    // one of which each asset wears (thumbnailFor).
     struct FileGroup {
         QList<QFileInfo> nonImages;
-        QString bestImage;
-        qint64 maxBytes = -1;
+        QList<ImageFile> images;
     };
     QHash<QString, FileGroup> groups;
     groups.reserve(files.size());
@@ -178,13 +166,8 @@ QList<AssetHit> scanFolderAssets(const QString& folderPath) {
         const QString suffix = fi.suffix().toLower();
         if (kIgnoredAssetExtensions.contains(suffix)) continue; // sidecar file (e.g. .mtl), not a listable asset
         const QString base = fi.baseName();
-        if (kImageExtensions.contains(suffix)) {
-            const qint64 sz = fi.size();
-            auto& g = groups[base];
-            if (sz > g.maxBytes) {
-                g.bestImage = fi.fileName();
-                g.maxBytes = sz;
-            }
+        if (AssetScan::isImageSuffix(suffix)) {
+            groups[base].images.append({fi.fileName(), fi.completeBaseName().toLower(), fi.size()});
         } else {
             groups[base].nonImages.append(fi);
         }
@@ -194,12 +177,12 @@ QList<AssetHit> scanFolderAssets(const QString& folderPath) {
     finalHits.reserve(groups.size());
     for (auto it = groups.cbegin(); it != groups.cend(); ++it) {
         const FileGroup& g = it.value();
-        if (!g.bestImage.isEmpty() && !g.nonImages.isEmpty()) {
+        if (!g.images.isEmpty() && !g.nonImages.isEmpty()) {
             for (const QFileInfo& nonImg : g.nonImages) {
                 AssetHit hit;
                 hit.folderPath = folderPath;
                 hit.assetFileName = nonImg.fileName();
-                hit.bestImage = g.bestImage;
+                hit.bestImage = thumbnailFor(hit.assetFileName, g.images);
                 hit.sizeBytes = nonImg.size();
                 hit.lastModified = nonImg.lastModified();
                 finalHits.append(std::move(hit));
@@ -234,22 +217,16 @@ QList<AssetHit> resolveAssetHits(const QStringList& assetPaths) {
             relevantNames.insert(fi.fileName().toLower(), p);
         }
 
-        // Single scan of this folder: the best (largest) image per asset basename, and the
-        // asset files' own stat data.
-        struct ImageGroup { QString bestImage; qint64 maxBytes = -1; };
-        QHash<QString, ImageGroup> imagesByBase;
+        // Single scan of this folder: the pictures per asset basename (the text before the
+        // first dot), and the asset files' own stat data.
+        QHash<QString, QList<ImageFile>> imagesByBase;
         QList<QPair<QString, AssetHit>> folderHits; // (stored full path, hit) found in this folder
         const QFileInfoList allFiles = QDir(folderPath).entryInfoList(kFileFilter);
         for (const QFileInfo& fi : allFiles) {
             const QString base = fi.baseName().toLower();
             if (!relevantBases.contains(base)) continue;
-            if (kImageExtensions.contains(fi.suffix().toLower())) {
-                const qint64 sz = fi.size();
-                auto& ig = imagesByBase[base];
-                if (sz > ig.maxBytes) {
-                    ig.bestImage = fi.fileName();
-                    ig.maxBytes = sz;
-                }
+            if (isImageSuffix(fi.suffix().toLower())) {
+                imagesByBase[base].append({fi.fileName(), fi.completeBaseName().toLower(), fi.size()});
                 continue;
             }
             const auto nameIt = relevantNames.constFind(fi.fileName().toLower());
@@ -264,7 +241,7 @@ QList<AssetHit> resolveAssetHits(const QStringList& assetPaths) {
 
         for (auto& [storedPath, hit] : folderHits) {
             const auto igIt = imagesByBase.constFind(QFileInfo(hit.assetFileName).baseName().toLower());
-            if (igIt != imagesByBase.cend()) hit.bestImage = igIt->bestImage;
+            if (igIt != imagesByBase.cend()) hit.bestImage = thumbnailFor(hit.assetFileName, *igIt);
             hitByPath.insert(storedPath, std::move(hit));
         }
     }

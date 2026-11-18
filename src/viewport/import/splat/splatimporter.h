@@ -46,6 +46,11 @@ struct SplatData {
     /// Trained with the antialiasing (mip) formulation (an `.spz` flag): the renderer then
     /// compensates each splat's opacity for the low-pass dilation, as that formulation expects.
     bool                   antialiased = false;
+    /// How many splats the reader left out because a value of theirs was not a number (a NaN or
+    /// an infinity from an unconverged training): one infinite position would stretch the depth
+    /// sort's range until no splat is sorted at all, and a NaN color or opacity spoils every
+    /// pixel the splat is blended into.
+    std::size_t            droppedNonFinite = 0;
 
     std::size_t count() const { return positions.size(); }
     int         coefficients() const { return (shDegree + 1) * (shDegree + 1); }

@@ -16,10 +16,10 @@
 #ifndef LIGHTSPANEL_H
 #define LIGHTSPANEL_H
 
+#include "colorswatch.h"
 #include "scenelight.h"
 
-#include <QColor>
-#include <QPointer>
+#include <QStringList>
 #include <QWidget>
 
 #include <array>
@@ -27,7 +27,6 @@
 #include <vector>
 
 class QCheckBox;
-class QColorDialog;
 class QFormLayout;
 class QLabel;
 class QLineEdit;
@@ -82,11 +81,14 @@ private:
     void refresh();
     /// One row of @p form for field @p which.
     void addRow(QFormLayout* form, Field which, const QString& label, const QString& tip, double lo, double hi,
-                double step, int decimals, double restoreTo);
+                double step, int decimals);
     /// The field's value of @p light in the tab's units, and its setter.
     static double fieldValue(const SceneLight& light, Field which);
     static void   setFieldValue(SceneLight& light, Field which, double value);
-    /// Whether a light of @p kind has the field at all.
+    /// The value a row's restore button puts back, in the tab's units: what a NEW light of
+    /// @p kind has (SceneLight's defaults, and defaultLightIntensity for the Intensity).
+    static double defaultFieldValue(LightKind kind, Field which);
+    /// Whether a light of @p kind has the field at all (a point light has no aim: no Turn, no Tilt).
     static bool fieldApplies(LightKind kind, Field which);
 
     /// Applies @p change to the selected light as ONE undoable edit of its own.
@@ -98,6 +100,7 @@ private:
     ViewportWidget* m_viewport = nullptr;
 
     MenuPickerButton* m_picker = nullptr; // which light the tab shows (= the selected light)
+    QStringList       m_pickerNames;      // the lights' names its menu was last built for
     QPushButton*      m_add = nullptr;
     QPushButton*      m_remove = nullptr;
     QLabel*           m_empty = nullptr;
@@ -111,11 +114,11 @@ private:
     QPushButton*      m_aim = nullptr;
     std::array<Row, FieldCount> m_rows{};
     std::vector<QLabel*>        m_plainLabels; // the Name / Kind / Color rows' labels
+    int                         m_restoreTipKind = -1; // the LightKind the restore buttons' tooltips were written for
     bool                        m_labelsAligned = false;
 
-    QPointer<QColorDialog> m_colorDialog;
-    QColor                 m_colorAtOpen;
-    int                    m_colorLight = -1; // the light the open color dialog edits
+    colorswatch::ColorPick m_colorPick;       // the Color row's dialog, while one is open
+    int                    m_colorLight = -1; // the light it edits
 };
 
 } // namespace pose

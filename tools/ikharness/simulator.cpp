@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <random>
 #include <string>
 #include <vector>
@@ -116,7 +117,8 @@ double volumePenetration(const Armature& arm, int* worstNode, int* worstVolume, 
     return worst;
 }
 
-std::vector<int> resolveBoneList(const Armature& arm, const char* commaSeparated) {
+/// The bones a comma-separated list of canonical names resolves to on @p arm (the trace probes').
+static std::vector<int> resolveBoneList(const Armature& arm, const char* commaSeparated) {
     std::vector<int> out;
     const std::string names(commaSeparated != nullptr ? commaSeparated : "");
     std::size_t from = 0;
@@ -134,6 +136,20 @@ std::vector<int> resolveBoneList(const Armature& arm, const char* commaSeparated
 
 std::string resolveBoneName(const Armature& arm, const std::string& canonical) {
     return aliasedBoneName(arm, canonical);
+}
+
+/// The REVERSAL OVERLAP of a step against the step before it (m): how far it goes back over
+/// the previous one — 0 when it does not, or when either is no step at all. @p stepMoved is the
+/// caller's own test that THIS step is one (each tremble measure keeps the test it was gated on).
+static double reversalOverlap(const glm::vec3& step, const glm::vec3& prevStep, bool stepMoved) {
+    const float pl = glm::length(prevStep);
+    if (pl > 1e-6f && stepMoved) {
+        const float against = -glm::dot(step, prevStep) / pl;
+        if (against > 0.0f) {
+            return std::min(static_cast<double>(against), static_cast<double>(pl));
+        }
+    }
+    return 0.0;
 }
 
 double rotationAngleDeg(const glm::mat3& a, const glm::mat3& b) {
@@ -164,6 +180,16 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
     // it (2026-11-03). Built here, after the mesh, it is the rig the first drag would have built.
     arm.prepareIkRig();
     const std::size_t n = arm.boneCount();
+    // (... and the per-bone results likewise, before the first early return: a failed run hands
+    // them back zeroed at their full size, so a phase that indexes one for a bone its own probe
+    // resolved reads a zero and not past an empty vector's end.)
+    r.startPos.assign(n, glm::vec3(0.0f));
+    r.dragEndPos.assign(n, glm::vec3(0.0f));
+    r.endPos.assign(n, glm::vec3(0.0f));
+    r.restPos.assign(n, glm::vec3(0.0f));
+    r.startEuler.assign(n, glm::vec3(0.0f));
+    r.endEuler.assign(n, glm::vec3(0.0f));
+    r.endPalm.assign(n, glm::vec3(0.0f));
     const auto applyPrePose = [&]() {
         for (const auto& [bone, euler] : sc.prePose) {
             if (!arm.setBoneRotation(resolveBoneName(arm, bone), euler)) {
@@ -492,6 +518,16 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
         leg.prevKnee = arm.boneWorldPosition(static_cast<std::size_t>(leg.knee));
         legs.push_back(leg);
     }
+    // From @p socket toward the OTHER leg's socket (zero with one leg).
+    const auto towardOtherSocket = [&](const Leg& leg, const glm::vec3& socket) {
+        glm::vec3 inward(0.0f);
+        for (const Leg& other : legs) {
+            if (other.socket != leg.socket) {
+                inward = arm.boneWorldPosition(static_cast<std::size_t>(other.socket)) - socket;
+            }
+        }
+        return inward;
+    };
     const auto wrapDeg = [](float d) {
         while (d > 180.0f) d -= 360.0f;
         while (d <= -180.0f) d += 360.0f;
@@ -515,12 +551,7 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
         }
         axis /= len;
         const glm::vec3 off = (knee - socket) - axis * glm::dot(knee - socket, axis);
-        glm::vec3 inward(0.0f); // toward the other leg's socket, perpendicular to the line
-        for (const Leg& other : legs) {
-            if (other.socket != leg.socket) {
-                inward = arm.boneWorldPosition(static_cast<std::size_t>(other.socket)) - socket;
-            }
-        }
+        glm::vec3 inward = towardOtherSocket(leg, socket); // ... perpendicular to the line
         inward -= axis * glm::dot(inward, axis);
         const float il = glm::length(inward);
         return il > 1e-4f ? static_cast<double>(glm::dot(off, inward / il)) : 0.0;
@@ -529,12 +560,7 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
     const auto kneeSplay = [&](const Leg& leg) {
         const glm::vec3 socket = arm.boneWorldPosition(static_cast<std::size_t>(leg.socket));
         const glm::vec3 knee = arm.boneWorldPosition(static_cast<std::size_t>(leg.knee));
-        glm::vec3 inward(0.0f);
-        for (const Leg& other : legs) {
-            if (other.socket != leg.socket) {
-                inward = arm.boneWorldPosition(static_cast<std::size_t>(other.socket)) - socket;
-            }
-        }
+        glm::vec3 inward = towardOtherSocket(leg, socket);
         inward.y = 0.0f;
         const float il = glm::length(inward);
         return il > 1e-4f ? -static_cast<double>(glm::dot(knee - socket, inward / il)) : 0.0;
@@ -543,12 +569,7 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
         const glm::vec3 socket = arm.boneWorldPosition(static_cast<std::size_t>(leg.socket));
         const glm::vec3 knee = arm.boneWorldPosition(static_cast<std::size_t>(leg.knee));
         const glm::vec3 ankle = arm.boneWorldPosition(static_cast<std::size_t>(leg.ankle));
-        glm::vec3 inward(0.0f);
-        for (const Leg& other : legs) {
-            if (other.socket != leg.socket) {
-                inward = arm.boneWorldPosition(static_cast<std::size_t>(other.socket)) - socket;
-            }
-        }
+        glm::vec3 inward = towardOtherSocket(leg, socket);
         inward.y = 0.0f;
         const float il = glm::length(inward);
         return il > 1e-4f ? -static_cast<double>(glm::dot(knee - ankle, inward / il)) : 0.0;
@@ -629,12 +650,15 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
             break; // past the last waypoint: release
         }
         if (sc.cursorNoise > 0.0f) {
+            // (KEEP THIS EXPRESSION AS IT IS WRITTEN. The three draws are arguments of one call, whose
+            // order of evaluation the language leaves to the compiler: the noisy phases' numbers are
+            // what MSVC's order gives, and three statements — or braces, which fix the order — would
+            // swap the x and z noise and move every gate of those phases in its last digits.)
             raw += glm::vec3(noise(rng), noise(rng), noise(rng)) * sc.cursorNoise;
         }
         PhaseStats& ph = r.phases[seg];
         const bool moved = arm.dragIkTo(filter.update(raw));
         ++ph.ticks;
-        ++r.dragTicks;
         if (moved) {
             ++ph.movedTicks;
         }
@@ -653,16 +677,8 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
         prevCursorSpeed = cursorSpeed;
         prevCursor = raw;
         // Oscillation (the app's [ikperf] osc): reversal overlap of the grabbed joint's steps.
-        {
-            const float pl = glm::length(prevEffStep);
-            if (pl > 1e-6f && effSpeed > 1e-6) {
-                const float against = -glm::dot(effStep, prevEffStep) / pl;
-                if (against > 0.0f) {
-                    ph.effOsc += std::min(static_cast<double>(against), static_cast<double>(pl));
-                }
-            }
-            prevEffStep = effStep;
-        }
+        ph.effOsc += reversalOverlap(effStep, prevEffStep, effSpeed > 1e-6); // (the DOUBLE speed's test)
+        prevEffStep = effStep;
         prevEff = eff;
         prevEffSpeed = effSpeed;
         // Per-joint steps: jumps, idle oscillation, contact drift, pin fidelity, floor.
@@ -691,9 +707,8 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
                     r.penetrationNode = static_cast<int>(i);
                     static const bool kPenTrace = std::getenv("IK_HARNESS_PENETRATION_TRACE") != nullptr;
                     if (kPenTrace && pen > 0.01) {
-                        std::printf("[penetration] tick %d: %s %.1f mm through the floor (clearance %.1f)", tick, arm.boneName(i).c_str(), pen * 1000.0,
+                        std::printf("[penetration] tick %d: %s %.1f mm through the floor (clearance %.1f)\n", tick, arm.boneName(i).c_str(), pen * 1000.0,
                                     rig->floorClearance(static_cast<int>(i)) * 1000.0);
-                        std::putchar(10);
                     }
                 }
             }
@@ -756,8 +771,7 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
                     }
                 }
                 if (worst > 0.005) {
-                    std::printf("[asym] tick %d: %.1f mm at %s", tick, worst * 1000.0, arm.boneName(worstBone).c_str());
-                    std::putchar(10);
+                    std::printf("[asym] tick %d: %.1f mm at %s\n", tick, worst * 1000.0, arm.boneName(worstBone).c_str());
                 }
             }
             static const bool kVolTrace = std::getenv("IK_HARNESS_VOLUME_TRACE") != nullptr;
@@ -903,13 +917,7 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
             const glm::vec3 kneeStep = knee - leg.prevKnee;
             const float kl = glm::length(kneeStep);
             r.kneeStepMax = std::max(r.kneeStepMax, static_cast<double>(kl));
-            const float pl = glm::length(leg.prevKneeStep);
-            if (pl > 1e-6f && kl > 1e-6f) {
-                const float against = -glm::dot(kneeStep, leg.prevKneeStep) / pl;
-                if (against > 0.0f) {
-                    leg.osc += std::min(static_cast<double>(against), static_cast<double>(pl));
-                }
-            }
+            leg.osc += reversalOverlap(kneeStep, leg.prevKneeStep, kl > 1e-6f);
             leg.prevKneeStep = kneeStep;
             leg.prevKnee = knee;
         }
@@ -918,10 +926,9 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
     for (const Leg& leg : legs) {
         r.kneeOscMax = std::max(r.kneeOscMax, leg.osc);
     }
-    // (Idle-joint tremble metrics come from runIdleMetrics — a second, identical run that keeps
-    // the per-joint step history; the main loop stays a plain mirror of the viewport's tick.)
+    // (Idle-joint tremble metrics come from runIdleMetrics — a second run of the plain drag that
+    // keeps the per-joint step history; the main loop stays a plain mirror of the viewport's tick.)
     r.grabEnd = arm.ikGrabPointWorld();
-    r.cursorEnd = raw;
     r.pinsAtRelease = static_cast<int>(rig->pins().size());
     // IK_HARNESS_POSE_TRACE=1: the joints the drag rotated most (Euler degrees) and any pose
     // translation, at mouse-up — which part of the body served the gesture.
@@ -1030,10 +1037,8 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
         r.headRollEndDeg = headAxisElevation(glm::vec3(1.0f, 0.0f, 0.0f));
         r.asymmetryEnd = asymmetryNow();
         r.endEuler.resize(n);
-        r.boneNames.resize(n);
         for (std::size_t i = 0; i < n; ++i) {
             r.endEuler[i] = arm.boneEuler(i);
-            r.boneNames[i] = arm.boneName(i);
         }
     }
     for (const Leg& leg : legs) {
@@ -1071,7 +1076,6 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
         for (std::size_t i = 0; i < n; ++i) {
             parents[i] = bones[i].parent;
         }
-        r.comStart = BalanceController::centerOfMass(r.startPos, parents, rigEnd->masses());
         r.comEnd = BalanceController::centerOfMass(r.endPos, parents, rigEnd->masses());
     }
     r.volumePenetrationEnd = volumeDepth();
@@ -1123,6 +1127,15 @@ RunResult runScenario(const std::vector<ArmatureBone>& baseBones, const Scenario
 
 IdleMetrics runIdleMetrics(const std::vector<ArmatureBone>& baseBones, const Scenario& sc) {
     IdleMetrics m;
+    // The idle pass replays the PLAIN drag: the pre-pose, the pins, the grab at its joint, the
+    // path. A scenario that uses anything else would have another drag's tremble gated in its
+    // name, so it is refused rather than measured wrongly.
+    if (sc.hover != 0.0f || !sc.before.empty() || sc.resetAfterBefore || sc.pinsAfterBefore || sc.grabShare >= 0.0f ||
+        glm::length(sc.grabOffset) > 0.0f || !sc.alsoGrab.empty() || sc.scoped || sc.toRest) {
+        std::fprintf(stderr, "[harness] runIdleMetrics: the scenario uses a prelude, a hover, a grab point, a group, a scope "
+                             "or toRest, which the idle pass does not replay: no idle metrics\n");
+        return m;
+    }
     Armature arm;
     arm.build(sc.scale == 1.0f ? baseBones : scaledBones(baseBones, sc.scale));
     applyBodyMesh(arm, sc.scale);
@@ -1186,6 +1199,7 @@ IdleMetrics runIdleMetrics(const std::vector<ArmatureBone>& baseBones, const Sce
             break;
         }
         if (sc.cursorNoise > 0.0f) {
+            // (As in runScenario, textually: the two passes must draw the same noise.)
             raw += glm::vec3(noise(rng), noise(rng), noise(rng)) * sc.cursorNoise;
         }
         arm.dragIkTo(filter.update(raw));
@@ -1194,13 +1208,7 @@ IdleMetrics runIdleMetrics(const std::vector<ArmatureBone>& baseBones, const Sce
             const glm::vec3 step = p - prevPos[k];
             const float len = glm::length(step);
             m.stepMax = std::max(m.stepMax, static_cast<double>(len));
-            const float pl = glm::length(prevStep[k]);
-            if (pl > 1e-6f && len > 1e-6f) {
-                const float against = -glm::dot(step, prevStep[k]) / pl;
-                if (against > 0.0f) {
-                    osc[k] += std::min(static_cast<double>(against), static_cast<double>(pl));
-                }
-            }
+            osc[k] += reversalOverlap(step, prevStep[k], len > 1e-6f);
             prevStep[k] = step;
             prevPos[k] = p;
         }

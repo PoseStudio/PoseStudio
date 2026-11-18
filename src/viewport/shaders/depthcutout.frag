@@ -23,6 +23,8 @@
 // cutout. A separate small shader rather than a branch of mesh.frag: a `discard` in the lit
 // shader would cost every opaque draw its early depth write.
 
+#extension GL_GOOGLE_include_directive : enable
+
 #define MATERIAL_SET 2
 #include "material.glsl"
 

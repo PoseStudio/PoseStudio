@@ -39,6 +39,7 @@ struct GridPushConstants {
     float lightRow2[4];    // math-row 2 (depth)
     float shadowParams[4]; // x = intensity (0..1), y = softness (0..1), z = reach (world), w unused
 };
+static_assert(sizeof(GridPushConstants) == 128, "GridPushConstants must match grid.vert / grid.frag");
 
 /**
  * @class Grid

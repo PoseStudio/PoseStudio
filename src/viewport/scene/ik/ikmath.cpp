@@ -121,7 +121,7 @@ float wrapDegrees(float x) {
 
 } // namespace
 
-glm::vec3 eulerFromMatrixNear(const glm::mat3& m, const std::string& order, const glm::vec3& near) {
+glm::vec3 eulerFromMatrixNear(const glm::mat3& m, const std::string& order, const glm::vec3& nearTo) {
     int i = 0, j = 1, k = 2;
     if (order.size() >= 3) {
         const int oi = axisIndexOf(order[0]);
@@ -133,14 +133,14 @@ glm::vec3 eulerFromMatrixNear(const glm::mat3& m, const std::string& order, cons
             k = ok;
         }
     }
-    // The plain decomposition, and the same with the third-applied angle held at near's: M =
+    // The plain decomposition, and the same with the third-applied angle held at nearTo's: M =
     // M' · Rk(c), M' decomposed (its third angle 0 by construction) — equal to the first away
     // from gimbal lock, and AT it the split of the folded angle that keeps the third where it was.
     glm::vec3 axisK(0.0f);
     axisK[k] = 1.0f;
-    const glm::mat3 rk(glm::rotate(glm::mat4(1.0f), glm::radians(near[k]), axisK));
+    const glm::mat3 rk(glm::rotate(glm::mat4(1.0f), glm::radians(nearTo[k]), axisK));
     glm::vec3       held = eulerFromMatrix(m * glm::transpose(rk), order);
-    held[k] += near[k];
+    held[k] += nearTo[k];
     const glm::vec3 bases[2] = {eulerFromMatrix(m, order), held};
 
     glm::vec3 best(0.0f);
@@ -155,9 +155,9 @@ glm::vec3 eulerFromMatrixNear(const glm::mat3& m, const std::string& order, cons
             glm::vec3 out(0.0f);
             float     dist = 0.0f;
             for (int a = 0; a < 3; ++a) {
-                // Nearest to near modulo 360, then into [-180, 180] (an exact ±180 keeps near's sign).
-                const float d = wrapDegrees(cand[a] - near[a]);
-                float       v = near[a] + d;
+                // Nearest to nearTo modulo 360, then into [-180, 180] (an exact ±180 keeps nearTo's sign).
+                const float d = wrapDegrees(cand[a] - nearTo[a]);
+                float       v = nearTo[a] + d;
                 if (v > 180.0f) {
                     v -= 360.0f;
                 } else if (v < -180.0f) {

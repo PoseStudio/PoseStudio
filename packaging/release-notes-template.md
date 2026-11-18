@@ -32,7 +32,7 @@ Full step-by-step instructions, including screenshots of the SmartScreen warning
 
 **System requirements:** 64-bit Windows 10 or 11, and a Vulkan-capable GPU (virtually any graphics card from 2016 onward) with reasonably current drivers.
 
-**Privacy:** each time it starts, the app sends a small anonymous ping (a random install ID, the version, your OS/CPU type, installed-vs-portable, the Qt version, and the time — nothing else) so we can count active installs. Switch it off any time in Edit → Preferences → General.
+**Privacy:** each time it starts, the app sends a small anonymous ping (a random install ID, the version, your OS/CPU type, installed-vs-portable, the Qt version, and the time — nothing else) so we can count active installs. A few seconds after it starts it also asks GitHub whether a newer release exists (the request alone). Switch either off any time in Edit → Preferences → General.
 
 ## 💡 Quick Tips — the stuff that isn't obvious
 
@@ -42,9 +42,9 @@ Full step-by-step instructions, including screenshots of the SmartScreen warning
 - 📌 **Pin joints** — select a joint and press **P** (or right-click → Pin Joint). Pinned joints stay exactly put while you drag everything else — plant a hand on a table and crouch under it. Pins save with poses.
 - 🎯 **Depth while posing** — roll the mouse wheel *while dragging* a joint to push it away from the camera or pull it toward you; it stays under the pointer, and the body follows.
 - 🪞 **Mirror & reset** — Edit → **Mirror Pose** swaps the left and right sides; **Mirror Limb to Other Side** copies the selected arm or leg across; **Reset Selected Joint / Reset Limb / Reset Pose** put things back at rest. Right-click a joint for the per-joint ones. All undoable.
-- 🎭 **Importing figures** — File → Import → .DUF for a native figure, or .FBX for a rigged character from another tool (it is read into PoseStudio's rig standard and poses the same way); or double-click one in the Asset Manager. If a native figure asks, point it at your content folder once — it's remembered.
+- 🎭 **Importing figures** — File → Import → .DUF for a native figure, or .FBX, .GLB, .USD or .VRM for a rigged character from another tool (it is read into PoseStudio's rig standard and poses the same way); or double-click one in the Asset Manager. If a native figure asks, point it at your content folder once — it's remembered.
 - ⬇️ **Ground button** — drops a floating figure onto the floor. In actual free fall.
-- 💾 **Poses** — File → Save Pose / Load Pose. **Ctrl+Z / Ctrl+Y** undo and redo — poses *and* lighting edits.
+- 💾 **Poses** — File → Save Pose / Load Pose. **Ctrl+Z / Ctrl+Y** undo and redo — poses, lighting, material and light edits alike.
 - 🌅 **Lighting** — Environment tab (right side) → click the environment name for the thumbnail picker. Drop your own `.hdr`/`.exr` files into `Documents\My PoseStudio Library\hdri` — subfolders become categories. And any number field: drag left/right to scrub, click to type.
 - 🎨 **Shade modes** — the picker at the viewport's top-right: photoreal PBR, textured, cartoon, matcap, clay, lighting-only, silhouette, wireframes (including a hidden-line one), and data views for albedo, ambient occlusion, roughness, specular, normals, and UVs. View → Show Skeleton overlays the bone cage.
 

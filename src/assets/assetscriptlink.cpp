@@ -23,6 +23,7 @@
 #include <QStringDecoder>
 #include <QVector>
 
+#include <algorithm>
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -33,6 +34,18 @@ namespace {
 
 /// A script bigger than this is a program, not a link; it is not read.
 constexpr qint64 kMaxScriptBytes = 1 << 20;
+// THE WORK IS BOUNDED, whatever the script holds. A double-click reads it on the GUI thread, and
+// a script need not have been written to be a link (most are programs; one may be written to
+// hang the reader). Three limits do it, none of which a real link or loader comes near:
+/// How many tokens one path expression may span. A longer "expression" is not a path: it is
+/// not evaluated.
+constexpr int kMaxExprTokens = 4096;
+/// How many terms one script may have evaluated. A variable's value may refer to other variables
+/// kMaxEvalDepth deep, each with many terms: without a limit that is terms to the power of depth.
+constexpr int kMaxEvalSteps = 20000;
+/// How many calls and file names of one script are tried as its link before the reader gives
+/// up: each one that leads nowhere costs a look under every content folder.
+constexpr int kMaxTries = 64;
 /// How many scripts a chain of links may pass through.
 constexpr int kMaxHops = 4;
 /// How deep a variable's value may refer to another variable.
@@ -130,10 +143,11 @@ bool isName(const QVector<Token>& t, int i, const char* name) {
     return i >= 0 && i < t.size() && t[i].type == Token::Name && t[i].text == QLatin1String(name);
 }
 
-/// The index of the bracket closing the one at @p open, or -1.
-int matchingClose(const QVector<Token>& t, int open) {
+/// The index of the bracket closing the one at @p open, or -1 when it is not closed before
+/// @p limit (the end of what the caller is looking at).
+int matchingClose(const QVector<Token>& t, int open, int limit) {
     int depth = 0;
-    for (int i = open; i < t.size(); ++i) {
+    for (int i = open; i < limit && i < t.size(); ++i) {
         if (isPunct(t, i, '(') || isPunct(t, i, '[') || isPunct(t, i, '{')) ++depth;
         if (isPunct(t, i, ')') || isPunct(t, i, ']') || isPunct(t, i, '}')) {
             if (--depth == 0) return i;
@@ -142,11 +156,27 @@ int matchingClose(const QVector<Token>& t, int open) {
     return -1;
 }
 
+/// The index of the bracket that the one at @p close closes, or -1 when it does not open at or
+/// after @p floor: matchingClose() the other way round, in one pass from the closing bracket.
+int matchingOpen(const QVector<Token>& t, int close, int floor) {
+    int depth = 0;
+    for (int i = close; i >= floor && i >= 0; --i) {
+        if (isPunct(t, i, ')') || isPunct(t, i, ']') || isPunct(t, i, '}')) ++depth;
+        if (isPunct(t, i, '(') || isPunct(t, i, '[') || isPunct(t, i, '{')) {
+            if (--depth == 0) return i;
+        }
+    }
+    return -1;
+}
+
 /// The end (exclusive) of the expression starting at @p begin: the first `,` `)` `;` or `}` at
-/// bracket depth 0, a `var` beginning the next statement, or the end of the script.
+/// bracket depth 0, a `var` beginning the next statement, or the end of the script. An
+/// expression that has not ended after kMaxExprTokens is no path: @p begin itself comes back
+/// (an empty expression, which evaluates to nothing).
 int expressionEnd(const QVector<Token>& t, int begin) {
     int depth = 0;
-    for (int i = begin; i < t.size(); ++i) {
+    const int stop = static_cast<int>(qMin<qsizetype>(t.size(), qsizetype(begin) + kMaxExprTokens));
+    for (int i = begin; i < stop; ++i) {
         if (isPunct(t, i, '(') || isPunct(t, i, '[') || isPunct(t, i, '{')) {
             ++depth;
         } else if (isPunct(t, i, ')') || isPunct(t, i, ']') || isPunct(t, i, '}')) {
@@ -156,7 +186,7 @@ int expressionEnd(const QVector<Token>& t, int begin) {
             return i;
         }
     }
-    return static_cast<int>(t.size());
+    return stop == t.size() ? stop : begin;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -171,22 +201,17 @@ struct Value {
     QString text;
 };
 
-/// `name = <expr>` (with or without `var`), at token `at`: the expression is [begin, end).
-struct Assignment {
-    int     at;
-    QString name;
-    int     begin;
-    int     end;
-};
-
 class Evaluator {
 public:
     explicit Evaluator(const QVector<Token>& tokens) : t(tokens) {
+        // `name = <expr>` (with or without `var`), at token `at`: the expression begins at at + 2
+        // and ends at expressionEnd() — looked for only when the variable is read, since a script
+        // has many assignments and a link reads one or two of them. Kept per name, in the order
+        // they stand in the script.
         for (int i = 0; i + 1 < t.size(); ++i) {
             // A plain `=`: not `==`, and not the second character of `<=`, `>=`, `!=`.
             if (t[i].type != Token::Name || !isPunct(t, i + 1, '=') || isPunct(t, i + 2, '=')) continue;
-            const int begin = i + 2;
-            assignments.push_back({i, t[i].text, begin, expressionEnd(t, begin)});
+            assignedAt[t[i].text].push_back(i);
         }
     }
 
@@ -227,23 +252,20 @@ public:
 
 private:
     Value term(int begin, int end, int at, int depth) const {
-        if (begin >= end) return {};
+        if (begin >= end || ++steps > kMaxEvalSteps) return {};
         // ( expr )
-        if (isPunct(t, begin, '(') && matchingClose(t, begin) == end - 1) {
+        if (isPunct(t, begin, '(') && matchingClose(t, begin, end) == end - 1) {
             return range(begin + 1, end - 1, at, depth + 1);
         }
         // String( expr ) / new String( expr )
         int s = isName(t, begin, "new") ? begin + 1 : begin;
-        if (isName(t, s, "String") && isPunct(t, s + 1, '(') && matchingClose(t, s + 1) == end - 1) {
+        if (isName(t, s, "String") && isPunct(t, s + 1, '(') && matchingClose(t, s + 1, end) == end - 1) {
             return range(s + 2, end - 1, at, depth + 1);
         }
         // "...%1...".arg( expr ), the literal possibly inside String( ).
         if (end - begin >= 5 && isPunct(t, end - 1, ')')) {
-            int open = -1;
-            for (int i = end - 2; i > begin; --i) {
-                if (isPunct(t, i, '(') && matchingClose(t, i) == end - 1) { open = i; break; }
-            }
-            if (open > begin + 1 && isName(t, open - 1, "arg") && isPunct(t, open - 2, '.')) {
+            const int open = matchingOpen(t, end - 1, begin);
+            if (open > begin + 1 && isPunct(t, open, '(') && isName(t, open - 1, "arg") && isPunct(t, open - 2, '.')) {
                 const Value format = term(begin, open - 2, at, depth + 1);
                 const Value arg = range(open + 1, expressionEnd(t, open + 1), at, depth + 1);
                 if (!format.ok || format.anchored) return {};
@@ -261,24 +283,29 @@ private:
         if (end - begin != 1) return {};
         if (t[begin].type == Token::Str) return {true, false, t[begin].text};
         if (t[begin].type == Token::Name) {
-            const Assignment* last = nullptr;
-            for (const Assignment& a : assignments) {
-                if (a.at < at && a.name == t[begin].text) last = &a;
+            // The variable as last assigned before `at`.
+            const auto places = assignedAt.constFind(t[begin].text);
+            if (places != assignedAt.cend()) {
+                const auto after = std::lower_bound(places->cbegin(), places->cend(), at);
+                if (after != places->cbegin()) {
+                    const int last = *(after - 1);
+                    return range(last + 2, expressionEnd(t, last + 2), last, depth + 1);
+                }
             }
-            if (last) return range(last->begin, last->end, last->at, depth + 1);
         }
         return {};
     }
 
     const QVector<Token>& t;
-    QVector<Assignment> assignments;
+    QHash<QString, QVector<int>> assignedAt; ///< variable -> the tokens it is assigned at, ascending
+    mutable int steps = 0;                   ///< terms evaluated so far (kMaxEvalSteps)
 };
 
 // ---------------------------------------------------------------------------------------------
 // Resolution
 // ---------------------------------------------------------------------------------------------
 
-enum class Want { Folder, File, Any };
+enum class Want { Folder, File };
 
 bool exists(const QString& path, Want want) {
     const QFileInfo info(path);
@@ -286,7 +313,6 @@ bool exists(const QString& path, Want want) {
     switch (want) {
     case Want::Folder: return info.isDir();
     case Want::File:   return info.isFile();
-    case Want::Any:    return true;
     }
     return false;
 }
@@ -296,12 +322,13 @@ QString cleanWritten(QString text) {
     return text.replace(QLatin1Char('\\'), QLatin1Char('/')).trimmed();
 }
 
-/// A real absolute path: a drive letter or a UNC share on Windows, a leading `/` elsewhere. A
-/// content-relative "/People/…" is not one on Windows (it would name the current drive's root).
+/// A real absolute path: a drive letter on Windows, a leading `/` elsewhere. A content-relative
+/// "/People/…" is not one on Windows (it would name the current drive's root) — and neither is
+/// a network share ("//host/share/…"): a script must not make PoseStudio probe a machine of the
+/// script's choosing. Such a path is read as content-relative, and found nowhere.
 bool isRealAbsolute(const QString& path) {
 #ifdef Q_OS_WIN
-    return (path.size() >= 3 && path.at(0).isLetter() && path.at(1) == QLatin1Char(':')) ||
-           path.startsWith(QLatin1String("//"));
+    return path.size() >= 3 && path.at(0).isLetter() && path.at(1) == QLatin1Char(':');
 #else
     return path.startsWith(QLatin1Char('/'));
 #endif
@@ -386,11 +413,17 @@ Link readOne(const QString& scriptPath, const QStringList& roots) {
         {QStringLiteral("loadScene"), Want::File},
     };
     QString firstMissing;
-    for (int i = 0; i + 1 < t.size(); ++i) {
+    QString firstUnsupported;
+    int tries = 0;
+    for (int i = 0; i + 1 < t.size() && tries < kMaxTries; ++i) {
         if (t[i].type != Token::Name || !isPunct(t, i + 1, '(') || isName(t, i - 1, "function")) continue;
+        const bool showsUrl = t[i].text == QLatin1String("showURL");
+        const auto call = showsUrl ? kCalls.constEnd() : kCalls.constFind(t[i].text);
+        if (!showsUrl && call == kCalls.constEnd()) continue; // not a call that leads anywhere
+        ++tries;
         const int argBegin = i + 2;
         const int argEnd = expressionEnd(t, argBegin);
-        if (t[i].text == QLatin1String("showURL")) {
+        if (showsUrl) {
             const Value v = eval.range(argBegin, argEnd, i);
             const QString url = v.text.trimmed();
             if (v.ok && !v.anchored && (url.startsWith(QLatin1String("https://"), Qt::CaseInsensitive) ||
@@ -401,29 +434,36 @@ Link readOne(const QString& scriptPath, const QStringList& roots) {
             }
             continue;
         }
-        const auto call = kCalls.constFind(t[i].text);
-        if (call == kCalls.constEnd()) continue;
         const Value v = eval.range(argBegin, argEnd, i);
         if (!v.ok) continue;
         QString display;
+        bool there = false; // it names something that IS there, but not something to follow
         for (const QString& path : candidates(v, scriptDir, roots, &display)) {
-            if (exists(path, *call)) {
-                link.kind = (*call == Want::Folder) ? Link::Kind::Folder : Link::Kind::File;
-                link.target = path;
-                return link;
+            if (!exists(path, *call)) continue;
+            // A file is followed only when PoseStudio itself opens it (see the header): any
+            // other would end at the operating system, started by a script.
+            if (*call == Want::File && !isOpenable(path)) {
+                if (firstUnsupported.isEmpty()) firstUnsupported = QDir::toNativeSeparators(path);
+                there = true;
+                continue;
             }
+            link.kind = (*call == Want::Folder) ? Link::Kind::Folder : Link::Kind::File;
+            link.target = path;
+            return link;
         }
-        if (firstMissing.isEmpty()) firstMissing = display;
+        if (!there && firstMissing.isEmpty()) firstMissing = display;
     }
 
     // No recognised call led anywhere: a literal naming a file PoseStudio opens, the loader that
     // builds its path some other way. Read relative to the script first, then as a content path.
     for (const Token& token : t) {
+        if (tries >= kMaxTries) break;
         if (token.type != Token::Str) continue;
         QString written = cleanWritten(token.text);
         const bool slot = written.startsWith(QLatin1String("%1"));
         if (slot) written.remove(0, 2);
         if (written.isEmpty() || !isOpenable(written)) continue;
+        ++tries;
         QString display;
         for (const bool anchored : {true, false}) {
             if (!anchored && slot) continue; // "%1/x.duf" is relative to whatever fills %1
@@ -439,7 +479,10 @@ Link readOne(const QString& scriptPath, const QStringList& roots) {
         if (firstMissing.isEmpty()) firstMissing = slot ? QDir::toNativeSeparators(scriptDir + written) : display;
     }
 
-    if (!firstMissing.isEmpty()) {
+    if (!firstUnsupported.isEmpty()) {
+        link.problem = Link::Problem::Unsupported;
+        link.missing = firstUnsupported;
+    } else if (!firstMissing.isEmpty()) {
         link.problem = Link::Problem::Missing;
         link.missing = firstMissing;
     } else {

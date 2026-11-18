@@ -63,13 +63,14 @@ VkSurfaceFormatKHR VulkanSwapchain::chooseSurfaceFormat(
             }
         }
     }
-    // No sRGB format at all: fall back to whatever the surface offers first. A UNORM swapchain
-    // stores linear values unencoded, so the image will look too dark/flat — worth a loud note,
-    // since every "the sRGB store encodes" assumption in the shaders is now false. (Plain stderr:
-    // the rendering/ core is Qt-free.)
+    // No sRGB format at all: fall back to whatever the surface offers first. Such a swapchain
+    // stores linear values unencoded, so the renderer's composite encodes in the shader instead
+    // (VulkanRenderer::recordCommandBuffer, CompositeOptions::encodeSrgb). Worth a note all the
+    // same: an 8-bit store of shader-encoded values is the untested path. (Plain stderr: the
+    // rendering/ core is Qt-free.)
     std::fprintf(stderr,
                  "[Vulkan] No sRGB swapchain format offered; using format %d (color space %d) — "
-                 "the viewport will not be gamma-encoded correctly.\n",
+                 "the composite encodes the picture itself.\n",
                  static_cast<int>(available.front().format),
                  static_cast<int>(available.front().colorSpace));
     return available.front();

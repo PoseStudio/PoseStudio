@@ -61,43 +61,42 @@ QSqlDatabase appDatabase() {
     return QSqlDatabase::database(QLatin1String(kDatabaseConnectionName));
 }
 
+QStringList splitSchemaStatements(const QString& sql) {
+    // Statements are split on ';' — a naive split, not a SQL parser, which is sufficient
+    // because the schema file keeps semicolons out of string literals and trigger bodies.
+    // Whole-line "--" comments are dropped FIRST: a semicolon in the 0.3.6 header comment
+    // once became a statement boundary and corrupted CREATE TABLE Preferences on every fresh
+    // install (the schema's run on every launch is what repairs those databases). Trailing
+    // comments on a statement line are still not supported — keep them on their own lines.
+    QStringList sqlLines = sql.split(QLatin1Char('\n'));
+    sqlLines.erase(std::remove_if(sqlLines.begin(), sqlLines.end(),
+                                  [](const QString& line) {
+                                      return line.trimmed().startsWith(QLatin1String("--"));
+                                  }),
+                   sqlLines.end());
+    QStringList statements;
+    const QStringList parts = sqlLines.join(QLatin1Char('\n')).split(QLatin1Char(';'), Qt::SkipEmptyParts);
+    for (const QString& part : parts) {
+        const QString statement = part.trimmed();
+        if (!statement.isEmpty()) {
+            statements << statement;
+        }
+    }
+    return statements;
+}
+
 /**
- * @brief The additive schema changes, each a no-op once applied. There is no formal migration
- *        system: a column or table added after the first schema is added HERE as well as in
+ * @brief The additive COLUMN changes, each a no-op once applied. There is no formal migration
+ *        system: a column added to a table after its first schema is added HERE as well as in
  *        initialize.sql, or pre-existing installs miss it and fail at the first query touching
- *        it. Schema only — nothing here reads or writes the disk beside the database (the data
- *        layer's checks call it on an in-memory database).
+ *        it. (A whole TABLE needs nothing here: initializeDatabase() runs initialize.sql, whose
+ *        statements are CREATE … IF NOT EXISTS, on every launch.) Schema only — nothing here
+ *        reads or writes the disk beside the database (the data layer's checks call it on an
+ *        in-memory database).
  */
 void ensureSchemaCurrent(QSqlDatabase& db) {
     // Nested collections: parent pointer (0 = top-level).
     ensureColumn(db, "AssetCollections", "AssetCollectionParentID", "INTEGER NOT NULL DEFAULT 0");
-
-    // Favorites (a single flat list of favorited asset paths) was added after the initial schema,
-    // so older databases lack the table entirely. CREATE TABLE IF NOT EXISTS is a no-op once present.
-    {
-        QSqlQuery q(db);
-        q.exec(QStringLiteral(
-            "CREATE TABLE IF NOT EXISTS Favorites("
-            "FavoriteID INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "FavoritePath TEXT NOT NULL UNIQUE, "
-            "FavoriteSortOrder INTEGER NOT NULL DEFAULT 0)"));
-    }
-
-    // Repair for a 0.3.6 schema-file regression: the header comment in initialize.sql contained a
-    // semicolon, which initializeDatabase's naive statement splitter treated as a boundary — corrupting
-    // CREATE TABLE Preferences on every fresh install since. Databases created by those builds lack
-    // the table entirely; recreate it here (a no-op once present).
-    {
-        QSqlQuery q(db);
-        q.exec(QStringLiteral(
-            "CREATE TABLE IF NOT EXISTS Preferences("
-            "PreferenceID INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "PreferenceName TEXT UNIQUE NOT NULL, "
-            "PreferenceValue TEXT NOT NULL DEFAULT '', "
-            "PreferenceStamp DATETIME DEFAULT CURRENT_TIMESTAMP)"));
-        q.exec(QStringLiteral(
-            "CREATE INDEX IF NOT EXISTS idx_PreferenceName ON Preferences(PreferenceName)"));
-    }
 
     // User-defined manual drag orders (Favorites pane / within a Collection). Seed existing rows
     // with a stable initial order matching their insertion order (the autoincrement ID).
@@ -124,9 +123,9 @@ void ensureSchemaCurrent(QSqlDatabase& db) {
 
 /**
  * @brief Opens (or rebuilds) the SQLite database; see database.h for the return contract.
- * @param mode Normal opens the existing file, building the schema only if this is the first
- *             launch (no file yet). FactoryReset deletes the existing file first and always
- *             rebuilds the schema from initialize.sql.
+ * @param mode Normal opens the existing file (or creates it, on a first launch). FactoryReset
+ *             deletes the existing file first. Either way the schema of initialize.sql is then
+ *             run — it only creates what is missing — followed by the column migrations.
  */
 bool initializeDatabase(DbInitMode mode) {
     const QString connectionName = QLatin1String(kDatabaseConnectionName);
@@ -222,46 +221,37 @@ bool initializeDatabase(DbInitMode mode) {
         }
     }
 
-    // Schema needs (re)building after we just deleted the file above, or on a first-ever launch
-    if (mode == DbInitMode::FactoryReset || isFirstLaunch) {
-        QFile sqlFile(QStringLiteral(":/resources/database/initialize.sql"));
-        if (!sqlFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            qCritical() << "Fatal Error: Missing initialize.sql blueprint in resources.";
-            return false;
-        }
-
+    // THE SCHEMA, ON EVERY LAUNCH. Each statement of initialize.sql is CREATE … IF NOT EXISTS: on
+    // a first-ever launch and after the reset above it builds everything; on a complete database
+    // it changes nothing (not a byte of the file); and a database that lacks a table — a launch
+    // that died between the first statement and the last, a file from before Favorites existed,
+    // an install the 0.3.6 splitter regression left without Preferences — is completed. The
+    // schema file is the tables' one definition.
+    const bool buildingSchema = mode == DbInitMode::FactoryReset || isFirstLaunch;
+    QFile sqlFile(QStringLiteral(":/resources/database/initialize.sql"));
+    if (sqlFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
         const QString sqlData = sqlFile.readAll();
         sqlFile.close();
 
-        // Statements are split on ';' — a naive split, not a SQL parser, which is sufficient
-        // because the schema file keeps semicolons out of string literals and trigger bodies.
-        // Whole-line "--" comments are dropped FIRST: a semicolon in the 0.3.6 header comment
-        // once became a statement boundary and corrupted CREATE TABLE Preferences on every fresh
-        // install (see the repair migration below). Trailing comments on a statement line are
-        // still not supported — keep them on their own lines.
-        QStringList sqlLines = sqlData.split(QLatin1Char('\n'));
-        sqlLines.erase(std::remove_if(sqlLines.begin(), sqlLines.end(),
-                                      [](const QString& line) {
-                                          return line.trimmed().startsWith(QLatin1String("--"));
-                                      }),
-                       sqlLines.end());
-        const QStringList sqlStatements =
-            sqlLines.join(QLatin1Char('\n')).split(QLatin1Char(';'), Qt::SkipEmptyParts);
-
         QSqlQuery query(db);
+        const QStringList sqlStatements = splitSchemaStatements(sqlData);
         for (const QString& statement : sqlStatements) {
-            const QString trimmedStatement = statement.trimmed();
-            if (trimmedStatement.isEmpty()) continue;
-
-            if (!query.exec(trimmedStatement)) {
-                qWarning() << "SQL Execution failed for statement:" << trimmedStatement;
+            if (!query.exec(statement)) {
+                qWarning() << "SQL Execution failed for statement:" << statement;
                 qWarning() << "Error:" << query.lastError().text();
             }
         }
-        qDebug() << "Success: Database architecture successfully reconstructed.";
+        if (buildingSchema) {
+            qDebug() << "Success: Database architecture successfully reconstructed.";
+        }
+    } else if (buildingSchema) {
+        qCritical() << "Fatal Error: Missing initialize.sql blueprint in resources.";
+        return false;
+    } else {
+        qWarning() << "[!] Missing initialize.sql blueprint in resources; using the database as it is.";
     }
 
-    // Additive schema changes for databases that predate them (see ensureSchemaCurrent).
+    // … then the columns added to those tables since (see ensureSchemaCurrent).
     ensureSchemaCurrent(db);
 
     // One-time default user library: "My PoseStudio Library" in the user's Documents — the

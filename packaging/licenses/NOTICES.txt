@@ -91,3 +91,12 @@ license; the text named after each is in this folder.
   stb_image (.hdr decoding) - MIT or public domain: stb-LICENSE.txt
   tinyexr (.exr decoding), with OpenEXR code - BSD 3-Clause:
     tinyexr-LICENSE.txt
+
+
+User-interface icons (in PoseStudio.exe)
+----------------------------------------
+PoseStudio's user-interface icons, which are built into the executable, are
+based on the Lucide icon set, Copyright (c) 2026 Lucide Icons and
+Contributors, https://lucide.dev - used under the ISC License. Some Lucide
+icons derive from the Feather project, Copyright (c) 2013-present Cole Bemis,
+and are under the MIT License. Both texts: Lucide-LICENSE.txt.

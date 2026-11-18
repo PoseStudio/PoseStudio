@@ -1,6 +1,14 @@
+"""Builds a run's CONTACT SHEET: every shot of a folder in one image, to look at a whole script.
+
+usage: montage.py <outdir> <sheet.png> [cols] [cropfrac]
+
+Each <outdir>/*.png (an earlier sheet*.png aside) is cropped to the middle <cropfrac> of its
+width — where the figure stands; 0.42 unless given, 1 keeps the whole frame — scaled to one
+height and labelled with its file name; <cols> shots to a row (4). run.sh calls it after a
+script (SHEET_COLS / SHEET_CROP set the two). Needs Pillow.
+"""
 import sys, os, glob
 from PIL import Image, ImageDraw
-# usage: montage.py <outdir> <sheet.png> [cols] [cropfrac]
 out, sheet = sys.argv[1], sys.argv[2]
 cols = int(sys.argv[3]) if len(sys.argv) > 3 else 4
 crop = float(sys.argv[4]) if len(sys.argv) > 4 else 0.42

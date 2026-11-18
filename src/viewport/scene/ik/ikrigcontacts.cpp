@@ -1,8 +1,10 @@
 /**
  * @file ikrigcontacts.cpp
- * @brief LIVE contact re-detection during a drag (IkRig::updateContacts) and the pin-set
- *        maintenance around it: adding a contact pin mid-drag, removing one, landing a
- *        suspended figure, and rebuilding the active subgraph for the current pin set.
+ * @brief LIVE contact re-detection during a drag (IkRig::updateContacts, in its three phases:
+ *        landIfTouchedDown, liftAndSlideContacts, detectContacts) and the pin-set maintenance
+ *        around it: seeding the pose's own contacts at a press, adding a contact pin mid-drag,
+ *        removing one, landing a suspended figure, and rebuilding the active subgraph for the
+ *        current pin set.
  *
  * The drag-start contacts (ikrigdrag.cpp) are what the figure stands on when the drag begins;
  * a LIVE contact is a joint that reaches the floor while the drag lowers the body — the hands
@@ -48,15 +50,14 @@ constexpr float kKneelContactBand = 0.05f; // a knee over its planted foot, goin
 //    of the chain's rest span — the pelvis rising out of a crouch with the hands planted pulls
 //    the arms straight) AND the solved joint above its pin height by kLiveContactLift, for
 //    kLiveContactReleaseTicks consecutive ticks, releases the pin; the joint then re-arms only
-//    after clearing the floor by kLiveContactRearm. Both halves are needed: an arm that cannot
-//    FOLD (a descent the joint limits refuse) also leaves the solver's hand above the pin —
-//    the clamped straight arm points beside it — but with the shoulder CLOSER than the span,
-//    and that hand must slide, not let go.
+//    after clearing the floor by kLiveContactRearm. Both halves are needed: a hand whose arm
+//    cannot FOLD (a descent the joint limits refuse) also ends above its pin, but with the
+//    shoulder CLOSER than the span, and that hand must slide, not let go.
 //  - SLIDE: a horizontal solved error beyond kLiveContactSlip moves the pin along the floor
 //    by the excess, so the pin resists up to that strain and then creeps with the body — a
 //    descent the arms cannot absorb (joint limits) slides the hands forward on the floor
-//    instead of dropping them (a released hand sank through the floor as an inactive subtree
-//    again, and a joint AT the floor could never re-plant).
+//    instead of dropping them (a joint released AT the floor could not re-plant: see
+//    kLiveContactRearm).
 constexpr float kLiveContactLift = 0.02f;
 constexpr float kLiveContactTaut = 0.95f;
 constexpr float kLiveContactSlip = 0.025f;
@@ -82,22 +83,12 @@ const bool kLiftTautOnly = std::getenv("IK_LIFT_TAUT_ONLY") != nullptr; // the l
 
 // POSESTUDIO_IK_TRACE=1 or IK_CONTACT_TRACE=1: the contact events (seeded, planted, slid, lifted
 // off, landed) on stderr, in order with the harness's stdout.
-const bool kContactTrace = std::getenv("POSESTUDIO_IK_TRACE") != nullptr || std::getenv("IK_CONTACT_TRACE") != nullptr;
+// IK_CONTACT_TRACE=2: also every candidate joint within 5cm of the floor, per tick.
+const char* const kContactTraceEnv = std::getenv("IK_CONTACT_TRACE");
+const bool        kContactTrace = kIkTrace || kContactTraceEnv != nullptr;
+const bool        kContactTraceNear = kContactTraceEnv != nullptr && kContactTraceEnv[0] == '2';
 
 } // namespace
-
-float IkRig::pathLenToChain(int node, const std::vector<int>& chain, const std::vector<float>& chainLen) const {
-    float acc = 0.0f;
-    for (int cur = node; cur >= 0; cur = m_parents[static_cast<std::size_t>(cur)]) {
-        for (std::size_t a = 0; a < chain.size(); ++a) {
-            if (chain[a] == cur) {
-                return acc + chainLen[a]; // met the effector's chain: cur is the LCA
-            }
-        }
-        acc += m_edgeRestLen[static_cast<std::size_t>(cur)];
-    }
-    return 1e30f; // disconnected (the excluded figure-node chain)
-}
 
 float IkRig::pathLenToEffector(int node) const {
     return pathLenToChain(node, m_effAncestor, m_effAncestorLen);
@@ -159,37 +150,6 @@ bool IkRig::liftedByDrag(int node) const {
     return false;
 }
 
-bool IkRig::belowInItsLimb(int node, int effector) const {
-    // The effector must be a joint OF THE LIMB the node ends (strictly below that limb's junction
-    // with the trunk) and above the node: a knee over its foot, an elbow or a shoulder over its
-    // hand. A TRUNK joint has the limbs below it too — and a chest drag that held the hands it
-    // found on the floor in full could not get a sitting figure up: on the two generations whose
-    // arms are short enough to put those hands within the lift reach of the chest she stayed
-    // down, 80cm under the cursor, nailed by her hands.
-    if (effector < 0 || effector == m_pelvis || node < 0) {
-        return false;
-    }
-    const int junction = limbJunction(node);
-    bool effectorInLimb = false;
-    for (int cur = m_parents[static_cast<std::size_t>(effector)]; cur >= 0;
-         cur = m_parents[static_cast<std::size_t>(cur)]) {
-        if (cur == junction) {
-            effectorInLimb = true;
-            break;
-        }
-    }
-    if (!effectorInLimb || effector == junction) {
-        return false;
-    }
-    for (int cur = m_parents[static_cast<std::size_t>(node)]; cur >= 0;
-         cur = m_parents[static_cast<std::size_t>(cur)]) {
-        if (cur == effector) {
-            return true;
-        }
-    }
-    return false;
-}
-
 bool IkRig::belowEffectorInItsLimb(int node) const {
     return belowInItsLimb(node, m_effector);
 }
@@ -219,19 +179,6 @@ std::vector<glm::vec2> IkRig::supportPoints(int excludePin) const {
         pts.insert(pts.end(), own.begin(), own.end());
     }
     return pts;
-}
-
-bool IkRig::computeDescendsFromPelvis(int node) const {
-    if (node < 0 || node >= static_cast<int>(m_parents.size())) {
-        return false;
-    }
-    for (int cur = m_parents[static_cast<std::size_t>(node)]; cur >= 0;
-         cur = m_parents[static_cast<std::size_t>(cur)]) {
-        if (cur == m_pelvis) {
-            return true;
-        }
-    }
-    return false;
 }
 
 bool IkRig::restsOnFloor(int node, const std::vector<glm::vec3>& positions) const {
@@ -320,9 +267,8 @@ float IkRig::liveContactRise(std::size_t pin, const std::vector<glm::vec3>& posi
 
 void IkRig::addLivePin(int node, const glm::vec3& target,
                        const std::vector<glm::vec3>& positions) {
-    // No leash: the sentinel must be effectively INFINITE, not merely unset (a non-positive
-    // radius makes the solver compute its path-length fallback, which would leash the root to
-    // a hand on the floor — and standing up must be able to lift that hand off).
+    // No leash (1e9, the "none" value: IkEffector::leashRadius): standing up must be able to lift
+    // a hand off the floor, and the lift-off test must not read the root as bound to it.
     IkEffector pin{node, target, 1.0f, 1e9f};
     m_pins.push_back(pin);
     m_pinUser.push_back(0);
@@ -331,16 +277,7 @@ void IkRig::addLivePin(int node, const glm::vec3& target,
     m_pinSteppable.push_back(0);
     m_pinStanceOffset.push_back(glm::vec2(0.0f));
     // The limb's rest span (see m_liveSpan): its chain's rest offsets summed as vectors.
-    {
-        const int junction = limbJunction(node);
-        glm::vec3 span(0.0f);
-        for (int cur = node; cur >= 0 && cur != junction;
-             cur = m_parents[static_cast<std::size_t>(cur)]) {
-            span += m_edgeRestDir[static_cast<std::size_t>(cur)] *
-                    m_edgeRestLen[static_cast<std::size_t>(cur)];
-        }
-        m_liveSpan.push_back(glm::length(span));
-    }
+    m_liveSpan.push_back(glm::length(limbRestSpan(node, limbJunction(node))));
     m_pinFootprint.push_back(footprintOf(node, target, positions));
 }
 
@@ -354,24 +291,6 @@ std::vector<glm::vec2> IkRig::footprintOf(int node, const glm::vec3& target, con
         }
     }
     return footprint;
-}
-
-bool IkRig::computeIsLimbTip(int node) const {
-    // A real-mass joint with no real-mass joint below it: a hand (its fingers are token), a
-    // foot, a carpal on the generations whose carpals are real joints, the head.
-    const int n = static_cast<int>(m_parents.size());
-    for (int d = 0; d < n; ++d) {
-        const std::size_t di = static_cast<std::size_t>(d);
-        if (d == node || (m_masses[di] < kTokenBoneMass && m_subtreeMass[di] < kTokenLimbMass)) {
-            continue;
-        }
-        for (int cur = m_parents[di]; cur >= 0; cur = m_parents[static_cast<std::size_t>(cur)]) {
-            if (cur == node) {
-                return false;
-            }
-        }
-    }
-    return true;
 }
 
 bool IkRig::servedByHandBelow(int c, const std::vector<glm::vec3>& positions) const {
@@ -390,8 +309,7 @@ bool IkRig::servedByHandBelow(int c, const std::vector<glm::vec3>& positions) co
     const int n = static_cast<int>(m_parents.size());
     for (int d = 0; d < n; ++d) {
         const std::size_t di = static_cast<std::size_t>(d);
-        if (d == c || !m_bodyNode[di] || isFootClass(static_cast<int>(di)) ||
-            (m_masses[di] < kTokenBoneMass && m_subtreeMass[di] < kTokenLimbMass) || !isLimbTip(d)) {
+        if (d == c || !m_bodyNode[di] || isFootClass(static_cast<int>(di)) || !realMass(d) || !isLimbTip(d)) {
             continue; // (a HAND: a real-mass tip that is not foot-class)
         }
         bool below = false;
@@ -403,16 +321,6 @@ bool IkRig::servedByHandBelow(int c, const std::vector<glm::vec3>& positions) co
         }
     }
     return false;
-}
-
-bool IkRig::helperNode(int node) const {
-    static const bool kHelperContacts = std::getenv("IK_HELPER_CONTACTS") != nullptr; // A/B probe: twist helpers as contacts, as before
-    if (kHelperContacts || node < 0 || static_cast<std::size_t>(node) >= m_helperNode.size()) {
-        return false;
-    }
-    // A twist helper (IkRigBone::helper), or a bone the rig standard reads as a HELPER — an anchor,
-    // a control, a skinless leaf (rigroles.h): no joint a body rests on either.
-    return m_helperNode[static_cast<std::size_t>(node)] != 0 || m_roles.role(node) == RigRole::Helper;
 }
 
 bool IkRig::servedByPinAbove(int c) const {
@@ -498,9 +406,8 @@ void IkRig::seedPoseContacts(const std::vector<glm::vec3>& positions) {
         const glm::vec3 span = positions[static_cast<std::size_t>(c)] - positions[static_cast<std::size_t>(socket)];
         const float     straight = glm::length(span);
         if (kTrace && socket != c) {
-            std::fprintf(stderr, "[ikrig]   node=%d limb from %d (junction %d): straight %.3f of path %.3f, down share %.2f, seated %d", c, socket,
+            std::fprintf(stderr, "[ikrig]   node=%d limb from %d (junction %d): straight %.3f of path %.3f, down share %.2f, seated %d\n", c, socket,
                          junction, straight, path, straight > 1.0e-4f ? -span.y / straight : 0.0f, seated ? 1 : 0);
-            std::fputc(10, stderr);
         }
         return socket != c && path > 0.20f * scale && straight > 0.95f * path && -span.y > 0.5f * straight;
     };
@@ -508,10 +415,8 @@ void IkRig::seedPoseContacts(const std::vector<glm::vec3>& positions) {
     // foot-class, not the drag's own limb (except under a pelvis drag), not under a pin.
     for (int c = 0; c < n; ++c) {
         const std::size_t ci = static_cast<std::size_t>(c);
-        const bool realMass =
-            m_masses[ci] >= kTokenBoneMass || m_subtreeMass[ci] >= kTokenLimbMass;
         const bool rootSeat = c == m_pelvis && m_rootIsSeat; // (the root descends from nothing: it is the seat by itself)
-        if (!m_bodyNode[ci] || (c == m_pelvis && !rootSeat) || isEffector(c) || !realMass ||
+        if (!m_bodyNode[ci] || (c == m_pelvis && !rootSeat) || isEffector(c) || !realMass(c) ||
             (!descendsFromPelvis(c) && !rootSeat) || isFootClass(static_cast<int>(ci)) || helperNode(c)) {
             continue; // (helperNode: a twist helper is no contact — the segment's far joint is; see ikrig.h; m_rootIsSeat: a rig with no pelvis bone sits on its root)
         }
@@ -545,14 +450,8 @@ void IkRig::seedPoseContacts(const std::vector<glm::vec3>& positions) {
         }
         // (... nor is her head, or her neck — see updateContacts: a face on the floor rests, it props
         // nothing, and seeded here under a hip drag up off her belly it held her head down.)
-        if (!kHeadProps && m_effector == m_pelvis && m_headNode >= 0 && m_neckBase >= 0) {
-            bool headChain = false;
-            for (int cur = c; cur >= 0 && !headChain; cur = m_parents[static_cast<std::size_t>(cur)]) {
-                headChain = cur == m_neckBase;
-            }
-            if (headChain) {
-                continue;
-            }
+        if (!kHeadProps && m_effector == m_pelvis && m_headNode >= 0 && m_neckBase >= 0 && inHeadChain(c)) {
+            continue;
         }
         // ... and so is ANY joint of an arm, while her trunk is dragged: rolled back onto her back
         // or brought up again, a hand held to its spot on the floor is a prop under a shoulder on
@@ -626,40 +525,6 @@ glm::vec3 IkRig::kneelSeat() const {
     }
     across /= static_cast<float>(knees);
     return glm::vec3(across.x, seat, across.z);
-}
-
-bool IkRig::computeIsLegJointAboveFoot(int node) const {
-    // A leg joint with a foot-class joint below it — a knee, a thigh (onKnees' test for one contact).
-    const int n = static_cast<int>(m_parents.size());
-    if (node < 0 || node == m_pelvis || isGirdleJoint(node) || !descendsFromPelvis(node) ||
-        isFootClass(node)) {
-        return false;
-    }
-    for (int i = node + 1; i < n; ++i) {
-        if (!isFootClass(i)) {
-            continue;
-        }
-        for (int cur = m_parents[static_cast<std::size_t>(i)]; cur >= 0; cur = m_parents[static_cast<std::size_t>(cur)]) {
-            if (cur == node) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-int IkRig::computeLegOf(int node) const {
-    // The leg a joint belongs to: its ancestor that is a child of the pelvis girdle with a foot
-    // below it (the thigh socket), or -1 for a joint of no leg.
-    int cur = node;
-    while (cur >= 0) {
-        const int par = m_parents[static_cast<std::size_t>(cur)];
-        if (par >= 0 && (par == m_pelvis || isGirdleJoint(par)) && isLegJointAboveFoot(cur)) {
-            return cur;
-        }
-        cur = par;
-    }
-    return -1;
 }
 
 bool IkRig::onKnees() const {
@@ -738,7 +603,7 @@ void IkRig::boundLivePins(const std::vector<glm::vec3>& positions) {
         }
         // (By the LEG the effector belongs to, not effectorIsTrunk: a shin's subtree — shin,
         // foot, toes — is over 5% of the body, so a dragged knee reads as a trunk grab there.)
-        if (!kKneesSlide && isLegJointAboveFoot(pin.node) && !pinIsShadow(p) && m_effector >= 0 && m_effector != m_graph.root() &&
+        if (!kKneesSlide && isLegJointAboveFoot(pin.node) && !pinIsShadow(p) && m_effector >= 0 && m_effector != m_pelvis &&
             legOf(m_effector) >= 0 && legOf(m_effector) != legOf(pin.node)) { // (not a SHADOW: a lifted knee is not nailed in the air)
             pin.hard = true;
             continue;
@@ -781,11 +646,12 @@ void IkRig::landAt(const std::vector<glm::vec3>& applied) {
     }
     const std::vector<glm::vec3> priorBefore = m_startPose;
     plantContacts(contacts, applied, &users);
-    // The prior after a landing is the DRAG-START pose moved horizontally under the landed
-    // body — a figure that has just come down onto its feet stands back up where it landed
-    // (see landAt): the landing pose itself as the prior kept the knees bent as they touched
-    // down (the hip 5-7cm low for the rest of the drag on two rigs) and pulled the dragged arm
-    // back toward the overhead stretch it landed with.
+    // The reference after a landing is the DRAG-START pose moved horizontally under the landed
+    // body, not the pose she touched down in (which plantContacts has just taken): a figure that
+    // has come down onto its feet stands back up where it landed. With the landing pose as the
+    // reference the knees stayed bent as they touched down (the hip 5-7cm low for the rest of
+    // the drag on two rigs) and the dragged arm was pulled back toward the overhead stretch it
+    // landed with.
     if (priorBefore.size() == m_startPose.size() && m_pelvis >= 0) {
         const glm::vec3& rootNow = applied[static_cast<std::size_t>(m_pelvis)];
         const glm::vec3& rootWas = priorBefore[static_cast<std::size_t>(m_pelvis)];
@@ -839,49 +705,35 @@ void IkRig::rebuildActiveSet() {
     m_active = m_graph.markActivePaths(targets);
 }
 
-bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
-    // (The rules below were written against two poses — the one the user sees and the solver's
-    // own — when those differed; the solve is applied in full now, so they are the same.)
-    const std::vector<glm::vec3>& applied = pose;
-    m_lastAppliedPrev.swap(m_lastApplied); // (last tick's: is a knee coming down? — swapped, never reallocated)
-    m_lastApplied = pose;
-    const std::vector<glm::vec3>& previous = m_lastAppliedPrev;
-    const std::vector<glm::vec3>& solved = pose;
-    const int n = m_graph.nodeCount();
-    if (!dragActive() || static_cast<int>(applied.size()) != n || m_pinLive.size() != m_pins.size() ||
-        m_liveSpan.size() != m_pins.size() || m_contactBlocked.size() != static_cast<std::size_t>(n)) {
+// LANDING (see isFootClass): a suspended figure whose foot has come back down to
+// the floor stands again — every contact re-planted from where the body is now.
+bool IkRig::landIfTouchedDown(const std::vector<glm::vec3>& pose) {
+    const int   n = m_graph.nodeCount();
+    const float scale = m_sizeScale;
+    float lowestFoot = 1e9f;
+    for (int i = 0; i < n; ++i) {
+        const std::size_t ui = static_cast<std::size_t>(i);
+        if (m_bodyNode[ui] && !isEffector(i) && descendsFromPelvis(i) &&
+            isFootClass(static_cast<int>(ui))) {
+            lowestFoot = std::min(lowestFoot, contactHeight(i, pose));
+        }
+    }
+    if (lowestFoot > kLandingAirborne * scale) {
+        m_airborne = true; // hanging clear of the floor: a later touch-down is a landing
+    }
+    if (!m_airborne || lowestFoot > kLiveContactBand * scale) {
         return false;
     }
-    const bool kTrace = kContactTrace;
-    // IK_CONTACT_TRACE=2: every candidate joint within 5cm of the floor, per tick.
-    static const bool kTraceNear = std::getenv("IK_CONTACT_TRACE") != nullptr &&
-                                   std::getenv("IK_CONTACT_TRACE")[0] == '2';
+    landAt(pose);
+    return true;
+}
+
+// LIFT-OFF and SLIDE (see the constants): a live contact the solve leaves above its pin
+// (sustained) is let go, and its joint must clear the floor before it can plant again;
+// one it leaves beyond the slip strain along the floor creeps with the body.
+void IkRig::liftAndSlideContacts(const std::vector<glm::vec3>& pose, bool& changed, bool& hullDirty) {
+    const bool  kTrace = kContactTrace;
     const float scale = m_sizeScale;
-    // 0. LANDING (see isFootClass): a suspended figure whose foot has come back down to
-    //    the floor stands again — every contact re-planted from where the body is now.
-    if (m_suspended) {
-        float lowestFoot = 1e9f;
-        for (int i = 0; i < n; ++i) {
-            const std::size_t ui = static_cast<std::size_t>(i);
-            if (m_bodyNode[ui] && !isEffector(i) && descendsFromPelvis(i) &&
-                isFootClass(static_cast<int>(ui))) {
-                lowestFoot = std::min(lowestFoot, contactHeight(i, applied));
-            }
-        }
-        if (lowestFoot > kLandingAirborne * scale) {
-            m_airborne = true; // hanging clear of the floor: a later touch-down is a landing
-        }
-        if (!m_airborne || lowestFoot > kLiveContactBand * scale) {
-            return false;
-        }
-        landAt(applied);
-        return true;
-    }
-    bool changed = false;   // pins added or removed: the active set and stiffness follow
-    bool hullDirty = false; // a pin slid: the support polygon follows
-    // 1. LIFT-OFF and SLIDE (see the constants): a live contact the solver holds above its pin
-    //    (sustained) is let go, and its joint must clear the floor before it can plant again;
-    //    one the solver holds beyond the slip strain along the floor creeps with the body.
     // (The contacts LIFTING this tick, judged TOGETHER: the shadow test below asks whether the
     // body still leans on a lifting contact, with the support drawn WITHOUT it — and read pin
     // by pin, the first hand of a pair to lift saw the other still in the support and let go,
@@ -904,7 +756,7 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
             continue;
         }
         const int   node = m_pins[p].node;
-        const float reach = glm::length(solved[static_cast<std::size_t>(limbJunction(node))] - m_pins[p].target);
+        const float reach = glm::length(pose[static_cast<std::size_t>(limbJunction(node))] - m_pins[p].target);
         // (A hand whose unload is still EASING IN — riseUnloading, 2026-10-27 — is not taut by its
         // reach yet: released on the reach alone with its hold at 1e5, the trunk it had held down
         // sprang 83mm at the brow in the tick the pin went. It is taut once the solve says so.)
@@ -912,7 +764,7 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
         // trailReleased, 2026-10-29: a leash the body slid forward over, not a support it comes down onto.)
         lifting[p] = (!descending || trailReleased(node)) && (kLiftNoDefer || !liftOffDeferred(node)) &&
                      ((((reach > kLiveContactTaut * m_liveSpan[p] && !riseUnloading(node)) || riseUnloaded(node)) &&
-                       liveContactRise(p, solved) > kLiveContactLift * scale && m_liveErrTicks[p] + 1 >= kLiveContactReleaseTicks) ||
+                       liveContactRise(p, pose) > kLiveContactLift * scale && m_liveErrTicks[p] + 1 >= kLiveContactReleaseTicks) ||
                       // (A hold the rise has taken OUTRIGHT holds nothing: let go of at once, whatever
                       // the height — see riseUnloadedOutright. A prone-up's hand pressed to the floor
                       // under a rising chest never rose the 2cm, and the weightless arm was thrown.)
@@ -924,7 +776,7 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
             continue;
         }
         const int node = m_pins[p].node;
-        const glm::vec3& at = solved[static_cast<std::size_t>(node)];
+        const glm::vec3& at = pose[static_cast<std::size_t>(node)];
         IkEffector& pin = m_pins[p];
         // A contact SETTLES: once its JOINT rests on the floor, that is the height it is planted at.
         // A hand comes down fingers first, its wrist a hand's length up, and then lies down on its
@@ -954,10 +806,10 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
         // free arm 144mm in one tick (a heavy newest-generation character getting up off her
         // belly). Unloaded, it is taut for the lift-off's purposes; a landing hand is never one.)
         const int   junction = limbJunction(node);
-        const float reach = glm::length(solved[static_cast<std::size_t>(junction)] - pin.target);
+        const float reach = glm::length(pose[static_cast<std::size_t>(junction)] - pin.target);
         const bool  taut = (p < m_liveSpan.size() && reach > kLiveContactTaut * m_liveSpan[p] && !riseUnloading(node)) || riseUnloaded(node);
         const bool  outright = riseUnloadedOutright(node); // (a hold the rise took outright: let go of now — see lifting[] above)
-        if ((!descending || trailReleased(node)) && (kLiftNoDefer || !liftOffDeferred(node)) && (outright || (taut && liveContactRise(p, solved) > kLiveContactLift * scale))) {
+        if ((!descending || trailReleased(node)) && (kLiftNoDefer || !liftOffDeferred(node)) && (outright || (taut && liveContactRise(p, pose) > kLiveContactLift * scale))) {
             if (++m_liveErrTicks[p] >= kLiveContactReleaseTicks || outright) {
                 // In the air. Is the body still LEANING on it? Removed the tick it lifts, a
                 // kneeling figure's support went from knees-and-feet to the feet alone in one
@@ -982,7 +834,7 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
                 // by the chest off a kneel jumped 97-105mm where she jumps 52 with the pin gone.)
                 static const bool kNoShadow = std::getenv("IK_NO_SHADOW_SUPPORT") != nullptr; // A/B probe
                 static const bool kNoExpiry = std::getenv("IK_SHADOW_NO_EXPIRY") != nullptr;  // A/B probe
-                const bool expired = !kNoExpiry && liveContactRise(p, solved) > kShadowMaxRise * scale;
+                const bool expired = !kNoExpiry && liveContactRise(p, pose) > kShadowMaxRise * scale;
                 if (!kNoShadow && !expired && m_effector != m_pelvis) {
                     std::vector<glm::vec2> without;
                     for (std::size_t q = 0; q < m_pins.size(); ++q) {
@@ -998,7 +850,7 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
                     glm::vec2 need(0.0f);
                     const std::vector<glm::vec2> hull = BalanceController::supportPolygon(std::move(without));
                     if (!hull.empty()) {
-                        BalanceController::balanceCorrection(solved, m_parents, m_masses, hull,
+                        BalanceController::balanceCorrection(pose, m_parents, m_masses, hull,
                                                              kBalanceMargin * scale, need);
                     }
                     if (hull.empty() || glm::length(need) > 1.0e-4f) {
@@ -1021,6 +873,12 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
                 }
                 m_contactBlocked[static_cast<std::size_t>(node)] = 1;
                 removePin(p);
+                // (... and its flag with it: `lifting` runs parallel to the pins, and every pin after
+                // the removed one has just moved down an index. Left unshifted, the shadow test of the
+                // next lifting contact read its neighbours' flags one pin off — a pin that stays was
+                // left out of the support it is balanced against, and a contact lifting in the same
+                // tick was kept as a shadow where its twin had been let go: judged apart after all.)
+                lifting.erase(lifting.begin() + static_cast<std::ptrdiff_t>(p));
                 changed = true;
                 continue;
             }
@@ -1047,25 +905,31 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
         }
         ++p;
     }
-    // 2. DETECT: a real-mass body joint (token-mass parts — fingers, toes, face bones — count
-    //    through the joint they ride, never on their own) that is not the effector, not within
-    //    the drag's own lift reach of it (the same rule that frees a dragged foot's toes at
-    //    drag start), not already served by a pin at or above it (a planted foot's toes), and
-    //    whose contact height has reached the floor. A pin BELOW it does not exclude it: a knee
-    //    coming down onto the floor with its foot still planted is a second support on that
-    //    leg (a kneel), and the solver restores the foot's chain through the knee pin.
+}
+
+// DETECT: a real-mass body joint (token-mass parts — fingers, toes, face bones — count
+// through the joint they ride, never on their own) that is not the effector, not within
+// the drag's own lift reach of it (the same rule that frees a dragged foot's toes at
+// drag start), not already served by a pin at or above it (a planted foot's toes), and
+// whose contact height has reached the floor. A pin BELOW it does not exclude it: a knee
+// coming down onto the floor with its foot still planted is a second support on that
+// leg (a kneel).
+// Returns true when a FOOT touching down re-planted the whole contact set instead (landAt): the
+// caller returns at once.
+bool IkRig::detectContacts(const std::vector<glm::vec3>& pose, bool& changed) {
+    const int   n = m_graph.nodeCount();
+    const bool  kTrace = kContactTrace;
+    const bool  kTraceNear = kContactTraceNear;
+    const float scale = m_sizeScale;
+    const std::vector<glm::vec3>& previous = m_lastAppliedPrev; // (last tick's pose: is a knee COMING DOWN?)
     for (int c = 0; c < n; ++c) {
         const std::size_t ci = static_cast<std::size_t>(c);
-        // A real-mass joint by its own segment OR by what hangs off it (a hand whose class
-        // share a helper bone halved still carries its fingers) — the promotion rule's pair.
-        const bool realMass =
-            m_masses[ci] >= kTokenBoneMass || m_subtreeMass[ci] >= kTokenLimbMass;
         const bool rootSeat = c == m_pelvis && m_rootIsSeat; // (the root descends from nothing: it is the seat by itself)
-        if (!m_bodyNode[ci] || (c == m_pelvis && !rootSeat) || isEffector(c) || !realMass ||
+        if (!m_bodyNode[ci] || (c == m_pelvis && !rootSeat) || isEffector(c) || !realMass(c) ||
             (!descendsFromPelvis(c) && !rootSeat) || helperNode(c)) {
             continue; // (helperNode: a twist helper is no contact — the segment's far joint is; see ikrig.h; m_rootIsSeat: a rig with no pelvis bone sits on its root)
         }
-        const float h = contactHeight(c, applied);
+        const float h = contactHeight(c, pose);
         if (kTraceNear && h < 0.05f * scale) {
             std::fprintf(stderr, "[ikrig]   near node=%d h=%.4f blocked=%d reach=%.3f\n", c, h,
                          m_contactBlocked[ci] ? 1 : 0, pathLenToEffector(c));
@@ -1087,7 +951,7 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
         // DOWN: sitting back out of a deep squat the knees hover within the band and RISE, and one
         // of them was pulled down onto the floor all the same — the other shin 12cm in one tick.
         if (m_lastDownIntent) {
-            const bool comingDown = ci < previous.size() && applied[ci].y < previous[ci].y - 2.0e-4f * scale;
+            const bool comingDown = ci < previous.size() && pose[ci].y < previous[ci].y - 2.0e-4f * scale;
             for (std::size_t q = 0; q < m_pins.size(); ++q) {
                 if (!m_pinLive[q] && comingDown && kneeOver(c, m_pins[q].node)) {
                     band = kKneelContactBand * scale;
@@ -1116,14 +980,8 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
         // face on the floor before its belly, and planted there — a hard hold of the head's place
         // with the hips still 30cm up — it stood on its head, a tripod of knees and face, the hips
         // frozen 40cm from their cursor. A head on the floor rests; it props nothing.
-        if (!kHeadProps && m_effector == m_pelvis && m_headNode >= 0 && m_neckBase >= 0) {
-            bool headChain = false;
-            for (int cur = c; cur >= 0 && !headChain; cur = m_parents[static_cast<std::size_t>(cur)]) {
-                headChain = cur == m_neckBase;
-            }
-            if (headChain) {
-                continue;
-            }
+        if (!kHeadProps && m_effector == m_pelvis && m_headNode >= 0 && m_neckBase >= 0 && inHeadChain(c)) {
+            continue;
         }
         if (m_effector == m_pelvis && isSpineJoint(c)) {
             continue; // (nor a SPINE joint under a pelvis drag: a chest lying down rests and slides — see seedPoseContacts)
@@ -1133,7 +991,7 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
         if (m_seatedTrunkDrag && !isGirdleJoint(c) && limbHangsAboveHips(c)) {
             continue;
         }
-        if (servedByPinAbove(c) || servedByHandBelow(c, applied)) {
+        if (servedByPinAbove(c) || servedByHandBelow(c, pose)) {
             continue;
         }
         // A FOOT touching down while unpinned — the second foot of a landing out of
@@ -1148,18 +1006,41 @@ bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
                 anyLive = anyLive || live != 0;
             }
             if (!anyLive) {
-                landAt(applied);
+                landAt(pose);
                 return true;
             }
         }
-        glm::vec3 target = applied[ci];
+        glm::vec3 target = pose[ci];
         target.y -= h; // the lowest riding part exactly at its clearance (h <= band: a lift)
         if (kTrace) {
             std::fprintf(stderr, "[ikrig] CONTACT plant node=%d h=%.4f at(%.3f %.3f %.3f)\n", c,
                          h, target.x, target.y, target.z);
         }
-        addLivePin(c, target, applied);
+        addLivePin(c, target, pose);
         changed = true;
+    }
+    return false;
+}
+
+bool IkRig::updateContacts(const std::vector<glm::vec3>& pose) {
+    m_lastAppliedPrev.swap(m_lastApplied); // (last tick's: is a knee coming down? — swapped, never reallocated)
+    m_lastApplied = pose;
+    const int n = m_graph.nodeCount();
+    if (!dragActive() || static_cast<int>(pose.size()) != n || m_pinLive.size() != m_pins.size() ||
+        m_liveSpan.size() != m_pins.size() || m_contactBlocked.size() != static_cast<std::size_t>(n)) {
+        return false;
+    }
+    // 0. LANDING: a suspended figure is in the air, or lands.
+    if (m_suspended) {
+        return landIfTouchedDown(pose);
+    }
+    bool changed = false;   // pins added or removed: the active set follows
+    bool hullDirty = false; // a pin slid: the support polygon follows
+    // 1. LIFT-OFF and SLIDE of the live contacts there are.
+    liftAndSlideContacts(pose, changed, hullDirty);
+    // 2. DETECT the joints that have come down onto the floor.
+    if (detectContacts(pose, changed)) {
+        return true; // (a foot touched down: the whole set was re-planted, as at a drag start)
     }
     if (changed) {
         rebuildActiveSet();

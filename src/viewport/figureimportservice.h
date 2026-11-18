@@ -6,10 +6,10 @@
  * (auto-detected, unioned with the user-configured roots, with a "Locate Content Folder" recovery
  * prompt), runs the Qt-free FigureImporter (import/figure/) to assemble a FigureData — materials,
  * skeleton, rotation limits, correctives, subdivision, follower addons — converts it to the
- * renderer's ModelData (applying the cm->world unit scale × the figure's driven scale), decodes
- * its textures via QImage (reusing ModelImportService::decodeModelTextures), and uploads it —
- * driving a modal progress dialog. As with the model path, all Qt lives here so the importer
- * core stays Qt-free.
+ * renderer's ModelData (applying the cm->world unit scale × the figure's driven scale), and
+ * hands that to the post-parse pipeline every import shares (ModelImportService::uploadModelData:
+ * texture decode, import smoothing, AO + tangents, GPU upload) — driving a modal progress dialog.
+ * As with the model path, all Qt lives here so the importer core stays Qt-free.
  */
 
 #ifndef FIGUREIMPORTSERVICE_H

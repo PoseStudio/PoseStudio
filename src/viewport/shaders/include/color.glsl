@@ -1,8 +1,8 @@
-// color.glsl — the tonemapping curve and the viewport's selection accent color.
+// color.glsl — the tonemapping curve.
 //
-// Included by mesh.frag (the matcap mode tonemaps inline; the selection highlight) and
-// composite.frag (the PBR chain's final ACES step). The stylized modes author display-ready
-// values and never tonemap.
+// Included by mesh.frag (the matcap mode tonemaps inline) and composite.frag (the PBR chain's
+// final ACES step). The stylized modes author display-ready values and never tonemap. (The
+// selection highlight's color is a preference and rides the camera block: camera_ubo.glsl.)
 
 // ACES filmic tonemap. Applied in composite.frag for the PBR family (which renders linear HDR into
 // the offscreen target, so bloom thresholds/blurs see real radiance) and inline by the matcap

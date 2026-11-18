@@ -1,20 +1,20 @@
 # Navigating the Viewport
 
-The viewport has an orbit camera: it looks at a target point and turns around it. Every navigation gesture that does not land on a figure's joint moves the camera; gestures on joints pose the figure instead (see [Posing](posing.md)).
+The viewport has an orbit camera: it looks at a target point and turns around it. The middle button pans and the wheel zooms. The left button orbits when the press lands on empty space or on an object that is not a figure; a left press on a figure poses her instead (see [Posing](posing.md)), and one on a light's marker moves the light (see [Lights](lights.md#lights-in-the-viewport)).
 
 ## Mouse
 
 | Gesture | What it does |
 | --- | --- |
-| **Left-drag** on empty space or on a model's body | Orbits, as if you were grabbing the scene: drag right and it turns right; drag down and it tips toward you, so you look from higher up; drag up and you look from lower down. |
+| **Left-drag** on empty space, or on an object that is not a figure | Orbits, as if you were grabbing the scene: drag right and it turns right; drag down and it tips toward you, so you look from higher up; drag up and you look from lower down. |
 | **Middle-drag** | Pans: the view slides with the mouse. |
 | **Mouse wheel** | Zooms in and out (dollies toward and away from the target). |
-| **Left-click** (no movement) | Selects the model under the cursor, or clears the selection on empty space. See [Selecting objects](#selecting-objects). |
+| **Left-click** (the pointer stays within a few pixels) | Selects the model under the cursor, or clears the selection on empty space. See [Selecting objects](#selecting-objects). |
 | **Right-click** on a model or joint | Opens the context menu (Delete, and the joint tools). |
 
-A left-drag that starts on a **joint** does not orbit — it poses. If you want to orbit around a figure, start the drag beside it or on a part of the body away from a joint; a click on the body that never moves still selects the model.
+A left-drag that starts on a **figure** does not orbit — it poses the part you pressed on. If you want to orbit around a figure, start the drag beside it; a click on the figure that never moves selects it, and the joint under the pointer.
 
-Orbiting even a little turns any named view into a free **Perspective View**.
+The view starts to turn once the pointer has moved a few pixels from where you pressed, and then catches up with the whole movement. A click made with a slightly unsteady hand therefore turns nothing, and a Front, Side or Top view stays that view. Once the view does turn, any named view becomes a free **Perspective View**.
 
 ## The camera views
 
@@ -24,7 +24,7 @@ Six axis-aligned views and three utilities are on the View menu, on the strip's 
 | --- | --- | --- |
 | Front View | `1` | Looks from the front — the side a freshly imported figure faces. |
 | Back View | `Ctrl+1` | |
-| Right View | `3` | Looks from the figure's right, showing her left side — as in every 3D application. |
+| Right View | `3` | Looks from the right as you face the figure from the front, so it shows her left side — as in every 3D application. |
 | Left View | `Ctrl+3` | |
 | Top View | `7` | From above, the figure's front at the bottom of the screen. |
 | Bottom View | `Ctrl+7` | From below, mirrored so the front is still at the bottom. |
@@ -38,7 +38,7 @@ The keys work whichever panel has focus, except while you are typing in a text f
 
 ## Selecting objects
 
-A **click** (press and release without dragging) selects the model under the cursor and outlines it in blue; a click on empty space — or `Esc` — clears the selection. The click takes **what is under the cursor**: a figure's or a prop's surface, or a Gaussian splat scene wherever its splats cover that spot — so with two objects close together, or one in front of the other, the one you see under the cursor is the one selected. Where the cursor is on nothing at all, the nearest object whose extent it falls within is taken, so a click just beside a lone model still selects it. An orbit drag, however short, never changes the selection.
+A **click** (press and release without dragging) selects the model under the cursor and outlines it in blue; a click on empty space — or `Esc` — clears the selection. The click takes **what is under the cursor**: a figure's or a prop's surface, or a Gaussian splat scene wherever its splats cover that spot — so with two objects close together, or one in front of the other, the one you see under the cursor is the one selected. Where the cursor is on nothing at all, the nearest object whose extent it falls within is taken, so a click just beside a lone model still selects it. Once the view has begun to turn the gesture is an orbit, and an orbit never changes the selection — not even one that ends where it began.
 
 The selection matters for:
 

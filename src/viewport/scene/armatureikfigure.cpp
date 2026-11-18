@@ -1,14 +1,17 @@
 /**
  * @file armatureikfigure.cpp
- * @brief THE FIGURE MOVE (IkScope::Figure): the app's Ctrl+drag of the body itself — the hips, the
- *        abdomen, the chest — moves the whole figure as she is posed, lifted off the floor or
- *        carried across it, and the user's pins hold.
+ * @brief THE FIGURE MOVE (IkScope::Figure): the app's Ctrl+drag of the HIPS — the solve root,
+ *        which a grab of the pelvis girdle is promoted to — moves the whole figure as she is
+ *        posed, lifted off the floor or carried across it, and the user's pins hold.
  *
  * The user: "when ctrl + pulling anywhere on the body should disable any ik pinning to the floor,
  * lifting the figure in its current position. This should not affect user added pins" (2026-09-28).
  * Until then a Ctrl+drag of the trunk was the scoped chain's (IkScope::Chain: the chest bent the
  * spine over a still pelvis, the hips took the legs over planted feet), and there was no way to pick
- * a posed figure up and put her somewhere else.
+ * a posed figure up and put her somewhere else. From that day to 2026-10-28 the abdomen and the
+ * chest moved her too; since then a spine joint under Ctrl bends the trunk alone again (the scoped
+ * chain: Armature::beginIkDrag resolves IkScope::Part), and the hips alone move the figure —
+ * isBodyGrab, below, is still what says a PIN on the trunk holds her where she is.
  *
  * Like the digit drag it is a solve of its own that the IK rig has no part in: the rig begins no
  * drag, so NO floor contact is planted — not the feet, not a knee or a hand the pose has on the
@@ -118,7 +121,8 @@ bool Armature::beginFigureMove() {
             }
         }
     }
-    syncRigRotations();
+    // (The rig has the bones' rotations — the floor clearances above — from beginIkDrag, which
+    // handed them over before it came here; the pose has not changed since.)
     m_ikInvTransform = glm::inverse(m_transform); // fixed for the drag (see armature.h)
     m_ikGrabOffset = glm::vec3(0.0f);
     m_ikStartEuler = m_boneEuler; // the posture reference: this moment's pose
@@ -126,8 +130,7 @@ bool Armature::beginFigureMove() {
     m_jsFollowValid = false;
     m_figureMove = true;
     m_ikScope = IkScope::Figure;
-    static const bool kTrace = std::getenv("POSESTUDIO_IK_TRACE") != nullptr;
-    if (kTrace) {
+    if (kIkTrace) {
         std::fprintf(stderr, "[ik] beginDrag FIGURE by %s, point (%.4f %.4f %.4f) in its frame; %zu pin(s) held by %zu limb bone(s)%s\n",
                      m_boneNames[static_cast<std::size_t>(m_moveBone)].c_str(), m_moveLocal.x, m_moveLocal.y, m_moveLocal.z,
                      m_movePins.size(), m_moveLimbs.size(), m_moveHeld ? "; a pin on the body holds her where she is" : "");
@@ -231,11 +234,10 @@ bool Armature::dragFigureTo(const glm::vec3& targetWorld) {
     // under any drag (armaturebreasts.cpp, armaturebuttocks.cpp); the settle ticks them on alone
     // once the figure stops (settleIkTick). Until this day the move never ticked them: a figure
     // carried by Ctrl rode dead still. Off, tickSoftBody returns at once.
-    m_jsSoftBodyMoving = tickSoftBody(1.0f / 60.0f);
+    m_jsSoftBodyMoving = tickSoftBody(kTickSeconds);
     // (THE HANGING FEET: no more hanging than the floor allows — flat as she is set down.)
     const bool feetMoved = poseHangFeet(1.0f, 0.0f);
-    static const bool kTrace = std::getenv("POSESTUDIO_IK_TRACE") != nullptr;
-    if (kTrace) {
+    if (kIkTrace) {
         const glm::vec3 point(m_poseGlobal[static_cast<std::size_t>(m_moveBone)] * glm::vec4(m_moveLocal, 1.0f));
         std::fprintf(stderr, "[js-figure] dofs=%zu it=%d conv=%d cost=%.6g miss=%.2fmm room=%.1fmm moved=%.4f\n", problem.dofs.size(),
                      result.iterations, result.converged ? 1 : 0, result.cost, glm::length(point - target) * 1000.0f,

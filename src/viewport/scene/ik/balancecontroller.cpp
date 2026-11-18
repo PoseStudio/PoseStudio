@@ -329,25 +329,10 @@ glm::vec2 BalanceController::closestBalancedPoint(const std::vector<glm::vec2>& 
         }
         return nearest;
     }
-    // Two points: the closest point on the segment, inset toward the centroid.
+    // Two points (a segment has no inside): the closest point on it, inset toward the centroid.
     const glm::vec2& centroid = inset.centroid;
-    const bool inside = insidePolygon(hull, p);
-    glm::vec2 best(0.0f);
-    float bestDist2 = 1e30f;
-    const std::size_t edges = hull.size() == 2 ? 1 : hull.size();
-    for (std::size_t i = 0; i < edges; ++i) {
-        const glm::vec2 c = closestOnSegment(hull[i], hull[(i + 1) % hull.size()], p);
-        const float d2 = glm::dot(c - p, c - p);
-        if (d2 < bestDist2) {
-            bestDist2 = d2;
-            best = c;
-        }
-    }
-    if (inside && bestDist2 >= margin * margin) {
-        return p; // safely inside: balanced as-is
-    }
-    // On/near/outside the boundary: come to the boundary point, inset toward the centroid.
-    const glm::vec2 toCentroid = centroid - best;
+    const glm::vec2  best = closestOnSegment(hull[0], hull[1], p);
+    const glm::vec2  toCentroid = centroid - best;
     const float len = glm::length(toCentroid);
     return len > 1e-6f ? best + toCentroid * std::min(1.0f, margin / len) : best;
 }

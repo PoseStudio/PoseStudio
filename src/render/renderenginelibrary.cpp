@@ -56,18 +56,38 @@ std::unique_ptr<RenderEngineLibrary> RenderEngineLibrary::load(const QString& di
     }
 
     // The engine's own dependencies sit beside it, and the system's loader looks for a library's
-    // dependencies in the process's search path — not in the folder the library came from: that
-    // folder is put first on PATH for the load. (Where the loader does look beside the library —
-    // an rpath of $ORIGIN — this changes nothing.)
+    // dependencies in the process's search path — not in the folder the library came from. For
+    // the load, that folder is made part of the search path in two ways. (Where the loader does
+    // look beside the library — an rpath of $ORIGIN — neither changes anything.)
+    //
+    //   - It is made the CURRENT DIRECTORY, which the Windows loader searches before PATH, and
+    //     which Qt sets and reads as wide characters: an install folder whose name the system's
+    //     8-bit code page cannot spell (a profile name in another script than the system
+    //     locale's) is found this way.
+    //   - It is put first on PATH — but only when PATH and the folder survive the trip through
+    //     the 8-bit code page unchanged, which is all qgetenv / qputenv can carry: written
+    //     through it, a folder it cannot spell arrives as question marks, and so does every
+    //     such entry ALREADY on PATH when the old value is written back — damaged for the rest
+    //     of the process and for whatever it starts.
+    const QString    engineDir = QFileInfo(file).absolutePath();
+    const QString    nativeDir = QDir::toNativeSeparators(engineDir);
+    const QString    oldCurrent = QDir::currentPath();
     const QByteArray oldPath = qgetenv("PATH");
-    qputenv("PATH", QDir::toNativeSeparators(QFileInfo(file).absolutePath()).toLocal8Bit() +
-                        QByteArray(1, QDir::listSeparator().toLatin1()) + oldPath);
+    const bool       pathSurvives8Bit =
+        QString::fromLocal8Bit(oldPath) == qEnvironmentVariable("PATH") && QString::fromLocal8Bit(nativeDir.toLocal8Bit()) == nativeDir;
+    QDir::setCurrent(engineDir);
+    if (pathSurvives8Bit) {
+        qputenv("PATH", nativeDir.toLocal8Bit() + QByteArray(1, QDir::listSeparator().toLatin1()) + oldPath);
+    }
     QLibrary library(file);
     library.setLoadHints(QLibrary::PreventUnloadHint);
     const bool loaded = library.load();
     const QString loadError = library.errorString();
     const QFunctionPointer entry = loaded ? library.resolve(POSESTUDIO_RENDER_ENGINE_ENTRY) : nullptr;
-    qputenv("PATH", oldPath);
+    if (pathSurvives8Bit) {
+        qputenv("PATH", oldPath);
+    }
+    QDir::setCurrent(oldCurrent);
     if (!loaded) {
         return fail(QCoreApplication::translate("RenderEngineLibrary", "The render engine could not be loaded: %1")
                         .arg(loadError));
@@ -95,7 +115,6 @@ std::unique_ptr<RenderEngineLibrary> RenderEngineLibrary::load(const QString& di
     result->m_create = create;
     result->m_resourceDir = resourceDir;
     result->m_userDir = userDirUtf8;
-    result->m_directory = QFileInfo(file).absolutePath();
     return result;
 }
 

@@ -23,20 +23,24 @@
  * breasts' pose term is left out), only the hips' ACCELERATION moves it, read as the breasts'
  * chest is (the hip joint's velocity smoothed, differenced, smoothed again, a dead band, a cap,
  * kButtockJoltShare of it felt), with the breasts' figure of eight (a drop spreads the cheeks a
- * little) and the landing's KICK. Compliance half the breasts' sideways and the breasts' own
- * along the trunk (kButtockSide, kButtockDown: the first look read the up-and-down too subtle
- * at half), its own frequency and damping (kButtockHz, kButtockDamping), substepped, the
- * stiffening capped. Nothing of it is in the pose. POSESTUDIO_BREAST_TRACE=2 prints the left
+ * little) and the landing's KICK. Compliance half the breasts' sideways and, along the trunk,
+ * what the breasts' own was that day (kButtockSide, kButtockDown: the first look read the
+ * up-and-down too subtle at half), its own frequency and damping (kButtockHz, kButtockDamping),
+ * substepped, the stiffening capped. The numbers were derived from the breasts' of 2026-11-05 and
+ * are the buttocks' own since: the breasts were retuned afterwards and the two are not kept in
+ * step. Nothing of it is in the pose. POSESTUDIO_BREAST_TRACE=2 prints the left
  * cheek per tick beside the breast; POSESTUDIO_BUTTOCK_DOWN / _SIDE (mm per g) and _IMPACT are
  * the levers.
  */
 
 #include "armature.h"
+#include "armaturesoftbodyshared.h" // the env levers' reader, the trace switches, "still moving"
 
-#include "ikmath.h" // normalizedFrame
 #include "ikrig.h"
 #include "rigroles.h"
 #include "softbodysettings.h"
+
+#include <glm/gtc/constants.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -48,34 +52,33 @@ namespace pose {
 
 namespace {
 
+// THE BUTTOCKS' NUMBERS ARE THEIR OWN. Each was first derived from the breasts' value of the day
+// (2026-11-05) and then approved as it stands; the breasts were retuned five times since, so where
+// a comment below names a breast value it is that day's, as history — do not "re-sync" one.
 constexpr float kButtockRadius = 0.13f;        ///< The field's reach about a cheek's apex (m, figure-scaled): the glute and the hip's side, fading to nothing at the edge.
 constexpr float kButtockBehind = 0.02f;        ///< The field reaches at most this far in front of the hip joint's depth (m, figure-scaled): the belly is not a buttock.
 constexpr float kButtockApexBand = 0.25f;      ///< The apex is looked for from this far below the hip joint ... (m, figure-scaled)
 constexpr float kButtockApexAbove = 0.10f;     ///< ... to this far above it.
-constexpr float kButtockDownDefault = 0.018f;  ///< Compliance along the trunk (m per g): the breasts' 18 at fullness 1 (9, half, at the first look: "side by side looks good, up and down is too subtle").
+constexpr float kButtockDownDefault = 0.018f;  ///< Compliance along the trunk (m per g): 18, the breasts' at fullness 1 when the buttocks were calibrated (theirs is 30 since) — 9, half of it, at the first look: "side by side looks good, up and down is too subtle".
 constexpr float kButtockSideDefault = 0.015f;  ///< Compliance sideways (m per g): half the breasts' 30.
-constexpr float kButtockHz = 2.4f;             ///< The bounce's frequency (the breasts' at fullness 1).
+constexpr float kButtockHz = 2.4f;             ///< The bounce's frequency: the breasts' at fullness 1 when the buttocks were calibrated (theirs is 3.2 since).
 constexpr float kButtockDamping = 0.6f;        ///< Its damping ratio: one swing past the rest and a settle.
 constexpr float kButtockCapDefault = 0.020f;   ///< The stiffening spring's cap (m): the excursion past which the tissue runs out.
 constexpr float kButtockStiffenMax = 16.0f;    ///< The stiffening factor is capped here (stability with the substeps).
 constexpr int   kButtockSubsteps = 4;          ///< The spring's substeps per tick (semi-implicit Euler: omega × step well under 2).
 constexpr float kButtockSplay = 0.3f;          ///< THE FIGURE OF EIGHT: the sideways rest moves outward by this share of the drop.
 constexpr float kButtockDetune = 0.985f;       ///< The right cheek's frequency against the left's.
-constexpr float kButtockImpactShareDefault = 0.4f; ///< THE LANDING'S KICK: the share of the impact speed the cheeks keep (0.25, half the breasts' 0.5, at the first look: the drop read too subtle).
-constexpr float kButtockJoltShare = 0.7f;      ///< The share of the hips' acceleration the mass feels (the breasts' rule).
+constexpr float kButtockImpactShareDefault = 0.4f; ///< THE LANDING'S KICK: the share of the impact speed the cheeks keep (0.25, half of the breasts' 0.5 of that day, at the first look: the drop read too subtle; the breasts keep 0.6 now).
+constexpr float kButtockJoltShare = 0.7f;      ///< The share of the hips' acceleration the mass feels: the breasts' rule and their share of that day (theirs is 0.3 with a gain for fast moves since; the cheeks have no gain).
 constexpr float kButtockVelSmooth = 0.4f;      ///< The hip joint's velocity low-passed by this per tick before it is differenced ...
-constexpr float kButtockAccelSmooth = 0.3f;    ///< ... and the acceleration by this after (a trembling hand is a g and a half raw).
-constexpr float kButtockAccelDeadG = 0.15f;    ///< Accelerations under this (g) are read as none.
+constexpr float kButtockAccelSmooth = 0.3f;    ///< ... and the acceleration by this after (a trembling hand is a g and a half raw) ...
+constexpr float kButtockAccelDeadG = 0.15f;    ///< ... and accelerations under this (g) read as none: the breasts' reader as it stood that day (theirs is 0.55 / 0.45 / 0.18 since).
 constexpr float kButtockAccelMaxG = 1.5f;      ///< ... and read up to this.
 
-float envOrF(const char* name, float fallback) {
-    const char* v = std::getenv(name);
-    return v && *v ? static_cast<float>(std::atof(v)) : fallback;
-}
-const float kButtockDown = envOrF("POSESTUDIO_BUTTOCK_DOWN", kButtockDownDefault * 1000.0f) / 1000.0f;
-const float kButtockSide = envOrF("POSESTUDIO_BUTTOCK_SIDE", kButtockSideDefault * 1000.0f) / 1000.0f;
-const float kButtockCap = envOrF("POSESTUDIO_BUTTOCK_CAP", kButtockCapDefault * 1000.0f) / 1000.0f;
-const float kButtockImpactShare = envOrF("POSESTUDIO_BUTTOCK_IMPACT", kButtockImpactShareDefault);
+const float kButtockDown = softBodyEnv("POSESTUDIO_BUTTOCK_DOWN", kButtockDownDefault * 1000.0f) / 1000.0f;
+const float kButtockSide = softBodyEnv("POSESTUDIO_BUTTOCK_SIDE", kButtockSideDefault * 1000.0f) / 1000.0f;
+const float kButtockCap = softBodyEnv("POSESTUDIO_BUTTOCK_CAP", kButtockCapDefault * 1000.0f) / 1000.0f;
+const float kButtockImpactShare = softBodyEnv("POSESTUDIO_BUTTOCK_IMPACT", kButtockImpactShareDefault);
 
 } // namespace
 
@@ -88,14 +91,13 @@ void Armature::setupButtocks() {
     if (!m_ikRig || !m_ikRig->roles().built() || m_bones.empty() || m_bodyMesh.empty()) {
         return;
     }
-    static const bool kTrace = std::getenv("POSESTUDIO_BREAST_TRACE") != nullptr;
     const RigRoles& roles = m_ikRig->roles();
     const float     scale = m_ikRig->sizeScale() > 0.0f ? m_ikRig->sizeScale() : 1.0f;
     const int       root = m_ikRig->rootNode();
     if (root < 0 || static_cast<std::size_t>(root) >= m_bones.size()) {
         return;
     }
-    const std::vector<glm::vec3> bind = bindJointPositions(); // (model space; binds are translation-only)
+    const std::vector<glm::vec3>& bind = m_ikBindPos; // (model space; binds are translation-only)
     const glm::vec3              hips = bind[static_cast<std::size_t>(root)];
     // THE SKIN THAT MAY CARRY THE FIELD: the hips' and the pelvis bone's (either cheek), each
     // side's thigh and its twist helpers (that side's cheek). 1 = either side, 2 = left, 3 = right.
@@ -144,7 +146,7 @@ void Armature::setupButtocks() {
         if (points == 0) {
             continue;
         }
-        if (kTrace) {
+        if (kSoftBodyTrace) {
             std::fprintf(stderr, "[buttock] %s apex %.1f mm behind and %.1f mm below the hip joint, %.1f mm out (%d points), field radius %.0f mm\n",
                          side > 0.0f ? "L" : "R", (hips.z - cheek.apexBind.z) * 1000.0f, (hips.y - cheek.apexBind.y) * 1000.0f,
                          std::abs(cheek.apexBind.x) * 1000.0f, points, m_buttockRadius * 1000.0f);
@@ -156,18 +158,6 @@ void Armature::setupButtocks() {
         m_buttocksReady = true;
     } else {
         m_buttocks.clear();
-    }
-}
-
-void Armature::setupSoftBodyFields() {
-    if ((m_buttocksReady && m_breastFieldsReady) || m_bodyMesh.empty() || !ensureIkRig()) {
-        return;
-    }
-    if (!m_buttocksReady) {
-        setupButtocks();
-    }
-    if (!m_breastFieldsReady) {
-        setupBreastFields(); // (armaturebreastfield.cpp: a breast no pectoral bone carries)
     }
 }
 
@@ -201,23 +191,6 @@ float Armature::softBodyFieldWeight(const glm::vec3& bindPos, int dominantBone, 
     return best;
 }
 
-float Armature::softBodyWeight(int index) const {
-    if (index >= kSoftBodyBreastBase) {
-        // A boneless breast's field (armaturebreastfield.cpp): side × 3 + the chest axis.
-        const int k = index - kSoftBodyBreastBase;
-        return k < kSoftBodyBreastFields ? breastFieldDisplacement(k / 3, k % 3) : 0.0f;
-    }
-    if (!softbody::buttockMotion() || !m_buttocksReady || !m_buttockDynamic || index < 0) {
-        return 0.0f;
-    }
-    const int cheek = index / 2;
-    const int axis = index % 2;
-    if (cheek < 0 || static_cast<std::size_t>(cheek) >= m_buttocks.size()) {
-        return 0.0f;
-    }
-    return m_buttocks[static_cast<std::size_t>(cheek)].disp[axis];
-}
-
 void Armature::tickButtocks(float dt, bool& movingOut) {
     if (!softbody::buttockMotion() || !m_buttocksReady || m_buttocks.empty() || m_buttockRoot < 0 ||
         static_cast<std::size_t>(m_buttockRoot) >= m_poseGlobal.size()) {
@@ -235,19 +208,16 @@ void Armature::tickButtocks(float dt, bool& movingOut) {
     float           mag = 0.0f;
     const glm::vec3 felt = m_buttockReader.sample(glm::vec3(m_transform * m_poseGlobal[static_cast<std::size_t>(m_buttockRoot)][3]), dt,
                                                   kButtockVelSmooth, kButtockAccelSmooth, kButtockAccelDeadG, kButtockAccelMaxG, mag);
-    (void)mag;
     // Into the hips' frame (the model transform taken off first): the rest the mass is drawn to is
     // the acceleration's alone — a pose changes nothing — sideways and along the trunk.
-    const glm::mat3 toModel = glm::inverse(glm::mat3(m_transform));
-    const glm::mat3 frame = normalizedFrame(m_poseGlobal[static_cast<std::size_t>(m_buttockRoot)]);
-    const glm::vec3 aFrame = glm::transpose(frame) * (toModel * felt) * kButtockJoltShare;
+    const glm::vec3 aFrame = worldInBoneFrame(m_buttockRoot, felt) * kButtockJoltShare;
     const float     strength = softbody::buttockStrength(); // (the tab's Softness of the buttocks' own; the breasts' until 2026-11-07)
     const glm::vec3 restBase(-kButtockSide * aFrame.x * strength, -kButtockDown * aFrame.y * strength, 0.0f);
     const glm::vec3 damping(kButtockDamping, kButtockDamping, kButtockDamping);
     const float     h = dt / static_cast<float>(kButtockSubsteps);
     bool            moving = false;
     for (Buttock& b : m_buttocks) {
-        const float omega = 2.0f * 3.14159265f * kButtockHz * (b.side < 0.0f ? kButtockDetune : 1.0f);
+        const float omega = glm::two_pi<float>() * kButtockHz * (b.side < 0.0f ? kButtockDetune : 1.0f);
         glm::vec3   rest = restBase;
         for (int k = 0; k < kButtockSubsteps; ++k) {
             rest = restBase;
@@ -263,14 +233,13 @@ void Armature::tickButtocks(float dt, bool& movingOut) {
             b.disp = glm::vec3(0.0f);
             b.vel = glm::vec3(0.0f);
         }
-        if (glm::length(rest - b.disp) > 0.0003f || glm::length(b.vel) > 0.003f) {
+        if (glm::length(rest - b.disp) > kSoftBodyRestDistance || glm::length(b.vel) > kSoftBodyRestSpeed) {
             moving = true;
         }
     }
     m_buttockDynamic = true;
     movingOut = movingOut || moving;
-    static const bool kTickTrace = std::getenv("POSESTUDIO_BREAST_TRACE") && std::getenv("POSESTUDIO_BREAST_TRACE")[0] == '2';
-    if (kTickTrace) {
+    if (kSoftBodyTickTrace) {
         const Buttock& b = m_buttocks.front();
         std::fprintf(stderr, "[buttock-tick] accel %.2f g | disp %+.1f %+.1f mm (rest %+.1f %+.1f)\n", mag * kButtockJoltShare,
                      b.disp.x * 1000.0f, b.disp.y * 1000.0f, restBase.x * 1000.0f, restBase.y * 1000.0f);
@@ -291,9 +260,7 @@ void Armature::kickButtocks(float impactSpeed) {
     }
     // The kick is the landing's whole deceleration: the reader forgets the fall.
     m_buttockReader.reset();
-    const glm::mat3 toModel = glm::inverse(glm::mat3(m_transform));
-    const glm::mat3 frame = normalizedFrame(m_poseGlobal[static_cast<std::size_t>(m_buttockRoot)]);
-    const glm::vec3 downFrame = glm::transpose(frame) * (toModel * glm::vec3(0.0f, -1.0f, 0.0f));
+    const glm::vec3 downFrame = worldInBoneFrame(m_buttockRoot, glm::vec3(0.0f, -1.0f, 0.0f));
     for (Buttock& b : m_buttocks) {
         b.vel += glm::vec3(downFrame.x, downFrame.y, 0.0f) * (impactSpeed * kButtockImpactShare * softbody::buttockStrength());
     }
@@ -313,7 +280,7 @@ bool Armature::buttocksMoving() const {
         return false;
     }
     for (const Buttock& b : m_buttocks) {
-        if (glm::length(b.disp) > 0.0003f || glm::length(b.vel) > 0.003f) {
+        if (glm::length(b.disp) > kSoftBodyRestDistance || glm::length(b.vel) > kSoftBodyRestSpeed) {
             return true;
         }
     }

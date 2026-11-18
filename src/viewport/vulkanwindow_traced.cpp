@@ -17,7 +17,10 @@
  *                render captures it (captureRenderScene). WHILE A POSE IS BEING CHANGED the
  *                viewport shows the rasterized PBR shading instead — a drag runs at sixty poses
  *                a second, and each would be a scene to rebuild — and the path-traced picture
- *                comes back a moment after the pose rests.
+ *                comes back a moment after the pose rests. A scene is sent only once the engine
+ *                has taken the last one in, and the maps a capture composites (a zone's overlays
+ *                painted in) are kept for the next, so a new pose hands the engine the textures
+ *                it already has.
  *
  * WHICH of the three is read off SIGNATURES of the live scene, compared with what the engine was
  * last sent — once per rendered frame (every change requests one) and on a timer that also polls
@@ -34,8 +37,6 @@
 
 #include "vulkanwindow.h"
 
-#include "constants.h"
-#include "preferencesmanager.h"
 #include "renderengineapi.h"
 #include "renderenginelibrary.h"
 #include "renderexport.h"
@@ -135,15 +136,19 @@ struct VulkanWindow::TracedState {
     int               lightingsSent = 0;    // … and lighting-only ones
     std::deque<HeldScene> scenes;           // descriptions the engine may still read: the scenes,
     std::deque<HeldScene> lightings;        // … and the lighting-only ones
+    /// The maps the last capture composited for the engine (a zone's overlays painted in), KEPT
+    /// from capture to capture: a new pose changes no map, and handed the SAME image again the
+    /// engine does not load it again — where a fresh composite at a fresh address was a 4K
+    /// texture painted and uploaded anew at every pose. What a capture did not ask for goes.
+    OverlayBake composites;
 
     // A changed scene waiting to stand still.
     SceneSignature pendingScene;
     bool           scenePending = false;
     QElapsedTimer  sceneChangedAt;
 
-    // The picture.
+    // The picture (the engine writes it straight into the renderer's buffer: beginTracedImage).
     std::uint64_t      imageVersion = 0;
-    std::vector<float> pixels;
     int                shownWidth = 0; // the size of the picture the renderer was last handed
     int                shownHeight = 0;
     renderapi::Status  status;
@@ -222,11 +227,11 @@ void VulkanWindow::startTraced() {
     m_traced.reset(new TracedState);
     TracedState& t = *m_traced;
     t.engine = std::move(engine);
+    t.composites.kept = true;
 
     // The device the Render window was last told to use; the fastest found until it has been.
-    QString device = PreferencesManager::instance().getValue(Constants::PREF_RENDER_DEVICE).toString();
+    QString device;
     if (const QString forced = qEnvironmentVariable("POSESTUDIO_TRACED_DEVICE"); !forced.isEmpty()) {
-        device.clear();
         for (const RenderDevice& candidate : RenderSession::devices()) {
             if (candidate.label().contains(forced, Qt::CaseInsensitive)) {
                 device = candidate.id;
@@ -237,13 +242,7 @@ void VulkanWindow::startTraced() {
             device = QStringLiteral("CPU");
         }
     } else {
-        bool known = false;
-        for (const RenderDevice& candidate : RenderSession::devices()) {
-            known = known || candidate.id == device;
-        }
-        if (!known) {
-            device = RenderSession::defaultDeviceId();
-        }
+        device = preferredRenderDevice();
     }
     t.deviceId = device.toUtf8();
 
@@ -352,7 +351,7 @@ void VulkanWindow::tracedTick() {
         if (busy) {
             return;
         }
-        std::shared_ptr<RenderSceneHolder> captured = captureRenderScene();
+        std::shared_ptr<RenderSceneHolder> captured = captureRenderSceneWith(t.composites);
         if (!captured) {
             return;
         }
@@ -422,7 +421,15 @@ void VulkanWindow::tracedTick() {
         if (t.sceneChangedAt.elapsed() < kSceneSettleMs) {
             return; // (the poll timer comes back)
         }
-        std::shared_ptr<RenderSceneHolder> captured = captureRenderScene();
+        if (t.status.sceneVersion < t.sceneVersion) {
+            // The engine is still taking the LAST scene in (seconds, on a heavy or displaced
+            // one): a scene captured now — every posed vertex, every composite — would only
+            // replace one it has not read, and be held here until a later one is. It is sent
+            // once that one is in; the rasterized shading shows meanwhile either way.
+            announce(tr("Rendered: updating…"));
+            return; // (the poll timer comes back)
+        }
+        std::shared_ptr<RenderSceneHolder> captured = captureRenderSceneWith(t.composites);
         if (!captured) {
             return;
         }
@@ -480,14 +487,15 @@ void VulkanWindow::tracedTick() {
     const bool sceneShown = t.status.sceneVersion >= t.sceneVersion && t.status.updatesShown >= t.sceneUpdate &&
                             t.status.imageWidth > 0 && t.status.imageHeight > 0;
     if (sceneShown && t.status.imageVersion != t.imageVersion) {
-        const std::size_t count = static_cast<std::size_t>(t.status.imageWidth) * static_cast<std::size_t>(t.status.imageHeight) * 4u;
-        t.pixels.resize(count);
-        if (engine->copyImage(t.pixels.data(), t.status.imageWidth, t.status.imageHeight)) {
+        // (Copied ONCE, from the engine into the buffer the renderer uploads from: a full-size
+        // float picture is tens of megabytes, and this runs thirty times a second.)
+        float* const pixels = m_renderer->beginTracedImage(static_cast<uint32_t>(t.status.imageWidth),
+                                                           static_cast<uint32_t>(t.status.imageHeight));
+        if (pixels != nullptr && engine->copyImage(pixels, t.status.imageWidth, t.status.imageHeight)) {
+            m_renderer->commitTracedImage();
             t.imageVersion = t.status.imageVersion;
             t.shownWidth = t.status.imageWidth;
             t.shownHeight = t.status.imageHeight;
-            m_renderer->setTracedImage(t.pixels.data(), static_cast<uint32_t>(t.status.imageWidth),
-                                       static_cast<uint32_t>(t.status.imageHeight));
             requestUpdate();
         }
     }

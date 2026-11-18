@@ -27,7 +27,8 @@ struct BrdfLut;
 
 class IblMaps {
 public:
-    /// Uploads @p specular as an RGBA16F cubemap (mip = roughness) and @p lut as an RG16F 2D texture.
+    /// Uploads @p specular as an RGBA16F cubemap (mip = roughness) and @p lut as an RGBA16F 2D
+    /// texture (red/green the split-sum scale and bias, blue the sheen lobe's directional albedo).
     IblMaps(VulkanContext& context, const PrefilteredSpecular& specular, const BrdfLut& lut);
     ~IblMaps();
 

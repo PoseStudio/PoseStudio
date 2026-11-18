@@ -91,6 +91,12 @@ def collect_pages(entries, out, errors, path="pages"):
 
 
 def main():
+    # The messages quote page names, headings and UI labels as they are written. Under CTest the
+    # output is a pipe, which Python on Windows encodes with the system code page, strictly: one
+    # character outside it (an arrow in a label) and the check died of its own warning, with a
+    # traceback where the message should be. UTF-8, whatever the output is.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     strict = "--strict" in sys.argv
     errors, warnings = [], []
 

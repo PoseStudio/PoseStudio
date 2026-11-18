@@ -5,6 +5,7 @@
 
 #include "dragnumberbox.h"
 
+#include <QApplication>
 #include <QEvent>
 #include <QFocusEvent>
 #include <QHideEvent>
@@ -275,6 +276,9 @@ bool DragNumberBox::event(QEvent* event) {
 
 void DragNumberBox::hideEvent(QHideEvent* event) {
     abandonScrub();
+    if (m_editing) {
+        commitEdit(); // hidden with the type-in open (its page was switched away): as a focus loss
+    }
     QWidget::hideEvent(event);
 }
 
@@ -327,8 +331,9 @@ void DragNumberBox::beginEdit() {
         m_editor = new QLineEdit(this);
         m_editor->setObjectName(QStringLiteral("DragNumberBoxEditor"));
         m_editor->setAlignment(Qt::AlignCenter);
-        m_editor->installEventFilter(this); // Esc = cancel (QLineEdit has no cancel signal)
-        connect(m_editor, &QLineEdit::editingFinished, this, &DragNumberBox::commitEdit);
+        // Esc = cancel (QLineEdit has no cancel signal) and a focus loss = commit: see eventFilter.
+        m_editor->installEventFilter(this);
+        connect(m_editor, &QLineEdit::editingFinished, this, &DragNumberBox::commitEdit); // Enter
     }
     // Self-contained styling (the widget must look right in any container, styled or not):
     // same surface and text as the painted box, the hover-accent border to signal edit mode.
@@ -347,27 +352,33 @@ void DragNumberBox::beginEdit() {
     m_editing = true;
     emit editingStarted(); // balanced by editingFinished in commitEdit/cancelEdit
     m_editor->setGeometry(rect());
-    m_editor->setText(formattedValue());
+    m_editText = formattedValue();
+    m_editor->setText(m_editText);
     m_editor->selectAll();
     m_editor->show();
     m_editor->setFocus();
 }
 
 void DragNumberBox::commitEdit() {
-    // editingFinished fires on Enter AND again on the focus-out that hiding causes; the
-    // m_editing guard collapses that (and a cancelled edit) to a single no-op pass.
+    // Reached by Enter (the editor's editingFinished), by the editor losing the focus
+    // (eventFilter) and by the box being hidden — and often by two of them for one edit (hiding
+    // the editor on Enter costs it the focus): the m_editing guard makes every pass after the
+    // first, and any after a cancel, a no-op.
     if (!m_editing) {
         return;
     }
     m_editing = false;
+    // A type-in that was not typed in applies NOTHING: the editor opens on the value as it is
+    // SHOWN, rounded to the box's digits, and writing that back would move the value — a dial
+    // at 23.4375 that reads 23.4 — just for having been clicked and left.
+    const bool typedIn = m_editor->text() != m_editText;
     // Tolerate a comma decimal separator; QString::toDouble parses C-format only.
     QString text = m_editor->text().trimmed();
     text.replace(QLatin1Char(','), QLatin1Char('.'));
     bool ok = false;
     const double typed = text.toDouble(&ok);
-    m_editor->hide();
-    setFocus(Qt::OtherFocusReason);
-    if (ok) {
+    closeEditor();
+    if (ok && typedIn) {
         setValue(typed); // clamps to range; unparseable input just keeps the old value
     }
     update();
@@ -375,11 +386,22 @@ void DragNumberBox::commitEdit() {
 }
 
 void DragNumberBox::cancelEdit() {
-    m_editing = false; // must clear BEFORE hide(): hiding focuses away -> commitEdit re-entry
-    m_editor->hide();
-    setFocus(Qt::OtherFocusReason);
+    m_editing = false; // must clear BEFORE the editor hides: hiding focuses away -> commitEdit re-entry
+    closeEditor();
     update();
     emit editingFinished(); // balances beginEdit's editingStarted; no value change happened
+}
+
+void DragNumberBox::closeEditor() {
+    // The focus comes back to the box only when the editor still HAS it — Enter, Esc. When the
+    // edit ends because the user clicked another widget, that widget is the focus widget already
+    // (the editor is told afterwards), and taking the focus here would leave the clicked field
+    // with the press and without the caret.
+    const bool hadFocus = m_editor->hasFocus();
+    m_editor->hide();
+    if (hadFocus && isVisible()) {
+        setFocus(Qt::OtherFocusReason);
+    }
 }
 
 bool DragNumberBox::eventFilter(QObject* watched, QEvent* event) {
@@ -387,6 +409,26 @@ bool DragNumberBox::eventFilter(QObject* watched, QEvent* event) {
         if (static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape) {
             cancelEdit();
             return true;
+        }
+    }
+    if (watched == m_editor && event->type() == QEvent::FocusOut && m_editing) {
+        // THE FOCUS LEFT THE EDITOR: the edit is over. QLineEdit's own editingFinished cannot be
+        // relied on for this — it is emitted on a focus loss only when the text was edited, and
+        // an editor that was opened and left untouched then stayed up over the box with the edit
+        // bracket open (a listener's undo bracket never closed). The one focus loss that is not
+        // an end is the editor's own context menu, which borrows the focus and gives it back.
+        const QWidget* popup = QApplication::activePopupWidget();
+        const bool     ownMenu = static_cast<QFocusEvent*>(event)->reason() == Qt::PopupFocusReason &&
+                                 popup != nullptr && popup->parentWidget() == m_editor;
+        if (ownMenu) {
+            // (not an end)
+        } else if (isEnabled()) {
+            commitEdit();
+        } else {
+            // The box was disabled under the open editor, which is what took the editor's focus
+            // (before the box's own EnabledChange arrives): what it edits went away, and the
+            // typed text with it — see changeEvent.
+            cancelEdit();
         }
     }
     return QWidget::eventFilter(watched, event);

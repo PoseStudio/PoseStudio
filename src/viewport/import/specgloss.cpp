@@ -13,12 +13,14 @@ namespace pose {
 namespace {
 constexpr float kDielectricSpecular = 0.04f; // a dielectric's reflectance at normal incidence
 constexpr float kEpsilon = 1.0e-4f;
-} // namespace
 
+/// Perceived brightness of a linear color (the Khronos sample's: sqrt of the weighted squares).
 float perceivedBrightness(const glm::vec3& c) {
     return std::sqrt(0.299f * c.r * c.r + 0.587f * c.g * c.g + 0.114f * c.b * c.b);
 }
 
+/// The metalness alone: from the perceived brightness of the linear diffuse and specular colors,
+/// and 1 − max(specular).
 float solveMetallic(float diffuseBrightness, float specularBrightness, float oneMinusSpecularStrength) {
     if (specularBrightness < kDielectricSpecular) {
         return 0.0f;
@@ -33,6 +35,8 @@ float solveMetallic(float diffuseBrightness, float specularBrightness, float one
     const float d = std::max(b * b - 4.0f * a * c, 0.0f);
     return std::clamp((-b + std::sqrt(d)) / (2.0f * a), 0.0f, 1.0f);
 }
+
+} // namespace
 
 MetallicRoughness convertSpecGloss(const glm::vec3& diffuse, const glm::vec3& specular, float glossiness) {
     MetallicRoughness out;

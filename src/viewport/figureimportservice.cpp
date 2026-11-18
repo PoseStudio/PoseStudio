@@ -37,32 +37,126 @@ namespace pose {
 
 namespace {
 
-// Walks up from the imported file to the content root — the first ancestor directory that
-// contains a "data" folder (the anchor every "/data/..." and "/Runtime/..." URI resolves against).
-// Returns an empty list if none is found (the importer then can't resolve the base geometry).
-// The 16-level cap bounds the walk on pathological paths (a figure filed absurdly deep, or a
-// filesystem whose parent_path never converges); real libraries are 3-6 levels deep.
+// The content root the imported file itself lies under — the first ancestor directory that
+// contains a "data" folder (the anchor every "/data/..." and "/Runtime/..." URI resolves against)
+// — as a list of none or one. The walk is the importer's own (FigureImporter::contentRootOf), so
+// the application and the headless check tool cannot disagree about where a library begins.
+// Empty when there is none (the importer then cannot resolve the base geometry, unless a
+// configured root does: see below).
 std::vector<std::string> detectContentRoots(const QString& path) {
-    std::vector<std::string> roots;
-    std::error_code ec;
-    std::filesystem::path dir = std::filesystem::path(path.toStdString()).parent_path();
-    for (int i = 0; i < 16 && !dir.empty(); ++i) {
-        if (std::filesystem::exists(dir / "data", ec)) {
-            roots.push_back(dir.string());
-            break;
-        }
-        const std::filesystem::path parent = dir.parent_path();
-        if (parent == dir) {
-            break; // reached the filesystem root
-        }
-        dir = parent;
-    }
-    return roots;
+    const std::string root = FigureImporter::contentRootOf(path.toStdString());
+    return root.empty() ? std::vector<std::string>{} : std::vector<std::string>{root};
 }
 
-// Converts a FigureData into the renderer's ModelData: one mesh per zone, base color + diffuse map
-// path, moving the geometry out of `fig`. Positions are scaled from the figure's native centimetres
-// to world units (÷100), so a ~180 cm figure lands at a grid-friendly ~1.8 units.
+// Copies one zone's material into the renderer's mesh: every value, and every map as the path
+// the decode layer will read. Which detail map drives the mesh's normal slot is decided here.
+void copyZoneMaterial(const FigureMaterial& material, MeshData& mesh) {
+    mesh.baseColor = material.baseColor;
+    mesh.diffuse.path = material.diffuseMapPath;
+    mesh.opacityMask.path = material.opacityMapPath;
+    mesh.roughness = material.roughness;
+    mesh.specularWeight = material.specularWeight;
+    mesh.specularWeightWithMap = material.specularWeightWithMap;
+    mesh.metalness = material.metallic;
+    mesh.lobe1Roughness = material.lobe1Roughness;
+    mesh.lobe2Roughness = material.lobe2Roughness;
+    mesh.lobeRatio = material.lobeRatio;
+    mesh.topCoatWeight = material.topCoatWeight;
+    mesh.topCoatEnabled = material.topCoatEnabled;
+    mesh.topCoatRoughness = material.topCoatRoughness;
+    mesh.translucencyWeight = material.translucencyWeight;
+    mesh.roughnessMap.path = material.roughnessMapPath;
+    mesh.specMask.path = material.specMaskMapPath;
+    mesh.translucencyMap.path = material.translucencyMapPath;
+    mesh.translucencyWeightMap.path = material.translucencyWeightMapPath;
+    mesh.detailNormalMap.path = material.detailNormalMapPath;
+    mesh.detailWeight = material.detailWeight;
+    mesh.detailTiles = material.detailTiles;
+    mesh.detailTilesV = material.detailTilesV;
+    mesh.detailOffset = material.detailOffset;
+    mesh.detailRoughness = material.detailRoughness;
+    mesh.detailWeightMap.path = material.detailWeightMapPath;
+    mesh.detailRoughnessMap.path = material.detailRoughnessMapPath;
+    mesh.opacity = material.opacity;
+    // The canonical material's further channels (figuredata.h).
+    mesh.emissionColor = material.emissionColor;
+    mesh.emission = material.emission;
+    mesh.emissionMap.path = material.emissionMapPath;
+    mesh.ior = material.ior;
+    mesh.transmission = material.transmission;
+    mesh.transmissionColor = material.transmissionColor;
+    mesh.transmissionDepth = material.transmissionDepth;
+    mesh.transmissionRoughness = material.transmissionRoughness;
+    mesh.thinWalled = material.thinWalled;
+    mesh.subsurfaceColor = material.subsurfaceColor;
+    mesh.subsurfaceRadiusColor = material.subsurfaceRadiusColor;
+    mesh.subsurfaceRadius = material.subsurfaceRadius;
+    mesh.subsurfaceAnisotropy = material.subsurfaceAnisotropy;
+    mesh.anisotropy = material.anisotropy;
+    mesh.anisotropyRotation = material.anisotropyRotation;
+    mesh.diffuseRoughness = material.diffuseRoughness;
+    mesh.diffuseRoughnessMap.path = material.diffuseRoughnessMapPath;
+    mesh.coatColor = material.coatColor;
+    mesh.coatIor = material.coatIor;
+    mesh.coatWeightMap.path = material.coatWeightMapPath;
+    mesh.coatColorMap.path = material.coatColorMapPath;
+    mesh.coatRoughnessMap.path = material.coatRoughnessMapPath;
+    mesh.coatReflectivityMap.path = material.coatReflectivityMapPath;
+    mesh.coatBumpMap.path = material.coatBumpMapPath;
+    mesh.coatBumpStrength = material.coatBumpStrength;
+    mesh.specularColorSlotMap.path = material.specularColorMapPath;
+    mesh.displacementMap.path = material.displacementMapPath;
+    mesh.transmissionColorMap.path = material.transmissionColorMapPath;
+    mesh.transmissionWeightMap.path = material.transmissionWeightMapPath;
+    mesh.coatAnisotropy = material.coatAnisotropy;
+    mesh.coatAnisotropyRotation = material.coatAnisotropyRotation;
+    mesh.coatAnisotropyMap.path = material.coatAnisotropyMapPath;
+    mesh.coatAnisotropyRotationMap.path = material.coatAnisotropyRotationMapPath;
+    mesh.sheen = material.sheen;
+    mesh.sheenColor = material.sheenColor;
+    mesh.sheenRoughness = material.sheenRoughness;
+    mesh.sheenWeightMap.path = material.sheenWeightMapPath;
+    mesh.sheenColorMap.path = material.sheenColorMapPath;
+    mesh.sheenRoughnessMap.path = material.sheenRoughnessMapPath;
+    mesh.thinFilm = material.thinFilm;
+    mesh.thinFilmThickness = material.thinFilmThickness;
+    mesh.thinFilmIor = material.thinFilmIor;
+    mesh.thinFilmThicknessMap.path = material.thinFilmThicknessMapPath;
+    mesh.displacementStrength = material.displacementStrength;
+    mesh.displacementMidLevel = material.displacementMidLevel;
+    mesh.displacementSubdiv = material.displacementSubdiv;
+    mesh.anisotropyMap.path = material.anisotropyMapPath;
+    mesh.anisotropyRotationMap.path = material.anisotropyRotationMapPath;
+    mesh.lobe2RoughnessMap.path = material.lobe2RoughnessMapPath;
+    mesh.lobeRatioMap.path = material.lobeRatioMapPath;
+    mesh.uvTiling = material.uvTiling;
+    mesh.uvOffset = material.uvOffset;
+    // Detail map: prefer a true tangent-space normal map (mode 1); else the grayscale bump/height
+    // map (mode 2, applied via a texture-space central difference in the shader). The base figure
+    // ships bump maps, so this is what gives its skin surface grain. Either way the AUTHORED
+    // strength rides along — heavily-detailed skins dial e.g. Normal Map 2.5 / Bump 4, and
+    // rendering them at 1x left the surface too coherent (broad sheen read as wet plastic).
+    if (!material.normalMapPath.empty()) {
+        mesh.normal.path = material.normalMapPath;
+        mesh.normalMode = 1;
+        mesh.normalStrength = material.normalStrength;
+        // A bump map BESIDE the normal map rides its own slot (mesh.frag applies both): until
+        // 2026-11-09 a skin with both lost its bump's grain.
+        mesh.bumpMap.path = material.bumpMapPath;
+        mesh.bumpStrength = material.bumpStrength;
+    } else if (!material.bumpMapPath.empty()) {
+        mesh.normal.path = material.bumpMapPath;
+        mesh.normalMode = 2;
+        mesh.normalStrength = material.bumpStrength;
+    }
+}
+
+// Converts a FigureData into the renderer's ModelData, moving the geometry out of `fig`: one mesh
+// per material zone with its whole material (every value, every map's path — copyZoneMaterial), the
+// skeleton, and the pose correctives. Positions, bone origins and corrective deltas are scaled
+// from the figure's native centimetres to world units (÷100, times the character's own scale), so
+// a ~180 cm figure lands at a grid-friendly ~1.8 units; and the figure is put ON THE FLOOR, mesh
+// and skeleton together (see the end of the function).
 ModelData toModelData(FigureData&& fig) {
     // cm -> world, times the character's overall scale (height). Applied to vertices AND bone
     // origins so the skeleton stays consistent with the mesh.
@@ -81,104 +175,7 @@ ModelData toModelData(FigureData&& fig) {
         for (Vertex& v : mesh.vertices) {
             v.pos *= kCmToWorld;
         }
-        mesh.baseColor = zone.material.baseColor;
-        mesh.diffuse.path = zone.material.diffuseMapPath;
-        mesh.opacityMask.path = zone.material.opacityMapPath;
-        mesh.roughness = zone.material.roughness;
-        mesh.specularWeight = zone.material.specularWeight;
-        mesh.specularWeightWithMap = zone.material.specularWeightWithMap;
-        mesh.metalness = zone.material.metallic;
-        mesh.lobe1Roughness = zone.material.lobe1Roughness;
-        mesh.lobe2Roughness = zone.material.lobe2Roughness;
-        mesh.lobeRatio = zone.material.lobeRatio;
-        mesh.topCoatWeight = zone.material.topCoatWeight;
-        mesh.topCoatEnabled = zone.material.topCoatEnabled;
-        mesh.topCoatRoughness = zone.material.topCoatRoughness;
-        mesh.translucencyWeight = zone.material.translucencyWeight;
-        mesh.roughnessMap.path = zone.material.roughnessMapPath;
-        mesh.specMask.path = zone.material.specMaskMapPath;
-        mesh.translucencyMap.path = zone.material.translucencyMapPath;
-        mesh.translucencyWeightMap.path = zone.material.translucencyWeightMapPath;
-        mesh.detailNormalMap.path = zone.material.detailNormalMapPath;
-        mesh.detailWeight = zone.material.detailWeight;
-        mesh.detailTiles = zone.material.detailTiles;
-        mesh.detailTilesV = zone.material.detailTilesV;
-        mesh.detailOffset = zone.material.detailOffset;
-        mesh.detailRoughness = zone.material.detailRoughness;
-        mesh.detailWeightMap.path = zone.material.detailWeightMapPath;
-        mesh.detailRoughnessMap.path = zone.material.detailRoughnessMapPath;
-        mesh.opacity = zone.material.opacity;
-        // The canonical material's further channels (figuredata.h).
-        mesh.emissionColor = zone.material.emissionColor;
-        mesh.emission = zone.material.emission;
-        mesh.emissionMap.path = zone.material.emissionMapPath;
-        mesh.ior = zone.material.ior;
-        mesh.transmission = zone.material.transmission;
-        mesh.transmissionColor = zone.material.transmissionColor;
-        mesh.transmissionDepth = zone.material.transmissionDepth;
-        mesh.transmissionRoughness = zone.material.transmissionRoughness;
-        mesh.thinWalled = zone.material.thinWalled;
-        mesh.subsurfaceColor = zone.material.subsurfaceColor;
-        mesh.subsurfaceRadiusColor = zone.material.subsurfaceRadiusColor;
-        mesh.subsurfaceRadius = zone.material.subsurfaceRadius;
-        mesh.subsurfaceAnisotropy = zone.material.subsurfaceAnisotropy;
-        mesh.anisotropy = zone.material.anisotropy;
-        mesh.anisotropyRotation = zone.material.anisotropyRotation;
-        mesh.diffuseRoughness = zone.material.diffuseRoughness;
-        mesh.diffuseRoughnessMap.path = zone.material.diffuseRoughnessMapPath;
-        mesh.coatColor = zone.material.coatColor;
-        mesh.coatIor = zone.material.coatIor;
-        mesh.coatWeightMap.path = zone.material.coatWeightMapPath;
-        mesh.coatColorMap.path = zone.material.coatColorMapPath;
-        mesh.coatRoughnessMap.path = zone.material.coatRoughnessMapPath;
-        mesh.coatReflectivityMap.path = zone.material.coatReflectivityMapPath;
-        mesh.coatBumpMap.path = zone.material.coatBumpMapPath;
-        mesh.coatBumpStrength = zone.material.coatBumpStrength;
-        mesh.specularColorSlotMap.path = zone.material.specularColorMapPath;
-        mesh.displacementMap.path = zone.material.displacementMapPath;
-        mesh.transmissionColorMap.path = zone.material.transmissionColorMapPath;
-        mesh.transmissionWeightMap.path = zone.material.transmissionWeightMapPath;
-        mesh.coatAnisotropy = zone.material.coatAnisotropy;
-        mesh.coatAnisotropyRotation = zone.material.coatAnisotropyRotation;
-        mesh.coatAnisotropyMap.path = zone.material.coatAnisotropyMapPath;
-        mesh.coatAnisotropyRotationMap.path = zone.material.coatAnisotropyRotationMapPath;
-        mesh.sheen = zone.material.sheen;
-        mesh.sheenColor = zone.material.sheenColor;
-        mesh.sheenRoughness = zone.material.sheenRoughness;
-        mesh.sheenWeightMap.path = zone.material.sheenWeightMapPath;
-        mesh.sheenColorMap.path = zone.material.sheenColorMapPath;
-        mesh.sheenRoughnessMap.path = zone.material.sheenRoughnessMapPath;
-        mesh.thinFilm = zone.material.thinFilm;
-        mesh.thinFilmThickness = zone.material.thinFilmThickness;
-        mesh.thinFilmIor = zone.material.thinFilmIor;
-        mesh.thinFilmThicknessMap.path = zone.material.thinFilmThicknessMapPath;
-        mesh.displacementStrength = zone.material.displacementStrength;
-        mesh.displacementMidLevel = zone.material.displacementMidLevel;
-        mesh.displacementSubdiv = zone.material.displacementSubdiv;
-        mesh.anisotropyMap.path = zone.material.anisotropyMapPath;
-        mesh.anisotropyRotationMap.path = zone.material.anisotropyRotationMapPath;
-        mesh.lobe2RoughnessMap.path = zone.material.lobe2RoughnessMapPath;
-        mesh.lobeRatioMap.path = zone.material.lobeRatioMapPath;
-        mesh.uvTiling = zone.material.uvTiling;
-        mesh.uvOffset = zone.material.uvOffset;
-        // Detail map: prefer a true tangent-space normal map (mode 1); else the grayscale bump/height
-        // map (mode 2, applied via a texture-space central difference in the shader). The base figure
-        // ships bump maps, so this is what gives its skin surface grain. Either way the AUTHORED
-        // strength rides along — heavily-detailed skins dial e.g. Normal Map 2.5 / Bump 4, and
-        // rendering them at 1x left the surface too coherent (broad sheen read as wet plastic).
-        if (!zone.material.normalMapPath.empty()) {
-            mesh.normal.path = zone.material.normalMapPath;
-            mesh.normalMode = 1;
-            mesh.normalStrength = zone.material.normalStrength;
-            // A bump map BESIDE the normal map rides its own slot (mesh.frag applies both): until
-            // 2026-11-09 a skin with both lost its bump's grain.
-            mesh.bumpMap.path = zone.material.bumpMapPath;
-            mesh.bumpStrength = zone.material.bumpStrength;
-        } else if (!zone.material.bumpMapPath.empty()) {
-            mesh.normal.path = zone.material.bumpMapPath;
-            mesh.normalMode = 2;
-            mesh.normalStrength = zone.material.bumpStrength;
-        }
+        copyZoneMaterial(zone.material, mesh);
         model.meshes.push_back(std::move(mesh));
     }
 
@@ -249,6 +246,9 @@ ModelData toModelData(FigureData&& fig) {
     if (fig.zonesOnOwnUvSet > 0) {
         qInfo("[figure] %d material zones read their maps through the UV set their material names, not the geometry's default",
               fig.zonesOnOwnUvSet);
+    }
+    for (const std::string& skipped : fig.skipped) {
+        qWarning("[figure] left out: %s", skipped.c_str());
     }
     return model;
 }
@@ -397,8 +397,7 @@ void logShape(const ShapeReport& shape) {
 // the modal staged progress dialog when showProgress is set.
 void runFigureImport(VulkanRenderer& renderer, const QString& path,
                      const std::vector<std::string>& roots, bool showProgress) {
-    ModelImportService::ImportProgress progress(showProgress, QObject::tr("Importing Figure"),
-                                                QObject::tr("Reading figure…"));
+    ImportProgress progress(showProgress, QObject::tr("Importing Figure"), QObject::tr("Reading figure…"));
 
     if (roots.empty()) {
         qWarning() << "[viewport] Figure import: no content root (a folder containing 'data') "
@@ -412,7 +411,8 @@ void runFigureImport(VulkanRenderer& renderer, const QString& path,
     logShape(figure.shape);
 
     ModelData data = toModelData(std::move(figure));
-    const QString counts = QObject::tr(", %1 zones, %2 pose correctives")
+    // (A suffix of the import's LOG line, not interface text: never translated.)
+    const QString counts = QStringLiteral(", %1 zones, %2 pose correctives")
                                .arg(data.meshes.size())
                                .arg(data.correctives.size());
     ModelImportService::uploadModelData(renderer, data, progress, "figure ", path, counts);

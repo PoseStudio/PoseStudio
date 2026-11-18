@@ -3,8 +3,9 @@
  * @brief The Armature's per-tick IK SOLVE (scene/ik/jointsolver.h) — the entry points and the map.
  *
  * One tick of a drag is dragIkTick: the damped target follower, the rig's intents (IkRig), then
- * solveIk, then the live contacts, landings and the step policy on the solved pose, and the two
- * POST-STEPS (armatureikpost.cpp: the idle arms' hang, the head's righting). solveIk itself is a
+ * solveIk, the POST-STEPS on the solved pose (armatureikpost.cpp: the idle arms' hang, the head's
+ * righting; armaturehangfeet.cpp: a floating figure's hanging feet) and the soft body's tick, then
+ * the live contacts, landings and the step policy. solveIk itself is a
  * sequence of STAGES over one IkSolveScratch (armatureiksolvestate.h), each a member function:
  *
  *   armatureiksolvedrag.cpp     what the drag IS and which channels answer it —
@@ -17,10 +18,12 @@
  *   armatureiksolveposture.cpp  the posture model that prices them —
  *     ikPostureModel            every unknown's stiffness and reference, the root's home
  *     ikSpineCoupling           the spine as one, the neck as its top, the posture easing
- *   armatureiksolverows.cpp     the rows the solver satisfies —
+ *   armatureiksolvepins.cpp     the rows the solver satisfies: what holds the body to the world —
  *     ikPinRowsBegin/ikPinRows/ikPinRowsEnd   the pins: user pins, the foot contact model,
  *                               live contacts, landed hands, the knee-drag foot's release
- *     ikCursorRows              the cursor, the rising trunk, the slide, the hand slide, suspension
+ *   armatureiksolvecursor.cpp   ... what the dragged joint is asked —
+ *     ikCursorRows              the cursor, the rising trunk, the slide, the hand slide and lay, suspension
+ *   armatureiksolverows.cpp     ... and the rows that belong to no joint's hold —
  *     ikBalanceRow              balance over the support polygon
  *     ikPlaneRows               the floor's and the body volumes' one-sided rows
  *   armatureiksolve.cpp (here)  ikSolve, ikApply, ikSolveTraces — and the tick around them.
@@ -52,20 +55,15 @@
 #include "armatureiksolvestate.h"
 #include "armatureiksolvetuning.h"
 
-#include "balancecontroller.h"
 #include "ikmath.h"
 #include "ikrig.h"
 #include "jointsolver.h"
 
-#include <glm/gtc/quaternion.hpp>
-
 #include <atomic>
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <tuple>
 
 namespace pose {
 
@@ -90,6 +88,7 @@ int Armature::ikDamping() {
 void Armature::buildJointSolver() {
     std::vector<JointSolverBone> bones(m_bones.size());
     m_jsTwistAxis.assign(m_bones.size(), -1);
+    m_jsSegmentDir.assign(m_bones.size(), glm::vec3(0.0f));
     m_jsSpineChain.clear(); // (a new skeleton: searched again at the next solve — ensureSpineChain)
     m_jsSpineChainChest = -1;
     m_jsWristOf.clear();    // (... and the hands: ensureHandMaps)
@@ -114,6 +113,7 @@ void Armature::buildJointSolver() {
                 segment = offset / longest;
             }
         }
+        m_jsSegmentDir[i] = segment;
         if (glm::dot(segment, segment) > 0.5f) {
             float best = 0.8f;
             for (int a = 0; a < 3; ++a) {
@@ -129,6 +129,14 @@ void Armature::buildJointSolver() {
     m_jointSolver->setSkeleton(std::move(bones));
 }
 
+glm::vec3 Armature::ikHeadingLateral() const {
+    return glm::vec3(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
+}
+
+glm::vec3 Armature::ikHeadingFore() const {
+    return glm::vec3(std::sin(m_jsRootHeading), 0.0f, std::cos(m_jsRootHeading));
+}
+
 bool Armature::solveIk(const glm::vec3* dragTarget, const glm::vec3* holdTarget) {
     IkRig& rig = *m_ikRig;
     const std::size_t n = m_bones.size();
@@ -139,8 +147,8 @@ bool Armature::solveIk(const glm::vec3* dragTarget, const glm::vec3* holdTarget)
     }
     IkSolveScratch s{rig, n, root, effector, *m_jointSolver, rig.pins(), rig.activeNodes(), rig.secondaryEffectors(),
                      dragTarget, holdTarget};
-    s.lateral = glm::vec3(std::cos(m_jsRootHeading), 0.0f, -std::sin(m_jsRootHeading));
-    s.fore = glm::vec3(std::sin(m_jsRootHeading), 0.0f, std::cos(m_jsRootHeading));
+    s.lateral = ikHeadingLateral();
+    s.fore = ikHeadingFore();
 
     // The stages, in order — each a member function over the scratch (armatureiksolvestate.h):
     // what the drag IS and which channels answer it, the posture model that prices them, the
@@ -310,8 +318,7 @@ void Armature::ikSolveTraces(IkSolveScratch& s) {
     int& iterations = s.iterations;
     float& changed = s.changed;
 
-    static const bool kTrace = std::getenv("POSESTUDIO_IK_TRACE") != nullptr;
-    if (kTrace) {
+    if (kIkTrace) {
         float pinErr = 0.0f;
         for (const IkEffector& pin : pins) {
             const std::size_t node = static_cast<std::size_t>(pin.node);
@@ -458,7 +465,8 @@ void Armature::updateGroupTargets() {
         m_jsGroupFollowPos = m_jsGroupCursorRaw + (offset + temp) * decay;
     }
     const glm::vec3 delta = m_jsGroupFollowPos - m_jsGroupCursorStart;
-    std::vector<glm::vec3> current;
+    std::vector<glm::vec3>& current = m_jsClampPositionsBuf; // (kept across ticks: no allocation)
+    current.clear();
     if (!m_ikRig->bodyVolumes().empty()) {
         current.resize(m_bones.size());
         for (std::size_t i = 0; i < m_bones.size(); ++i) {
@@ -569,7 +577,7 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
         }
         // ... and a trunk joint of a figure SITTING OR LYING ON THE FLOOR is, to her seat, what a
         // hand is to its shoulder: taken up, the trunk first comes up ABOUT the seat — she sits up,
-        // the seat's roll undone (solveIk) — and the body rises by what the trunk cannot give, the
+        // the seat's roll undone (ikPosturePolicy) — and the body rises by what the trunk cannot give, the
         // target's distance beyond the trunk's reach of the seat as the drag found it. Read as the
         // cursor's whole upward travel, a figure lying on her back and taken up by the chest was
         // "getting up" from the first 20cm: the pelvis freed and sent upright, the hips drawn in
@@ -600,7 +608,7 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
         }
         // ... and ON HER KNEES the same: a kneeling figure's trunk comes up ABOUT the hips over the
         // planted knees before the body rises — a chest lifted off all fours kneels her upright
-        // (the kneel-start hinge, solveIk) — and the body rises by what the trunk cannot give
+        // (the kneel-start hinge, ikTrunkPolicy) — and the body rises by what the trunk cannot give
         // about the hips at their KNEELING height (IkRig::kneelSeatHeight: over the knees with
         // the thighs upright — all fours has the hips there already, a child's pose 15cm lower);
         // found more than 45 degrees from upright, the trunk is kneeled up, not stood up, by that
@@ -626,7 +634,7 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
             rose *= 1.0f - kneelUp;
             roseAgain *= 1.0f - kneelUp;
             // ... and THE KNEES STAY DOWN meanwhile (m_jsKneelHold, a ceiling on each knee contact:
-            // solveIk): a live contact holds its joint in the floor's plane and nothing holds it
+            // ikPinRowLiveContact): a live contact holds its joint in the floor's plane and nothing holds it
             // DOWN, and with the rise off the solve's cheap way to a chest asked 40cm up off all
             // fours was to straighten the legs off the toes — the knees 4.5cm in the air under a
             // trunk still leaning. Held while the trunk can give what is asked (the target within
@@ -639,8 +647,8 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
             // it afterwards threw a finger 42cm in a tick), and for the whole drag when the trunk
             // began folded: that drag kneels her up, the next stands her.
             m_jsKneelHold = 1.0f - glm::smoothstep(0.0f, 0.05f * scale, beyondUp) * (1.0f - kneelUp);
-            // ... and THE HIPS COME UP TO THE SEAT as the trunk comes up (m_jsKneelSeatLift, the
-            // root's home in solveIk; 2026-09-23): on all fours the hips sit 9-11cm BELOW the
+            // ... and THE HIPS COME UP TO THE SEAT as the trunk comes up (m_jsKneelSeatShift, the
+            // root's home in ikPostureRoot; 2026-09-23): on all fours the hips sit 9-11cm BELOW the
             // kneeling seat height (the thighs lean), and with the rise nil — the kneeling chest
             // is within reach about the seat AT the seat's height — nothing freed the root's
             // vertical price: the hips came up only as far as the cursor's bounded pull dragged
@@ -665,7 +673,7 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
             // trunk's: pelvis 22-28 forward, 167mm short on the newest generation, 429 on the
             // half-size one); and the horizontal price simply YIELDED to the uprightness (the hips
             // drifted where the pull took them, back and down on the oldest: 78mm short).)
-            glm::vec3 toSeat(0.0f, std::max(0.0f, m_jsKneelSeat.y - hips.y), 0.0f);
+            glm::vec3 toSeat(0.0f, std::max(0.0f, m_jsKneelSeatY - hips.y), 0.0f);
             m_jsKneelSeatShift = kNoSeatLift ? glm::vec3(0.0f) : toSeat * upright;
             m_jsKneelUpright = kNoSeatLift ? 0.0f : upright;
             static const bool kKneelUpTrace = std::getenv("IK_JS_KNEELUP_TRACE") != nullptr;
@@ -673,7 +681,7 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
                 std::fprintf(stderr, "[kneel-up] hips.y %.4f seatY %.4f target(%.3f %.3f %.3f) far %.3f reach %.3f beyond %.4f tilt %.1f now %.1f kneelUp %.2f hold %.2f lift %.4f", hips.y, m_jsKneelSeatY, target.x, target.y, target.z, far, kLimbReachShare * glm::length(m_jsStartTarget - seat), beyond, glm::degrees(tilt), glm::degrees(tiltNow), kneelUp, m_jsKneelHold, m_jsKneelSeatShift.y);
                 std::fputc(10, stderr);
             }
-            // ... and the HANDS unload by the trunk's upward travel (solveIk, the live contacts):
+            // ... and the HANDS unload by the trunk's upward travel (ikPinRowLiveContact):
             // the kneel-up has no rise of its own to unload them with. Over its FIRST centimetres
             // (kKneelUpUnloadCm), while the shoulder still stands over the hand: faded over the
             // rise's 5-20cm the hand stayed nailed until the last decade of its rows and sprang to
@@ -686,7 +694,7 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
             m_jsKneelUpright = 0.0f;
         }
         if (rig.seatPin() >= 0) {
-            rose = 0.0f; // (THE SEAT, see solveIk: a pinned pelvis goes nowhere, and nothing turns home)
+            rose = 0.0f; // (THE SEAT, see ikBalanceRow: a pinned pelvis goes nowhere, and nothing turns home)
             roseAgain = 0.0f;
         }
         if (m_ikScope == IkScope::Chain) {
@@ -704,8 +712,8 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
         m_jsReachDown = yieldFor(std::max(0.0f, -moved.y)); // (REACHING DOWN, ikTrunkPolicy: the push-down alone, without the rise)
         m_jsReachTravel = std::max(0.0f, -moved.y);
         // A BODY COMING DOWN (the target below where the drag began, by its DOWNWARD travel
-        // alone: kHandCeilingDownFrom..Full) stands the slack hands' CEILINGS down — see the
-        // live-contact block in solveIk. A function of the target.
+        // alone: kHandCeilingDownFrom..Full) stands the slack hands' CEILINGS down — see
+        // ikPinRowLiveContact. A function of the target.
         m_jsTargetDown = glm::smoothstep(kHandCeilingDownFrom * scale, kHandCeilingDownFull * scale, std::max(0.0f, -moved.y));
         // How far ALONG the rise is: the height regained, as a share of the height the legs had
         // left when the drag began. m_jsRootRise says the body is getting up — it is full after
@@ -853,13 +861,20 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
         m_jsPostStepMoving = hangMoved || headMoved; // (the settle waits for them: settleIkSolveTick)
     }
     m_jsSoftBodyMoving = false;
-    if (softbody::breastMotion() || softbody::buttockMotion()) {
+    // (A/B probe: POSESTUDIO_SOFTBODY_DIP_TWICE=1 ticks the soft body here through a landing's dip
+    // too, as every build before 2026-11-18 did — the landings of the soft-body rounds were all
+    // looked at, and their recorded numbers measured, with that double tick.)
+    static const bool kDipTicksTwice = std::getenv("POSESTUDIO_SOFTBODY_DIP_TWICE") != nullptr;
+    if ((softbody::breastMotion() || softbody::buttockMotion()) && (!m_landing.active || kDipTicksTwice)) {
+        // (Not through a LANDING BOUNCE's dip: the bounce ticks the soft body itself, once a frame
+        // and by the frame's own time — armaturelanding.cpp. Ticked here as well, the springs ran at
+        // twice their speed through the dip and the acceleration reader took two samples of one move.)
         // THE SOFT BODY (armaturebreasts.cpp, armaturebuttocks.cpp): after the solve and the post-steps. Its motion is
         // NOT a post-step for the settle's purposes — folded into m_jsPostStepMoving it kept the
         // settle SOLVING while they bounced, and the pose a drag ended in then depended on how long
         // they bounced (a calmer spring moved a knife-edge prone-up's hand 2 mm past its gate); the
         // settle ticks them alone once the pose is at rest (settleIkSolveTick's tail).
-        m_jsSoftBodyMoving = tickSoftBody(1.0f / 60.0f);
+        m_jsSoftBodyMoving = tickSoftBody(kTickSeconds);
         moved = moved || m_jsSoftBodyMoving;
     }
 
@@ -868,7 +883,7 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
         positions[i] = glm::vec3(m_poseGlobal[i][3]);
     }
     syncRigRotations(); // (the contacts are read off the SOLVED pose: its clearances, not the tick's first)
-    // A knee still coming down is planted where it IS (see the hard live pins in solveIk).
+    // A knee still coming down is planted where it IS (see the landing knee in ikPinRows).
     for (std::size_t p = 0; p < rig.pins().size() && !kKneeLandingHeld; ++p) {
         const IkEffector& pin = rig.pins()[p];
         if (!rig.pinIsLive(p) || !pin.hard || rig.pinUnderEffector(p) || pin.node < 0) {
@@ -920,7 +935,7 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
         const bool before = a < heldBefore.size() ? heldBefore[a] != 0 : true;
         const bool now = hangArmHeld(m_jsHangArms[a]);
         if (before && !now) {
-            m_jsHangArms[a].released = true; // (its contact lifted: the hang's, and no floor rows — HangArm::released)
+            m_jsHangArms[a].released = true; // (its contact lifted: the arm is the hang's from here — HangArm::released)
         }
         if (before || !now) {
             continue;
@@ -953,8 +968,12 @@ bool Armature::dragIkTick(const glm::vec3& rawTarget) {
     if (m_jsSettling) {
         return moved || m_jsPinsEasing; // (the settle: no new steps — see settleIkSolveTick)
     }
-    rig.updateStepPolicy(rig.dragEffector() != rig.rootNode() ? m_jsSolveGoal : target,
-                         balanceIsBlind() ? balancePositions() : positions, // (blind to the arms' hang, the head's righting)
+    const std::vector<glm::vec3>* stepPositions = &positions;
+    if (balanceIsBlind()) { // (blind to the arms' hang, the head's righting)
+        balancePositions(m_jsBalancePositionsBuf);
+        stepPositions = &m_jsBalancePositionsBuf;
+    }
+    rig.updateStepPolicy(rig.dragEffector() != rig.rootNode() ? m_jsSolveGoal : target, *stepPositions,
                          followed ? &bodyAnchor : nullptr);
     return moved || m_jsPinsEasing || following || rig.steppingPin() >= 0 ||
            glm::length(m_jsLiftDeficit) > 0.0f || glm::length(m_jsHangDeficit) > 0.0f;
@@ -1006,7 +1025,7 @@ bool Armature::settleIkSolveTick() {
         // THE SOFT BODY'S TAIL: the pose is at rest; the breasts, if they still bounce, tick on by
         // themselves — no solve, so the pose does not depend on how long they take (2026-11-05).
         if (m_jsSoftBodyMoving) {
-            m_jsSoftBodyMoving = tickSoftBody(1.0f / 60.0f);
+            m_jsSoftBodyMoving = tickSoftBody(kTickSeconds);
             return m_jsSoftBodyMoving;
         }
         return false;

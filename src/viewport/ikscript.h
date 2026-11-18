@@ -10,12 +10,16 @@
  * window's own gesture functions are called with scripted cursor positions), reports what a
  * user would see as numbers, and saves rendered frames as PNGs read back from the GPU
  * (VulkanRenderer::requestCapture), so a covered window captures as well as a visible one.
- * The runner lives in vulkanwindow_script.cpp; tools/ikscripts/README.md is the command reference.
+ * The runner is three translation units of VulkanWindow: vulkanwindow_script.cpp (the loader and
+ * the step driver), vulkanwindow_script_commands.cpp (what each command does) and
+ * vulkanwindow_script_metrics.cpp (what each metric reads). tools/ikscripts/README.md is the
+ * command reference.
  */
 
 #ifndef IKSCRIPT_H
 #define IKSCRIPT_H
 
+#include <QImage>
 #include <QPointF>
 #include <QString>
 #include <QStringList>
@@ -30,6 +34,10 @@ namespace pose {
 struct IkScript {
     /// Null unless POSESTUDIO_IK_SCRIPT names a readable file.
     static std::unique_ptr<IkScript> fromEnvironment();
+    /// Where a command finds the file it names: @p name itself when it is an absolute path, else
+    /// a TEST ASSET's — against POSESTUDIO_IK_SCRIPT_ASSETS (the folder the asset generators under
+    /// tools/ wrote), else against the run's folder (outDir).
+    QString assetPath(const QString& name) const;
 
     QStringList lines;      ///< The script, one command a line (# comments and blanks dropped).
     int         next = 0;   ///< The next line to run.

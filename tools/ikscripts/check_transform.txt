@@ -406,7 +406,7 @@ expect dial.forward < 21.01
 undo
 expect dial.forward == 0
 # The figure's own rows scrub the same way: Left-Right in whole centimetres, tenths with Shift
-# (its range is 1000 cm: 5 % of the box is 50 cm; 5.27 % with Shift is 5.27 cm more, to the tenth).
+# (its scrub span is 1000 cm: 5 % of the box is 50 cm; 5.27 % with Shift is 5.27 cm more, to the tenth).
 ui scrub transform.figure 0 5
 expect figure.x > 49.99
 expect figure.x < 50.01

@@ -169,6 +169,14 @@ void checkFile() {
           "a color of two numbers is rejected");
     check(rejects("{ \"format\": \"posestudio.material\", \"version\": 1, \"material\": { \"textures\": [ { \"slot\": 7 } ] } }"),
           "a malformed map entry is rejected");
+    check(rejects("{ \"format\": \"posestudio.material\", \"version\": 1, \"material\": { \"roughness\": 1e39 } }"),
+          "a number past a float's range is rejected (finite as JSON's double, infinite as the float it is kept as)");
+    MaterialDocument held;
+    check(readMaterialFileText("{ \"format\": \"posestudio.material\", \"version\": 1, \"material\": "
+                               "{ \"ior\": -1, \"roughness\": 4, \"detailTiles\": 0, \"normalStrength\": 8 } }",
+                               held, error) &&
+              held.params.ior == 1.0f && held.params.roughness == 1.0f && held.params.detailTiles == 0.0f && held.params.normalStrength == 8.0f,
+          "a value outside the range it can take is held to it (an index of refraction of -1 is 1); one inside is kept");
 
     // What a newer build may add.
     MaterialDocument tolerant;
@@ -490,6 +498,21 @@ void checkShader() {
     const std::vector<std::uint8_t> painted = shadeMaterialBall(white, mapped, studio, lighting, size);
     const Pixel                     left = at(painted, size, 0.3f, 0.5f), right = at(painted, size, 0.7f, 0.5f);
     check(left.g > left.b + 40 && right.b > right.g + 40, "a base color map is read: its left half left of the middle, its right half right");
+
+    // An emission map: the same image on a black ball that glows white — it glows green on the
+    // left and blue on the right.
+    MaterialParams lamp;
+    lamp.baseColor = glm::vec3(0.0f);
+    lamp.specular = 0.0f;
+    lamp.translucency = 0.0f;
+    lamp.emission = 1.0f;
+    lamp.emissionColor = glm::vec3(1.0f);
+    BallMaps lit;
+    lit.emission = map;
+    const std::vector<std::uint8_t> glow = shadeMaterialBall(lamp, lit, studio, lighting, size);
+    const Pixel                     glowLeft = at(glow, size, 0.3f, 0.5f), glowRight = at(glow, size, 0.7f, 0.5f);
+    check(glowLeft.g > glowLeft.b + 40 && glowRight.b > glowRight.g + 40 && shadeMaterialBall(lamp, none, studio, lighting, size) != glow,
+          "an emission map is read: the glow takes the map's color where the map has it");
 
     const EnvironmentImage dark;
     const std::vector<std::uint8_t> unlit = shadeMaterialBall(red, none, dark, lighting, size);

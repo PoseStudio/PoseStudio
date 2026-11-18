@@ -6,20 +6,30 @@
  * signals) — and it is built MORE THAN ONCE: the Asset Manager tab and the Materials Library
  * tab are two instances of it, told apart by nothing but the AssetManagerScope each is given
  * (assetmanagerscope.h: which folders are the roots, whose collections it shows). Everything
- * below is therefore per instance, and anything added here is added to both tabs. It composes the module's parts, each in its own file, and owns the STATE that ties
- * them together (which source is displayed, the tree's section roots, the cached library list):
+ * below is therefore per instance, and anything added here is added to both tabs.
+ *
+ * It composes the module's parts, each in its own file, and owns the STATE that ties them
+ * together (which source is displayed, the tree's section roots, the cached library list):
  * - AssetTreeView over a QStandardItemModel wrapped by AssetFolderProxyModel (folder hit icons,
  *   collection drag-reparent), painted by AssetTreeDelegate;
  * - the QListWidget grid painted by AssetGridDelegate, fed by AssetThumbnailLoader, with the
  *   hand-rolled drag in AssetGridDragController and the floating CustomToolTip;
  * - AssetBreadcrumbLabel as the grid's title;
- * - AssetScan (filesystem), AssetDb (collections/favorites SQL) and core/assetlibraries.h
- *   (library folders) as the data layer, with assetnodeids.h as the shared vocabulary.
+ * - the data layer: AssetScan (the filesystem), AssetDb (collections/favorites SQL),
+ *   core/assetlibraries.h (library folders), the asset store with its file operations and
+ *   packages (assetstore.h, assetfileops.h, assetpackage.h) and AssetScriptLink (a
+ *   content-library script read as the link it is), with assetnodeids.h as the shared
+ *   vocabulary.
  * The tree mixes physical library folders with virtual, DB-backed rows (Search Results,
  * Favorites, nested Collections), all told apart by the node id in Qt::UserRole; the grid shows
  * whichever source is selected. Physical folders are lazy-loaded on expand; Favorites and
- * Collections keep a user-defined drag order. The context menus live in a second translation
- * unit of this class (assetmanagerwidget_menus.cpp).
+ * Collections keep a user-defined drag order.
+ *
+ * The class is FOUR translation units, split for size:
+ *   assetmanagerwidget.cpp        setup, the grid, opening an asset, collections and favorites
+ *   assetmanagerwidget_tree.cpp   the tree: build / refresh, lazy loading, search, navigation
+ *   assetmanagerwidget_menus.cpp  the context menus
+ *   assetmanagerwidget_files.cpp  an asset's file operations and packages
  */
 
 #ifndef ASSETMANAGERWIDGET_H
@@ -75,11 +85,9 @@ public:
                                 QWidget *parent = nullptr);
     ~AssetManagerWidget() override;
 
-    /// What this instance browses.
-    const AssetManagerScope& scope() const { return m_scope; }
-
-    /// Clears the directory tree and rebuilds it from the database, preserving the expanded
-    /// nodes and the selection where they still exist. Also re-reads the library list.
+    /// Clears the directory tree and rebuilds it from the database and the disk, keeping what
+    /// the user has on screen where it still exists: the expanded rows, the selection, the
+    /// source the grid shows and an active search's results. Also re-reads the library list.
     void refreshAssetManager();
 
     /// Selects and displays a top-level library's own root node (e.g. from Preferences'
@@ -89,9 +97,9 @@ public:
 
     /// Opens a file the way double-clicking it in the grid does: a model, a figure or a splat
     /// scene goes to the viewport through the import*Requested signals, a saved material is
-    /// applied (applyMaterialRequested), a content-library script
-    /// is followed as the link it is (openScriptLink), anything else opens in the operating
-    /// system's application for it. Public so a script on the command line takes the same path.
+    /// applied (applyMaterialRequested), a content-library script is followed as the link it is
+    /// (openScriptLink), anything else opens in the operating system's application for it.
+    /// Public so a script on the command line takes the same path.
     void openAsset(const QString& path);
 
     /// The scripted in-app test's door to an asset's file operations (the script's `asset`
@@ -176,10 +184,12 @@ private:
     AssetThumbnailLoader *m_thumbnails;   ///< Off-thread thumbnail decodes; cleared by clearGrid()
     AssetGridDragController *m_gridDrag;  ///< The hand-rolled grid drag (reorder / drop onto the tree)
 
-    QStandardItem *searchResultsRootItem;
-    QStandardItem *searchSeparatorItem; ///< Separator between Search Results and Favorites; hidden together with searchResultsRootItem when no search is active
-    QStandardItem *favoritesRootItem;
-    QStandardItem *collectionsRootItem;
+    // The tree's section rows. Owned by dirModel and REPLACED by every refreshAssetManager()
+    // (the model is cleared); null until the first one.
+    QStandardItem *searchResultsRootItem = nullptr;
+    QStandardItem *searchSeparatorItem = nullptr; ///< Separator between Search Results and Favorites; hidden together with searchResultsRootItem when no search is active
+    QStandardItem *favoritesRootItem = nullptr;
+    QStandardItem *collectionsRootItem = nullptr;
 
     // --- State ---
     /// What this instance browses (see assetmanagerscope.h). Fixed for the widget's lifetime.
@@ -198,6 +208,9 @@ private:
     /// between the browsers: one shown again after another edited them re-reads its grid.
     int m_favoritesRevisionShown = -1;
 
+    /// True while a search's results are on show (the Search Results section is visible).
+    bool m_searchActive = false;
+
     QString m_currentFolderPath;  ///< Node id of what the grid shows: a folder path, FAVORITES_ROOT or COLLECTION_<id>
     int m_currentAssetCount = 0;
     int m_currentFolderCount = 0; ///< Subfolder count for the currently displayed physical folder (0 for virtual sources)
@@ -214,12 +227,20 @@ private:
     void setupUI();
     void promptAddAssetLibrary();
 
-    // --- Tree build/refresh ---
+    // --- Tree build/refresh (assetmanagerwidget_tree.cpp, with Search and Navigation below) ---
     /// The roots as they stand now: the scope's own, or the enabled asset libraries.
     QStringList currentLibraryRoots() const;
-    void saveExpandedState(const QModelIndex &parentProxyIndex, QSet<QString> &expandedPaths);
-    void restoreExpandedState(const QModelIndex &parentProxyIndex, const QSet<QString> &expandedPaths);
-    QModelIndex findProxyIndexByPath(const QModelIndex &parentProxyIndex, const QString &targetPath);
+    // (Each of the three walks the rows under `parentProxyIndex`; the branch under `except`,
+    // when one is given, is passed over — the Search Results, whose rows are folders the
+    // library rows show too.)
+    void saveExpandedState(const QModelIndex &parentProxyIndex, QSet<QString> &expandedPaths,
+                           const QModelIndex &except = QModelIndex());
+    void restoreExpandedState(const QModelIndex &parentProxyIndex, const QSet<QString> &expandedPaths,
+                              const QModelIndex &except = QModelIndex());
+    QModelIndex findProxyIndexByPath(const QModelIndex &parentProxyIndex, const QString &targetPath,
+                                     const QModelIndex &except = QModelIndex());
+    /// The Search Results section's row, or an invalid index before the tree is first built.
+    QModelIndex searchRootIndex() const;
     /// The top-level tree row of the library registered at `libraryPath`, or an invalid index.
     QModelIndex libraryRootIndex(const QString& libraryPath) const;
     /// Builds the Collections subtree from one query of the whole AssetCollections table.
@@ -279,12 +300,18 @@ private:
     void navigateToCollectionNode(int collectionId, bool enterEditMode = false);
     void navigateToCollectionAssetItem(int collectionId, const QString& assetFullPath);
 
+    /// openAsset without its last resort: true when `path` is a file PoseStudio opens itself
+    /// (and it was opened), false — with nothing done — for any other file. What a script
+    /// link leads to goes through here: it must never reach the operating system.
+    bool openWithinApp(const QString& path);
+
     // --- Script links (assetscriptlink.h) ---
     /// Follows a content-library script to what it links to: a folder is shown (in the tree when
     /// it lies in a library) and the character in it imported when it is the folder's only one;
-    /// a file opens through openAsset; a web page opens in the browser. A script that leads
-    /// nowhere PoseStudio can go is explained in a message, which offers the operating system's
-    /// application instead — PoseStudio never runs a script.
+    /// a file PoseStudio opens is opened (openWithinApp); a web page opens in the browser. A
+    /// script that leads nowhere PoseStudio can go is explained in a message, which offers the
+    /// operating system's application for the script instead — PoseStudio never runs a script,
+    /// and never hands what one names to the operating system.
     void openScriptLink(const QString& scriptPath);
     /// The folders a script's content-relative path may lie under besides its own ancestors:
     /// the asset libraries and the figure content roots set in Preferences.
@@ -334,7 +361,7 @@ private:
     void expandNodeRecursively(const QModelIndex &proxyIndex);
     void collapseNodeRecursively(const QModelIndex &proxyIndex);
 
-    // --- An asset's file operations and packages (assetmanagerwidget_files.cpp; assetstore.h) ---
+    // --- An asset's file operations and packages (assetmanagerwidget_files.cpp; assetfileops.h, assetpackage.h) ---
     struct FileActions {
         QAction* rename = nullptr;
         QAction* duplicate = nullptr;
@@ -364,8 +391,10 @@ private:
     AssetStore::Result moveAssetTo(const QString& assetPath, const QString& folder);
     AssetStore::Result deleteAssetAt(const QString& assetPath, bool permanently);
     AssetStore::Result installPackageFrom(const QString& package, const QString& folderPath, bool replaceExisting);
-    /// Reads the grid (and, when folders came or went, the tree) again and tells the other browser.
-    void afterFileOperation(bool foldersChanged);
+    /// After files of `folder` changed: reads the grid again — with the whole tree when folders
+    /// came or went, else with the hit state of that folder's row and of the rows above it —
+    /// and tells the other browser.
+    void afterFileOperation(const QString& folder, bool foldersChanged);
 
 protected:
     /// Catches up with what changed while the tab was hidden: roots of its own that moved, a

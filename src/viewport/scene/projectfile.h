@@ -3,9 +3,12 @@
  * @brief The `.pss` project file: the whole working scene — figures with their poses, model
  *        transforms, the lighting environment and the camera framing — written out and read back.
  *
- * A project file is a small (kilobyte-scale) versioned JSON document that REFERENCES imported
- * figures by source path (`.duf`/`.dsf`/`.obj`) instead of duplicating their geometry or
- * textures: loading re-imports each figure from its source and restores the saved state on top.
+ * A project file is a small (kilobyte-scale) versioned JSON document that REFERENCES every
+ * imported model by its source path — a figure (`.duf`/`.dsf`), a rigged character (FBX, glTF,
+ * VRM, USD), a static model (`.obj`), a Gaussian splat scene — instead of duplicating its
+ * geometry or textures: loading re-imports each one from its source and restores the saved
+ * state on top. (The entries are called "figures" in the file and in the types below for the
+ * format's first use; an entry is any model.)
  * The document carries an explicit format marker ("posestudio.project") and version; unknown
  * FIELDS are ignored (forward compatibility), a higher/unknown VERSION is rejected (we don't
  * guess). This file owns the codec only — it never touches a figure — and is Qt-free (<fstream> +
@@ -38,15 +41,29 @@ struct ProjectMaterial {
     std::string                 zone;
     MaterialParams              params;
     std::vector<ProjectTexture> textures; ///< The slots that differ from the import (paths are absolute).
-    /// Whether the file says how the zone is smoothed (params.smoothByAngle / smoothAngle). A
-    /// project saved before the smoothing existed does not: the zone then keeps what the import
-    /// gives it.
-    bool                        hasSmoothing = false;
+    /// The keys the file's zone object NAMED, as the file spells them ("zone", "roughness",
+    /// "smoothByAngle", …) — filled by the reader, not read by the writer (which names every
+    /// value). Only THOSE values of `params` are the file's. A value the file does not name —
+    /// it was saved by a build that did not know the value yet: the smoothing, the transmission
+    /// roughness — holds the struct's default in `params`, which is not what the zone should
+    /// get: the re-imported zone keeps its own (Model::applyMaterialOverride takes this list;
+    /// materialWithNamedValues is the rule).
+    std::vector<std::string>    named;
+
+    /// Whether the file named @p key.
+    bool names(const char* key) const {
+        for (const std::string& name : named) {
+            if (name == key) {
+                return true;
+            }
+        }
+        return false;
+    }
 };
 
 /// One saved figure: its source file plus the state to restore onto the re-imported model.
 struct ProjectFigure {
-    std::string          source;   ///< Absolute path of the imported file (`.duf`/`.dsf`/`.obj`).
+    std::string          source;   ///< Absolute path of the imported file (any format the application imports).
     PoseRows             pose;     ///< The pose snapshot's rotation rows: (bone name, Euler degrees).
     std::vector<std::string> pins; ///< The user's pinned bone names (the snapshot's @pin: rows).
     std::string          rootBone; ///< The bone carrying the saved pose translation ("" = none).

@@ -15,17 +15,26 @@
  * open it, a web page goes to the browser. Recognised, the script's comments skipped, the first
  * call in source order that leads somewhere winning:
  *  - browseToNativeFolder(<path>)                                        — a folder;
- *  - openFile / openNativeFile / importFile / loadScene (<path>, ...)   — a file;
+ *  - openFile / openNativeFile / importFile / loadScene (<path>, ...)   — a file PoseStudio opens;
  *  - showURL(<url>)                                                     — an http(s) page;
  *  - failing all of those, a string literal naming a file PoseStudio opens (a figure, a model, a
  *    splat scene, another script) — the loader that builds its path some other way.
  * A <path> is an expression of string literals joined by `+`, variables assigned one, `String()`
- * and `"%1…".arg()`. A LEADING term that is not a literal — `sPath + "/Sinn for G8F"`, where sPath
- * is the content library's selected folder (the script's own, when it is double-clicked) or the
- * folder of getScriptFileName() — stands for the script's own folder. A path of literals alone is
- * absolute, or content-relative ("/People/…") and looked for under the script's own ancestors
- * (the library it was found in), then the given content roots. A link to another script is
- * followed in turn, four hops at most and never in a circle.
+ * and `"%1…".arg()`. A LEADING term that is not a literal — `sPath + "/<Character> for
+ * <Generation>"`, where sPath is the content library's selected folder (the script's own, when
+ * it is double-clicked) or the folder of getScriptFileName() — stands for the script's own
+ * folder. A path of literals alone is absolute, or content-relative ("/People/…") and looked
+ * for under the script's own ancestors (the library it was found in), then the given content
+ * roots. A link to another script is followed in turn, four hops at most and never in a circle.
+ *
+ * A LINK LEADS ONLY TO WHAT POSESTUDIO ITSELF OPENS: a folder to browse, a file an importer
+ * takes (or another script, read in turn), an http(s) page. A script is content from elsewhere,
+ * and following it must never hand a file of the script's choosing — a program packed beside
+ * it, a document — to the operating system: a call that names any other file is not followed
+ * (Problem::Unsupported), and the caller's message offers the SCRIPT to the operating system as
+ * the user's own choice. Nor does a script make PoseStudio reach out to another machine: a path
+ * that names a network share (`\\host\share\…`) is not an absolute path here, so the share
+ * is never probed.
  */
 
 #ifndef ASSETSCRIPTLINK_H
@@ -49,12 +58,13 @@ struct Link {
         Unreadable, ///< encrypted or compiled (`.dse` / `.dsb`), or not text
         NotALink,   ///< a program: no folder, file or page in it (or a circle of links)
         Missing,    ///< it names a folder or file that is not there: see missing
+        Unsupported ///< it names a file that is there but is not one PoseStudio opens: see missing
     };
 
     Kind    kind = Kind::None;
     QString target;  ///< the absolute folder or file path, or the URL
     Problem problem = Problem::None;
-    QString missing; ///< Problem::Missing: the path the script names (resolved where it could be)
+    QString missing; ///< Problem::Missing / Unsupported: the path the script names (resolved where it could be)
 };
 
 /// A content-library script by its extension: `.dsa`, `.dse` or `.dsb`.

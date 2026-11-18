@@ -60,6 +60,11 @@ QString minutesSeconds(double seconds) {
     return QStringLiteral("%1:%2").arg(total / 60).arg(total % 60, 2, 10, QLatin1Char('0'));
 }
 
+/// What the picture area says while there is nothing to show and nothing rendering.
+QString idleHint() {
+    return RenderWindow::tr("Press Render (F12) to render the scene as the viewport shows it.");
+}
+
 QString pickerStyle(const QString& objectName, int minWidthPx) {
     // (The viewport strip's field: the menus it opens are the application's own.)
     return QStringLiteral("#%1 { background-color: #252627; color: #e8e8ea; border: 1px solid #555555;"
@@ -127,10 +132,6 @@ RenderWindow* RenderWindow::open(QWidget* owner) {
     g_window->show();
     g_window->raise();
     g_window->activateWindow();
-    return g_window;
-}
-
-RenderWindow* RenderWindow::existing() {
     return g_window;
 }
 
@@ -264,12 +265,16 @@ RenderWindow::RenderWindow(QWidget* owner)
     connect(&m_session, &RenderSession::imageChanged, this, [this] { m_view->setImage(m_session.image()); });
     connect(&m_session, &RenderSession::statusChanged, this, &RenderWindow::showStatus);
     connect(&m_session, &RenderSession::ended, this, [this] {
-        syncControls();
+        // A render that ended before its first pixels — it failed while loading, or was stopped
+        // there — leaves the picture area showing its hint, which said "Rendering…": it says what
+        // happened instead (the status line has the reason).
+        if (!m_session.hasImage()) {
+            m_view->setHint(m_session.status().state == renderapi::State::Failed ? tr("The render failed.") : idleHint());
+        }
         showStatus();
     });
 
-    m_view->setHint(tr("Press Render (F12) to render the scene as the viewport shows it."));
-    syncControls();
+    m_view->setHint(idleHint());
     showStatus();
 }
 
@@ -364,13 +369,17 @@ void RenderWindow::startRender() {
     options.transparent = m_transparent->isChecked();
     storeSettings();
 
+    const QString rendering = tr("Rendering…");
     m_view->setImage(QImage());
-    m_view->setHint(tr("Rendering…"));
-    if (!m_session.start(scene, options, &error)) {
+    m_view->setHint(rendering);
+    if (m_session.start(scene, options, &error)) {
+        // (Said again: a running render this one replaces ends on the way, and one that had no
+        // picture yet puts its own word in the picture area as it does.)
+        m_view->setHint(rendering);
+    } else {
         m_view->setHint(tr("The render could not start."));
         QMessageBox::warning(this, tr("Render"), tr("The render could not start.\n\n%1").arg(error));
     }
-    syncControls();
     showStatus();
 }
 
@@ -446,9 +455,7 @@ void RenderWindow::showStatus() {
     m_statusText->setText(text);
     m_progress->setValue(static_cast<int>(status.progress * 1000.0f + 0.5f));
     m_progress->setVisible(status.state == renderapi::State::Starting || status.state == renderapi::State::Rendering);
-    m_save->setEnabled(m_session.hasImage());
-    m_stop->setEnabled(m_session.running());
-    m_render->setText(m_session.running() ? tr("Render Again") : tr("Render"));
+    syncControls(); // (Save, Stop and the Render button's caption follow the session too)
 }
 
 void RenderWindow::keyPressEvent(QKeyEvent* event) {

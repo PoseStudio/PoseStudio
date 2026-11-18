@@ -14,10 +14,10 @@
  * - shadeMaterialBall(), where there is none: the same ball shaded here, on the processor, in
  *   one pass per pixel. It is a real, if plain, physically based shader — the base layer
  *   (color, metalness, roughness, the dielectric's reflectance with their maps), a coat,
- *   emission, a see-through look for transmission — lit by the same studio, pre-blurred per
- *   roughness. It does not scatter, refract through the ball's volume, or read normal and bump
- *   maps: a stand-in, so that a saved material always has a picture, never the picture a
- *   render makes.
+ *   emission with its map, a see-through look for transmission — lit by the same studio,
+ *   pre-blurred per roughness. It does not scatter, refract through the ball's volume, or read
+ *   normal and bump maps: a stand-in, so that a saved material always has a picture, never the
+ *   picture a render makes.
  *
  * Qt-free and device-free (glm + the scene's plain types).
  */
@@ -78,7 +78,7 @@ EnvironmentImage makeIconStudio(int width = 2048, int height = 1024);
 /// light (the softbox is the key), no fill — at exposure 1, tonemapped.
 LightingSettings iconStudioLighting();
 
-/// A UV sphere as a renderer takes it (the layout of Model::PosedMesh).
+/// A UV sphere as a renderer takes it (the layout of pose::PosedMesh, posedmesh.h).
 struct BallMesh {
     std::vector<glm::vec3> positions;
     std::vector<glm::vec3> normals;
@@ -101,7 +101,7 @@ struct BallMaps {
     std::shared_ptr<const DecodedImage> roughness; ///< its value in `roughnessChannel`
     std::shared_ptr<const DecodedImage> metalness;
     std::shared_ptr<const DecodedImage> specular;
-    std::shared_ptr<const DecodedImage> emission;  ///< sRGB
+    std::shared_ptr<const DecodedImage> emission;  ///< sRGB: multiplies the emission color
     int roughnessChannel = 0;
     int metalnessChannel = 0;
     int specularChannel = 0;

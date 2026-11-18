@@ -3,7 +3,7 @@
  * @brief VulkanWindow's lighting environment: the default HDRI, the off-thread IBL bake, and the
  *        live lighting dials.
  *
- * One of the seven translation units of VulkanWindow — see vulkanwindow.h for the map. This is
+ * One of the translation units of VulkanWindow — see vulkanwindow.h for the map. This is
  * the only QtConcurrent user in the viewport: decoding + prefiltering a panorama costs hundreds
  * of milliseconds of CPU, so it runs on a worker and the result is uploaded on the GUI thread,
  * guarded by a request id (a slower earlier bake must never clobber a newer pick) and by a catch

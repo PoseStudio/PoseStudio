@@ -46,11 +46,11 @@ void IkRig::landStep(const std::vector<glm::vec3>& positions) {
     pin.target = m_stepTo;
     pin.leashRadius = socketLeash(pin.node, m_stepTo, positions, pin.leashOffset);
     rebuildSupportHull(-1);
-    // The body's pose prior WALKS with the stance: the drag-start positions every non-pin
-    // node eases back toward shift horizontally by the stance center's move (this step's
-    // displacement shared over the standing feet), so the pelvis — the stiffest prior of all
-    // — comes over the new stance instead of staying anchored where the drag began, with the
-    // feet planted a stride ahead of it. (A pelvis drag pins the root and never reads this.)
+    // The drag-start reference WALKS with the stance: m_startPose shifts horizontally by the
+    // stance center's move (this step's displacement shared over the standing feet), and
+    // stanceShift() hands the same shift to the Armature's solve, whose root-translation
+    // reference follows it — so the pelvis comes over the new stance instead of staying anchored
+    // where the drag began, with the feet planted a stride ahead of it.
     int stanceCount = 0;
     for (std::size_t p = 0; p < m_pins.size(); ++p) {
         if (p < m_pinSteppable.size() && m_pinSteppable[p]) {
@@ -128,18 +128,16 @@ void IkRig::updateStepping(const std::vector<glm::vec3>& positions, bool allowTr
         }
     }
     // Trigger, sustained for kStepConfirmTicks (a transient lean recovers by itself): the
-    // smoothed balance EFFORT stays high — the drag keeps imposing a lean the pelvis correction
-    // must continuously fight (the post-correction residual is useless here: the engagement
-    // blend succeeds each tick, so the residual reads balanced right up until the figure is
-    // grotesquely stretched) — or, with an EXPLICIT anchor only, a foot is simply far from its
+    // smoothed balance EFFORT stays high — the solved pose's centre of mass keeps standing
+    // outside its support, by more than the imbalance the drag began with (updateStepPolicy:
+    // m_balanceCorrection) — or, with an EXPLICIT anchor only, a foot is simply far from its
     // target-centered stance spot: this is what makes a pelvis-walk step PROACTIVELY (before
     // the foot gets visibly dragged) and take its final GATHERING step once the hip arrives
     // (the trailing foot's pin holds fine there, so the effort signal would never fire). There
     // is no pin-strain trigger: the solve never drags a foot off its plant.
     const bool misplaced =
         anchorXZ != nullptr && best >= 0 && bestErr > kStepStanceThreshold * scale;
-    static const bool kStepTrace = std::getenv("IK_STEP_TRACE") != nullptr;
-    if (kStepTrace) {
+    if (kIkStepTrace) {
         std::fprintf(stderr, "[step] corr=%.4f stanceErr=%.4f m=%d ticks=%d\n",
                      glm::length(m_balanceCorrection), best >= 0 ? bestErr : 0.0f,
                      misplaced ? 1 : 0, m_imbalanceTicks);
@@ -230,15 +228,12 @@ void IkRig::updateStepping(const std::vector<glm::vec3>& positions, bool allowTr
                              kStepMaxTicks);
     m_stepHeight = glm::clamp(kStepHeightFactor * dist, kStepHeightMin * scale,
                               kStepHeightMax * scale);
-    // A moving pin's leash would yank the root after the swinging target; the standing limbs'
-    // leashes keep binding the root, and the landing recomputes this one. The sentinel must be
-    // effectively INFINITE, not merely unset: the solver treats a non-positive radius as
-    // "compute the path-length fallback", which quietly re-leashed the root to the moving
-    // swing target.
+    // No leash on a foot in flight (1e9, the "none" value: IkEffector::leashRadius): the
+    // lift-off test must not read the root as bound to a moving swing target. The landing
+    // recomputes it.
     pin.leashRadius = 1e9f;
     rebuildSupportHull(best);
-    static const bool kRigStepTrace = std::getenv("POSESTUDIO_IK_TRACE") != nullptr;
-    if (kRigStepTrace) {
+    if (kIkTrace) {
         std::fprintf(stderr, "[ikrig] STEP pin=%d from(%.3f %.3f) to(%.3f %.3f) ticks=%d\n",
                      pin.node, m_stepFrom.x, m_stepFrom.z, m_stepTo.x, m_stepTo.z, m_stepTotal);
     }

@@ -18,24 +18,26 @@
  * Any button press while a drag is live cancels it first. Windows opens the context menu on
  * the right button's RELEASE, so a right-click mid-drag used to leave the drag stuck: the
  * left release was swallowed by the menu's grab, the (unparented, top-level) ghost stayed on
- * screen for the session and the grid never hover-highlighted again.
+ * screen for the session and the grid never hover-highlighted again. A release can be lost in
+ * other ways too (a modal dialog opening over the drag, a switch to another window), so a
+ * mouse move that arrives with the left button up while a drag is live cancels it as well.
  */
 
 #ifndef ASSETGRIDDRAGCONTROLLER_H
 #define ASSETGRIDDRAGCONTROLLER_H
 
+#include <QLabel>
 #include <QObject>
 #include <QPoint>
+#include <QPointer>
 #include <QString>
 #include <functional>
 
 class AssetTreeView;
-class QLabel;
 class QListWidget;
 class QListWidgetItem;
 class QMouseEvent;
 class QTimer;
-class QWidget;
 
 /**
  * @class AssetGridDragController
@@ -88,8 +90,11 @@ private:
     QListWidgetItem* m_dragItem = nullptr;
     QPoint m_dragStartPos;
     bool m_dragging = false;
-    QLabel* m_dragPreview = nullptr;  ///< Floating ghost thumbnail that follows the cursor mid-drag (top-level, unparented)
-    QWidget* m_dropLine = nullptr;    ///< Vertical line marking where the dragged item will drop
+    // Guarded pointers: the drop line is a child of the grid's viewport, and at teardown the
+    // grid dies BEFORE this controller (the widget's children go in creation order), taking the
+    // line with it; the destructor must not delete it a second time.
+    QPointer<QLabel> m_dragPreview;   ///< Floating ghost thumbnail that follows the cursor mid-drag (top-level, unparented)
+    QPointer<QWidget> m_dropLine;     ///< Vertical line marking where the dragged item will drop (a child of the grid's viewport)
     QTimer* m_scrollTimer = nullptr;  ///< Drives edge auto-scroll while reordering
     int m_scrollDir = 0;              ///< -1 = scroll up, +1 = scroll down, 0 = idle
     QPoint m_dragLastPos;             ///< Last cursor pos (viewport coords) during a drag

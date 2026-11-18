@@ -609,6 +609,10 @@ struct Conformer {
     void framesAndLimits() {
         const RigRoles& roles = *rolesPtr;
         frame.assign(idx(n), glm::mat3(1.0f));
+        // Whether each side's foot has a metatarsal (limitsFor asks per bone; by RigSide's value).
+        const bool footHasMetatarsal[3] = {roles.find(RigRole::Metatarsal, RigSide::Centre) >= 0,
+                                           roles.find(RigRole::Metatarsal, RigSide::Left) >= 0,
+                                           roles.find(RigRole::Metatarsal, RigSide::Right) >= 0};
         for (int i = 0; i < n; ++i) {
             const RigRoleTag& t = roles.tag(i);
             ModelBone&        bone = data.bones[idx(i)];
@@ -632,7 +636,7 @@ struct Conformer {
             case RigRole::Thigh: helperForSegment = twistOnChain(i, RigRole::Shin, RigRole::ThighTwist, t.side); break;
             default: break;
             }
-            RoleLimits lims = limitsFor(t, roles.spineLinks(), roles.neckLinks(), helperForSegment, roles.find(RigRole::Metatarsal, t.side) >= 0);
+            RoleLimits lims = limitsFor(t, roles.spineLinks(), roles.neckLinks(), helperForSegment, footHasMetatarsal[static_cast<int>(t.side)]);
             if (t.role == RigRole::UpperArm) {
                 // THE LIMITS ARE RELATIVE TO THE BIND. The reference generation binds its arms 46
                 // degrees from straight down, and its shoulder raises 90 and lowers 40 from there — an

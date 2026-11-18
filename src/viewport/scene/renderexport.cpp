@@ -11,6 +11,7 @@
 #include "cameraubo.h" // keyLightDirection
 #include "lightingsettings.h"
 #include "materialparams.h"
+#include "viewportcolors.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -28,10 +29,10 @@ void set3(float out[3], const glm::vec3& v) {
     out[2] = v.z;
 }
 
-// The viewport's background, #3E4042, as linear values (VulkanRenderer's scene-pass clear).
-const glm::vec3 kViewportGrey(0.04816f, 0.05125f, 0.05447f);
-// The key light's color (fillCameraUbo's lightColor).
-const glm::vec3 kKeyColor(1.0f, 0.96f, 0.9f);
+// The viewport's background as linear values: the scene pass's own clear color (viewportcolors.h).
+const glm::vec3 kViewportGrey(kViewportGreyLinear[0], kViewportGreyLinear[1], kViewportGreyLinear[2]);
+// The key light's color (lightingsettings.h: fillCameraUbo's lightColor).
+const glm::vec3 kKeyColor(kKeyLightColor[0], kKeyLightColor[1], kKeyLightColor[2]);
 // The distances light diffuses under skin, relative to red's, used where a material names none:
 // red light travels furthest, blue hardly at all.
 const glm::vec3 kSkinProfile(1.0f, 0.2f, 0.1f);
@@ -218,12 +219,6 @@ void renderEnvironment(const LightingSettings& lighting, float luminanceScale, r
         const float exposure = std::max(lighting.exposure, 1.0e-4f);
         set3(environment.backdropColor, kViewportGrey / exposure);
     }
-}
-
-float tonemapAces(float x) {
-    const float a = 2.51f, b = 0.03f, c = 2.43f, d = 0.59f, e = 0.14f;
-    x = std::max(x, 0.0f);
-    return std::clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0f, 1.0f);
 }
 
 } // namespace pose

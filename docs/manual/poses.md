@@ -10,7 +10,7 @@ Distances assume a standard-size adult figure; a small character needs proportio
 - **Reach forward, out of reach**: drag the hand away. The body leans as far as its balance allows and stops there — a hand you cannot reach is left short, never with the figure falling over. Take the hips along if you want her to step after it.
 - **Lean the body**: drag the chest sideways or back. A short pull leans; a longer one, and the feet step under her. Drag the head instead for the same lean carried through the neck.
 - **Bow**: drag the chest (or the head) forward *and down*. She folds at the hips with the spine curling and the head staying up to look ahead, and she takes no step.
-- **Hands on hips, elbows out**: drag the hand to the hip, pin it (`P`), then drag the elbow outward — it swivels about the pinned hand.
+- **Hands on hips, elbows out**: drag the hand to the hip and hold it there — it lies flat on the hip and the elbow comes out. For more, pin the hand (`P`), then drag the elbow outward — it swivels about the pinned hand.
 - **Turn the head**: click the head, press `T` and move the mouse left or right to turn it; `B` nods it and `S` tilts it sideways. Click to keep the result (a badge under the strip shows which of the three is on).
 
 ## Crouching, kneeling, sitting

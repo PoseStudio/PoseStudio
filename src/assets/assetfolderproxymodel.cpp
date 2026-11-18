@@ -14,6 +14,9 @@
 #include <QThread>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <algorithm>
+#include <utility>
+
 namespace {
 /// The MIME type a dragged Collection row carries; its payload is the row's "COLLECTION_<id>"
 /// node id. Private to this model: the tree view only forwards the QMimeData back to it.
@@ -47,11 +50,16 @@ AssetFolderProxyModel::AssetFolderProxyModel(QAbstractItemModel* source, QObject
         // survivor id would block that folder from ever being re-enqueued, freezing it on the
         // placeholder "hit" icon. In-flight jobs finish on their own and are discarded by the
         // generation check.
-        m_pendingHitChecks.clear();
-        m_pendingHitIds.clear();
+        abandonHitChecks();
         m_collectionItemsLoaded = false;
-        ++m_generation;
     });
+}
+
+void AssetFolderProxyModel::abandonHitChecks() {
+    m_pendingHitChecks.clear();
+    m_pendingHitIds.clear();
+    m_staleHitIds.clear();
+    ++m_generation;
 }
 
 AssetFolderProxyModel::~AssetFolderProxyModel() {
@@ -64,9 +72,54 @@ void AssetFolderProxyModel::refreshNode(const QModelIndex& proxyIndex) {
     if (!proxyIndex.isValid()) return;
     const QString nodeId = sourceModel()->data(mapToSource(proxyIndex), Qt::UserRole).toString();
     m_hitCache.remove(nodeId);
+    // A check of this row that is queued or running may have read it as it was: its result is
+    // dropped when it lands, and the row asked again (see the watcher in dispatchHitChecks).
+    if (m_pendingHitIds.contains(nodeId)) m_staleHitIds.insert(nodeId);
     // A collection's items changed: the aggregate is stale for it, so reload on next need.
     if (AssetNode::isCollection(nodeId)) m_collectionItemsLoaded = false;
     emit dataChanged(proxyIndex, proxyIndex, {Qt::ForegroundRole, Qt::DecorationRole});
+}
+
+void AssetFolderProxyModel::refreshFolder(const QString& folderPath) {
+    // The chain: `folder` and every folder above it that has a state.
+    const QString folder = AssetScan::normalizePath(folderPath);
+    QStringList chain;
+    for (auto it = m_hitCache.begin(); it != m_hitCache.end();) {
+        // (A folder above `folder`, or `folder` itself, has a path no longer than its own — but
+        // for a trailing slash: the cheap test spares most of the cache the normalizing one.)
+        if (!AssetNode::isCollection(it.key()) && it.key().size() <= folder.size() + 1
+            && AssetScan::folderWithinLibrary(folder, it.key())) {
+            chain.append(it.key());
+            it = m_hitCache.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    abandonHitChecks(); // (a walk in flight may have listed the folder before its files changed)
+
+    // Established again here and now, deepest first: `folder` is listed (and walked below only
+    // if it has no asset of its own any more), each folder above it is one listing — what lies
+    // beside the chain is still known. So a row goes from its old icon to its new one.
+    std::sort(chain.begin(), chain.end(), [](const QString& a, const QString& b) { return a.size() > b.size(); });
+    for (const QString& path : std::as_const(chain)) folderHitState(path);
+    announceHitStates(QModelIndex());
+}
+
+void AssetFolderProxyModel::refreshCollections() {
+    for (auto it = m_hitCache.begin(); it != m_hitCache.end();) {
+        if (AssetNode::isCollection(it.key())) it = m_hitCache.erase(it);
+        else ++it;
+    }
+    m_collectionItemsLoaded = false;
+    abandonHitChecks(); // (a check in flight read the collections' items as they were)
+    announceHitStates(QModelIndex());
+}
+
+void AssetFolderProxyModel::announceHitStates(const QModelIndex& parent) {
+    const int rows = rowCount(parent);
+    if (rows == 0) return;
+    emit dataChanged(index(0, 0, parent), index(rows - 1, 0, parent), {Qt::ForegroundRole, Qt::DecorationRole});
+    for (int row = 0; row < rows; ++row) announceHitStates(index(row, 0, parent));
 }
 
 // =============================================================================
@@ -139,6 +192,9 @@ void AssetFolderProxyModel::dispatchHitChecks() const {
                 const HitStates states = watcher->result();
                 for (auto it = states.cbegin(); it != states.cend(); ++it)
                     self->m_hitCache.insert(it.key(), it.value());
+                // (Refreshed while this check ran: what it read is the row as it was. Not kept;
+                // the repaint below queues a new check.)
+                if (self->m_staleHitIds.remove(job.nodeId)) self->m_hitCache.remove(job.nodeId);
                 self->m_pendingHitIds.remove(job.nodeId);
                 if (job.index.isValid()) {
                     const QModelIndex idx(job.index);

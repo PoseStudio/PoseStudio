@@ -20,10 +20,13 @@ namespace pose {
 
 namespace {
 
-/// The file's name without its folders (either separator), for the tab's heading.
-std::string baseName(const std::string& path) {
-    const std::size_t slash = path.find_last_of("/\\");
-    return slash == std::string::npos ? path : path.substr(slash + 1);
+/// Mesh @p mesh of model @p model of @p scene, or null where either index names nothing.
+const Mesh* meshAt(const Scene& scene, int model, int mesh) {
+    const Model* m = model >= 0 ? scene.modelAt(static_cast<std::size_t>(model)) : nullptr;
+    if (m == nullptr || mesh < 0 || static_cast<std::size_t>(mesh) >= m->meshCount()) {
+        return nullptr;
+    }
+    return &m->mesh(static_cast<std::size_t>(mesh));
 }
 
 } // namespace
@@ -37,14 +40,14 @@ MaterialView Scene::materialView() const {
     }
     view.valid = true;
     view.model = sel;
-    view.modelName = baseName(model->sourcePath());
+    view.modelName = fileBaseName(model->sourcePath());
     const std::size_t count = model->meshCount();
     view.zones.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
         const std::string& name = model->mesh(i).name();
         view.zones.push_back(name.empty() ? "Zone " + std::to_string(i + 1) : name);
     }
-    const int zone = (m_selectedZone >= 0 && static_cast<std::size_t>(m_selectedZone) < count) ? m_selectedZone : 0;
+    const int zone = selectedZoneIndex();
     view.zone = zone;
     const Mesh& mesh = model->mesh(static_cast<std::size_t>(zone));
     view.params = mesh.material();
@@ -62,6 +65,23 @@ MaterialView Scene::materialView() const {
     view.overlayZones = model->overlayZones(static_cast<std::size_t>(zone));
     view.revision = model->materialRevision();
     return view;
+}
+
+MaterialViewKey Scene::materialViewKey() const {
+    // (The same selection, zone and revision materialView() reports: keep the two in step.)
+    MaterialViewKey key;
+    const int       sel = selectedModelIndex();
+    const Model*    model = sel >= 0 ? modelAt(static_cast<std::size_t>(sel)) : nullptr;
+    if (model == nullptr || model->meshCount() == 0) {
+        return key;
+    }
+    const std::size_t count = model->meshCount();
+    key.valid = true;
+    key.model = sel;
+    key.zone = (m_selectedZone >= 0 && static_cast<std::size_t>(m_selectedZone) < count) ? m_selectedZone : 0;
+    key.zoneCount = count;
+    key.revision = model->materialRevision();
+    return key;
 }
 
 void Scene::setSelectedZone(int index) {
@@ -98,9 +118,7 @@ bool Scene::setSelectedZoneMaterial(const MaterialParams& params, bool linked) {
         return false;
     }
     const std::size_t count = model->meshCount();
-    const std::size_t zone = (m_selectedZone >= 0 && static_cast<std::size_t>(m_selectedZone) < count)
-                                 ? static_cast<std::size_t>(m_selectedZone)
-                                 : 0;
+    const std::size_t zone = static_cast<std::size_t>(selectedZoneIndex());
     // The linked zones are read off the IMPORTED materials (a figure's skin zones all carry one
     // preset's values; its eyes and mouth others), so a zone edited apart earlier still follows
     // the group when the group is edited again — the imported material is the group's identity.
@@ -169,15 +187,14 @@ int Scene::selectedZoneIndex() const {
 }
 
 std::shared_ptr<const DecodedImage> Scene::meshSlotImage(int model, int mesh, MaterialMap map, bool imported, int* channel) const {
-    const Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr;
-    if (m == nullptr || mesh < 0 || static_cast<std::size_t>(mesh) >= m->meshCount()) {
+    const Mesh* zone = meshAt(*this, model, mesh);
+    if (zone == nullptr) {
         return nullptr;
     }
-    const Mesh& zone = m->mesh(static_cast<std::size_t>(mesh));
     if (channel != nullptr) {
-        *channel = zone.slotChannel(map, imported);
+        *channel = zone->slotChannel(map, imported);
     }
-    return zone.slotImage(map, imported);
+    return zone->slotImage(map, imported);
 }
 
 bool Scene::setMeshTexture(int model, int mesh, MaterialMap map, const std::shared_ptr<const DecodedImage>& plain, int channel,
@@ -193,27 +210,18 @@ bool Scene::setMeshTexture(int model, int mesh, MaterialMap map, const std::shar
 }
 
 std::vector<MaterialOverlay> Scene::meshOverlays(int model, int mesh) const {
-    const Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr;
-    if (m == nullptr || mesh < 0 || static_cast<std::size_t>(mesh) >= m->meshCount()) {
-        return {};
-    }
-    return m->mesh(static_cast<std::size_t>(mesh)).material().overlays;
+    const Mesh* zone = meshAt(*this, model, mesh);
+    return zone != nullptr ? zone->material().overlays : std::vector<MaterialOverlay>();
 }
 
 float Scene::meshMetalness(int model, int mesh) const {
-    const Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr;
-    if (m == nullptr || mesh < 0 || static_cast<std::size_t>(mesh) >= m->meshCount()) {
-        return 0.0f;
-    }
-    return m->mesh(static_cast<std::size_t>(mesh)).material().metalness;
+    const Mesh* zone = meshAt(*this, model, mesh);
+    return zone != nullptr ? zone->material().metalness : 0.0f;
 }
 
 float Scene::meshMetalBaked(int model, int mesh) const {
-    const Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr;
-    if (m == nullptr || mesh < 0 || static_cast<std::size_t>(mesh) >= m->meshCount()) {
-        return -1.0f;
-    }
-    return m->mesh(static_cast<std::size_t>(mesh)).metalBaked();
+    const Mesh* zone = meshAt(*this, model, mesh);
+    return zone != nullptr ? zone->metalBaked() : -1.0f;
 }
 
 void Scene::setMeshMetalBaked(int model, int mesh, float scalar) {
@@ -229,11 +237,8 @@ bool Scene::setMeshOverlays(int model, int mesh, const std::vector<MaterialOverl
 }
 
 std::string Scene::meshSlotSource(int model, int mesh, MaterialMap map) const {
-    const Model* m = model >= 0 ? modelAt(static_cast<std::size_t>(model)) : nullptr;
-    if (m == nullptr || mesh < 0 || static_cast<std::size_t>(mesh) >= m->meshCount()) {
-        return {};
-    }
-    return m->mesh(static_cast<std::size_t>(mesh)).material().maps[static_cast<std::size_t>(map)].source;
+    const Mesh* zone = meshAt(*this, model, mesh);
+    return zone != nullptr ? zone->material().maps[static_cast<std::size_t>(map)].source : std::string();
 }
 
 std::vector<int> Scene::overlayZones(int model, int mesh) const {
@@ -259,9 +264,7 @@ bool Scene::resetZoneMaterials(bool allZones, bool linked) {
         syncSmoothing(sel);
         return changed;
     }
-    const std::size_t zone = (m_selectedZone >= 0 && static_cast<std::size_t>(m_selectedZone) < count)
-                                 ? static_cast<std::size_t>(m_selectedZone)
-                                 : 0;
+    const std::size_t    zone = static_cast<std::size_t>(selectedZoneIndex());
     const MaterialParams imported = model->mesh(zone).importedMaterial();
     const MaterialParams before = model->mesh(zone).material();
     changed = model->setMeshMaterial(zone, imported);

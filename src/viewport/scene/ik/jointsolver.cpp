@@ -56,6 +56,10 @@ const bool kAllNear = std::getenv("IK_JS_TRIAL_PLANE_TRACE_NEAR") != nullptr; //
 const bool kRowTrace = std::getenv("IK_JS_ROW_TRACE") != nullptr;
 const bool kRowTraceFirst = std::getenv("IK_JS_ROW_TRACE_FIRST") != nullptr; // the FIRST rejected attempt, not the last
 const char* const kGradTrace = std::getenv("IK_JS_GRAD_TRACE");
+const bool kBlockedTrace = std::getenv("IK_JS_BLOCKED_TRACE") != nullptr; // the active set, once per descent
+/// A/B probe: IK_JS_OLD_ASK=1 bounds a position row's ask at its full weight, as it used to be
+/// (see residuals()).
+const bool kAskKeepsGradient = std::getenv("IK_JS_OLD_ASK") == nullptr;
 
 /// Right-handed rotation about principal axis @p axis — glm::rotate, as eulerMatrix composes.
 glm::dmat3 axisRotation(int axis, double radians) {
@@ -134,13 +138,6 @@ bool choleskySolve(std::vector<double>& A, std::vector<double>& b, int n) {
     return true;
 }
 
-/// A/B probe: IK_JS_OLD_ASK=1 bounds a position row's ask at its full weight, as it used to be
-/// (see residuals()).
-bool askKeepsGradient() {
-    static const bool kOld = std::getenv("IK_JS_OLD_ASK") != nullptr;
-    return !kOld;
-}
-
 double dofValue(const JointSolver::Pose& pose, const JointSolverDof& dof) {
     const std::size_t b = static_cast<std::size_t>(dof.bone);
     return dof.axis < 3 ? pose.eulerDeg[b][dof.axis] * kDegToRad : pose.translation[b][dof.axis - 3];
@@ -202,29 +199,37 @@ void JointSolver::setSkeleton(std::vector<JointSolverBone> bones) {
     }
 }
 
+glm::dmat3 JointSolver::localRotation(const Pose& pose, std::size_t i) const {
+    const JointSolverBone& b = m_bones[i];
+    glm::dmat3 euler(1.0);
+    for (int k = 0; k < 3; ++k) {
+        const int axis = m_order[i * 3 + static_cast<std::size_t>(k)];
+        if (axis >= 0) {
+            euler = euler * axisRotation(axis, pose.eulerDeg[i][axis] * kDegToRad);
+        }
+    }
+    return b.orient * euler * glm::transpose(b.orient);
+}
+
+void JointSolver::placeBone(const Pose& pose, std::size_t i, const glm::dmat3& local, Frames& frames) const {
+    const JointSolverBone& b = m_bones[i];
+    const glm::dvec3 offset = b.bindOffset + pose.translation[i];
+    if (b.parent >= 0) {
+        const std::size_t p = static_cast<std::size_t>(b.parent);
+        frames.rot[i] = frames.rot[p] * local;
+        frames.pos[i] = frames.pos[p] + frames.rot[p] * offset;
+    } else {
+        frames.rot[i] = local;
+        frames.pos[i] = offset;
+    }
+}
+
 void JointSolver::forwardKinematics(const Pose& pose, Frames& frames) const {
     const std::size_t n = m_bones.size();
     frames.rot.resize(n);
     frames.pos.resize(n);
     for (std::size_t i = 0; i < n; ++i) {
-        const JointSolverBone& b = m_bones[i];
-        glm::dmat3 euler(1.0);
-        for (int k = 0; k < 3; ++k) {
-            const int axis = m_order[i * 3 + static_cast<std::size_t>(k)];
-            if (axis >= 0) {
-                euler = euler * axisRotation(axis, pose.eulerDeg[i][axis] * kDegToRad);
-            }
-        }
-        const glm::dmat3 local = b.orient * euler * glm::transpose(b.orient);
-        const glm::dvec3 offset = b.bindOffset + pose.translation[i];
-        if (b.parent >= 0) {
-            const std::size_t p = static_cast<std::size_t>(b.parent);
-            frames.rot[i] = frames.rot[p] * local;
-            frames.pos[i] = frames.pos[p] + frames.rot[p] * offset;
-        } else {
-            frames.rot[i] = local;
-            frames.pos[i] = offset;
-        }
+        placeBone(pose, i, localRotation(pose, i), frames);
     }
 }
 
@@ -376,7 +381,7 @@ double JointSolver::residuals(const Pose& pose, const Frames& frames, const Prob
         // the two: a figure sat on the floor and leaned back by the chest stopped with her chest
         // 44cm over its cursor.
         const double k = bounded(len, &Settings::maxTaskStep);
-        const double sw = std::sqrt(w) * (askKeepsGradient() ? std::sqrt(k) : k);
+        const double sw = std::sqrt(w) * (kAskKeepsGradient ? std::sqrt(k) : k);
         r[row++] = e.x * sw;
         r[row++] = e.y * sw;
         r[row++] = e.z * sw;
@@ -513,7 +518,7 @@ double JointSolver::linearize(const Pose& pose, const Frames& frames, const Prob
         double w = (task.huber > 0.0 && len > task.huber)
                        ? task.weight * task.huber / len
                        : task.weight;
-        if (stepBounds != nullptr && len > stepBounds->maxTaskStep && askKeepsGradient()) {
+        if (stepBounds != nullptr && len > stepBounds->maxTaskStep && kAskKeepsGradient) {
             w *= len / stepBounds->maxTaskStep; // (the bounded ask at 1/k of the weight: residuals())
         }
         ws.posX[p] = x;
@@ -710,18 +715,6 @@ double JointSolver::softCost(const Pose& pose, const Problem& problem) const {
     return cost;
 }
 
-double JointSolver::cost(const Pose& pose, const Problem& problem) const {
-    Frames frames;
-    forwardKinematics(pose, frames);
-    std::vector<double> r;
-    std::vector<JointPlaneTask> planes = problem.planes;
-    if (problem.planeSource) {
-        planes.clear();
-        problem.planeSource(frames, planes);
-    }
-    return residuals(pose, frames, problem, planes, buildComModel(problem), r) + postureCost(pose, problem);
-}
-
 void JointSolver::dofBounds(const Problem& problem, std::vector<double>& lo,
                             std::vector<double>& hi) const {
     const std::size_t nDof = problem.dofs.size();
@@ -791,12 +784,16 @@ JointSolver::Result JointSolver::solve(Pose& pose, const Problem& problem,
                     }
                 }
             }
-            std::fputc(10, stderr);
+            std::fputc('\n', stderr);
         }
-        std::vector<double> lo, hi;
+        // (The workspace's buffers: most ticks that come here kick nothing, and none of them
+        // should allocate. `kicked` is the pose only once a channel is kicked; the descent below
+        // refills lo and hi for itself.)
+        std::vector<double>& lo = m_ws.lo;
+        std::vector<double>& hi = m_ws.hi;
         dofBounds(problem, lo, hi);
-        Pose kicked = pose;
-        bool any = false;
+        Pose& kicked = m_ws.kicked;
+        bool  any = false;
         for (std::size_t j = 0; j < problem.dofs.size(); ++j) {
             const JointSolverDof& dof = problem.dofs[j];
             if (dof.foldSign == 0 || !dof.foldRetry) {
@@ -805,6 +802,9 @@ JointSolver::Result JointSolver::solve(Pose& pose, const Problem& problem,
             const double bound = dof.foldSign > 0 ? lo[j] : hi[j];
             const double flexed = (dofValue(pose, dof) - bound) * dof.foldSign;
             if (flexed < kFoldNearStraight) {
+                if (!any) {
+                    kicked = pose;
+                }
                 setDofValue(kicked, dof, glm::clamp(bound + dof.foldSign * kFoldKick, lo[j], hi[j]));
                 if (kRetryTrace) {
                     std::fprintf(stderr, "[js-retry]   kicks bone %d axis %d (flexed %.2f deg)\n", dof.bone, dof.axis, flexed * 57.2958);
@@ -845,8 +845,32 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
 
     ComModel& com = ws.com;
     buildComModel(problem, com);
+    // THE FK CACHE. The solver's skeleton is ALL the figure's bones, and between the trials of one
+    // descent only the bones that own an Euler DoF of the problem turn in their parent's frame:
+    // every other bone's local rotation — three trig rotations and the orient sandwich — is the
+    // value the same expression gives again on the same pose. `local` holds the descent's pose's,
+    // filled here; a trial recomputes the DoF bones' alone into `trialLocal`, and an accepted
+    // trial hands those over. Refilled at every descent, so the fold retry's kicked pose and the
+    // next tick's pose are covered; the chain products are what they were.
+    const std::size_t        nBones = m_bones.size();
+    std::vector<char>&       eulerDof = ws.eulerDof;
+    std::vector<glm::dmat3>& local = ws.local;
+    std::vector<glm::dmat3>& trialLocal = ws.trialLocal;
+    eulerDof.assign(nBones, 0);
+    for (const JointSolverDof& dof : problem.dofs) {
+        if (dof.axis < 3) {
+            eulerDof[static_cast<std::size_t>(dof.bone)] = 1;
+        }
+    }
+    local.resize(nBones);
+    trialLocal.resize(nBones);
     Frames& frames = ws.frames;
-    forwardKinematics(pose, frames);
+    frames.rot.resize(nBones);
+    frames.pos.resize(nBones);
+    for (std::size_t i = 0; i < nBones; ++i) {
+        local[i] = localRotation(pose, i);
+        placeBone(pose, i, local[i], frames);
+    }
     std::vector<double>&         r = ws.r;
     std::vector<double>&         rTrial = ws.rTrial;
     std::vector<double>&         J = ws.J;
@@ -1100,7 +1124,15 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                     maxApplied = std::max(maxApplied, std::abs(v - q[j]));
                     setDofValue(trial, problem.dofs[j], v);
                 }
-                forwardKinematics(trial, trialFrames);
+                // (The trial's frames, through the FK cache: see the top of this function.)
+                trialFrames.rot.resize(nBones);
+                trialFrames.pos.resize(nBones);
+                for (std::size_t i = 0; i < nBones; ++i) {
+                    if (eulerDof[i]) {
+                        trialLocal[i] = localRotation(trial, i);
+                    }
+                    placeBone(trial, i, eulerDof[i] ? trialLocal[i] : local[i], trialFrames);
+                }
                 // A TRIAL IS JUDGED BY THE ROWS IT MAKES (2026-09-28; IK_JS_STALE_TRIAL_PLANES is
                 // the A/B). The one-sided rows are regenerated per linearization, within a margin
                 // of each surface — and a step of 20 degrees at a shoulder moves its elbow 9cm:
@@ -1120,13 +1152,11 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                 }
                 const double costTrial =
                     residuals(trial, trialFrames, problem, *judgedBy, com, rTrial) + postureCost(trial, problem);
-                static const bool kBlockedTrace = std::getenv("IK_JS_BLOCKED_TRACE") != nullptr; // the active set, once per descent
                 if (kBlockedTrace && it == 0 && attempt == 0 && halving == 0) {
                     for (std::size_t j = 0; j < blocked.size(); ++j) {
                         if (blocked[j]) {
-                            std::fprintf(stderr, "[js-blocked] bone %d axis %d [%.1f, %.1f]", problem.dofs[j].bone, problem.dofs[j].axis,
+                            std::fprintf(stderr, "[js-blocked] bone %d axis %d [%.1f, %.1f]\n", problem.dofs[j].bone, problem.dofs[j].axis,
                                          problem.dofs[j].minDeg, problem.dofs[j].maxDeg);
-                            std::fputc(10, stderr);
                         }
                     }
                 }
@@ -1180,8 +1210,7 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                         const double asked = q[j] + step[j] * factor;
                         const double got = glm::clamp(asked, lo[j], hi[j]);
                         if (std::abs(asked - got) > 1e-6) {
-                            std::fprintf(stderr, "[rows]   clamped: bone %d axis %d at %.4f asked %+.4f got %+.4f%s", problem.dofs[j].bone, problem.dofs[j].axis, q[j], step[j] * factor, got - q[j], blocked[j] ? " BLOCKED" : "");
-                            std::fputc(10, stderr);
+                            std::fprintf(stderr, "[rows]   clamped: bone %d axis %d at %.4f asked %+.4f got %+.4f%s\n", problem.dofs[j].bone, problem.dofs[j].axis, q[j], step[j] * factor, got - q[j], blocked[j] ? " BLOCKED" : "");
                         }
                     }
                     std::vector<double> rNow;
@@ -1212,6 +1241,11 @@ JointSolver::Result JointSolver::descend(Pose& pose, const Problem& problem, con
                     pose.translation.swap(trial.translation);
                     frames.rot.swap(trialFrames.rot);
                     frames.pos.swap(trialFrames.pos);
+                    for (std::size_t i = 0; i < nBones; ++i) {
+                        if (eulerDof[i]) {
+                            local[i] = trialLocal[i]; // (the pose's local rotations are the trial's now)
+                        }
+                    }
                     cost0 = costTrial;
                     accepted = true;
                     appliedMax = maxApplied;
