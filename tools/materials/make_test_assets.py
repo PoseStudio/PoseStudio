@@ -45,6 +45,13 @@ Writes into the folder given as argv[1]:
                      named at a path that does not exist while a file of that name lies beside
                      it; one that is not XML; and a folder with a document that names its image
                      through a fileprefix, the way published material packs do
+  preset_library/    SHADER PRESETS (tools/ikscripts/materials/shaderpreset.txt): a small content
+                     library in the native figure format's layout — "Shader Presets/Test" with
+                     a compressed whole surface (Painted Metal), a specular / glossiness one
+                     with a glossiness map (Glossy Plastic), two partial presets (Tile 4x4,
+                     Weave Normal), one whose map is nowhere, one of another shader and a
+                     material preset of named surfaces — and their maps under
+                     "Runtime/Textures/Test Maps"
 Every buffer is a base64 data URI, every image a PNG data URI but packed_mr.png — one file each.
 """
 import base64, json, math, struct, sys, zlib, os
@@ -494,3 +501,88 @@ open(os.path.join(pack, "pack.mtlx"), "w").write("""<?xml version="1.0"?>
 </materialx>
 """)
 print("wrote", out)
+
+# SHADER PRESETS (scene/shaderpresetfile.h; tools/ikscripts/materials/shaderpreset.txt): a small
+# content library in the native figure format's own layout — presets under "Shader Presets",
+# their maps under "Runtime/Textures", named by root-relative, percent-encoded URIs — written
+# here, so the test needs no vendor content. A preset is the format's JSON document: the shader's
+# definition in material_library, the preset's values as single-key tracks on "the selection's
+# materials".
+import gzip
+import shutil
+
+library = os.path.join(out, "preset_library")
+textures = os.path.join(library, "Runtime", "Textures", "Test Maps")
+presets = os.path.join(library, "Shader Presets", "Test")
+os.makedirs(textures, exist_ok=True)
+os.makedirs(presets, exist_ok=True)
+for source, name in (("tex_red.png", "color.png"), ("tex_rough.png", "gloss.png"), ("overlay_normal.png", "weave normal.png")):
+    shutil.copyfile(os.path.join(out, source), os.path.join(textures, name))
+
+SHADER_DEFAULTS = {
+    "Base Mixing": 0, "Metallic Weight": 0.0, "Diffuse Weight": 1.0, "Diffuse Roughness": 0.0, "Glossy Weight": 0.0,
+    "Glossy Layered Weight": 1.0, "Glossy Color": [1.0, 1.0, 1.0], "Glossy Specular": [0.2313726, 0.2313726, 0.2313726],
+    "Glossy Reflectivity": 0.5, "Glossy Roughness": 0.5, "Glossiness": 1.0, "Glossy Anisotropy": 0.0,
+    "Glossy Anisotropy Rotations": 0.0, "Roughness Squared": True, "Share Glossy Inputs": True, "Refraction Weight": 0.0,
+    "Refraction Index": 1.5, "Refraction Color": [1.0, 1.0, 1.0], "Refraction Roughness": 0.0, "Abbe": 0.0, "Thin Walled": False,
+    "Transmitted Color": [0.0, 0.0, 0.0], "Transmitted Measurement Distance": 0.1, "Translucency Weight": 0.0,
+    "Translucency Color": [1.0, 1.0, 1.0], "SSS Amount": 0.0, "Backscattering Weight": 0.0, "Backscattering Color": [1.0, 1.0, 1.0],
+    "Backscattering Roughness": 0.5, "Metallic Flakes Weight": 0.0, "Metallic Flakes Color": [1.0, 1.0, 1.0],
+    "Metallic Flakes Size": 0.001, "Top Coat Weight": 0.0, "Top Coat Color": [1.0, 1.0, 1.0], "Top Coat Roughness": 0.0,
+    "Top Coat Glossiness": 1.0, "Top Coat Layering Mode": 0, "Reflectivity": 0.5, "Top Coat IOR": 1.5, "Top Coat Bump": 1.0,
+    "Base Thin Film": 0.0, "Bump Strength": 1.0, "Normal Map": 1.0, "Displacement Strength": 1.0, "Minimum Displacement": -0.1,
+    "Maximum Displacement": 0.1, "Cutout Opacity": 1.0, "Emission Color": [0.0, 0.0, 0.0], "Emission Temperature": 6500.0,
+    "Luminance": 1500.0, "Luminance Units": 0, "Horizontal Tiles": 1.0, "Vertical Tiles": 1.0, "Horizontal Offset": 0.0,
+    "Vertical Offset": 0.0, "Tags": "", "Render Priority": 3,
+}
+
+
+def preset_track(setting, leaf, value):
+    path = "diffuse" if setting == "diffuse" else "extra/studio_material_channels/channels/" + setting.replace(" ", "%20")
+    return {"url": "name://@selection#materials:?" + path + "/" + leaf, "keys": [[0, value]]}
+
+
+def shader_preset(values=None, images=None, whole=True, kind="preset_shader", standard=True):
+    """A preset's document. `whole`: it names every setting of the shader (a surface); else only
+    `values` and `images` (a part of one). `standard` False: a definition without a base mixing
+    mode — another shader."""
+    values, images = values or {}, images or {}
+    settings = dict(SHADER_DEFAULTS)
+    if not standard:
+        del settings["Base Mixing"]
+    channels = [{"channel": {"id": name, "type": "float", "value": value}} for name, value in settings.items()]
+    definition = {"id": "sphere", "diffuse": {"channel": {"id": "diffuse", "type": "float_color", "value": [0.7529412] * 3}},
+                  "extra": [{"type": "studio_material_channels", "channels": channels}]}
+    tracks = []
+    if whole:
+        dialed = dict(settings, diffuse=[0.7529412] * 3)
+        dialed.update(values)
+        for name, value in dialed.items():
+            tracks.append(preset_track(name, "value", value))
+            tracks.append(preset_track(name, "image_file", images.get(name)))
+    else:
+        tracks += [preset_track(name, "value", value) for name, value in values.items()]
+        tracks += [preset_track(name, "image_file", image) for name, image in images.items()]
+    return json.dumps({"file_version": "0.6.0.0", "asset_info": {"id": "/Shader%20Presets/Test/preset.duf", "type": kind},
+                       "material_library": [definition],
+                       "scene": {"materials": [{"url": "#sphere"}], "animations": tracks}}, indent=1)
+
+
+MAPS = "/Runtime/Textures/Test%20Maps/"
+# A whole surface, stored COMPRESSED (as most presets are): a rough red metal with a normal map, tiled twice.
+with gzip.open(os.path.join(presets, "Painted Metal.duf"), "wb") as f:
+    f.write(shader_preset({"Metallic Weight": 1.0, "Glossy Roughness": 0.3, "Normal Map": 1.5, "Horizontal Tiles": 2.0, "Vertical Tiles": 2.0},
+                          {"diffuse": MAPS + "color.png", "Normal Map": MAPS + "weave%20normal.png"}).encode("utf-8"))
+# Specular / glossiness with a GLOSSINESS map (read inverted, as a roughness map) under a clear coat with an index.
+open(os.path.join(presets, "Glossy Plastic.duf"), "w").write(
+    shader_preset({"Base Mixing": 1, "diffuse": [0.2, 0.4, 0.8], "Top Coat Weight": 1.0, "Top Coat Layering Mode": 2, "Top Coat IOR": 1.6,
+                   "Top Coat Glossiness": 0.9}, {"Glossiness": MAPS + "gloss.png"}))
+# Two PARTIAL presets: a tiling, and a normal map with its strength.
+open(os.path.join(presets, "Tile 4x4.duf"), "w").write(
+    shader_preset({"Horizontal Tiles": 4.0, "Vertical Tiles": 4.0, "Horizontal Offset": 0.0, "Vertical Offset": 0.0}, whole=False))
+open(os.path.join(presets, "Weave Normal.duf"), "w").write(
+    shader_preset({"Normal Map": 0.5}, {"Normal Map": MAPS + "weave%20normal.png"}, whole=False))
+# A surface whose color map is nowhere; a preset of another shader; a material preset of named surfaces.
+open(os.path.join(presets, "Missing Map.duf"), "w").write(shader_preset({}, {"diffuse": MAPS + "nowhere%20at%20all.png"}))
+open(os.path.join(presets, "Other Shader.duf"), "w").write(shader_preset(standard=False))
+open(os.path.join(presets, "Named Surfaces.duf"), "w").write(shader_preset(kind="preset_material"))

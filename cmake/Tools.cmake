@@ -210,6 +210,30 @@ posestudio_check_tool(PoseStudioMaterialXCheck materialx-check
         posestudio_glm
 )
 
+# The shader-preset reader's guard and report tool (tools/shaderpreset): a content library's
+# shader preset (.duf, gzip-compressed or plain) read as a material — the three base mixing
+# modes, the coat as a clear coat and merged, flakes, refraction, emission, the relief, partial
+# presets onto a standing material, and what is refused — on presets written in the tool; with
+# --report <file|folder> [--root <content root>] it prints what real presets read as and a tally.
+# The reader with the figure importer's document helpers (gzip, URI decoding), the material's
+# values, the spec/gloss solve, and stb_image for the report's map means. No Qt, no device.
+posestudio_check_tool(PoseStudioShaderPresetCheck shader-preset-check
+    SOURCES
+        tools/shaderpreset/check_shaderpreset.cpp
+        src/viewport/scene/shaderpresetfile.cpp
+        src/viewport/scene/materialparams.cpp
+        src/viewport/import/specgloss.cpp
+        src/viewport/stb_impl.cpp
+    INCLUDES
+        src/viewport/scene
+        src/viewport/util
+        ${stb_SOURCE_DIR}
+    LIBRARIES
+        posestudio_figureimport
+        posestudio_miniz
+        posestudio_glm
+)
+
 # The guard of a render's Gaussian splat composite (tools/splatcomposite): the display transform
 # and its inverse, the capture coming out of a render as it went in, the backdrop behind it, the
 # scene laid over it in linear light (a figure's edge, the floor's shadow), the front of the

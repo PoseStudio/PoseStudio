@@ -157,7 +157,7 @@ void MaterialPanel::importMaterial() {
     const QString       key = QString::fromLatin1(Constants::PREF_LAST_MATERIALX_DIR);
     const QString path = QFileDialog::getOpenFileName(
         this, tr("Import Material"), prefs.rememberedDirectory(key, QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)),
-        tr("Material Files (*.mtlx *.psm);;MaterialX Files (*.mtlx);;PoseStudio Materials (*.psm)"));
+        tr("Material Files (*.mtlx *.psm *.duf);;MaterialX Files (*.mtlx);;PoseStudio Materials (*.psm);;Shader Presets (*.duf)"));
     if (path.isEmpty()) {
         return; // cancelled
     }

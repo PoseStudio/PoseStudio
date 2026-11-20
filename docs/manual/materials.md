@@ -2,7 +2,7 @@
 
 The **Materials** tab on the side panel edits the surfaces of the selected object: a figure's skin, eyes, mouth and nails, an imported prop's materials. Every object imports with the materials its file describes, and this tab lets you change them with sliders, color swatches and texture slots — glossier skin, a metallic prop, a color tint, a see-through surface, a different map — without writing a shader. It is also where images are layered over the skin: [tattoos, marks and makeup](#overlays-tattoos-marks-and-makeup).
 
-The **Import** button at the top of the tab puts a material from a file on the zone you are looking at — a MaterialX material (`.mtlx`) or a saved one (`.psm`) — and **Save** beside it saves the material you are looking at to a file, and the tab below it, **Materials Library**, lists the materials you have saved — see [Saving and reusing a material](#saving-and-reusing-a-material).
+The **Import** button at the top of the tab puts a material from a file on the zone you are looking at — a MaterialX material (`.mtlx`), a content library's shader preset (`.duf`) or a saved material (`.psm`) — and **Save** beside it saves the material you are looking at to a file, and the tab below it, **Materials Library**, lists the materials you have saved — see [Saving and reusing a material](#saving-and-reusing-a-material).
 
 PoseStudio has **one material model**: a physically based surface in the metallic / roughness convention, the parameter set the industry's renderers share (the base layer, a coat, transmission, subsurface, sheen, emission, a thin film, and the maps that paint them). The viewport's PBR shading draws nearly all of it — the base layer, the coat, sheen, the thin film, transmission, emission, the detail layer and the maps that paint them; what it cannot (the subsurface's scattering color and distance) is kept with the material for a render, and the tab says which is which; displacement — a map that really moves the surface — shows in the Rendered mode and in a render. There is no node editor and no second workflow to choose: files authored in the older specular / glossiness convention are converted when they are imported (see [Importing Content](importing.md#materials-and-the-specular--glossiness-conversion)).
 
@@ -401,6 +401,8 @@ Select an object, click the surface you want — the Materials tab shows which z
 - **Reset Zone** still returns the zone to what its own file imported with.
 
 **MaterialX materials** (`.mtlx`, the format material libraries are published in) are applied the same way — double-click one in a library, or click **Import** at the top of the tab: see [MaterialX materials](importing.md#materialx-materials-mtlx). Save one after applying it and it becomes a material of your own library, with its images copied in beside it.
+
+**Shader presets** (`.duf`, the one-surface presets content libraries in the native figure format ship) are applied the same way: see [Shader presets](importing.md#shader-presets-duf). A preset that changes only part of a surface — a tiling, one map — changes just that and keeps the rest of the zone's material.
 
 A material file is plain text (JSON) and can be read, compared or kept under version control. If you edit one by hand, a value outside the range its setting can take is held to that range when the material is applied, and a file with a number too large to be one is refused.
 

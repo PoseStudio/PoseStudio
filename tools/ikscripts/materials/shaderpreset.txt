@@ -1,0 +1,118 @@
+# SHADER PRESETS (scene/shaderpresetfile.h; the Materials tab's Import, or a double-click on a
+# shader preset in a library): a content library's shader preset — a `.duf` file of one surface,
+# gzip-compressed or plain — put on the selected zone as a material: its values converted, its
+# maps found under the content root and put in their slots, a glossiness map read inverted as a
+# roughness map; and a PARTIAL preset (a tiling, one map) changing just what it names.
+#
+# NOT run by run_all.sh (the subfolder). On the six-sphere scene and the small preset library
+# tools/materials/make_test_assets.py writes (no vendor content is needed):
+#
+#   python tools/materials/make_test_assets.py <assets>
+#   POSESTUDIO_TEST_FIGURE=<assets>/showcase.gltf tools/ikscripts/run.sh \
+#       tools/ikscripts/materials/shaderpreset.txt <out> POSESTUDIO_IK_SCRIPT_ASSETS=<assets>
+#
+# LOOK at the shots: the sphere is a rough red metal with a woven relief, tiled twice; then a
+# blue plastic under a clear coat whose base is glossy on one side and matt on the other — the
+# glossiness ramp, inverted — and, saved, plastic.psm names a roughness map WRITTEN for it
+# (.textures/plastic/plastic_roughness.png: dark where the preset's gloss.png is light).
+
+wait 10
+select 0
+expect zones == 6
+view front
+
+# --- 1. A whole surface from a compressed preset: values, maps, one undo step --------------------
+zone Chalk
+expect mat.metallic == 0
+applymaterial preset_library/Shader Presets/Test/Painted Metal.duf
+expect matfile.ok == 1
+expect matfile.missing == 0
+expect matfile.notes == 0
+expect mat.metallic == 100
+expect mat.roughness == 30
+expect mat.specular == 100
+expect mat.subsurface == 0
+expect mat.topcoat == 0
+expect mat.normal == 150
+expect mat.tilingx == 2
+expect mat.tilingy == 2
+expect mattex.basecolor == 2
+expect mattex.normal == 2
+expect mattex.roughness == 0
+view home
+lookat 2.75 0.5 0 0.62
+shot 01_painted_metal
+undo
+expect mat.metallic == 0
+expect mattex.basecolor == 0
+expect mat.tilingx == 1
+redo
+expect mat.metallic == 100
+expect mattex.basecolor == 2
+
+# --- 2. Specular / glossiness: a glossiness map is the roughness map, inverted; a clear coat -----
+applymaterial preset_library/Shader Presets/Test/Glossy Plastic.duf
+expect matfile.ok == 1
+expect matfile.missing == 0
+expect mat.metallic == 0
+expect mat.roughness == 100
+expect mattex.roughness == 2
+expect mattex.basecolor == 0
+expect mattex.normal == 0
+expect mat.topcoat == 100
+expect mat.coatior > 1.59
+expect mat.coatior < 1.61
+expect mat.topcoatrough == 10
+expect mat.tilingx == 1
+shot 02_glossy_plastic
+# Saved, the inverted map is WRITTEN as a file of its own (a material file holds no marks).
+savematerial plastic.psm noicon
+expect matfile.ok == 1
+expect matfile.written == 1
+expect matfile.copied == 0
+expect exists..textures/plastic/plastic_roughness.png == 1
+
+# --- 3. Partial presets: only what they name changes ----------------------------------------------
+applymaterial preset_library/Shader Presets/Test/Tile 4x4.duf
+expect matfile.ok == 1
+expect mat.tilingx == 4
+expect mat.tilingy == 4
+expect mat.roughness == 100
+expect mat.topcoat == 100
+expect mattex.roughness == 2
+applymaterial preset_library/Shader Presets/Test/Weave Normal.duf
+expect matfile.ok == 1
+expect mattex.normal == 2
+expect mat.normal == 50
+expect mattex.roughness == 2
+expect mat.tilingx == 4
+shot 03_partials_applied
+undo
+expect mattex.normal == 0
+undo
+expect mat.tilingx == 1
+
+# --- 4. The inverted map through a project ---------------------------------------------------------
+saveproject preset.pss
+new
+expect figures == 0
+openproject preset.pss
+expect figures == 1
+select 0
+zone Chalk
+expect mattex.roughness == 2
+expect mat.roughness == 100
+expect mat.topcoat == 100
+shot 04_after_project
+
+# --- 5. What is not applied, and a map that is nowhere ---------------------------------------------
+applymaterial preset_library/Shader Presets/Test/Other Shader.duf
+expect matfile.ok == 0
+expect mat.topcoat == 100
+applymaterial preset_library/Shader Presets/Test/Named Surfaces.duf
+expect matfile.ok == 0
+applymaterial preset_library/Shader Presets/Test/Missing Map.duf
+expect matfile.ok == 1
+expect matfile.missing == 1
+expect mattex.basecolor == 0
+expect mat.topcoat == 0

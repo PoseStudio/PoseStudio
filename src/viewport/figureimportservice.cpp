@@ -12,6 +12,7 @@
 #include "rendering/vulkanrenderer.h"
 
 #include "preferencesmanager.h" // user-configured content roots
+#include "shaderpresetfile.h"  // isShaderPresetFile: the failure message of a preset that is a material
 #include "constants.h"          // PREF_FIGURE_CONTENT_ROOTS
 
 #include <limits>
@@ -349,7 +350,11 @@ QString promptLocateContentFolder(const QString& path) {
 void showImportFailureMessage(const QString& path, const QString& detail, bool notAFigure,
                               bool missingContent) {
     QString body;
-    if (notAFigure) {
+    if (isShaderPresetFile(path.toStdString())) {
+        body = QObject::tr("\"%1\" is a shader preset: a material, not a figure.\n\nTo use it, select an object, open the "
+                           "Materials tab and choose Import - or double-click the preset in a library.")
+                   .arg(QFileInfo(path).fileName());
+    } else if (notAFigure) {
         body = QObject::tr("Could not import a character figure from:\n%1\n\nThis file may be a "
                            "pose, material, or other preset rather than a figure.\n\nDetails: %2")
             .arg(QFileInfo(path).fileName(), detail);

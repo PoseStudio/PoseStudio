@@ -564,6 +564,8 @@ add_executable(
     src/viewport/scene/materialfile.h
     src/viewport/scene/materialxfile.cpp # a MaterialX document (.mtlx) read as materials: values + image files
     src/viewport/scene/materialxfile.h
+    src/viewport/scene/shaderpresetfile.cpp # a content library's shader preset (.duf) read as a material: values + map URIs
+    src/viewport/scene/shaderpresetfile.h
     src/viewport/scene/materialball.cpp  # the ball a saved material is pictured on: its mesh, and the built-in ball shader
     src/viewport/scene/materialball.h
     # (The Armature, scene/armature*.cpp, and scene/ik/ are the library posestudio_ik: see

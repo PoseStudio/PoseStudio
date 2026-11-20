@@ -4,7 +4,7 @@ PoseStudio reads four kinds of content today: static models in the Wavefront `.o
 
 There are three ways to import, and they all do the same thing:
 
-- **File → Import → .OBJ (Wavefront)**, **File → Import → .DUF (DUF File)**, **File → Import → .FBX (FBX File)**, **File → Import → .GLB (GL Transmission Format .glTF)**, **File → Import → .USD (Universal Scene Description)**, **File → Import → .VRM (VRM Avatar)** or **File → Import → .PLY / .SPLAT / .SPZ (Gaussian Splat)** — a file dialog, opening in the folder you imported from last time. (A MaterialX material is not imported from this menu: it does not add an object, it goes on one — see [MaterialX materials](#materialx-materials-mtlx).)
+- **File → Import → .OBJ (Wavefront)**, **File → Import → .DUF (DUF File)**, **File → Import → .FBX (FBX File)**, **File → Import → .GLB (GL Transmission Format .glTF)**, **File → Import → .USD (Universal Scene Description)**, **File → Import → .VRM (VRM Avatar)** or **File → Import → .PLY / .SPLAT / .SPZ (Gaussian Splat)** — a file dialog, opening in the folder you imported from last time. (A MaterialX material or a shader preset is not imported from this menu: it does not add an object, it goes on one — see [MaterialX materials](#materialx-materials-mtlx) and [Shader presets](#shader-presets-duf).)
 - **Double-click** an `.obj`, `.duf`, `.dsf`, `.fbx`, `.glb`, `.gltf`, `.vrm`, `.usd`, `.usda`, `.usdc`, `.usdz`, `.ply`, `.splat` or `.spz` asset in the [Asset Manager](asset-manager.md) grid.
 - **Open with** PoseStudio, or **drag files onto** `PoseStudio.exe`: every model, figure or splat file on the command line is imported in order, and a `.pose` file after a figure is applied to it. (A `.pss` file given this way is not imported into the scene: it is opened as a [project](project-files.md).)
 
@@ -33,7 +33,7 @@ Import takes a few seconds for a fully textured character. The progress dialog n
 
 ### Files that are not figures
 
-Pose, material, light and other presets share the `.duf` extension. Importing one of those shows *"This file may be a pose, material, or other preset rather than a figure"* — pick the character's own preset instead. (Pose presets in this format are not readable yet; PoseStudio has its own [pose files](pose-files.md).)
+Pose, material, light and other presets share the `.duf` extension. Importing one of those shows *"This file may be a pose, material, or other preset rather than a figure"* — pick the character's own preset instead. A **shader preset** is the exception: it is a material, and goes on an object through the Materials tab — the message says so, and [Shader presets](#shader-presets-duf) has the steps. (Pose presets in this format are not readable yet; PoseStudio has its own [pose files](pose-files.md).)
 
 The same goes for a character that is distributed as **shaping presets** — a "head", a "body", a "feet" preset to apply to a figure that is already loaded — with no preset of the character as a whole: those are not figures, and PoseStudio cannot apply one to a figure in the scene yet. Import the preset that loads the whole character.
 
@@ -120,6 +120,44 @@ What is read:
 - Images are looked for where the file says — relative to the `.mtlx` — and, if they are not there, by name beside it and in the library it lies in. A message says how many could not be found.
 
 What is not: MaterialX can also describe a surface by a *procedure* — a noise, a brick pattern, one picture blended into another — and those have no single image PoseStudio could put in a slot. Such an input keeps its default, and after the material is applied a message lists what could not be carried over. A file whose materials use a shading model other than the four above is refused, with the model's name.
+
+## Shader presets (.duf)
+
+Content libraries in the native figure format ship surfaces as **shader presets**: one `.duf` file a surface — a metal, a fabric, a glaze, a glass — usually in a *Shader Presets* folder, each with a thumbnail beside it. A shader preset is not a figure and adds nothing to the scene: **its surface is put on an object you already have**, exactly as a [saved material](materials.md#saving-and-reusing-a-material) is.
+
+1. Select the object and click the surface you want; the Materials tab shows which zone that is.
+2. Click **Import**, at the top right of the Materials tab beside **Save**, and pick the preset — or double-click it in the [Asset Manager](asset-manager.md), once the content library it lies in is one of your asset folders.
+
+The zone takes the surface as one undo step: its values, and its texture maps in their slots. A preset stored compressed and one stored as plain text are read alike. From there it is a material like any other — adjust it in the Materials tab, and **Save** it to keep it in your Materials Library with an icon of its own.
+
+What is read:
+
+- Presets of the format's **standard physically-based surface shader** — the one figures' own surfaces use — in each of its three base mixing modes: metallicity / roughness, specular / glossiness, and weighted. PoseStudio's material is a metallic / roughness one, so the other two are converted to it.
+- The shader's layers: the base, the top coat, metallic flakes, backscattering, refraction, translucency, emission, the thin film, normal, bump and displacement maps, the cutout, and the tiling.
+- **Texture maps**, which a preset names relative to its content library. They are looked for under the library the preset lies in (the nearest folder above it that holds a `Runtime` or a `data` folder), then under your figure content folders and asset libraries, then by file name. A message says how many could not be found.
+- **Partial presets.** Many packs include presets that change only part of a surface — *tile the maps six times*, *this bump map*, *this cutout*. Such a preset changes just what it names on the material the zone already has, and leaves every other value and map alone. Apply the pack's surface first, then its partial presets on top.
+
+A shader has layers PoseStudio's material has no exact equal for; each is brought in as the nearest thing the material does have:
+
+| In the preset | Becomes |
+|---|---|
+| A plain clear top coat | The **Top Coat**, its index set from how much it reflects |
+| A top coat that reflects strongly or in a color (a "specular layer", a glaze) | Merged into **Base Color**, **Metallic** and **Roughness** |
+| Metallic flakes | A plain metallic share of the base — the sparkle of single flakes is not carried |
+| A glossiness map | The **Roughness** map, read inverted |
+| Backscattering (cloth's soft bloom) | **Sheen** |
+| A solid that scatters the light it lets in (wax, jade) | **Subsurface**, in the volume's color |
+| A light source's emission (a bulb, a fire) | **Emission** at the top of its range — lower it to taste |
+
+When something could not be carried over exactly, a message after applying lists it.
+
+What is not read:
+
+- A preset made for **another shader** — a custom shader graph, an older renderer's surface. Its look lives in that shader's own code, not in values that could be carried over, so it is refused with a message.
+- A **material preset** made for one figure's or one object's own named surfaces (it sets *Torso*, *Face*, *Lips* … all at once). Only a shader preset — one surface, for whatever it is applied to — goes on a zone.
+- A partial preset whose settings have no single counterpart in a PoseStudio material (the size of metallic flakes, a coat's layering mode). The message names them.
+
+Presets and their texture maps stay under the licence of the content they came from. A material you save from one copies those maps into your library, and an exported package carries them along — share such a material only if that licence allows it.
 
 ## Gaussian splat scenes (.ply, .splat, .spz)
 

@@ -331,9 +331,11 @@ bool VulkanWindow::decodeSlotSource(int model, int mesh, MaterialMap map, const 
         // A cutout mask is read as gray (the import's decodeMask: a single-channel or RGB mask
         // alike); every other slot as RGBA. A roughness or metalness file read here is a plain
         // grayscale map whose RED channel is the value — unless the source names ANOTHER channel
-        // (textureSourcePath: a packed image, a cutout in a color image's alpha).
+        // (textureSourcePath: a packed image, a cutout in a color image's alpha) — and is read
+        // INVERTED where the source says so (a glossiness map in a roughness slot).
         int                           wanted = 0;
-        const std::string             path = textureSourcePath(source, &wanted);
+        bool                          inverted = false;
+        const std::string             path = textureSourcePath(source, &wanted, &inverted);
         std::shared_ptr<DecodedImage> decoded;
         if (map == MaterialMap::Opacity) {
             if (wanted != 0) {
@@ -350,6 +352,16 @@ bool VulkanWindow::decodeSlotSource(int model, int mesh, MaterialMap map, const 
         if (!decoded) {
             qWarning().noquote() << "[materials] could not read the image" << QString::fromStdString(path);
             return false;
+        }
+        if (inverted) {
+            // The color channels turned over, the alpha left: from here on the image IS the map
+            // its slot holds (what is packed, bound, rendered and saved is this picture).
+            std::vector<uint8_t>& pixels = decoded->pixels;
+            for (std::size_t i = 0; i + 3 < pixels.size(); i += 4) {
+                pixels[i] = static_cast<uint8_t>(255 - pixels[i]);
+                pixels[i + 1] = static_cast<uint8_t>(255 - pixels[i + 1]);
+                pixels[i + 2] = static_cast<uint8_t>(255 - pixels[i + 2]);
+            }
         }
         // THE GUTTER FILL, once per chosen image and here: the atlas background between the
         // zone's UV islands is flooded with their colors, so the mip chain never averages it

@@ -46,6 +46,13 @@
 #include "materialfile.h"
 #include "materialparams.h"
 #include "materialxfile.h"
+#include "shaderpresetfile.h"
+#include "uriresolver.h" // a shader preset's maps: content-root-relative URIs
+#include "figureutils.h" // urlDecode
+#include "colorcurves.h"
+#include "assetlibraries.h"
+#include "preferencesmanager.h"
+#include "constants.h"
 #include "model.h"
 #include "renderexport.h"
 #include "rendersession.h"
@@ -61,6 +68,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QImageReader>
 #include <QSaveFile>
 #include <QTimer>
 
@@ -73,6 +81,8 @@
 #include <cstdio>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace pose {
 
@@ -211,9 +221,10 @@ bool VulkanWindow::saveMaterialFile(const QString& path, bool copyTextures, QStr
             int                                       channel = 0;
             const std::shared_ptr<const DecodedImage> plain = materialSlotImage(map, &channel);
             int                                       named3 = 0; // the channel the slot's SOURCE names (a cutout from an alpha)
-            textureSourcePath(view.params.maps[slot].source, &named3);
+            bool                                      turnedOver = false; // … and whether it reads the file inverted
+            textureSourcePath(view.params.maps[slot].source, &named3, &turnedOver);
             AssetStore::Placed                        how = AssetStore::Placed::Failed;
-            if (hasFile && channel == 0 && named3 == 0) {
+            if (hasFile && channel == 0 && named3 == 0 && !turnedOver) {
                 written = collector.addFile(onDisk, &how);
                 switch (how) {
                     case AssetStore::Placed::Linked: ++counts.linked; break;
@@ -298,6 +309,78 @@ bool loadMaterialXFile(const QString& path, MaterialXDocument& document, QString
 
 } // namespace
 
+namespace {
+
+/// Whether @p path is a content library's preset file by its name (`.duf`): which KIND of
+/// preset is the reader's to say (shaderpresetfile.h).
+bool isPresetFile(const QString& path) {
+    return path.endsWith(QStringLiteral(".duf"), Qt::CaseInsensitive);
+}
+
+/// The content roots a shader preset's maps are looked for under ("/Runtime/Textures/…" is
+/// relative to one): the library the preset lies in — the nearest folder above it that holds a
+/// "Runtime" or a "data" folder — then the configured figure content folders and the
+/// registered asset libraries.
+std::vector<std::string> shaderPresetRoots(const QString& path) {
+    std::vector<std::string> roots;
+    const auto               add = [&roots](const QString& folder) {
+        if (folder.trimmed().isEmpty()) {
+            return;
+        }
+        const std::string root = QDir::cleanPath(folder.trimmed()).toStdString();
+        if (std::find(roots.begin(), roots.end(), root) == roots.end()) {
+            roots.push_back(root);
+        }
+    };
+    QDir dir = QFileInfo(path).absoluteDir();
+    for (int level = 0; level < 16; ++level) {
+        if (dir.exists(QStringLiteral("Runtime")) || dir.exists(QStringLiteral("runtime")) || dir.exists(QStringLiteral("data"))) {
+            add(dir.absolutePath());
+            break;
+        }
+        if (!dir.cdUp()) {
+            break;
+        }
+    }
+    const QString configured = PreferencesManager::instance().getValue(Constants::PREF_FIGURE_CONTENT_ROOTS).toString();
+    for (const QString& root : configured.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+        add(root);
+    }
+    for (const QString& root : AssetLibraries::enabledPaths()) {
+        add(root);
+    }
+    return roots;
+}
+
+/// The mean color of the image at @p path, LINEAR, from a small decode of it (a JPEG is scaled
+/// in its decode: milliseconds for a 4K map). False when it cannot be read.
+bool imageMeanLinear(const QString& path, glm::vec3& mean) {
+    QImageReader reader(path);
+    reader.setAutoTransform(false);
+    const QSize size = reader.size();
+    if (size.isValid() && (size.width() > 64 || size.height() > 64)) {
+        reader.setScaledSize(size.scaled(64, 64, Qt::KeepAspectRatio));
+    }
+    const QImage image = reader.read().convertToFormat(QImage::Format_RGBA8888);
+    if (image.isNull() || image.width() <= 0 || image.height() <= 0) {
+        return false;
+    }
+    double sum[3] = {0.0, 0.0, 0.0};
+    for (int y = 0; y < image.height(); ++y) {
+        const uchar* row = image.constScanLine(y);
+        for (int x = 0; x < image.width(); ++x) {
+            for (int c = 0; c < 3; ++c) {
+                sum[c] += colorcurves::srgbToLinear(row[x * 4 + c] / 255.0f);
+            }
+        }
+    }
+    const double count = static_cast<double>(image.width()) * image.height();
+    mean = glm::vec3(static_cast<float>(sum[0] / count), static_cast<float>(sum[1] / count), static_cast<float>(sum[2] / count));
+    return true;
+}
+
+} // namespace
+
 QStringList VulkanWindow::materialNamesIn(const QString& path, QString* error) {
     QStringList names;
     if (pose::ImportFormats::isMaterialXFile(path)) {
@@ -330,8 +413,65 @@ bool VulkanWindow::applyMaterialFile(const QString& path, QString* error, int* m
     if (!m_renderer) {
         return fail(tr("The viewport is not ready yet."));
     }
-    MaterialDocument doc;
-    if (pose::ImportFormats::isMaterialXFile(path)) {
+    MaterialDocument                    doc;
+    bool                                partial = false; // a shader preset that changes PART of the surface: the other slots stay
+    std::array<bool, kMaterialMapCount> named{};         // … the slots it names
+    if (isPresetFile(path)) {
+        // A content library's SHADER PRESET: read as a material (shaderpresetfile.h) — onto the
+        // zone's own material where the preset names only part of a surface — its maps found
+        // under the content roots, a glossiness map carried as an inverted roughness map.
+        QFile in(path);
+        if (!in.open(QIODevice::ReadOnly)) {
+            return fail(tr("The file could not be read:\n%1").arg(in.errorString()));
+        }
+        const QByteArray                raw = in.readAll();
+        const std::vector<std::uint8_t> bytes(raw.constBegin(), raw.constEnd());
+        const MaterialView              standing = materialView();
+        const std::vector<std::string>  roots = shaderPresetRoots(path);
+        const UriResolver               uris(roots);
+        std::unordered_map<std::string, std::pair<bool, glm::vec3>> means; // (a map's mean is asked for once)
+        const auto mapMean = [&uris, &means](const std::string& uri, glm::vec3& mean) {
+            auto it = means.find(uri);
+            if (it == means.end()) {
+                glm::vec3         value(1.0f);
+                const ResolvedUri file = uris.resolve(uri);
+                const bool        ok = file.resolved() && imageMeanLinear(QString::fromStdString(file.path), value);
+                it = means.emplace(uri, std::make_pair(ok, value)).first;
+            }
+            mean = it->second.second;
+            return it->second.first;
+        };
+        ShaderPresetMaterial preset;
+        std::string          why;
+        if (!readShaderPreset(bytes, standing.valid && standing.zone >= 0 ? standing.params : MaterialParams(), preset, why, mapMean)) {
+            return fail(QString::fromStdString(why));
+        }
+        doc.name = QFileInfo(path).completeBaseName().toStdString();
+        doc.params = preset.params;
+        partial = preset.partial;
+        for (const ShaderPresetTexture& texture : preset.textures) {
+            named[static_cast<std::size_t>(texture.slot)] = true;
+            if (texture.uri.empty()) {
+                continue; // (a partial preset empties the slot)
+            }
+            // Where the map is; a map found under no root keeps the place it should have been
+            // at, so that it is looked for by its name and, failing that, counted as missing.
+            std::string file = uris.resolve(texture.uri).path;
+            if (file.empty()) {
+                const std::string base = roots.empty() ? QFileInfo(path).absolutePath().toStdString() : roots.front();
+                file = base + urlDecode(texture.uri);
+            }
+            doc.textures.push_back({materialMapName(texture.slot), textureSourceWithChannel(file, 0, texture.inverted)});
+        }
+        qInfo().noquote() << "[materials]" << QFileInfo(path).fileName() << ": a shader preset read as"
+                          << QString::fromStdString(preset.reading) << "(" << preset.settings << "settings," << preset.textures.size() << "maps )";
+        for (const std::string& said : preset.notes) {
+            qInfo().noquote() << "[materials]" << QFileInfo(path).fileName() << ":" << QString::fromStdString(said);
+            if (notes != nullptr) {
+                notes->append(QString::fromStdString(said));
+            }
+        }
+    } else if (pose::ImportFormats::isMaterialXFile(path)) {
         // A MATERIALX document: one of its materials, as the values and maps of a saved one (a
         // map read from another channel than the red carries the channel in its source).
         MaterialXDocument document;
@@ -392,8 +532,9 @@ bool VulkanWindow::applyMaterialFile(const QString& path, QString* error, int* m
         if (!materialMapByName(texture.slot, map) || texture.source.empty()) {
             continue;
         }
-        int           channel = 0; // (a MaterialX map may be one channel of a packed image)
-        const QString source = QString::fromStdString(textureSourcePath(texture.source, &channel));
+        int           channel = 0;      // (a MaterialX map may be one channel of a packed image)
+        bool          inverted = false; // (a shader preset's glossiness map is a roughness map read inverted)
+        const QString source = QString::fromStdString(textureSourcePath(texture.source, &channel, &inverted));
         bool          viaName = false;
         const QString found = resolver.resolve(source, &viaName);
         if (found.isEmpty()) {
@@ -410,7 +551,7 @@ bool VulkanWindow::applyMaterialFile(const QString& path, QString* error, int* m
                 ++*relocatedMaps;
             }
         }
-        wanted[static_cast<std::size_t>(map)] = QString::fromStdString(textureSourceWithChannel(found.toStdString(), channel));
+        wanted[static_cast<std::size_t>(map)] = QString::fromStdString(textureSourceWithChannel(found.toStdString(), channel, inverted));
     }
 
     // ONE undoable edit (its own bracket, or the one already open).
@@ -427,6 +568,9 @@ bool VulkanWindow::applyMaterialFile(const QString& path, QString* error, int* m
         const MaterialMap map = static_cast<MaterialMap>(i);
         const bool        has = !view.params.maps[slot].source.empty();
         const QString     want = wanted[slot];
+        if (partial && !named[slot]) {
+            continue; // (part of a surface: a slot the preset does not name keeps its map)
+        }
         if (want.isEmpty()) {
             if (has) {
                 changes.emplace_back(map, std::string());
@@ -700,15 +844,30 @@ void VulkanWindow::scriptApplyMaterial(const QStringList& words) {
     s.matFileMissing = 0.0;
     s.matFileRelocated = 0.0;
     // applymaterial <name.psm>: from the run's folder (a file `savematerial` wrote), else a test asset.
-    QString path = QDir(s.outDir).filePath(words[1]);
-    if (!QFileInfo::exists(path)) {
-        const QString assets = qEnvironmentVariable("POSESTUDIO_IK_SCRIPT_ASSETS");
-        if (!assets.isEmpty()) {
-            path = QDir(assets).filePath(words[1]);
+    // A script's line is split on spaces, and a content library's files have spaces in their
+    // names: the file is the LONGEST run of the line's words that names one (so
+    // `applymaterial Metal - Gold.duf` and a path of folders with spaces both work), and what
+    // follows it is the material's name (a MaterialX document: `applymaterial <file.mtlx>
+    // [<material name>]`). With no such file the first word is the path, as before.
+    const QString assets = qEnvironmentVariable("POSESTUDIO_IK_SCRIPT_ASSETS");
+    const auto    located = [&](const QString& name) {
+        const QString inRun = QDir(s.outDir).filePath(name);
+        if (QFileInfo(inRun).isFile() || assets.isEmpty()) {
+            return inRun;
+        }
+        return QDir(assets).filePath(name);
+    };
+    QString path = located(words[1]);
+    int     pathWords = 1;
+    for (int count = static_cast<int>(words.size()) - 1; count > 1; --count) {
+        const QString candidate = located(words.mid(1, count).join(QLatin1Char(' ')));
+        if (QFileInfo(candidate).isFile()) {
+            path = candidate;
+            pathWords = count;
+            break;
         }
     }
-    // (A MaterialX document: `applymaterial <file.mtlx> [<material name>]`.)
-    const QString material = words.mid(2).join(QLatin1Char(' '));
+    const QString material = words.mid(1 + pathWords).join(QLatin1Char(' '));
     s.matFileMaterials = static_cast<double>(materialNamesIn(path).size());
     QString     error;
     int         missing = 0;

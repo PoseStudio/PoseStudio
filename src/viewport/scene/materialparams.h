@@ -102,12 +102,22 @@ constexpr const char* kImportedTexture = "@imported";
 /// without the mark is read from its red.
 constexpr const char* kTextureChannelMark = "?channel=";
 
-/// @p path as a slot's source read from @p channel (0 red … 3 alpha): the path itself for 0.
-std::string textureSourceWithChannel(const std::string& path, int channel);
+/// A CHOSEN FILE READ INVERTED. A map may hold the opposite of what its slot holds — a
+/// GLOSSINESS map where the material has a roughness slot (a content library's shader preset:
+/// shaderpresetfile.h). The source then ends in this mark — "D:/maps/gloss.jpg?inverted", after
+/// a channel mark where it has both — and the image is decoded with its color channels turned
+/// over (255 less each), so everything downstream holds a plain roughness map. Like a channel
+/// mark it lives in a slot's source alone: saved into a material file, the map is written out
+/// as a file of its own, already inverted.
+constexpr const char* kTextureInvertMark = "?inverted";
 
-/// The file a slot's source names, without its channel mark; @p channel (when given) is the
-/// channel it names, 0 where it names none.
-std::string textureSourcePath(const std::string& source, int* channel = nullptr);
+/// @p path as a slot's source read from @p channel (0 red … 3 alpha) and, with @p inverted,
+/// turned over: the path itself for channel 0 as it is.
+std::string textureSourceWithChannel(const std::string& path, int channel, bool inverted = false);
+
+/// The file a slot's source names, without its marks; @p channel (when given) is the channel
+/// it names, 0 where it names none, and @p inverted whether it is to be read inverted.
+std::string textureSourcePath(const std::string& source, int* channel = nullptr, bool* inverted = nullptr);
 
 struct MaterialTextureRef {
     std::string source; ///< "", kImportedTexture, or a file path (which may end in a channel mark: textureSourcePath)

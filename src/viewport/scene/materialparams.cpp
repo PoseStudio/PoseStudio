@@ -36,31 +36,50 @@ void hold(float& v, float lo, float hi) {
 // THE TEXTURE SLOTS — a slot's source, and the slots' script names
 // ============================================================================================
 
-std::string textureSourceWithChannel(const std::string& path, int channel) {
-    if (channel <= 0 || channel > 3 || path.empty() || path == kImportedTexture) {
+std::string textureSourceWithChannel(const std::string& path, int channel, bool inverted) {
+    if (path.empty() || path == kImportedTexture) {
         return path;
     }
-    return path + kTextureChannelMark + "rgba"[channel];
+    std::string source = path;
+    if (channel > 0 && channel <= 3) {
+        source += std::string(kTextureChannelMark) + "rgba"[channel];
+    }
+    if (inverted) {
+        source += kTextureInvertMark;
+    }
+    return source;
 }
 
-std::string textureSourcePath(const std::string& source, int* channel) {
+std::string textureSourcePath(const std::string& source, int* channel, bool* inverted) {
     if (channel != nullptr) {
         *channel = 0;
     }
-    const std::string mark(kTextureChannelMark);
-    const std::size_t at = source.rfind(mark);
-    if (at == std::string::npos || at + mark.size() + 1 != source.size()) {
-        return source;
+    if (inverted != nullptr) {
+        *inverted = false;
     }
-    const char letter = source.back();
+    // The invert mark is the last thing of a source that has one; the channel mark before it.
+    std::string       rest = source;
+    const std::string invert(kTextureInvertMark);
+    if (rest.size() > invert.size() && rest.compare(rest.size() - invert.size(), invert.size(), invert) == 0) {
+        rest.erase(rest.size() - invert.size());
+        if (inverted != nullptr) {
+            *inverted = true;
+        }
+    }
+    const std::string mark(kTextureChannelMark);
+    const std::size_t at = rest.rfind(mark);
+    if (at == std::string::npos || at + mark.size() + 1 != rest.size()) {
+        return rest;
+    }
+    const char letter = rest.back();
     const int  index = letter == 'r' ? 0 : letter == 'g' ? 1 : letter == 'b' ? 2 : letter == 'a' ? 3 : -1;
     if (index < 0) {
-        return source;
+        return rest;
     }
     if (channel != nullptr) {
         *channel = index;
     }
-    return source.substr(0, at);
+    return rest.substr(0, at);
 }
 
 const char* materialMapName(MaterialMap map) {

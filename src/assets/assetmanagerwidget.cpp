@@ -34,6 +34,7 @@
 
 #include "assetmanagerwidget.h"
 #include "importformats.h"
+#include "shaderpresetfile.h" // isShaderPresetFile: a `.duf` that is a material, not a figure
 #include "assetbreadcrumblabel.h"
 #include "assetdb.h"
 #include "assetfolderproxymodel.h"
@@ -520,6 +521,10 @@ bool AssetManagerWidget::openWithinApp(const QString& path) {
     if (pose::ImportFormats::isModelFile(path)) {
         // Importable model: load it into the 3D viewport rather than the OS default app.
         emit importModelRequested(path);
+    } else if (path.endsWith(QStringLiteral(".duf"), Qt::CaseInsensitive) && pose::isShaderPresetFile(path.toStdString())) {
+        // A content library's shader preset: a material, put on the selected zone (the extension
+        // is every kind of preset's, so the file itself is asked what it is).
+        emit applyMaterialRequested(path);
     } else if (pose::ImportFormats::isFigureRouteFile(path)) {
         // Character figure (native, or a rigged FBX / glTF / USD): import it into the 3D viewport
         // (same path as File -> Import / open-with).

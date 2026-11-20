@@ -97,7 +97,7 @@ The **Materials Library** tab, right under **Materials** on the side panel, is t
 
 The Materials folder is part of *My PoseStudio Library*, which is one of the Asset Manager's libraries, so the same files can also be reached there; the tab is the short way in.
 
-**Double-clicking a MaterialX material** (`.mtlx`) does the same with one of that file's materials — see [MaterialX materials](importing.md#materialx-materials-mtlx).
+**Double-clicking a MaterialX material** (`.mtlx`) does the same with one of that file's materials — see [MaterialX materials](importing.md#materialx-materials-mtlx). **Double-clicking a shader preset** (a `.duf` file of one surface, in a content library you have added as an asset folder) puts that surface on the selected zone — see [Shader presets](importing.md#shader-presets-duf).
 
 **Double-clicking a saved material** (`.psm`) puts it on the selected object: on the zone the Materials tab shows, as one undo step. Materials get here from the Materials tab's **Save** button, which writes the material and the picture of it on a ball that is its thumbnail — see [Saving and reusing a material](materials.md#saving-and-reusing-a-material). Any other file opens exactly as it does in the Asset Manager.
 

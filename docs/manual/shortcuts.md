@@ -74,7 +74,7 @@ The keys work on the number row and on the numeric keypad. With NumLock off, the
 | --- | --- |
 | `Enter` in the search field | Search |
 | `F2` on a collection | Rename it |
-| Double-click an asset | Import it (a model, a figure, a Gaussian splat scene), put it on the selected zone (a saved or MaterialX material), follow it (a script link), or open it with its application |
+| Double-click an asset | Import it (a model, a figure, a Gaussian splat scene), put it on the selected zone (a saved or MaterialX material, a shader preset), follow it (a script link), or open it with its application |
 | Double-click a folder | Open the folder |
 | Drag a thumbnail | Reorder (in Favorites and Collections), or drop onto Favorites / a Collection in the tree |
 
