@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+# Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 # =============================================================================
 # THE CYCLES RENDER ENGINE — an OPT-IN part of the build (-DPOSESTUDIO_WITH_CYCLES=ON)
 # =============================================================================
@@ -21,8 +24,8 @@
 #                     GPU kernels at build time; nothing of it ships.
 #   optix             (POSESTUDIO_CYCLES_OPTIX) the OptiX headers (github.com/NVIDIA/optix-dev).
 #                     NOTE: they are under NVIDIA's own SDK license, not an open-source one.
-#                     PoseStudio's license permits the combination (LICENSE-EXCEPTION.txt, a GPL
-#                     section 7 additional permission); NVIDIA's terms are the distributor's to
+#                     PoseStudio's license permits the combination (LICENSE-ADDITIONAL-TERMS.txt,
+#                     an AGPL section 7 additional permission); NVIDIA's terms are the distributor's to
 #                     meet (docs/RELEASING.md).
 # ... patches ONE block into Cycles's src/CMakeLists.txt (it adds engines/cycles as a
 # subdirectory THERE, so the bridge is compiled with exactly Cycles's own definitions and flags:
@@ -44,7 +47,7 @@ endif()
 set(POSESTUDIO_CYCLES_TAG "v5.3.0" CACHE STRING "The Cycles release the engine is built from (a tag of blender/cycles and of its library repositories)")
 if(WIN32 OR (UNIX AND NOT APPLE))
     option(POSESTUDIO_CYCLES_CUDA "Build Cycles's CUDA device (NVIDIA cards)" ON)
-    option(POSESTUDIO_CYCLES_OPTIX "Build Cycles's OptiX device (NVIDIA RTX cards; NVIDIA's SDK license applies: LICENSE-EXCEPTION.txt, docs/RELEASING.md)" ON)
+    option(POSESTUDIO_CYCLES_OPTIX "Build Cycles's OptiX device (NVIDIA RTX cards; NVIDIA's SDK license applies: LICENSE-ADDITIONAL-TERMS.txt, docs/RELEASING.md)" ON)
 else()
     set(POSESTUDIO_CYCLES_CUDA OFF)
     set(POSESTUDIO_CYCLES_OPTIX OFF)

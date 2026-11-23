@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+# Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 # ==============================================================================
 # PoseStudio Open Source Project
 # File: CMakeLists.txt
@@ -288,6 +291,8 @@ add_executable(
     src/help/helpmanual.h
     src/help/whatsnewdialog.cpp           # "What's New in x.y.z": the version's release notes, once per version at startup
     src/help/whatsnewdialog.h
+    src/help/licensenotice.cpp            # Help -> License: the copyright, license and trademark notices (AGPL "Appropriate Legal Notices")
+    src/help/licensenotice.h
 
     # --- Asset Manager (and the Materials Library: the same widget, built twice) ---
     src/assets/assetmanagerwidget.cpp
@@ -662,7 +667,12 @@ qt_add_resources(PoseStudio "manual"
 # configure_file() template so the number is still stamped from project(VERSION) alone: it
 # is generated into the build tree and compiled as a second .rc beside the icon's.
 if(WIN32)
+    # The copyright years: from the first release's year to the build's ("2026", "2026-2027").
     string(TIMESTAMP POSESTUDIO_BUILD_YEAR "%Y")
+    set(POSESTUDIO_COPYRIGHT_YEARS "2026")
+    if(POSESTUDIO_BUILD_YEAR GREATER 2026)
+        set(POSESTUDIO_COPYRIGHT_YEARS "2026-${POSESTUDIO_BUILD_YEAR}")
+    endif()
     configure_file(resources/version.rc.in "${CMAKE_CURRENT_BINARY_DIR}/version.rc" @ONLY)
     target_sources(PoseStudio PRIVATE
         resources/PoseStudio.rc                   # Injects the .exe icon

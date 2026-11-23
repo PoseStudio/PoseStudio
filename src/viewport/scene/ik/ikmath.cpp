@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+// Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 /**
  * @file ikmath.cpp
  * @brief The IK module's shared rotation math (see ikmath.h): the Euler composition and its exact

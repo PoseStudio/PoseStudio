@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+// Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 /**
  * @file assetmanagerwidget_menus.cpp
  * @brief AssetManagerWidget, the context menus' translation unit: the tree's and the grid's.

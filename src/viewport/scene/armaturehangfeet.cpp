@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+// Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 /**
  * @file armaturehangfeet.cpp
  * @brief THE HANGING FEET COME DOWN FLAT: a figure lifted off the floor hangs her feet, and coming

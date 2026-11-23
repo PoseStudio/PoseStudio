@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+// Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 // correctives.glsl — the per-model pose-corrective buffers and their per-vertex blend.
 //
 // Pose correctives are blended BEFORE skinning: each vertex carries a packed range into the

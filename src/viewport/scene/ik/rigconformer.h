@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+// Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 /**
  * @file rigconformer.h
  * @brief THE RIG STANDARD'S CONFORMER: gives a skeleton that authors no frames and no limits — a

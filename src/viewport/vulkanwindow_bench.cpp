@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+// Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 /**
  * @file vulkanwindow_bench.cpp
  * @brief The IK loop diagnostics (POSESTUDIO_IK_PERF=1) and the scripted in-app IK benchmark

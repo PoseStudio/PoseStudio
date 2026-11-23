@@ -1,0 +1,80 @@
+PoseStudio: license, additional permission and additional terms
+================================================================
+
+Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+
+PoseStudio is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License, version 3, as published by the Free Software Foundation (the
+file LICENSE), together with the additional permission and the additional terms below, which
+PoseStudio's copyright holders add under section 7 of that license.
+
+PoseStudio is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+Affero General Public License for more details.
+
+Versions of PoseStudio up to and including 0.4.4 were released under the GNU General Public
+License, version 3, and remain available under that license.
+
+
+A. Additional permission (section 7, first paragraph)
+-----------------------------------------------------
+
+    If you modify this Program, or any covered work, by linking or combining it with NVIDIA
+    Corporation's OptiX SDK or CUDA Toolkit (or a modified version of either), containing parts
+    covered by the terms of NVIDIA's license agreements for that software, the licensors of this
+    Program grant you additional permission to convey the resulting work.
+
+
+B. Additional terms (section 7, paragraphs b, c and e)
+------------------------------------------------------
+
+1.  Attribution (section 7, paragraph b). PoseStudio displays Appropriate Legal Notices, as the
+    license defines them, under Help > License. Every copy of PoseStudio and every work based on
+    it that you convey, modified or not, must preserve in the Appropriate Legal Notices it
+    displays the copyright notice above and the attribution
+
+        PoseStudio by Ion Hatzithomas and the PoseStudio contributors - https://posestudio.org
+
+    and every source file must keep the copyright and license notice at its top.
+
+2.  Origin (section 7, paragraph c). A modified version must be marked, in its name and in the
+    notices it displays, as different from the original. It must not be presented as PoseStudio,
+    as a release of PoseStudio, or as made or endorsed by PoseStudio's authors.
+
+3.  Trademarks (section 7, paragraph e). This license grants no rights under trademark law to the
+    name "PoseStudio", its logo, or any other trade name, trademark or service mark of the
+    project. Their use is governed by the trademark policy in TRADEMARKS.md.
+
+These terms apply to every source file that refers to this file, and to PoseStudio as a whole.
+
+
+C. Other licenses
+-----------------
+
+The copyright holders also license PoseStudio under separate commercial terms, for uses the GNU
+Affero General Public License does not allow, such as building it into a product whose source is
+not published. See LICENSING.md. A commercial license changes nothing for anyone using PoseStudio
+under the open-source license.
+
+
+What the additional permission is for
+-------------------------------------
+
+PoseStudio's render engine (Cycles, loaded as a plugin from the "engines/cycles" folder) can
+render on NVIDIA graphics cards through CUDA and OptiX. To do so the engine is compiled against
+NVIDIA's OptiX headers and its GPU kernels are compiled with NVIDIA's CUDA compiler. That
+software is NVIDIA's, under NVIDIA's own license terms, and is not open source. The permission
+above says that PoseStudio's license does not stand in the way of building, using and
+distributing PoseStudio together with it.
+
+What it does not do
+-------------------
+
+- It places nothing of NVIDIA's under the GNU Affero General Public License. The OptiX SDK and
+  the CUDA Toolkit remain under NVIDIA's license agreements, and whoever builds or distributes a
+  PoseStudio that uses them must meet those agreements themselves.
+- It changes nothing for any other library. Everything else PoseStudio is combined with is under
+  a license compatible with the GNU Affero General Public License (see ATTRIBUTIONS.md).
+- As section 7 says, you may remove this additional permission from a copy you convey; a copy
+  built without the NVIDIA devices has no need of it. The additional terms in part B are not
+  permissions, and they stay with every copy.

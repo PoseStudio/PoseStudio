@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+// Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 // material.glsl — the per-model MATERIAL buffer (set MATERIAL_SET, binding 3): one entry per
 // mesh, packed by Mesh::packGpu (the C++ twin is MaterialGpu in mesh.h — the two must stay
 // byte-identical), indexed by the push block's meta.x. Until 2026-11-09 the material rode in

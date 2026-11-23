@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+// Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 // fullscreen.glsl — the one oversized triangle that covers the screen (no vertex buffers).
 //
 // Shared by fullscreen.vert (every post pass) and background.vert (the HDRI backdrop). Index

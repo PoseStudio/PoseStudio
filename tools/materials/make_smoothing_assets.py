@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+# Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 """Synthetic test assets for THE SMOOTHING BY ANGLE (src/viewport/import/smoothnormals.h; the
 Materials tab's Smooth by Angle), what tools/ikscripts/materials/smoothing.txt runs on.
 

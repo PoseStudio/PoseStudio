@@ -16,7 +16,7 @@ First off, thank you for considering contributing to PoseStudio! It's people lik
 
 Before we can merge your contribution, you need to sign the [PoseStudio Individual CLA](https://cla-assistant.io/PoseStudio/PoseStudio). You only sign once, and it takes about a minute with your GitHub account.
 
-**Why we ask:** PoseStudio is and will remain free and open source under GPL-3.0. We may also offer commercial licenses, for example to companies that want to build PoseStudio into closed products. That income helps fund development. The CLA lets the project offer both.
+**Why we ask:** PoseStudio is and will remain free and open-source software. Since the release after 0.4.4 its license is the GNU AGPL v3, the GPL v3's network-aware sibling; earlier versions remain under the GPL v3. We also offer commercial licenses, for example to companies that want to build PoseStudio into closed products (see [LICENSING.md](../LICENSING.md)). That income helps fund development. The CLA lets the project offer both.
 
 **What it means for you:**
 

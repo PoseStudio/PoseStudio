@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+// Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 /**
  * @file menumanager.cpp
  * @brief Builds the application's top menu bar (File / Edit / View / Render / Help).
@@ -26,6 +29,7 @@
 #include "updatecheck.h"
 #include "helpwindow.h"
 #include "whatsnewdialog.h"
+#include "licensenotice.h"   // Help → License: the program's legal notices (see the header)
 #include "renderwindow.h"    // Render → Render Image: the Render window and its session
 #include "viewport/viewportwidget.h"
 #include "jointtransform.h" // pose::JointTransform: which of the joint-mode keys are live
@@ -423,6 +427,14 @@ void MenuManager::setupMenus() {
     QObject::connect(aboutAction, &QAction::triggered, mainWindow, [this]() {
         SplashOverlay *splash = new SplashOverlay(mainWindow);
         splash->show();
+    });
+
+    // License: PoseStudio's own legal notices — the copyright, the AGPL v3 with its additional
+    // terms, no warranty, the trademarks, the commercial option (licensenotice.h says why the
+    // wording is part of the license's working).
+    QAction *licenseAction = helpMenu->addAction(tr("License"));
+    QObject::connect(licenseAction, &QAction::triggered, mainWindow, [this]() {
+        LicenseNotice::show(mainWindow);
     });
 
     // Qt is used under the LGPL v3, which asks that a program showing copyright notices at

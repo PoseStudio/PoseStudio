@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+// Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 /**
  * @file viewportwidget_testhooks.cpp
  * @brief ViewportWidget's side of the scripted in-app test (POSESTUDIO_IK_SCRIPT): the commands

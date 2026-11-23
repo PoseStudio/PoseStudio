@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+// Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 /**
  * @file main.cpp
  * @brief Application entry point: boots core services, then builds the main window.
@@ -20,6 +23,7 @@
 #include "splashoverlay.h"
 #include "whatsnewdialog.h"
 #include "helpwindow.h"
+#include "licensenotice.h"
 #include "constants.h"
 #include "preferencesmanager.h"
 #include "runmode.h"
@@ -280,6 +284,20 @@ int main(int argc, char *argv[]) {
                         }
                         help->grab().save(QString::fromUtf8(shotPath));
                     }
+                }
+                QApplication::quit();
+            });
+        });
+    }
+
+    // Developer lever: POSESTUDIO_LICENSE_SHOT=<png> opens Help → License, saves a picture of the
+    // box and exits — how the notice is LOOKED at without a desktop.
+    if (const QByteArray shotPath = qgetenv("POSESTUDIO_LICENSE_SHOT"); !shotPath.isEmpty()) {
+        QTimer::singleShot(1200, &mainWindow, [&mainWindow, shotPath]() {
+            LicenseNotice::show(&mainWindow);
+            QTimer::singleShot(600, &mainWindow, [&mainWindow, shotPath]() {
+                if (auto* box = mainWindow.findChild<QWidget*>(QStringLiteral("LicenseNotice"))) {
+                    box->grab().save(QString::fromUtf8(shotPath));
                 }
                 QApplication::quit();
             });

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+# Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 """A synthetic Gaussian-splat capture of a standing person, for measuring the splat pass.
 
 Writes a .ply in the reference 3D Gaussian Splatting layout (positions, nx/ny/nz, f_dc_0..2,

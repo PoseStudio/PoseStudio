@@ -62,8 +62,10 @@ confusing, broken, or missing:
 Full installation guide and troubleshooting:
   https://github.com/PoseStudio/PoseStudio/blob/main/docs/INSTALL.md
 
-PoseStudio is free, open-source software (GPL v3) - the license is
-LICENSE.txt next to this file. It is built on the Qt framework
+PoseStudio is free, open-source software under the GNU AGPL v3 with
+the additional permission and terms in LICENSE-ADDITIONAL-TERMS.txt -
+the license is LICENSE.txt next to this file. "PoseStudio" and its
+logo are trademarks of Ion Hatzithomas. It is built on the Qt framework
 (LGPL v3) and a few other open-source components; their licenses and
 notices are in the licenses\ folder (start with licenses\NOTICES.txt).
   https://github.com/PoseStudio/PoseStudio

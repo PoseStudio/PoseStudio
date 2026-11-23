@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+// Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 // skinning.glsl — the per-model joint buffer and the DUAL-QUATERNION skinning blend.
 //
 // Shared by mesh.vert (the lit pass) and shadow.vert (the shadow map + the selection-outline

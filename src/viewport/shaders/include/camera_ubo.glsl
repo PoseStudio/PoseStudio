@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+// Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 // camera_ubo.glsl — the per-frame camera/lighting uniform block (descriptor set 0, binding 0)
 // and the environment-rotation helper that goes with its params2.z dial.
 //

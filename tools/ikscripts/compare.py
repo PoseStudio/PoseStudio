@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+# Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 """Compares a run's shots with reference shots: which poses LOOK different from last time.
 
 usage: compare.py <outdir> <refdir> [--accept]

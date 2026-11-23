@@ -1,10 +1,14 @@
 PoseStudio - licenses of the software shipped in this package
 =============================================================
 
-PoseStudio itself is free software under the GNU General Public License v3;
-its text is LICENSE.txt, one folder up, and its source code is at
-https://github.com/PoseStudio/PoseStudio. This folder holds the licenses and
-notices of the other software that ships next to it in this package.
+PoseStudio itself is free software under the GNU Affero General Public
+License v3, with the additional permission and terms in
+LICENSE-ADDITIONAL-TERMS.txt; their texts are LICENSE.txt and
+LICENSE-ADDITIONAL-TERMS.txt, one folder up, and its source code is at
+https://github.com/PoseStudio/PoseStudio. Copyright (C) 2026 Ion Hatzithomas
+and the PoseStudio contributors. "PoseStudio" and its logo are trademarks of
+Ion Hatzithomas. This folder holds the licenses and notices of the other
+software that ships next to it in this package.
 
 
 Qt {{QT_VERSION}}
@@ -13,7 +17,7 @@ The Qt6*.dll libraries and the plugin folders (generic, iconengines,
 imageformats, networkinformation, platforms, sqldrivers, styles, tls) are the
 Qt framework, Copyright (C) The Qt Company Ltd. and other contributors,
 https://www.qt.io - used under the GNU Lesser General Public License v3
-(LGPL-3.0.txt, a supplement to the GNU GPL v3 in ../LICENSE.txt). Qt and the
+(LGPL-3.0.txt, a supplement to the GNU GPL v3 in GPL-3.0.txt). Qt and the
 Qt logo are trademarks of The Qt Company Ltd.
 
 PoseStudio links Qt dynamically. The Qt libraries are separate files that you

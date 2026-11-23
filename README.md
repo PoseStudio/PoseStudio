@@ -177,7 +177,20 @@ Building a powerful tool requires a powerful community.
 
 ## <img src="/docs/assets/icons/license.png" width="28" alt="License"> License
 
-PoseStudio is open-source software licensed under the **[GNU General Public License v3.0](https://github.com/PoseStudio/PoseStudio/blob/main/LICENSE)**, with one additional permission under section 7 of that license: it may be built and distributed together with NVIDIA's OptiX and CUDA software, which the render engine uses on NVIDIA graphics cards — see **[LICENSE-EXCEPTION.txt](LICENSE-EXCEPTION.txt)**. That software stays under NVIDIA's own license terms.
+PoseStudio is free and open-source software under the **[GNU Affero General Public License v3.0](https://github.com/PoseStudio/PoseStudio/blob/main/LICENSE)** (AGPL v3). It comes with additional terms under section 7 of that license, which keep the project's attribution and name with every copy, and a permission to build and distribute it with NVIDIA's OptiX and CUDA software, which the render engine uses on NVIDIA graphics cards. Both are in **[LICENSE-ADDITIONAL-TERMS.txt](LICENSE-ADDITIONAL-TERMS.txt)**. Versions up to and including 0.4.4 were released under the GNU GPL v3 and remain available under it.
+
+In short, you can use PoseStudio for anything, including commercial work, and sell what you make with it. If you distribute PoseStudio or a program built from any part of it, or let people use a modified version over a network, you must:
+
+* publish the whole program's source under the same license,
+* keep the attribution, and
+* give your version a name of its own.
+
+**[LICENSING.md](LICENSING.md)** explains this in plain terms.
+
+* **Commercial licenses:** to build PoseStudio, or part of it, into a closed-source product or service, ask for a commercial license. See **[LICENSING.md](LICENSING.md#commercial-licenses)**.
+* **Trademarks:** "PoseStudio" and its logo are trademarks of Ion Hatzithomas, and the open-source license doesn't cover them. See the **[trademark policy](TRADEMARKS.md)**.
+
+Copyright © 2026 Ion Hatzithomas and the PoseStudio contributors.
 
 The binary releases also ship the [Qt framework](https://www.qt.io) under the LGPL v3, together with a few other open-source runtime components; their license texts and notices are in the `licenses\` folder next to the app (sources in [`packaging/licenses/`](packaging/licenses/)), and Help → About Qt shows Qt's own notice.
 
@@ -231,7 +244,7 @@ cmake -B build -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/msvc2022_64" -DPOSESTUDIO_WITH_
 cmake --build build --config Release
 ```
 
-This needs **[git-lfs](https://git-lfs.com)** and fetches Cycles, a sparse checkout of its precompiled libraries (about 0.6 GB) and — for NVIDIA cards — the CUDA compiler and the OptiX headers, all into the build folder; nothing is installed on your system. The first build compiles Cycles and its GPU kernels and takes a while. `-DPOSESTUDIO_CYCLES_CUDA=OFF -DPOSESTUDIO_CYCLES_OPTIX=OFF` builds the processor-only engine. The engine is a plugin: it lands in `engines/cycles` next to the executable and is loaded when a render is first asked for. `cmake/CyclesEngine.cmake` has the details. The OptiX headers are under NVIDIA's own license, not an open-source one; [LICENSE-EXCEPTION.txt](LICENSE-EXCEPTION.txt) is PoseStudio's permission to be combined with them, and whoever distributes such a build must meet NVIDIA's terms themselves.
+This needs **[git-lfs](https://git-lfs.com)** and fetches Cycles, a sparse checkout of its precompiled libraries (about 0.6 GB) and — for NVIDIA cards — the CUDA compiler and the OptiX headers, all into the build folder; nothing is installed on your system. The first build compiles Cycles and its GPU kernels and takes a while. `-DPOSESTUDIO_CYCLES_CUDA=OFF -DPOSESTUDIO_CYCLES_OPTIX=OFF` builds the processor-only engine. The engine is a plugin: it lands in `engines/cycles` next to the executable and is loaded when a render is first asked for. `cmake/CyclesEngine.cmake` has the details. The OptiX headers are under NVIDIA's own license, not an open-source one; [LICENSE-ADDITIONAL-TERMS.txt](LICENSE-ADDITIONAL-TERMS.txt) carries PoseStudio's permission to be combined with them, and whoever distributes such a build must meet NVIDIA's terms themselves.
 
 ## Contributors ✨
 

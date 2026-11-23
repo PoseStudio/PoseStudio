@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+# Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 # A small synthetic Gaussian splat SCENE, for looking at the splat pass and for the render check
 # (tools/ikscripts/render/splats.txt): a checkered floor at y = 0, six metres square; a shaded
 # sphere of half a metre resting on it at the origin; a wall four metres wide and two tall, three

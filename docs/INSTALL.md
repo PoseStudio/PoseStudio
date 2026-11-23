@@ -46,7 +46,7 @@ The first time you run it, Windows SmartScreen will likely show a blue screen sa
 
 ### The installer itself
 
-Click through the wizard — accept the license (PoseStudio is free software under the GPL v3), optionally add a desktop icon, and click **Install**. There's no administrator password prompt: PoseStudio installs into your own user account.
+Click through the wizard — accept the license (PoseStudio is free software under the GNU AGPL v3), optionally add a desktop icon, and click **Install**. There's no administrator password prompt: PoseStudio installs into your own user account.
 
 At the end, leave **Launch PoseStudio** checked and click **Finish**.
 

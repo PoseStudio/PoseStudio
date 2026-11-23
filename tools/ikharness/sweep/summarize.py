@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Ion Hatzithomas and the PoseStudio contributors.
+# Licensed under the GNU AGPL v3 with the additional terms in LICENSE-ADDITIONAL-TERMS.txt.
 """Tabulates a sweep's failed gates (see run.sh): per rig, how many are NEAR-MISSES — a gate set
 on the reference rigs, exceeded by no more than a quarter — and how many are REAL, and lists the
 real ones. Rows of the left/right asymmetry gate are listed apart and not counted. The exit code
